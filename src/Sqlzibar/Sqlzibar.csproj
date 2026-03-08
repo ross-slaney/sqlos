@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- existing props -->
     <PackageId>Sqlzibar</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Authors>YourName</Authors>
     <Description>Hierarchical RBAC authorization library using SQL Server TVFs for composable, efficient access control with EF Core.</Description>
     <PackageTags>rbac;authorization;efcore;sqlserver;hierarchical</PackageTags>
