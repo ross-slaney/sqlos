@@ -14,7 +14,7 @@ public class TestInMemoryDbContext : DbContext, ISqlzibarDbContext
     public TestInMemoryDbContext(DbContextOptions<TestInMemoryDbContext> options) : base(options) { }
 
     public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId)
+        string resourceId, string subjectIds, string permissionId)
         => throw new NotSupportedException("TVF not supported with InMemory provider");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -26,10 +26,10 @@ public class TestInMemoryDbContext : DbContext, ISqlzibarDbContext
 }
 
 [TestClass]
-public class SqlzibarPrincipalServiceTests
+public class SqlzibarSubjectServiceTests
 {
     private TestInMemoryDbContext _context = null!;
-    private SqlzibarPrincipalService _service = null!;
+    private SqlzibarSubjectService _service = null!;
 
     [TestInitialize]
     public void Setup()
@@ -40,18 +40,18 @@ public class SqlzibarPrincipalServiceTests
 
         _context = new TestInMemoryDbContext(options);
 
-        // Seed principal types
-        _context.Set<SqlzibarPrincipalType>().AddRange(
-            new SqlzibarPrincipalType { Id = "user", Name = "User" },
-            new SqlzibarPrincipalType { Id = "group", Name = "Group" },
-            new SqlzibarPrincipalType { Id = "service_account", Name = "Service Account" },
-            new SqlzibarPrincipalType { Id = "agent", Name = "Agent" }
+        // Seed subject types
+        _context.Set<SqlzibarSubjectType>().AddRange(
+            new SqlzibarSubjectType { Id = "user", Name = "User" },
+            new SqlzibarSubjectType { Id = "group", Name = "Group" },
+            new SqlzibarSubjectType { Id = "service_account", Name = "Service Account" },
+            new SqlzibarSubjectType { Id = "agent", Name = "Agent" }
         );
         _context.SaveChanges();
 
-        _service = new SqlzibarPrincipalService(
+        _service = new SqlzibarSubjectService(
             _context,
-            Mock.Of<ILogger<SqlzibarPrincipalService>>());
+            Mock.Of<ILogger<SqlzibarSubjectService>>());
     }
 
     [TestCleanup]
@@ -61,65 +61,65 @@ public class SqlzibarPrincipalServiceTests
     }
 
     [TestMethod]
-    public async Task CreatePrincipal_CreatesWithGeneratedId()
+    public async Task CreateSubject_CreatesWithGeneratedId()
     {
-        var result = await _service.CreatePrincipalAsync("Test User", "user");
+        var result = await _service.CreateSubjectAsync("Test User", "user");
         Assert.IsNotNull(result);
-        Assert.IsTrue(result.Id.StartsWith("prin_"));
+        Assert.IsTrue(result.Id.StartsWith("subj_"));
         Assert.AreEqual("Test User", result.DisplayName);
-        Assert.AreEqual("user", result.PrincipalTypeId);
+        Assert.AreEqual("user", result.SubjectTypeId);
     }
 
     [TestMethod]
-    public async Task CreateGroup_CreatesGroupAndPrincipal()
+    public async Task CreateGroup_CreatesGroupAndSubject()
     {
         var group = await _service.CreateGroupAsync("Test Group", "A test group");
         Assert.IsNotNull(group);
         Assert.IsTrue(group.Id.StartsWith("grp_"));
         Assert.AreEqual("Test Group", group.Name);
 
-        var principal = await _context.Set<SqlzibarPrincipal>()
-            .FirstOrDefaultAsync(p => p.Id == group.PrincipalId);
-        Assert.IsNotNull(principal);
-        Assert.AreEqual("group", principal.PrincipalTypeId);
+        var subject = await _context.Set<SqlzibarSubject>()
+            .FirstOrDefaultAsync(p => p.Id == group.SubjectId);
+        Assert.IsNotNull(subject);
+        Assert.AreEqual("group", subject.SubjectTypeId);
     }
 
     [TestMethod]
     public async Task AddToGroup_ValidUser_Succeeds()
     {
-        var user = await _service.CreatePrincipalAsync("User", "user");
+        var user = await _service.CreateSubjectAsync("User", "user");
         var group = await _service.CreateGroupAsync("Group");
 
         await _service.AddToGroupAsync(user.Id, group.Id);
 
-        var groups = await _service.GetGroupsForPrincipalAsync(user.Id);
+        var groups = await _service.GetGroupsForSubjectAsync(user.Id);
         Assert.AreEqual(1, groups.Count);
         Assert.AreEqual(group.Id, groups[0].Id);
     }
 
     [TestMethod]
-    public async Task AddToGroup_GroupPrincipal_ThrowsInvalidOperation()
+    public async Task AddToGroup_GroupSubject_ThrowsInvalidOperation()
     {
         var group1 = await _service.CreateGroupAsync("Group 1");
         var group2 = await _service.CreateGroupAsync("Group 2");
 
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(async () =>
         {
-            await _service.AddToGroupAsync(group1.PrincipalId, group2.Id);
+            await _service.AddToGroupAsync(group1.SubjectId, group2.Id);
         });
     }
 
     [TestMethod]
     public async Task AddToGroup_Idempotent_DoesNotDuplicate()
     {
-        var user = await _service.CreatePrincipalAsync("User", "user");
+        var user = await _service.CreateSubjectAsync("User", "user");
         var group = await _service.CreateGroupAsync("Group");
 
         await _service.AddToGroupAsync(user.Id, group.Id);
         await _service.AddToGroupAsync(user.Id, group.Id); // second call
 
         var memberships = await _context.Set<SqlzibarUserGroupMembership>()
-            .Where(m => m.PrincipalId == user.Id)
+            .Where(m => m.SubjectId == user.Id)
             .ToListAsync();
         Assert.AreEqual(1, memberships.Count);
     }
@@ -127,32 +127,32 @@ public class SqlzibarPrincipalServiceTests
     [TestMethod]
     public async Task RemoveFromGroup_RemovesMembership()
     {
-        var user = await _service.CreatePrincipalAsync("User", "user");
+        var user = await _service.CreateSubjectAsync("User", "user");
         var group = await _service.CreateGroupAsync("Group");
 
         await _service.AddToGroupAsync(user.Id, group.Id);
         await _service.RemoveFromGroupAsync(user.Id, group.Id);
 
-        var groups = await _service.GetGroupsForPrincipalAsync(user.Id);
+        var groups = await _service.GetGroupsForSubjectAsync(user.Id);
         Assert.AreEqual(0, groups.Count);
     }
 
     [TestMethod]
-    public async Task ResolvePrincipalIds_ReturnsUserAndGroupPrincipals()
+    public async Task ResolveSubjectIds_ReturnsUserAndGroupSubjects()
     {
-        var user = await _service.CreatePrincipalAsync("User", "user");
+        var user = await _service.CreateSubjectAsync("User", "user");
         var group = await _service.CreateGroupAsync("Group");
 
         await _service.AddToGroupAsync(user.Id, group.Id);
 
-        var ids = await _service.ResolvePrincipalIdsAsync(user.Id);
+        var ids = await _service.ResolveSubjectIdsAsync(user.Id);
         Assert.AreEqual(2, ids.Count);
         Assert.IsTrue(ids.Contains(user.Id));
-        Assert.IsTrue(ids.Contains(group.PrincipalId));
+        Assert.IsTrue(ids.Contains(group.SubjectId));
     }
 
     [TestMethod]
-    public async Task CreateUser_CreatesUserAndPrincipal()
+    public async Task CreateUser_CreatesUserAndSubject()
     {
         var user = await _service.CreateUserAsync("Test User", "test@example.com");
         Assert.IsNotNull(user);
@@ -160,15 +160,15 @@ public class SqlzibarPrincipalServiceTests
         Assert.AreEqual("test@example.com", user.Email);
         Assert.IsTrue(user.IsActive);
 
-        var principal = await _context.Set<SqlzibarPrincipal>()
-            .FirstOrDefaultAsync(p => p.Id == user.PrincipalId);
-        Assert.IsNotNull(principal);
-        Assert.AreEqual("user", principal.PrincipalTypeId);
-        Assert.AreEqual("Test User", principal.DisplayName);
+        var subject = await _context.Set<SqlzibarSubject>()
+            .FirstOrDefaultAsync(p => p.Id == user.SubjectId);
+        Assert.IsNotNull(subject);
+        Assert.AreEqual("user", subject.SubjectTypeId);
+        Assert.AreEqual("Test User", subject.DisplayName);
     }
 
     [TestMethod]
-    public async Task CreateAgent_CreatesAgentAndPrincipal()
+    public async Task CreateAgent_CreatesAgentAndSubject()
     {
         var agent = await _service.CreateAgentAsync("Test Agent", "background_job", "Nightly sync");
         Assert.IsNotNull(agent);
@@ -176,15 +176,15 @@ public class SqlzibarPrincipalServiceTests
         Assert.AreEqual("background_job", agent.AgentType);
         Assert.AreEqual("Nightly sync", agent.Description);
 
-        var principal = await _context.Set<SqlzibarPrincipal>()
-            .FirstOrDefaultAsync(p => p.Id == agent.PrincipalId);
-        Assert.IsNotNull(principal);
-        Assert.AreEqual("agent", principal.PrincipalTypeId);
-        Assert.AreEqual("Test Agent", principal.DisplayName);
+        var subject = await _context.Set<SqlzibarSubject>()
+            .FirstOrDefaultAsync(p => p.Id == agent.SubjectId);
+        Assert.IsNotNull(subject);
+        Assert.AreEqual("agent", subject.SubjectTypeId);
+        Assert.AreEqual("Test Agent", subject.DisplayName);
     }
 
     [TestMethod]
-    public async Task CreateServiceAccount_CreatesServiceAccountAndPrincipal()
+    public async Task CreateServiceAccount_CreatesServiceAccountAndSubject()
     {
         var sa = await _service.CreateServiceAccountAsync("API Client", "client_123", "hash_abc");
         Assert.IsNotNull(sa);
@@ -192,22 +192,22 @@ public class SqlzibarPrincipalServiceTests
         Assert.AreEqual("client_123", sa.ClientId);
         Assert.AreEqual("hash_abc", sa.ClientSecretHash);
 
-        var principal = await _context.Set<SqlzibarPrincipal>()
-            .FirstOrDefaultAsync(p => p.Id == sa.PrincipalId);
-        Assert.IsNotNull(principal);
-        Assert.AreEqual("service_account", principal.PrincipalTypeId);
-        Assert.AreEqual("API Client", principal.DisplayName);
+        var subject = await _context.Set<SqlzibarSubject>()
+            .FirstOrDefaultAsync(p => p.Id == sa.SubjectId);
+        Assert.IsNotNull(subject);
+        Assert.AreEqual("service_account", subject.SubjectTypeId);
+        Assert.AreEqual("API Client", subject.DisplayName);
     }
 
     [TestMethod]
-    public async Task AddToGroup_AgentPrincipal_Succeeds()
+    public async Task AddToGroup_AgentSubject_Succeeds()
     {
         var agent = await _service.CreateAgentAsync("Agent", "worker");
         var group = await _service.CreateGroupAsync("Group");
 
-        await _service.AddToGroupAsync(agent.PrincipalId, group.Id);
+        await _service.AddToGroupAsync(agent.SubjectId, group.Id);
 
-        var groups = await _service.GetGroupsForPrincipalAsync(agent.PrincipalId);
+        var groups = await _service.GetGroupsForSubjectAsync(agent.SubjectId);
         Assert.AreEqual(1, groups.Count);
         Assert.AreEqual(group.Id, groups[0].Id);
     }

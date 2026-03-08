@@ -17,53 +17,66 @@ Sqlzibar uses a Hangfire-style raw SQL schema versioning system:
 UseSqlzibarAsync()
   1. Schema Init  → Check version table → Run pending scripts
   2. Function Init → Create/update fn_IsResourceAccessible TVF
-  3. Seed Core     → Seed principal types + root resource
+  3. Seed Core     → Seed subject types + root resource
 ```
 
 ### Script Conventions
 
 - Scripts are embedded resources at `src/Sqlzibar/Schema/*.sql`
 - Named `NNN_DescriptiveName.sql` (e.g., `001_Initial.sql`, `002_AddEffectiveFromIndex.sql`)
-- Use `{Schema}`, `{Principals}`, `{Resources}`, etc. as placeholders (replaced at runtime from `SqlzibarOptions`)
+- Use `{Schema}`, `{Subjects}`, `{Resources}`, etc. as placeholders (replaced at runtime from `SqlzibarOptions`)
 - Use `GO` to separate batches (the initializer splits on `GO` lines)
 - All DDL should be idempotent where possible (`IF NOT EXISTS` for new objects, `IF COL_NAME(...)` checks for columns)
 
 ## Adding a New Schema Version
 
-1. **Create the script** in `src/Sqlzibar/Schema/`:
+Migration scripts are **auto-discovered** based on the naming convention. Just add the file and it will be picked up automatically.
+
+1. **Create the script** in `src/Sqlzibar/Schema/` with the naming pattern `NNN_Name.sql`:
 
    ```
-   002_AddGrantIndex.sql
+   004_AddSomeFeature.sql
    ```
 
-   Example content:
+   The number prefix determines the execution order. Scripts are run in ascending order.
+
+   Example content (from actual v3 migration):
    ```sql
-   IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_{Grants}_PrincipalId_ResourceId')
+   -- Sqlzibar Schema v3: Add Description column to Grants table
+
+   -- Add Description column to Grants table (if it doesn't exist)
+   IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{Schema}.{Grants}') AND name = 'Description')
    BEGIN
-       CREATE INDEX [IX_{Grants}_PrincipalId_ResourceId]
-           ON [{Schema}].[{Grants}] ([PrincipalId], [ResourceId]);
+       ALTER TABLE [{Schema}].[{Grants}] ADD [Description] NVARCHAR(MAX) NULL;
    END
    GO
 
-   UPDATE [{Schema}].[SqlzibarSchema] SET [Version] = 2;
+   -- Update schema version
+   UPDATE [{Schema}].[SqlzibarSchema] SET [Version] = 3 WHERE [Version] < 3;
+   GO
    ```
 
-2. **Bump `CurrentSchemaVersion`** in `SqlzibarSchemaInitializer.cs`:
+2. **Update the model** if needed. If the script adds a column, update the corresponding model class:
 
    ```csharp
-   private const int CurrentSchemaVersion = 2; // was 1
+   // In SqlzibarGrant.cs
+   public string? Description { get; set; }
    ```
 
-3. **Add the upgrade path** in `EnsureSchemaAsync()` (in the `currentVersion < CurrentSchemaVersion` branch):
+3. **Add integration tests** to validate the migration. See `SchemaInitializerIntegrationTests.cs` for examples:
 
    ```csharp
-   if (currentVersion < 2)
-       await RunScriptAsync("Sqlzibar.Schema.002_AddGrantIndex.sql", cancellationToken);
+   [TestMethod]
+   public async Task EnsureSchema_V3Migration_AddsDescriptionColumnToGrants()
+   {
+       // ... setup ...
+       await initializer.EnsureSchemaAsync();
+       var hasColumn = await ColumnExistsAsync("SqlzibarGrants", "Description");
+       Assert.IsTrue(hasColumn, "SqlzibarGrants.Description column should exist after v3 migration");
+   }
    ```
 
-4. **Verify the `.csproj`** includes the script. The glob `<EmbeddedResource Include="Schema\*.sql" />` should pick it up automatically.
-
-5. **Update the model** if needed. If the script adds a column, update the corresponding model class and `SqlzibarModelConfiguration`.
+That's it! No need to modify `SqlzibarSchemaInitializer.cs` - it auto-discovers all `NNN_*.sql` files in the Schema folder.
 
 ## Local Development Workflow
 
@@ -93,8 +106,8 @@ UseSqlzibarAsync()
 | Placeholder              | Source                             |
 |--------------------------|------------------------------------|
 | `{Schema}`               | `SqlzibarOptions.Schema`           |
-| `{PrincipalTypes}`       | `SqlzibarOptions.TableNames.PrincipalTypes` |
-| `{Principals}`           | `SqlzibarOptions.TableNames.Principals` |
+| `{SubjectTypes}`       | `SqlzibarOptions.TableNames.SubjectTypes` |
+| `{Subjects}`           | `SqlzibarOptions.TableNames.Subjects` |
 | `{UserGroups}`           | `SqlzibarOptions.TableNames.UserGroups` |
 | `{UserGroupMemberships}` | `SqlzibarOptions.TableNames.UserGroupMemberships` |
 | `{ResourceTypes}`        | `SqlzibarOptions.TableNames.ResourceTypes` |

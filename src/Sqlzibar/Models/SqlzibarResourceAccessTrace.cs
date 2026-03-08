@@ -9,8 +9,8 @@ public class SqlzibarResourceAccessTrace
     public string TargetResourceId { get; set; } = string.Empty;
     public string TargetResourceName { get; set; } = string.Empty;
     public string TargetResourceType { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
-    public string PrincipalDisplayName { get; set; } = string.Empty;
+    public string SubjectId { get; set; } = string.Empty;
+    public string SubjectDisplayName { get; set; } = string.Empty;
     public string PermissionKey { get; set; } = string.Empty;
     public string PermissionName { get; set; } = string.Empty;
     public bool AccessGranted { get; set; }
@@ -20,7 +20,7 @@ public class SqlzibarResourceAccessTrace
     public string DecisionSummary { get; set; } = string.Empty;
     public string? DenialReason { get; set; }
     public string? Suggestion { get; set; }
-    public List<SqlzibarPrincipalInfo> PrincipalsChecked { get; set; } = new();
+    public List<SqlzibarSubjectInfo> SubjectsChecked { get; set; } = new();
 }
 
 public class SqlzibarResourcePathNodeTrace
@@ -43,9 +43,9 @@ public class SqlzibarGrantTrace
     public string ResourceType { get; set; } = string.Empty;
     public string RoleKey { get; set; } = string.Empty;
     public string RoleName { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
-    public string PrincipalDisplayName { get; set; } = string.Empty;
-    public bool AppliesToPrincipal { get; set; }
+    public string SubjectId { get; set; } = string.Empty;
+    public string SubjectDisplayName { get; set; } = string.Empty;
+    public bool AppliesToSubject { get; set; }
     public bool IsDirectGrant { get; set; }
     public string? ViaGroupName { get; set; }
     public bool ContributedToDecision { get; set; }
@@ -71,9 +71,9 @@ public class SqlzibarPermissionAssignmentTrace
     public bool UsedForDecision { get; set; }
 }
 
-public class SqlzibarPrincipalInfo
+public class SqlzibarSubjectInfo
 {
-    public string PrincipalId { get; set; } = string.Empty;
+    public string SubjectId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public bool IsDirect { get; set; }

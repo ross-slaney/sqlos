@@ -1,0 +1,211 @@
+---
+title: "The Developer's Guide to Hierarchical RBAC"
+description: "Learn how hierarchical role-based access control works and why it's essential for modern multi-tenant applications."
+date: "2026-03-01"
+author: "Sqlzibar Team"
+tags: ["RBAC", "Authorization", "Architecture"]
+---
+
+Role-based access control (RBAC) has been the go-to authorization model for decades. But as applications grow more complex—especially in multi-tenant SaaS environments—traditional flat RBAC starts showing its limitations. Enter hierarchical RBAC: a more powerful approach that models real-world organizational structures.
+
+## The Problem with Flat RBAC
+
+In traditional RBAC, you assign roles to users, and roles contain permissions. Simple enough:
+
+```
+User → Role → Permissions
+```
+
+But what happens when your application has multiple tenants, each with their own teams, projects, and resources? You end up with one of two bad options:
+
+1. **Global roles**: A user with "Editor" role can edit everything in the system
+2. **Explosion of roles**: Create "Team-A-Editor", "Team-B-Editor", "Project-1-Editor", etc.
+
+Neither scales well. Global roles are too permissive, and role explosion becomes unmanageable.
+
+## How Hierarchical RBAC Works
+
+Hierarchical RBAC adds a crucial dimension: **resources form a tree**, and permissions **inherit down the tree**.
+
+```
+Organization (root)
+├── Team Alpha
+│   ├── Project X
+│   │   └── Document 1
+│   └── Project Y
+└── Team Beta
+    └── Project Z
+```
+
+When you grant a role at any level, the permissions automatically apply to all descendants:
+
+- Grant "Admin" on Organization → Admin access to everything
+- Grant "Editor" on Team Alpha → Edit access to Team Alpha, Project X, Project Y, and all their contents
+- Grant "Viewer" on Project X → Read access to Project X and Document 1 only
+
+This maps naturally to how organizations actually work. A team lead has full access to their team's resources but not to other teams.
+
+## Key Concepts
+
+### Resources and Resource Types
+
+Resources are the things you're protecting: organizations, teams, projects, documents, API keys, etc. Each resource has a type that defines what it is and what permissions apply to it.
+
+```csharp
+// Define resource types
+var resourceTypes = new[] {
+    new { Id = "organization", Name = "Organization" },
+    new { Id = "team", Name = "Team" },
+    new { Id = "project", Name = "Project" },
+    new { Id = "document", Name = "Document" }
+};
+```
+
+### The Resource Hierarchy
+
+Every resource (except roots) has a parent. This parent-child relationship creates the inheritance chain:
+
+```csharp
+// Create a resource hierarchy
+await seedService.CreateResourceAsync(
+    id: "org_acme",
+    name: "Acme Corp",
+    resourceTypeId: "organization",
+    parentId: null  // Root resource
+);
+
+await seedService.CreateResourceAsync(
+    id: "team_engineering",
+    name: "Engineering",
+    resourceTypeId: "team",
+    parentId: "org_acme"  // Child of Acme Corp
+);
+```
+
+### Roles and Permissions
+
+Roles are collections of permissions. Unlike flat RBAC, you don't assign roles globally—you assign them **on specific resources**:
+
+```csharp
+// Grant the "editor" role to Alice on the Engineering team
+await authService.GrantRoleAsync(
+    subjectId: "user_alice",
+    roleId: "editor",
+    resourceId: "team_engineering"
+);
+```
+
+Alice now has editor permissions on the Engineering team and all its projects and documents.
+
+## Permission Checks
+
+When checking if a user has permission, the system walks up the resource tree looking for a grant:
+
+```csharp
+var access = await authService.CheckAccessAsync(
+    subjectId: "user_alice",
+    permissionKey: "DOCUMENT_WRITE",
+    resourceId: "doc_123"  // A document in Project X
+);
+
+if (!access.Allowed)
+    return Results.Forbid();
+```
+
+The check process:
+1. Does Alice have a role with "DOCUMENT_WRITE" on doc_123? No.
+2. Does Alice have it on doc_123's parent (Project X)? No.
+3. Does Alice have it on Project X's parent (Team Engineering)? Yes! Alice has "editor" role here.
+4. Does "editor" include "DOCUMENT_WRITE"? Yes. **Access granted.**
+
+## Subjects: More Than Just Users
+
+Modern applications have multiple types of actors:
+
+- **Users**: Human users authenticated via OAuth, SAML, etc.
+- **Service Accounts**: Machine-to-machine authentication for APIs and integrations
+- **Agents**: AI agents and bots that perform actions on behalf of users
+- **User Groups**: Collections of users that share permissions (teams, departments)
+
+Hierarchical RBAC treats all of these as "subjects" that can be granted roles:
+
+```csharp
+// Grant a service account access to a specific project
+await authService.GrantRoleAsync(
+    subjectId: "svc_ci_pipeline",
+    roleId: "deployer",
+    resourceId: "project_api"
+);
+
+// Grant an entire team access
+await authService.GrantRoleAsync(
+    subjectId: "group_backend_team",
+    roleId: "developer",
+    resourceId: "team_engineering"
+);
+```
+
+## Real-World Example: Multi-Tenant SaaS
+
+Consider a project management SaaS like Jira or Asana. The resource hierarchy might look like:
+
+```
+Tenant (Acme Corp)
+├── Workspace: Engineering
+│   ├── Project: API v2
+│   │   ├── Sprint: March 2026
+│   │   │   ├── Task: Implement auth
+│   │   │   └── Task: Write tests
+│   │   └── Sprint: April 2026
+│   └── Project: Mobile App
+└── Workspace: Marketing
+    └── Project: Q2 Campaign
+```
+
+With hierarchical RBAC:
+
+- **Tenant Admin**: Full access to everything in Acme Corp
+- **Workspace Admin**: Manage all projects in Engineering
+- **Project Lead**: Manage sprints and tasks in API v2
+- **Developer**: Create and update tasks in assigned sprints
+- **Viewer**: Read-only access to specific projects
+
+Each role is scoped to exactly the right level. A developer on the API v2 project can't see or modify the Mobile App project unless explicitly granted access.
+
+## Benefits Over Flat RBAC
+
+1. **Natural modeling**: Mirrors real organizational structures
+2. **Reduced complexity**: No role explosion; one "Editor" role works at any level
+3. **Principle of least privilege**: Easy to grant minimal necessary access
+4. **Audit clarity**: Clear chain of why someone has access
+5. **Delegation**: Admins at each level can manage their subtree
+
+## Implementation Considerations
+
+### Performance
+
+Walking up the tree for every permission check could be slow. Good implementations use:
+
+- **Materialized paths**: Store the full ancestry path for O(1) lookups
+- **Caching**: Cache permission decisions with smart invalidation
+- **Database-level filtering**: Use TVFs or CTEs to filter at the database
+
+### Consistency
+
+When the hierarchy changes (resource moved, deleted), permissions must update atomically. This requires careful transaction handling and potentially background jobs for large subtrees.
+
+### Scale
+
+For very deep hierarchies or high-frequency checks, consider:
+
+- Denormalizing effective permissions
+- Using read replicas for permission checks
+- Implementing permission snapshots for batch operations
+
+## Conclusion
+
+Hierarchical RBAC is the natural evolution of authorization for complex applications. By modeling resources as a tree and inheriting permissions down the hierarchy, you get a system that's both powerful and intuitive.
+
+If you're building a multi-tenant application, a platform with nested resources, or any system where "who can access what" depends on organizational structure, hierarchical RBAC should be your default choice.
+
+In the next post, we'll dive into implementing row-level security with EF Core and SQL Server TVFs—the database-level enforcement that makes hierarchical RBAC truly secure.

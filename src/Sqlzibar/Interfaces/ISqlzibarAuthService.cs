@@ -11,26 +11,26 @@ namespace Sqlzibar.Interfaces;
 public interface ISqlzibarAuthService
 {
     /// <summary>
-    /// Check if a principal has access to a resource with a specific permission.
+    /// Check if a subject has access to a resource with a specific permission.
     /// Walks up the resource hierarchy to find grants.
     /// </summary>
-    Task<SqlzibarAccessCheckResult> CheckAccessAsync(string principalId, string permissionKey, string resourceId);
+    Task<SqlzibarAccessCheckResult> CheckAccessAsync(string subjectId, string permissionKey, string resourceId);
 
     /// <summary>
-    /// Check if a principal has a specific permission capability at root level.
+    /// Check if a subject has a specific permission capability at root level.
     /// </summary>
-    Task<bool> HasCapabilityAsync(string principalId, string permissionKey);
+    Task<bool> HasCapabilityAsync(string subjectId, string permissionKey);
 
     /// <summary>
     /// Produce a detailed, structured trace of a resource access decision.
     /// </summary>
-    Task<SqlzibarResourceAccessTrace> TraceResourceAccessAsync(string principalId, string resourceId, string permissionKey);
+    Task<SqlzibarResourceAccessTrace> TraceResourceAccessAsync(string subjectId, string resourceId, string permissionKey);
 
     /// <summary>
     /// Get an expression filter for entities with a ResourceId property.
-    /// The filter restricts results to only those resources the principal can access.
+    /// The filter restricts results to only those resources the subject can access.
     /// </summary>
     Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
-        string principalId,
+        string subjectId,
         string permissionKey) where T : IHasResourceId;
 }

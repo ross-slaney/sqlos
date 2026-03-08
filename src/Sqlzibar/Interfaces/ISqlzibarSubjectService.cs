@@ -3,22 +3,22 @@ using Sqlzibar.Models;
 namespace Sqlzibar.Interfaces;
 
 /// <summary>
-/// Service for managing principals, groups, and group membership.
+/// Service for managing subjects, groups, and group membership.
 /// </summary>
-public interface ISqlzibarPrincipalService
+public interface ISqlzibarSubjectService
 {
     /// <summary>
-    /// Create a new principal.
+    /// Create a new subject.
     /// </summary>
-    Task<SqlzibarPrincipal> CreatePrincipalAsync(
+    Task<SqlzibarSubject> CreateSubjectAsync(
         string displayName,
-        string principalTypeId,
+        string subjectTypeId,
         string? organizationId = null,
         string? externalRef = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Create a new user with its associated principal.
+    /// Create a new user with its associated subject.
     /// </summary>
     Task<SqlzibarUser> CreateUserAsync(
         string displayName,
@@ -29,7 +29,7 @@ public interface ISqlzibarPrincipalService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Create a new agent with its associated principal.
+    /// Create a new agent with its associated subject.
     /// </summary>
     Task<SqlzibarAgent> CreateAgentAsync(
         string displayName,
@@ -40,7 +40,7 @@ public interface ISqlzibarPrincipalService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Create a new service account with its associated principal.
+    /// Create a new service account with its associated subject.
     /// </summary>
     Task<SqlzibarServiceAccount> CreateServiceAccountAsync(
         string displayName,
@@ -53,7 +53,7 @@ public interface ISqlzibarPrincipalService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Create a new user group with its associated principal.
+    /// Create a new user group with its associated subject.
     /// </summary>
     Task<SqlzibarUserGroup> CreateGroupAsync(
         string name,
@@ -62,25 +62,25 @@ public interface ISqlzibarPrincipalService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Add a principal to a group.
-    /// Only principals of type 'user', 'agent', or 'service_account' can be added — groups cannot contain other groups.
+    /// Add a subject to a group.
+    /// Only subjects of type 'user', 'agent', or 'service_account' can be added — groups cannot contain other groups.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown if the principal is a group type.</exception>
-    Task AddToGroupAsync(string principalId, string userGroupId, CancellationToken cancellationToken = default);
+    /// <exception cref="InvalidOperationException">Thrown if the subject is a group type.</exception>
+    Task AddToGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Remove a principal from a group.
+    /// Remove a subject from a group.
     /// </summary>
-    Task RemoveFromGroupAsync(string principalId, string userGroupId, CancellationToken cancellationToken = default);
+    Task RemoveFromGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resolve all principal IDs for a given principal (the principal itself plus any groups it belongs to).
+    /// Resolve all subject IDs for a given subject (the subject itself plus any groups it belongs to).
     /// Single-level lookup — no recursion needed since groups can't contain groups.
     /// </summary>
-    Task<List<string>> ResolvePrincipalIdsAsync(string principalId, CancellationToken cancellationToken = default);
+    Task<List<string>> ResolveSubjectIdsAsync(string subjectId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get all groups a principal belongs to.
+    /// Get all groups a subject belongs to.
     /// </summary>
-    Task<List<SqlzibarUserGroup>> GetGroupsForPrincipalAsync(string principalId, CancellationToken cancellationToken = default);
+    Task<List<SqlzibarUserGroup>> GetGroupsForSubjectAsync(string subjectId, CancellationToken cancellationToken = default);
 }

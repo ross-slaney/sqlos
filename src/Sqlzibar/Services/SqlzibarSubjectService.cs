@@ -5,42 +5,42 @@ using Sqlzibar.Models;
 
 namespace Sqlzibar.Services;
 
-public class SqlzibarPrincipalService : ISqlzibarPrincipalService
+public class SqlzibarSubjectService : ISqlzibarSubjectService
 {
     private readonly ISqlzibarDbContext _context;
-    private readonly ILogger<SqlzibarPrincipalService> _logger;
+    private readonly ILogger<SqlzibarSubjectService> _logger;
 
-    public SqlzibarPrincipalService(
+    public SqlzibarSubjectService(
         ISqlzibarDbContext context,
-        ILogger<SqlzibarPrincipalService> logger)
+        ILogger<SqlzibarSubjectService> logger)
     {
         _context = context;
         _logger = logger;
     }
 
-    public async Task<SqlzibarPrincipal> CreatePrincipalAsync(
+    public async Task<SqlzibarSubject> CreateSubjectAsync(
         string displayName,
-        string principalTypeId,
+        string subjectTypeId,
         string? organizationId = null,
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var principal = new SqlzibarPrincipal
+        var subject = new SqlzibarSubject
         {
-            Id = $"prin_{Guid.NewGuid():N}"[..30],
-            PrincipalTypeId = principalTypeId,
+            Id = $"subj_{Guid.NewGuid():N}"[..30],
+            SubjectTypeId = subjectTypeId,
             DisplayName = displayName,
             OrganizationId = organizationId,
             ExternalRef = externalRef,
         };
 
-        _context.Set<SqlzibarPrincipal>().Add(principal);
+        _context.Set<SqlzibarSubject>().Add(subject);
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Created principal {PrincipalId} ({DisplayName}) of type {Type}",
-            principal.Id, displayName, principalTypeId);
+        _logger.LogInformation("Created subject {SubjectId} ({DisplayName}) of type {Type}",
+            subject.Id, displayName, subjectTypeId);
 
-        return principal;
+        return subject;
     }
 
     public async Task<SqlzibarUserGroup> CreateGroupAsync(
@@ -49,7 +49,7 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
         string? groupType = null,
         CancellationToken cancellationToken = default)
     {
-        var principal = await CreatePrincipalAsync(name, "group", cancellationToken: cancellationToken);
+        var subject = await CreateSubjectAsync(name, "group", cancellationToken: cancellationToken);
 
         var group = new SqlzibarUserGroup
         {
@@ -57,7 +57,7 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
             Name = name,
             Description = description,
             GroupType = groupType,
-            PrincipalId = principal.Id,
+            SubjectId = subject.Id,
         };
 
         _context.Set<SqlzibarUserGroup>().Add(group);
@@ -76,12 +76,12 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var principal = await CreatePrincipalAsync(displayName, "user", organizationId, externalRef, cancellationToken);
+        var subject = await CreateSubjectAsync(displayName, "user", organizationId, externalRef, cancellationToken);
 
         var user = new SqlzibarUser
         {
             Id = $"usr_{Guid.NewGuid():N}"[..30],
-            PrincipalId = principal.Id,
+            SubjectId = subject.Id,
             Email = email,
             IsActive = isActive,
         };
@@ -102,12 +102,12 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var principal = await CreatePrincipalAsync(displayName, "agent", organizationId, externalRef, cancellationToken);
+        var subject = await CreateSubjectAsync(displayName, "agent", organizationId, externalRef, cancellationToken);
 
         var agent = new SqlzibarAgent
         {
             Id = $"agt_{Guid.NewGuid():N}"[..30],
-            PrincipalId = principal.Id,
+            SubjectId = subject.Id,
             AgentType = agentType,
             Description = description,
         };
@@ -130,12 +130,12 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
         string? externalRef = null,
         CancellationToken cancellationToken = default)
     {
-        var principal = await CreatePrincipalAsync(displayName, "service_account", organizationId, externalRef, cancellationToken);
+        var subject = await CreateSubjectAsync(displayName, "service_account", organizationId, externalRef, cancellationToken);
 
         var serviceAccount = new SqlzibarServiceAccount
         {
             Id = $"sa_{Guid.NewGuid():N}"[..30],
-            PrincipalId = principal.Id,
+            SubjectId = subject.Id,
             ClientId = clientId,
             ClientSecretHash = clientSecretHash,
             Description = description,
@@ -150,68 +150,68 @@ public class SqlzibarPrincipalService : ISqlzibarPrincipalService
         return serviceAccount;
     }
 
-    public async Task AddToGroupAsync(string principalId, string userGroupId, CancellationToken cancellationToken = default)
+    public async Task AddToGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default)
     {
-        // Validate principal is NOT a group type (no nested groups allowed)
-        var principal = await _context.Set<SqlzibarPrincipal>()
-            .FirstOrDefaultAsync(p => p.Id == principalId, cancellationToken)
-            ?? throw new InvalidOperationException($"Principal '{principalId}' not found");
+        // Validate subject is NOT a group type (no nested groups allowed)
+        var subject = await _context.Set<SqlzibarSubject>()
+            .FirstOrDefaultAsync(s => s.Id == subjectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Subject '{subjectId}' not found");
 
-        if (principal.PrincipalTypeId == "group")
+        if (subject.SubjectTypeId == "group")
         {
             throw new InvalidOperationException("Groups cannot be members of other groups");
         }
 
         var exists = await _context.Set<SqlzibarUserGroupMembership>()
-            .AnyAsync(m => m.PrincipalId == principalId && m.UserGroupId == userGroupId, cancellationToken);
+            .AnyAsync(m => m.SubjectId == subjectId && m.UserGroupId == userGroupId, cancellationToken);
 
         if (exists) return;
 
         var membership = new SqlzibarUserGroupMembership
         {
-            PrincipalId = principalId,
+            SubjectId = subjectId,
             UserGroupId = userGroupId,
         };
 
         _context.Set<SqlzibarUserGroupMembership>().Add(membership);
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Added principal {PrincipalId} to group {GroupId}", principalId, userGroupId);
+        _logger.LogInformation("Added subject {SubjectId} to group {GroupId}", subjectId, userGroupId);
     }
 
-    public async Task RemoveFromGroupAsync(string principalId, string userGroupId, CancellationToken cancellationToken = default)
+    public async Task RemoveFromGroupAsync(string subjectId, string userGroupId, CancellationToken cancellationToken = default)
     {
         var membership = await _context.Set<SqlzibarUserGroupMembership>()
-            .FirstOrDefaultAsync(m => m.PrincipalId == principalId && m.UserGroupId == userGroupId, cancellationToken);
+            .FirstOrDefaultAsync(m => m.SubjectId == subjectId && m.UserGroupId == userGroupId, cancellationToken);
 
         if (membership == null) return;
 
         _context.Set<SqlzibarUserGroupMembership>().Remove(membership);
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Removed principal {PrincipalId} from group {GroupId}", principalId, userGroupId);
+        _logger.LogInformation("Removed subject {SubjectId} from group {GroupId}", subjectId, userGroupId);
     }
 
-    public async Task<List<string>> ResolvePrincipalIdsAsync(string principalId, CancellationToken cancellationToken = default)
+    public async Task<List<string>> ResolveSubjectIdsAsync(string subjectId, CancellationToken cancellationToken = default)
     {
-        var principals = new List<string> { principalId };
+        var subjects = new List<string> { subjectId };
 
-        var groupPrincipalIds = await _context.Set<SqlzibarUserGroupMembership>()
-            .Where(m => m.PrincipalId == principalId)
+        var groupSubjectIds = await _context.Set<SqlzibarUserGroupMembership>()
+            .Where(m => m.SubjectId == subjectId)
             .Join(_context.Set<SqlzibarUserGroup>(),
                 m => m.UserGroupId,
                 g => g.Id,
-                (m, g) => g.PrincipalId)
+                (m, g) => g.SubjectId)
             .ToListAsync(cancellationToken);
 
-        principals.AddRange(groupPrincipalIds);
-        return principals;
+        subjects.AddRange(groupSubjectIds);
+        return subjects;
     }
 
-    public async Task<List<SqlzibarUserGroup>> GetGroupsForPrincipalAsync(string principalId, CancellationToken cancellationToken = default)
+    public async Task<List<SqlzibarUserGroup>> GetGroupsForSubjectAsync(string subjectId, CancellationToken cancellationToken = default)
     {
         return await _context.Set<SqlzibarUserGroupMembership>()
-            .Where(m => m.PrincipalId == principalId)
+            .Where(m => m.SubjectId == subjectId)
             .Join(_context.Set<SqlzibarUserGroup>(),
                 m => m.UserGroupId,
                 g => g.Id,

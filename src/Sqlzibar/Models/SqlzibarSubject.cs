@@ -1,12 +1,12 @@
 namespace Sqlzibar.Models;
 
 /// <summary>
-/// Core security principal (can be user, group, or service account).
+/// Core security subject (can be user, group, or service account).
 /// </summary>
-public class SqlzibarPrincipal
+public class SqlzibarSubject
 {
     public string Id { get; set; } = string.Empty;
-    public string PrincipalTypeId { get; set; } = string.Empty;
+    public string SubjectTypeId { get; set; } = string.Empty;
     public string? OrganizationId { get; set; }
     public string? ExternalRef { get; set; }
     public string DisplayName { get; set; } = string.Empty;
@@ -14,7 +14,7 @@ public class SqlzibarPrincipal
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public SqlzibarPrincipalType? PrincipalType { get; set; }
+    public SqlzibarSubjectType? SubjectType { get; set; }
     public SqlzibarUser? User { get; set; }
     public SqlzibarAgent? Agent { get; set; }
     public SqlzibarUserGroup? UserGroup { get; set; }

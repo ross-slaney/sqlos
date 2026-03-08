@@ -27,11 +27,11 @@ public static class InventoryEndpoints
             string? sortBy = null,
             string? sortDir = null) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
             var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
             var spec = new GetInventoryItemsSpecification(pageSize, search, locationId, sortBy, descending) { Cursor = cursor };
             var result = await executor.ExecuteAsync(
-                context.InventoryItems, spec, principalId,
+                context.InventoryItems, spec, subjectId,
                 i => new InventoryItemDto
                 {
                     Id = i.Id,
@@ -53,12 +53,12 @@ public static class InventoryEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             return await authService.AuthorizedDetailAsync(
                 context.InventoryItems.Include(i => i.Location),
                 i => i.Id == id,
-                principalId, RetailPermissionKeys.InventoryView,
+                subjectId, RetailPermissionKeys.InventoryView,
                 item => new InventoryItemDetailDto
                 {
                     Id = item.Id,
@@ -82,12 +82,12 @@ public static class InventoryEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             var location = await context.Locations.FirstOrDefaultAsync(l => l.Id == locationId);
             if (location is null) return Results.NotFound();
 
-            var access = await authService.CheckAccessAsync(principalId, RetailPermissionKeys.InventoryEdit, location.ResourceId);
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, location.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
             var resourceId = context.CreateResource(location.ResourceId, request.Name, RetailResourceTypeIds.InventoryItem);

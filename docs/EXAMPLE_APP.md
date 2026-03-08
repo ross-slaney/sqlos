@@ -17,7 +17,7 @@ dotnet run
 > **If you change the seed data**, drop the database first — the seed service skips if data already exists:
 >
 > ```bash
-> sqlcmd -S 127.0.0.1,1433 -U sa -P 'YourPassword' -Q "DROP DATABASE example"
+> sqlcmd -S 127.0.0.1,1434 -U sa -P 'YourPassword' -Q "DROP DATABASE example"
 > ```
 
 ## Seeded Resource Hierarchy
@@ -38,9 +38,9 @@ retail_root (CompanyAdmin)
   └── Aldi
 ```
 
-## Seeded Principals
+## Seeded Subjects
 
-| Principal                 | Type            | Direct Grant                  | Scope                                 |
+| Subject                   | Type            | Direct Grant                  | Scope                                 |
 | ------------------------- | --------------- | ----------------------------- | ------------------------------------- |
 | Company Admin             | user            | CompanyAdmin @ retail_root    | Everything                            |
 | Walmart Chain Manager     | user            | ChainManager @ Walmart        | Walmart + all descendants             |
@@ -63,7 +63,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 
 | Field      | Value            |
 | ---------- | ---------------- |
-| Principal  | Alice (Regional) |
+| Subject    | Alice (Regional) |
 | Permission | CHAIN_VIEW       |
 | Resource   | Walmart          |
 
@@ -73,7 +73,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 
 | Field      | Value          |
 | ---------- | -------------- |
-| Principal  | Company Admin  |
+| Subject    | Company Admin  |
 | Permission | INVENTORY_VIEW |
 | Resource   | Laptop         |
 
@@ -87,7 +87,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 | Permission | CHAIN_VIEW            |
 | Resource   | Target                |
 
-**Expected: ACCESS DENIED.** The trace walks up from Target → retail_root, checking for grants from this principal at each level. The ChainManager grant is on Walmart, not on Target or retail_root.
+**Expected: ACCESS DENIED.** The trace walks up from Target → retail_root, checking for grants from this subject at each level. The ChainManager grant is on Walmart, not on Target or retail_root.
 
 ### 4. Permission Boundary — Having a role doesn't mean having all permissions
 
@@ -97,7 +97,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 | Permission | INVENTORY_EDIT  |
 | Resource   | Laptop          |
 
-**Expected: ACCESS DENIED.** The clerk has a StoreClerk grant at Store 001 which covers the Laptop resource, but StoreClerk only includes INVENTORY_VIEW, not INVENTORY_EDIT. The trace shows the grant is found but the permission doesn't match.
+**Expected: ACCESS DENIED.** The clerk has a StoreClerk grant at Store 001 which covers the Laptop resource, but StoreClerk only includes INVENTORY_VIEW, not INVENTORY_EDIT. The trace shows the grant is found but the permission does not match.
 
 ### 5. Store-Level Scoping — Store manager can't see sibling store's data
 
@@ -107,7 +107,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 | Permission | INVENTORY_VIEW    |
 | Resource   | Tablet            |
 
-**Expected: ACCESS DENIED.** The Tablet is under Store 002, and Store 001 Manager's grant is at Store 001. Walking up from Tablet → Store 002 → Walmart → retail_root finds no grants for this principal at any ancestor.
+**Expected: ACCESS DENIED.** The Tablet is under Store 002, and Store 001 Manager's grant is at Store 001. Walking up from Tablet → Store 002 → Walmart → retail_root finds no grants for this subject at any ancestor.
 
 ### 6. Group Isolation — Non-member doesn't inherit group access
 
@@ -117,7 +117,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 | Permission | CHAIN_VIEW     |
 | Resource   | Walmart        |
 
-**Expected: ACCESS DENIED.** This user has no direct grants and no group memberships. The trace shows only one principal was checked (the user themselves), with no grants found at any level.
+**Expected: ACCESS DENIED.** This user has no direct grants and no group memberships. The trace shows only one subject was checked (the user themselves), with no grants found at any level.
 
 ### 7. Agent Access — Agent has direct grant
 
@@ -133,7 +133,7 @@ Open the dashboard at `/sqlzibar/` and navigate to **Access Tester**. These scen
 
 | Field      | Value           |
 | ---------- | --------------- |
-| Principal  | API Integration |
+| Subject    | API Integration |
 | Permission | INVENTORY_EDIT  |
 | Resource   | Laptop          |
 

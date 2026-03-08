@@ -21,7 +21,7 @@ public class AuthorizationFlowTests
     public async Task Request_WithoutHeader_Returns401()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains");
-        // No X-Principal-Id header
+        // No X-Subject-Id header
 
         var response = await _client.SendAsync(request);
 
@@ -32,7 +32,7 @@ public class AuthorizationFlowTests
     public async Task CompanyAdmin_GetChains_SeesAllChains()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains");
-        request.Headers.Add("X-Principal-Id", "prin_company_admin");
+        request.Headers.Add("X-Subject-Id", "subj_company_admin");
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -47,7 +47,7 @@ public class AuthorizationFlowTests
     {
         // Store clerk only has LOCATION_VIEW and INVENTORY_VIEW, not CHAIN_VIEW
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains");
-        request.Headers.Add("X-Principal-Id", "prin_store_clerk_001");
+        request.Headers.Add("X-Subject-Id", "subj_store_clerk_001");
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -61,7 +61,7 @@ public class AuthorizationFlowTests
     public async Task StoreClerk_CreateChain_Returns403()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains");
-        request.Headers.Add("X-Principal-Id", "prin_store_clerk_001");
+        request.Headers.Add("X-Subject-Id", "subj_store_clerk_001");
         request.Content = JsonContent.Create(new { Name = "New Chain" });
 
         var response = await _client.SendAsync(request);
@@ -73,7 +73,7 @@ public class AuthorizationFlowTests
     public async Task CompanyAdmin_CreateChain_Returns201()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains");
-        request.Headers.Add("X-Principal-Id", "prin_company_admin");
+        request.Headers.Add("X-Subject-Id", "subj_company_admin");
         request.Content = JsonContent.Create(new { Name = "Publix", Description = "Supermarket chain" });
 
         var response = await _client.SendAsync(request);
@@ -85,7 +85,7 @@ public class AuthorizationFlowTests
     public async Task ChainManager_GetLocations_SeesLocationsInTheirChain()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains/chain_walmart/locations");
-        request.Headers.Add("X-Principal-Id", "prin_chain_mgr_walmart");
+        request.Headers.Add("X-Subject-Id", "subj_chain_mgr_walmart");
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -99,7 +99,7 @@ public class AuthorizationFlowTests
     public async Task StoreManager_GetInventory_SeesItemsInTheirStore()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/locations/loc_001/inventory");
-        request.Headers.Add("X-Principal-Id", "prin_store_mgr_001");
+        request.Headers.Add("X-Subject-Id", "subj_store_mgr_001");
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);

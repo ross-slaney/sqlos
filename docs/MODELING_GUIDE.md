@@ -9,10 +9,10 @@ You are helping me model authorization for an application using Sqlzibar (SHRBAC
 
 SHRBAC rules (must follow):
 - Resources form a rooted TREE (single parent; no DAG).
-- Grants: (principal, role, resource_scope, optional time window).
+- Grants: (subject, role, resource_scope, optional time window).
 - Roles are flat; roles map to atomic permissions.
 - Sharing/collab is done by EXTRA GRANTS, not multiple parents.
-- List filtering must be expressible as: WHERE EXISTS(IsResourceAccessible(row.ResourceId, principalIds, perm, now)).
+- List filtering must be expressible as: WHERE EXISTS(IsResourceAccessible(row.ResourceId, subjectIds, perm, now)).
 
 IMPORTANT STYLE REQUIREMENTS (follow these strictly):
 1) Keep it simple and readable: aim for ~1 page of output.
@@ -92,9 +92,9 @@ platform_root
 
 **Principals:**
 
-- **User principals:** AliceUserId, BobUserId
-- **Group principals** (optional): e.g., `household/{id}`, `tenant_admins/{id}`
-- **Agent principals:** robo-advisor, reconciliation worker, statement generator
+- **User subjects:** AliceUserId, BobUserId
+- **Group subjects** (optional): e.g., `household/{id}`, `tenant_admins/{id}`
+- **Agent subjects:** robo-advisor, reconciliation worker, statement generator
 
 **Joint ownership pattern**
 
@@ -205,7 +205,7 @@ That's just a permission like `ACCOUNT_MANAGE_OWNERS`. Grant it only to `JOINT_O
 
 **B) "Power of attorney / advisor access"**
 
-Model advisor as a user or `service_account` principal. Grant them `ADVISOR_VIEWER` on a specific customer subtree or account subtree. Time-bound it.
+Model advisor as a user or `service_account` subject. Grant them `ADVISOR_VIEWER` on a specific customer subtree or account subtree. Time-bound it.
 
 **C) Break-glass support access**
 
@@ -219,6 +219,6 @@ Auditors should get read-only role, scoped to tenant root or customer root, time
 
 You keep containment as the system-of-record tree: **a resource has one parent.**
 
-Sharing is expressed by additional grants. Joint ownership is not "two parents." It's "two principals granted on one resource."
+Sharing is expressed by additional grants. Joint ownership is not "two parents." It's "two subjects granted on one resource."
 
 That's exactly what SHRBAC wants.

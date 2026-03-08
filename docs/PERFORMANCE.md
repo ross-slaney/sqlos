@@ -116,7 +116,7 @@ cd libraries/Sqlzibar/tests/Sqlzibar.Benchmarks
 dotnet run
 
 # Or with a custom connection string:
-dotnet run -- "Server=localhost,1433;Database=Sqlzibar_Benchmark;User Id=sa;Password=YourPassword;TrustServerCertificate=True;"
+dotnet run -- "Server=localhost,1434;Database=Sqlzibar_Benchmark;User Id=sa;Password=YourPassword;TrustServerCertificate=True;"
 ```
 
 The full suite takes ~25 minutes (mostly seeding 1.2M entities). Benchmarks 1-7 run on small datasets (seconds). Benchmarks 8-10 share a single 1.2M-entity seed to avoid re-seeding.

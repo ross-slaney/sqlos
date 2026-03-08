@@ -10,8 +10,8 @@ namespace Sqlzibar.Example.IntegrationTests;
 public class InventoryApiTests
 {
     private HttpClient _client = null!;
-    private const string AdminPrincipalId = "prin_company_admin";
-    private const string StoreManagerPrincipalId = "prin_store_mgr_001";
+    private const string AdminSubjectId = "subj_company_admin";
+    private const string StoreManagerSubjectId = "subj_store_mgr_001";
 
     [TestInitialize]
     public void TestInit()
@@ -23,7 +23,7 @@ public class InventoryApiTests
     public async Task GetInventory_ReturnsPaginatedResult()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/locations/loc_001/inventory");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -37,7 +37,7 @@ public class InventoryApiTests
     public async Task GetInventoryItem_ValidId_ReturnsDetail()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/inventory/inv_laptop");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -51,7 +51,7 @@ public class InventoryApiTests
     public async Task GetInventoryItem_InvalidId_Returns404()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/inventory/nonexistent");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
 
@@ -62,7 +62,7 @@ public class InventoryApiTests
     public async Task CreateInventoryItem_WithPermission_Returns201()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/locations/loc_001/inventory");
-        request.Headers.Add("X-Principal-Id", StoreManagerPrincipalId);
+        request.Headers.Add("X-Subject-Id", StoreManagerSubjectId);
         request.Content = JsonContent.Create(new
         {
             Sku = "NEW-ITEM-001",
@@ -81,7 +81,7 @@ public class InventoryApiTests
     public async Task CreateInventoryItem_WithoutPermission_Returns403()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/locations/loc_001/inventory");
-        request.Headers.Add("X-Principal-Id", "prin_store_clerk_001");
+        request.Headers.Add("X-Subject-Id", "subj_store_clerk_001");
         request.Content = JsonContent.Create(new
         {
             Sku = "UNAUTH-001",

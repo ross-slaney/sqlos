@@ -6,7 +6,7 @@ using Sqlzibar.Example.Api.Middleware;
 namespace Sqlzibar.Example.Tests.Middleware;
 
 [TestClass]
-public class PrincipalIdMiddlewareTests
+public class SubjectIdMiddlewareTests
 {
     [TestMethod]
     public async Task InvokeAsync_WithoutHeader_Returns401()
@@ -15,7 +15,7 @@ public class PrincipalIdMiddlewareTests
         context.Request.Path = "/api/chains";
         var nextCalled = false;
 
-        var middleware = new PrincipalIdMiddleware(_ =>
+        var middleware = new SubjectIdMiddleware(_ =>
         {
             nextCalled = true;
             return Task.CompletedTask;
@@ -34,7 +34,7 @@ public class PrincipalIdMiddlewareTests
         context.Request.Path = "/swagger/index.html";
         var nextCalled = false;
 
-        var middleware = new PrincipalIdMiddleware(_ =>
+        var middleware = new SubjectIdMiddleware(_ =>
         {
             nextCalled = true;
             return Task.CompletedTask;
@@ -52,7 +52,7 @@ public class PrincipalIdMiddlewareTests
         context.Request.Path = "/sqlzibar/api/resources";
         var nextCalled = false;
 
-        var middleware = new PrincipalIdMiddleware(_ =>
+        var middleware = new SubjectIdMiddleware(_ =>
         {
             nextCalled = true;
             return Task.CompletedTask;
@@ -70,7 +70,7 @@ public class PrincipalIdMiddlewareTests
         context.Request.Path = "/";
         var nextCalled = false;
 
-        var middleware = new PrincipalIdMiddleware(_ =>
+        var middleware = new SubjectIdMiddleware(_ =>
         {
             nextCalled = true;
             return Task.CompletedTask;
@@ -86,10 +86,10 @@ public class PrincipalIdMiddlewareTests
     {
         var context = new DefaultHttpContext();
         context.Request.Path = "/api/chains";
-        context.Request.Headers["X-Principal-Id"] = "test_principal";
+        context.Request.Headers["X-Subject-Id"] = "test_subject";
         var nextCalled = false;
 
-        var middleware = new PrincipalIdMiddleware(_ =>
+        var middleware = new SubjectIdMiddleware(_ =>
         {
             nextCalled = true;
             return Task.CompletedTask;
@@ -98,24 +98,24 @@ public class PrincipalIdMiddlewareTests
         await middleware.InvokeAsync(context);
 
         nextCalled.Should().BeTrue();
-        context.Items["PrincipalId"].Should().Be("test_principal");
+        context.Items["SubjectId"].Should().Be("test_subject");
     }
 
     [TestMethod]
-    public void GetPrincipalId_WithStoredValue_ReturnsIt()
+    public void GetSubjectId_WithStoredValue_ReturnsIt()
     {
         var context = new DefaultHttpContext();
-        context.Items["PrincipalId"] = "my_principal";
+        context.Items["SubjectId"] = "my_subject";
 
-        context.GetPrincipalId().Should().Be("my_principal");
+        context.GetSubjectId().Should().Be("my_subject");
     }
 
     [TestMethod]
-    public void GetPrincipalId_WithoutStoredValue_Throws()
+    public void GetSubjectId_WithoutStoredValue_Throws()
     {
         var context = new DefaultHttpContext();
 
-        var act = () => context.GetPrincipalId();
+        var act = () => context.GetSubjectId();
         act.Should().Throw<InvalidOperationException>();
     }
 }

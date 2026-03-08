@@ -25,10 +25,10 @@ public static class LocationEndpoints
             string? search = null,
             string? cursor = null) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
             var spec = new GetLocationsSpecification(pageSize, search, chainId) { Cursor = cursor };
             var result = await executor.ExecuteAsync(
-                context.Locations, spec, principalId,
+                context.Locations, spec, subjectId,
                 l => new LocationDto
                 {
                     Id = l.Id,
@@ -50,12 +50,12 @@ public static class LocationEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             return await authService.AuthorizedDetailAsync(
                 context.Locations.Include(l => l.Chain).Include(l => l.InventoryItems),
                 l => l.Id == id,
-                principalId, RetailPermissionKeys.LocationView,
+                subjectId, RetailPermissionKeys.LocationView,
                 location => new LocationDetailDto
                 {
                     Id = location.Id,
@@ -81,12 +81,12 @@ public static class LocationEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == chainId);
             if (chain is null) return Results.NotFound();
 
-            var access = await authService.CheckAccessAsync(principalId, RetailPermissionKeys.LocationEdit, chain.ResourceId);
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.LocationEdit, chain.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
             var resourceId = context.CreateResource(chain.ResourceId, request.Name, RetailResourceTypeIds.Location);

@@ -8,7 +8,7 @@ namespace Sqlzibar.Example.IntegrationTests;
 
 /// <summary>
 /// Tests that validate TVF-based list filtering via the specification executor.
-/// Each test arranges a specific principal (with known grants at specific hierarchy levels),
+/// Each test arranges a specific subject (with known grants at specific hierarchy levels),
 /// calls a list endpoint, and asserts that only authorized data is returned.
 ///
 /// "Has access" tests use HaveCountGreaterThanOrEqualTo + Contain to verify expected seeded items
@@ -36,14 +36,14 @@ public class QueryFilteringTests
 {
     private HttpClient _client = null!;
 
-    // Principals
-    private const string CompanyAdmin = "prin_company_admin";
-    private const string ChainMgrWalmart = "prin_chain_mgr_walmart";
-    private const string ChainMgrTarget = "prin_chain_mgr_target";
-    private const string StoreMgr001 = "prin_store_mgr_001";
-    private const string StoreMgr002 = "prin_store_mgr_002";
-    private const string StoreClerk001 = "prin_store_clerk_001";
-    private const string NoGrants = "prin_no_grants";
+    // Subjects
+    private const string CompanyAdmin = "subj_company_admin";
+    private const string ChainMgrWalmart = "subj_chain_mgr_walmart";
+    private const string ChainMgrTarget = "subj_chain_mgr_target";
+    private const string StoreMgr001 = "subj_store_mgr_001";
+    private const string StoreMgr002 = "subj_store_mgr_002";
+    private const string StoreClerk001 = "subj_store_clerk_001";
+    private const string NoGrants = "subj_no_grants";
 
     [TestInitialize]
     public void TestInit()
@@ -1190,7 +1190,7 @@ public class QueryFilteringTests
     // ====================================================================
 
     private async Task<PaginatedResult<ChainItem>> GetChainsAsync(
-        string principalId, string? search = null, int? pageSize = null, string? cursor = null,
+        string subjectId, string? search = null, int? pageSize = null, string? cursor = null,
         string? sortBy = null, string? sortDir = null)
     {
         var url = "/api/chains?";
@@ -1202,10 +1202,10 @@ public class QueryFilteringTests
         url = url.TrimEnd('&', '?');
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<ChainItem>>();
         result.Should().NotBeNull();
@@ -1213,7 +1213,7 @@ public class QueryFilteringTests
     }
 
     private async Task<PaginatedResult<LocationItem>> GetLocationsAsync(
-        string principalId, string chainId, string? search = null, int? pageSize = null, string? cursor = null)
+        string subjectId, string chainId, string? search = null, int? pageSize = null, string? cursor = null)
     {
         var url = $"/api/chains/{chainId}/locations?";
         if (pageSize.HasValue) url += $"pageSize={pageSize}&"; else url += "pageSize=10&";
@@ -1222,10 +1222,10 @@ public class QueryFilteringTests
         url = url.TrimEnd('&', '?');
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<LocationItem>>();
         result.Should().NotBeNull();
@@ -1233,7 +1233,7 @@ public class QueryFilteringTests
     }
 
     private async Task<PaginatedResult<InventoryItemResult>> GetInventoryAsync(
-        string principalId, string locationId, string? search = null, int? pageSize = null,
+        string subjectId, string locationId, string? search = null, int? pageSize = null,
         string? cursor = null, string? sortBy = null, string? sortDir = null)
     {
         var url = $"/api/locations/{locationId}/inventory?";
@@ -1245,10 +1245,10 @@ public class QueryFilteringTests
         url = url.TrimEnd('&', '?');
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<InventoryItemResult>>();
         result.Should().NotBeNull();

@@ -37,7 +37,7 @@ var spec = PagedSpec.For<Order>(o => o.Id)
     .Configure(q => q.Include(o => o.Customer))          // EF Core includes
     .Build(pageSize, cursor, sortBy, sortDir);           // sortDir accepts "asc"/"desc" string
 
-var result = await executor.ExecuteAsync(context.Orders, spec, principalId, o => new OrderDto { ... });
+var result = await executor.ExecuteAsync(context.Orders, spec, subjectId, o => new OrderDto { ... });
 return Results.Ok(result);
 ```
 
@@ -91,7 +91,7 @@ The auth filter is a plain `Expression<Func<T, bool>>` — compose it with any L
 return await authService.AuthorizedDetailAsync(
     context.Orders.Include(o => o.Customer),
     o => o.Id == id,
-    principalId, "ORDER_VIEW",
+    subjectId, "ORDER_VIEW",
     o => new OrderDto { Id = o.Id, Name = o.Name });
 ```
 
@@ -101,7 +101,7 @@ Returns 404 if not found, 403 if denied, 200 with mapped DTO.
 
 ```csharp
 // Check permission at the parent scope
-var access = await authService.CheckAccessAsync(principalId, "ORDER_EDIT", parentResourceId);
+var access = await authService.CheckAccessAsync(subjectId, "ORDER_EDIT", parentResourceId);
 if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
 // Create the authorization resource (one line, not yet saved)
@@ -115,7 +115,7 @@ await context.SaveChangesAsync();
 ## 6. Capability Check (Root-Level)
 
 ```csharp
-bool isAdmin = await authService.HasCapabilityAsync(principalId, "ADMIN_ACCESS");
+bool isAdmin = await authService.HasCapabilityAsync(subjectId, "ADMIN_ACCESS");
 ```
 
 ## Key Rules

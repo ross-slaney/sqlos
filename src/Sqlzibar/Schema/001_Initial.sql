@@ -1,32 +1,32 @@
 -- Sqlzibar Schema v1: Initial table creation
 -- All statements are idempotent (IF NOT EXISTS) for safe execution on existing databases.
 
--- 1. PrincipalTypes
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{PrincipalTypes}' AND schema_id = SCHEMA_ID('{Schema}'))
+-- 1. SubjectTypes
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{SubjectTypes}' AND schema_id = SCHEMA_ID('{Schema}'))
 BEGIN
-    CREATE TABLE [{Schema}].[{PrincipalTypes}] (
+    CREATE TABLE [{Schema}].[{SubjectTypes}] (
         [Id]          NVARCHAR(450)  NOT NULL,
         [Name]        NVARCHAR(MAX)  NOT NULL,
         [Description] NVARCHAR(MAX)  NULL,
-        CONSTRAINT [PK_{PrincipalTypes}] PRIMARY KEY ([Id])
+        CONSTRAINT [PK_{SubjectTypes}] PRIMARY KEY ([Id])
     );
 END
 GO
 
--- 2. Principals
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{Principals}' AND schema_id = SCHEMA_ID('{Schema}'))
+-- 2. Subjects
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{Subjects}' AND schema_id = SCHEMA_ID('{Schema}'))
 BEGIN
-    CREATE TABLE [{Schema}].[{Principals}] (
-        [Id]              NVARCHAR(450)  NOT NULL,
-        [PrincipalTypeId] NVARCHAR(450)  NOT NULL,
-        [OrganizationId]  NVARCHAR(450)  NULL,
-        [ExternalRef]     NVARCHAR(450)  NULL,
-        [DisplayName]     NVARCHAR(MAX)  NOT NULL,
-        [CreatedAt]       DATETIME2      NOT NULL,
-        [UpdatedAt]       DATETIME2      NOT NULL,
-        CONSTRAINT [PK_{Principals}] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_{Principals}_{PrincipalTypes}_PrincipalTypeId] FOREIGN KEY ([PrincipalTypeId])
-            REFERENCES [{Schema}].[{PrincipalTypes}] ([Id]) ON DELETE NO ACTION
+    CREATE TABLE [{Schema}].[{Subjects}] (
+        [Id]             NVARCHAR(450)  NOT NULL,
+        [SubjectTypeId]  NVARCHAR(450)  NOT NULL,
+        [OrganizationId] NVARCHAR(450)  NULL,
+        [ExternalRef]    NVARCHAR(450)  NULL,
+        [DisplayName]    NVARCHAR(MAX)  NOT NULL,
+        [CreatedAt]      DATETIME2      NOT NULL,
+        [UpdatedAt]      DATETIME2      NOT NULL,
+        CONSTRAINT [PK_{Subjects}] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_{Subjects}_{SubjectTypes}_SubjectTypeId] FOREIGN KEY ([SubjectTypeId])
+            REFERENCES [{Schema}].[{SubjectTypes}] ([Id]) ON DELETE NO ACTION
     );
 END
 GO
@@ -114,7 +114,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{Grants}' AND schema_id = 
 BEGIN
     CREATE TABLE [{Schema}].[{Grants}] (
         [Id]            NVARCHAR(450)  NOT NULL,
-        [PrincipalId]   NVARCHAR(450)  NOT NULL,
+        [SubjectId]     NVARCHAR(450)  NOT NULL,
         [ResourceId]    NVARCHAR(450)  NOT NULL,
         [RoleId]        NVARCHAR(450)  NOT NULL,
         [EffectiveFrom] DATETIME2      NULL,
@@ -122,8 +122,8 @@ BEGIN
         [CreatedAt]     DATETIME2      NOT NULL,
         [UpdatedAt]     DATETIME2      NOT NULL,
         CONSTRAINT [PK_{Grants}] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_{Grants}_{Principals}_PrincipalId] FOREIGN KEY ([PrincipalId])
-            REFERENCES [{Schema}].[{Principals}] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [FK_{Grants}_{Subjects}_SubjectId] FOREIGN KEY ([SubjectId])
+            REFERENCES [{Schema}].[{Subjects}] ([Id]) ON DELETE NO ACTION,
         CONSTRAINT [FK_{Grants}_{Resources}_ResourceId] FOREIGN KEY ([ResourceId])
             REFERENCES [{Schema}].[{Resources}] ([Id]) ON DELETE NO ACTION,
         CONSTRAINT [FK_{Grants}_{Roles}_RoleId] FOREIGN KEY ([RoleId])
@@ -139,14 +139,14 @@ BEGIN
         [Id]          NVARCHAR(450)  NOT NULL,
         [Name]        NVARCHAR(MAX)  NOT NULL,
         [Description] NVARCHAR(MAX)  NULL,
-        [GroupType]    NVARCHAR(MAX)  NULL,
-        [PrincipalId] NVARCHAR(450)  NOT NULL,
+        [GroupType]   NVARCHAR(MAX)  NULL,
+        [SubjectId]   NVARCHAR(450)  NOT NULL,
         [CreatedAt]   DATETIME2      NOT NULL,
         [UpdatedAt]   DATETIME2      NOT NULL,
         CONSTRAINT [PK_{UserGroups}] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_{UserGroups}_{Principals}_PrincipalId] FOREIGN KEY ([PrincipalId])
-            REFERENCES [{Schema}].[{Principals}] ([Id]) ON DELETE NO ACTION,
-        CONSTRAINT [UQ_{UserGroups}_PrincipalId] UNIQUE ([PrincipalId])
+        CONSTRAINT [FK_{UserGroups}_{Subjects}_SubjectId] FOREIGN KEY ([SubjectId])
+            REFERENCES [{Schema}].[{Subjects}] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [UQ_{UserGroups}_SubjectId] UNIQUE ([SubjectId])
     );
 END
 GO
@@ -155,12 +155,12 @@ GO
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{UserGroupMemberships}' AND schema_id = SCHEMA_ID('{Schema}'))
 BEGIN
     CREATE TABLE [{Schema}].[{UserGroupMemberships}] (
-        [PrincipalId]  NVARCHAR(450)  NOT NULL,
-        [UserGroupId]  NVARCHAR(450)  NOT NULL,
-        [CreatedAt]    DATETIME2      NOT NULL,
-        CONSTRAINT [PK_{UserGroupMemberships}] PRIMARY KEY ([PrincipalId], [UserGroupId]),
-        CONSTRAINT [FK_{UserGroupMemberships}_{Principals}_PrincipalId] FOREIGN KEY ([PrincipalId])
-            REFERENCES [{Schema}].[{Principals}] ([Id]) ON DELETE NO ACTION,
+        [SubjectId]   NVARCHAR(450)  NOT NULL,
+        [UserGroupId] NVARCHAR(450)  NOT NULL,
+        [CreatedAt]   DATETIME2      NOT NULL,
+        CONSTRAINT [PK_{UserGroupMemberships}] PRIMARY KEY ([SubjectId], [UserGroupId]),
+        CONSTRAINT [FK_{UserGroupMemberships}_{Subjects}_SubjectId] FOREIGN KEY ([SubjectId])
+            REFERENCES [{Schema}].[{Subjects}] ([Id]) ON DELETE NO ACTION,
         CONSTRAINT [FK_{UserGroupMemberships}_{UserGroups}_UserGroupId] FOREIGN KEY ([UserGroupId])
             REFERENCES [{Schema}].[{UserGroups}] ([Id]) ON DELETE NO ACTION
     );
@@ -172,7 +172,7 @@ IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{ServiceAccounts}' AND sch
 BEGIN
     CREATE TABLE [{Schema}].[{ServiceAccounts}] (
         [Id]               NVARCHAR(450)  NOT NULL,
-        [PrincipalId]      NVARCHAR(450)  NOT NULL,
+        [SubjectId]        NVARCHAR(450)  NOT NULL,
         [ClientId]         NVARCHAR(MAX)  NOT NULL,
         [ClientSecretHash] NVARCHAR(MAX)  NOT NULL,
         [Description]      NVARCHAR(MAX)  NULL,
@@ -181,9 +181,9 @@ BEGIN
         [CreatedAt]        DATETIME2      NOT NULL,
         [UpdatedAt]        DATETIME2      NOT NULL,
         CONSTRAINT [PK_{ServiceAccounts}] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_{ServiceAccounts}_{Principals}_PrincipalId] FOREIGN KEY ([PrincipalId])
-            REFERENCES [{Schema}].[{Principals}] ([Id]) ON DELETE NO ACTION,
-        CONSTRAINT [UQ_{ServiceAccounts}_PrincipalId] UNIQUE ([PrincipalId])
+        CONSTRAINT [FK_{ServiceAccounts}_{Subjects}_SubjectId] FOREIGN KEY ([SubjectId])
+            REFERENCES [{Schema}].[{Subjects}] ([Id]) ON DELETE NO ACTION,
+        CONSTRAINT [UQ_{ServiceAccounts}_SubjectId] UNIQUE ([SubjectId])
     );
 END
 GO

@@ -39,7 +39,7 @@ public class SqlzibarFunctionInitializer
         var createFunctionSql = $@"
 CREATE FUNCTION [{schema}].fn_IsResourceAccessible(
     @ResourceId NVARCHAR(128),
-    @PrincipalIds NVARCHAR(MAX),
+    @SubjectIds NVARCHAR(MAX),
     @PermissionId NVARCHAR(128)
 )
 RETURNS TABLE
@@ -61,7 +61,7 @@ RETURN
     FROM ancestors a
     INNER JOIN [{schema}].[{tables.Grants}] g ON a.Id = g.ResourceId
     INNER JOIN [{schema}].[{tables.RolePermissions}] rp ON g.RoleId = rp.RoleId
-    WHERE g.PrincipalId IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PrincipalIds, ','))
+    WHERE g.SubjectId IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@SubjectIds, ','))
       AND rp.PermissionId = @PermissionId
       AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
       AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())

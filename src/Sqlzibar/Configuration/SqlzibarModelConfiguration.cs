@@ -15,21 +15,21 @@ public static class SqlzibarModelConfiguration
         var schema = options.Schema;
         var tables = options.TableNames;
 
-        // PrincipalType
-        modelBuilder.Entity<SqlzibarPrincipalType>(entity =>
+        // SubjectType
+        modelBuilder.Entity<SqlzibarSubjectType>(entity =>
         {
-            entity.ToTable(tables.PrincipalTypes, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.SubjectTypes, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
         });
 
-        // Principal
-        modelBuilder.Entity<SqlzibarPrincipal>(entity =>
+        // Subject
+        modelBuilder.Entity<SqlzibarSubject>(entity =>
         {
-            entity.ToTable(tables.Principals, schema, t => t.ExcludeFromMigrations());
+            entity.ToTable(tables.Subjects, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.PrincipalType)
-                .WithMany(pt => pt.Principals)
-                .HasForeignKey(e => e.PrincipalTypeId)
+            entity.HasOne(e => e.SubjectType)
+                .WithMany(st => st.Subjects)
+                .HasForeignKey(e => e.SubjectTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -38,20 +38,20 @@ public static class SqlzibarModelConfiguration
         {
             entity.ToTable(tables.UserGroups, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.Principal)
-                .WithOne(p => p.UserGroup)
-                .HasForeignKey<SqlzibarUserGroup>(e => e.PrincipalId)
+            entity.HasOne(e => e.Subject)
+                .WithOne(s => s.UserGroup)
+                .HasForeignKey<SqlzibarUserGroup>(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // UserGroupMembership (PrincipalId, not UserId)
+        // UserGroupMembership (SubjectId, not UserId)
         modelBuilder.Entity<SqlzibarUserGroupMembership>(entity =>
         {
             entity.ToTable(tables.UserGroupMemberships, schema, t => t.ExcludeFromMigrations());
-            entity.HasKey(e => new { e.PrincipalId, e.UserGroupId });
-            entity.HasOne(e => e.Principal)
+            entity.HasKey(e => new { e.SubjectId, e.UserGroupId });
+            entity.HasOne(e => e.Subject)
                 .WithMany()
-                .HasForeignKey(e => e.PrincipalId)
+                .HasForeignKey(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.UserGroup)
                 .WithMany(ug => ug.Memberships)
@@ -86,9 +86,9 @@ public static class SqlzibarModelConfiguration
         {
             entity.ToTable(tables.Grants, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.Principal)
-                .WithMany(p => p.Grants)
-                .HasForeignKey(e => e.PrincipalId)
+            entity.HasOne(e => e.Subject)
+                .WithMany(s => s.Grants)
+                .HasForeignKey(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Resource)
                 .WithMany(r => r.Grants)
@@ -138,9 +138,9 @@ public static class SqlzibarModelConfiguration
         {
             entity.ToTable(tables.Users, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.Principal)
-                .WithOne(p => p.User)
-                .HasForeignKey<SqlzibarUser>(e => e.PrincipalId)
+            entity.HasOne(e => e.Subject)
+                .WithOne(s => s.User)
+                .HasForeignKey<SqlzibarUser>(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -149,9 +149,9 @@ public static class SqlzibarModelConfiguration
         {
             entity.ToTable(tables.Agents, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.Principal)
-                .WithOne(p => p.Agent)
-                .HasForeignKey<SqlzibarAgent>(e => e.PrincipalId)
+            entity.HasOne(e => e.Subject)
+                .WithOne(s => s.Agent)
+                .HasForeignKey<SqlzibarAgent>(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -160,9 +160,9 @@ public static class SqlzibarModelConfiguration
         {
             entity.ToTable(tables.ServiceAccounts, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
-            entity.HasOne(e => e.Principal)
-                .WithOne(p => p.ServiceAccount)
-                .HasForeignKey<SqlzibarServiceAccount>(e => e.PrincipalId)
+            entity.HasOne(e => e.Subject)
+                .WithOne(s => s.ServiceAccount)
+                .HasForeignKey<SqlzibarServiceAccount>(e => e.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -10,8 +10,8 @@ namespace Sqlzibar.Example.IntegrationTests;
 public class LocationApiTests
 {
     private HttpClient _client = null!;
-    private const string AdminPrincipalId = "prin_company_admin";
-    private const string ChainManagerPrincipalId = "prin_chain_mgr_walmart";
+    private const string AdminSubjectId = "subj_company_admin";
+    private const string ChainManagerSubjectId = "subj_chain_mgr_walmart";
 
     [TestInitialize]
     public void TestInit()
@@ -23,7 +23,7 @@ public class LocationApiTests
     public async Task GetLocations_ReturnsPaginatedResult()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains/chain_walmart/locations");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -37,7 +37,7 @@ public class LocationApiTests
     public async Task GetLocation_ValidId_ReturnsDetail()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/locations/loc_001");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -51,7 +51,7 @@ public class LocationApiTests
     public async Task GetLocation_InvalidId_Returns404()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/locations/nonexistent");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
 
@@ -62,7 +62,7 @@ public class LocationApiTests
     public async Task CreateLocation_WithPermission_Returns201()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains/chain_walmart/locations");
-        request.Headers.Add("X-Principal-Id", ChainManagerPrincipalId);
+        request.Headers.Add("X-Subject-Id", ChainManagerSubjectId);
         request.Content = JsonContent.Create(new
         {
             Name = "New Walmart Store",
@@ -80,7 +80,7 @@ public class LocationApiTests
     public async Task CreateLocation_WithoutPermission_Returns403()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains/chain_walmart/locations");
-        request.Headers.Add("X-Principal-Id", "prin_store_clerk_001");
+        request.Headers.Add("X-Subject-Id", "subj_store_clerk_001");
         request.Content = JsonContent.Create(new
         {
             Name = "Unauthorized Store",

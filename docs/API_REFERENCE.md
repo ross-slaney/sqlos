@@ -3,27 +3,27 @@
 ## ISqlzibarAuthService
 
 ```csharp
-// Check if principal has permission on a resource (hierarchy walk)
+// Check if subject has permission on a resource (hierarchy walk)
 Task<SqlzibarAccessCheckResult> CheckAccessAsync(
-    string principalId, string permissionKey, string resourceId);
+    string subjectId, string permissionKey, string resourceId);
 
-// Check if principal has permission at root level
-Task<bool> HasCapabilityAsync(string principalId, string permissionKey);
+// Check if subject has permission at root level
+Task<bool> HasCapabilityAsync(string subjectId, string permissionKey);
 
 // Get LINQ filter expression for authorized entities
 Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
-    string principalId, string permissionKey) where T : IHasResourceId;
+    string subjectId, string permissionKey) where T : IHasResourceId;
 
 // Detailed access trace for diagnostics
 Task<SqlzibarResourceAccessTrace> TraceResourceAccessAsync(
-    string principalId, string resourceId, string permissionKey);
+    string subjectId, string resourceId, string permissionKey);
 ```
 
-## ISqlzibarPrincipalService
+## ISqlzibarSubjectService
 
 ```csharp
-Task<SqlzibarPrincipal> CreatePrincipalAsync(
-    string displayName, string principalTypeId,
+Task<SqlzibarSubject> CreateSubjectAsync(
+    string displayName, string subjectTypeId,
     string? organizationId = null, string? externalRef = null,
     CancellationToken cancellationToken = default);
 
@@ -31,10 +31,10 @@ Task<SqlzibarUserGroup> CreateGroupAsync(
     string name, string? description = null, string? groupType = null,
     CancellationToken cancellationToken = default);
 
-Task AddToGroupAsync(string principalId, string userGroupId, CancellationToken ct = default);
-Task RemoveFromGroupAsync(string principalId, string userGroupId, CancellationToken ct = default);
-Task<List<string>> ResolvePrincipalIdsAsync(string principalId, CancellationToken ct = default);
-Task<List<SqlzibarUserGroup>> GetGroupsForPrincipalAsync(string principalId, CancellationToken ct = default);
+Task AddToGroupAsync(string subjectId, string userGroupId, CancellationToken ct = default);
+Task RemoveFromGroupAsync(string subjectId, string userGroupId, CancellationToken ct = default);
+Task<List<string>> ResolveSubjectIdsAsync(string subjectId, CancellationToken ct = default);
+Task<List<SqlzibarUserGroup>> GetGroupsForSubjectAsync(string subjectId, CancellationToken ct = default);
 ```
 
 ## ISpecificationExecutor
@@ -44,7 +44,7 @@ Task<List<SqlzibarUserGroup>> GetGroupsForPrincipalAsync(string principalId, Can
 Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
     DbSet<TEntity> dbSet,
     PagedSpecification<TEntity> specification,
-    string principalId,
+    string subjectId,
     Func<TEntity, TDto> selector,
     CancellationToken cancellationToken = default)
     where TEntity : class, IHasResourceId;
@@ -53,7 +53,7 @@ Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
 Task<long> CountAsync<TEntity>(
     DbSet<TEntity> dbSet,
     PagedSpecification<TEntity> specification,
-    string principalId,
+    string subjectId,
     CancellationToken cancellationToken = default)
     where TEntity : class, IHasResourceId;
 ```
@@ -117,7 +117,7 @@ Task<IResult> AuthorizedDetailAsync<TEntity, TDto>(
     this ISqlzibarAuthService authService,
     IQueryable<TEntity> query,
     Expression<Func<TEntity, bool>> predicate,
-    string principalId,
+    string subjectId,
     string permissionKey,
     Func<TEntity, TDto> selector)
     where TEntity : class, IHasResourceId;

@@ -4,12 +4,12 @@ namespace Sqlzibar.IntegrationTests.Infrastructure;
 
 public static class TestDataSeeder
 {
-    // Test principal IDs
-    public const string SystemAdminPrincipalId = "prin_test_sysadmin";
-    public const string AgencyAdminPrincipalId = "prin_test_agencyadmin";
-    public const string AgencyMemberPrincipalId = "prin_test_member";
-    public const string GroupMemberPrincipalId = "prin_test_groupmember";
-    public const string UnauthorizedPrincipalId = "prin_test_unauth";
+    // Test subject IDs
+    public const string SystemAdminSubjectId = "subj_test_sysadmin";
+    public const string AgencyAdminSubjectId = "subj_test_agencyadmin";
+    public const string AgencyMemberSubjectId = "subj_test_member";
+    public const string GroupMemberSubjectId = "subj_test_groupmember";
+    public const string UnauthorizedSubjectId = "subj_test_unauth";
 
     // Test resource IDs
     public const string TestAgencyResourceId = "res_test_agency";
@@ -29,18 +29,18 @@ public static class TestDataSeeder
 
     // Test group IDs
     public const string TestGroupId = "grp_test_group";
-    public const string TestGroupPrincipalId = "prin_test_group";
+    public const string TestGroupSubjectId = "subj_test_group";
 
     // Test user (extension table)
-    public const string TestUserPrincipalId = "prin_test_user";
+    public const string TestUserSubjectId = "subj_test_user";
     public const string TestUserId = "usr_test_user";
 
     // Test agent
-    public const string TestAgentPrincipalId = "prin_test_agent";
+    public const string TestAgentSubjectId = "subj_test_agent";
     public const string TestAgentId = "agt_test_agent";
 
     // Test service account
-    public const string TestServiceAccountPrincipalId = "prin_test_sa";
+    public const string TestServiceAccountSubjectId = "subj_test_sa";
     public const string TestServiceAccountId = "sa_test_sa";
 
     public static async Task SeedAsync(TestSqlzibarDbContext context)
@@ -89,24 +89,24 @@ public static class TestDataSeeder
             new SqlzibarResource { Id = OtherAgencyResourceId, ParentId = "root", Name = "Other Agency", ResourceTypeId = "agency" }
         );
 
-        // Principals
-        context.Set<SqlzibarPrincipal>().AddRange(
-            new SqlzibarPrincipal { Id = SystemAdminPrincipalId, PrincipalTypeId = "user", DisplayName = "System Admin" },
-            new SqlzibarPrincipal { Id = AgencyAdminPrincipalId, PrincipalTypeId = "user", DisplayName = "Agency Admin" },
-            new SqlzibarPrincipal { Id = AgencyMemberPrincipalId, PrincipalTypeId = "user", DisplayName = "Agency Member" },
-            new SqlzibarPrincipal { Id = GroupMemberPrincipalId, PrincipalTypeId = "user", DisplayName = "Group Member" },
-            new SqlzibarPrincipal { Id = UnauthorizedPrincipalId, PrincipalTypeId = "user", DisplayName = "Unauthorized User" },
-            new SqlzibarPrincipal { Id = TestGroupPrincipalId, PrincipalTypeId = "group", DisplayName = "Test Group" },
-            new SqlzibarPrincipal { Id = TestUserPrincipalId, PrincipalTypeId = "user", DisplayName = "Test User" },
-            new SqlzibarPrincipal { Id = TestAgentPrincipalId, PrincipalTypeId = "agent", DisplayName = "Test Agent" },
-            new SqlzibarPrincipal { Id = TestServiceAccountPrincipalId, PrincipalTypeId = "service_account", DisplayName = "Test Service Account" }
+        // Subjects
+        context.Set<SqlzibarSubject>().AddRange(
+            new SqlzibarSubject { Id = SystemAdminSubjectId, SubjectTypeId = "user", DisplayName = "System Admin" },
+            new SqlzibarSubject { Id = AgencyAdminSubjectId, SubjectTypeId = "user", DisplayName = "Agency Admin" },
+            new SqlzibarSubject { Id = AgencyMemberSubjectId, SubjectTypeId = "user", DisplayName = "Agency Member" },
+            new SqlzibarSubject { Id = GroupMemberSubjectId, SubjectTypeId = "user", DisplayName = "Group Member" },
+            new SqlzibarSubject { Id = UnauthorizedSubjectId, SubjectTypeId = "user", DisplayName = "Unauthorized User" },
+            new SqlzibarSubject { Id = TestGroupSubjectId, SubjectTypeId = "group", DisplayName = "Test Group" },
+            new SqlzibarSubject { Id = TestUserSubjectId, SubjectTypeId = "user", DisplayName = "Test User" },
+            new SqlzibarSubject { Id = TestAgentSubjectId, SubjectTypeId = "agent", DisplayName = "Test Agent" },
+            new SqlzibarSubject { Id = TestServiceAccountSubjectId, SubjectTypeId = "service_account", DisplayName = "Test Service Account" }
         );
 
         // User extension
         context.Set<SqlzibarUser>().Add(new SqlzibarUser
         {
             Id = TestUserId,
-            PrincipalId = TestUserPrincipalId,
+            SubjectId = TestUserSubjectId,
             Email = "testuser@example.com",
             IsActive = true
         });
@@ -115,7 +115,7 @@ public static class TestDataSeeder
         context.Set<SqlzibarAgent>().Add(new SqlzibarAgent
         {
             Id = TestAgentId,
-            PrincipalId = TestAgentPrincipalId,
+            SubjectId = TestAgentSubjectId,
             AgentType = "background_job",
             Description = "Test background job agent"
         });
@@ -124,34 +124,34 @@ public static class TestDataSeeder
         context.Set<SqlzibarServiceAccount>().Add(new SqlzibarServiceAccount
         {
             Id = TestServiceAccountId,
-            PrincipalId = TestServiceAccountPrincipalId,
+            SubjectId = TestServiceAccountSubjectId,
             ClientId = "test_client_id",
             ClientSecretHash = "test_hash"
         });
 
         // User group
         context.Set<SqlzibarUserGroup>().Add(
-            new SqlzibarUserGroup { Id = TestGroupId, Name = "Test Group", PrincipalId = TestGroupPrincipalId }
+            new SqlzibarUserGroup { Id = TestGroupId, Name = "Test Group", SubjectId = TestGroupSubjectId }
         );
 
         await context.SaveChangesAsync();
 
         // Group membership (GroupMember belongs to TestGroup, Agent also in TestGroup for inheritance tests)
         context.Set<SqlzibarUserGroupMembership>().AddRange(
-            new SqlzibarUserGroupMembership { PrincipalId = GroupMemberPrincipalId, UserGroupId = TestGroupId },
-            new SqlzibarUserGroupMembership { PrincipalId = TestAgentPrincipalId, UserGroupId = TestGroupId }
+            new SqlzibarUserGroupMembership { SubjectId = GroupMemberSubjectId, UserGroupId = TestGroupId },
+            new SqlzibarUserGroupMembership { SubjectId = TestAgentSubjectId, UserGroupId = TestGroupId }
         );
 
         // Grants
         context.Set<SqlzibarGrant>().AddRange(
             // SystemAdmin at root
-            new SqlzibarGrant { Id = "grant_test_sysadmin", PrincipalId = SystemAdminPrincipalId, ResourceId = "root", RoleId = SystemAdminRoleId },
+            new SqlzibarGrant { Id = "grant_test_sysadmin", SubjectId = SystemAdminSubjectId, ResourceId = "root", RoleId = SystemAdminRoleId },
             // AgencyAdmin at test agency
-            new SqlzibarGrant { Id = "grant_test_agencyadmin", PrincipalId = AgencyAdminPrincipalId, ResourceId = TestAgencyResourceId, RoleId = AgencyAdminRoleId },
+            new SqlzibarGrant { Id = "grant_test_agencyadmin", SubjectId = AgencyAdminSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyAdminRoleId },
             // AgencyMember at test agency
-            new SqlzibarGrant { Id = "grant_test_member", PrincipalId = AgencyMemberPrincipalId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId },
-            // Group at test agency (via group principal)
-            new SqlzibarGrant { Id = "grant_test_group", PrincipalId = TestGroupPrincipalId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId }
+            new SqlzibarGrant { Id = "grant_test_member", SubjectId = AgencyMemberSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId },
+            // Group at test agency (via group subject)
+            new SqlzibarGrant { Id = "grant_test_group", SubjectId = TestGroupSubjectId, ResourceId = TestAgencyResourceId, RoleId = AgencyMemberRoleId }
         );
 
         await context.SaveChangesAsync();

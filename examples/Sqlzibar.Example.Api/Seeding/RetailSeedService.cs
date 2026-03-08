@@ -11,26 +11,26 @@ public class RetailSeedService
 {
     private readonly RetailDbContext _context;
     private readonly SqlzibarSeedService _seedService;
-    private readonly ISqlzibarPrincipalService _principalService;
+    private readonly ISqlzibarSubjectService _subjectService;
 
-    // Well-known principal IDs for the example
-    public const string CompanyAdminPrincipalId = "prin_company_admin";
-    public const string ChainManagerWalmartPrincipalId = "prin_chain_mgr_walmart";
-    public const string ChainManagerTargetPrincipalId = "prin_chain_mgr_target";
-    public const string StoreManager001PrincipalId = "prin_store_mgr_001";
-    public const string StoreManager002PrincipalId = "prin_store_mgr_002";
-    public const string StoreClerk001PrincipalId = "prin_store_clerk_001";
-    public const string NoGrantsPrincipalId = "prin_no_grants";
+    // Well-known subject IDs for the example
+    public const string CompanyAdminSubjectId = "subj_company_admin";
+    public const string ChainManagerWalmartSubjectId = "subj_chain_mgr_walmart";
+    public const string ChainManagerTargetSubjectId = "subj_chain_mgr_target";
+    public const string StoreManager001SubjectId = "subj_store_mgr_001";
+    public const string StoreManager002SubjectId = "subj_store_mgr_002";
+    public const string StoreClerk001SubjectId = "subj_store_clerk_001";
+    public const string NoGrantsSubjectId = "subj_no_grants";
 
     // User group: "Walmart Regional Managers" — members inherit ChainManager on Walmart
-    public const string WalmartRegionalGroupPrincipalId = "prin_walmart_regional_group";
+    public const string WalmartRegionalGroupSubjectId = "subj_walmart_regional_group";
     public const string WalmartRegionalGroupId = "grp_walmart_regional";
-    public const string RegionalUserAlicePrincipalId = "prin_regional_alice";
-    public const string RegionalUserBobPrincipalId = "prin_regional_bob";
+    public const string RegionalUserAliceSubjectId = "subj_regional_alice";
+    public const string RegionalUserBobSubjectId = "subj_regional_bob";
 
-    // Agent and service account principal IDs (set during seeding via CreateAgentAsync/CreateServiceAccountAsync)
-    public static string? InventorySyncAgentPrincipalId { get; private set; }
-    public static string? ApiIntegrationServiceAccountPrincipalId { get; private set; }
+    // Agent and service account subject IDs (set during seeding via CreateAgentAsync/CreateServiceAccountAsync)
+    public static string? InventorySyncAgentSubjectId { get; private set; }
+    public static string? ApiIntegrationServiceAccountSubjectId { get; private set; }
 
     // Well-known resource IDs
     public const string WalmartChainResourceId = "res_chain_walmart";
@@ -45,11 +45,11 @@ public class RetailSeedService
     public RetailSeedService(
         RetailDbContext context,
         SqlzibarSeedService seedService,
-        ISqlzibarPrincipalService principalService)
+        ISqlzibarSubjectService subjectService)
     {
         _context = context;
         _seedService = seedService;
-        _principalService = principalService;
+        _subjectService = subjectService;
     }
 
     public async Task SeedAsync(CancellationToken ct = default)
@@ -92,63 +92,63 @@ public class RetailSeedService
             ],
         }, ct);
 
-        // 2. Create principals (users + group principal)
-        _context.Set<SqlzibarPrincipal>().AddRange(
-            new SqlzibarPrincipal { Id = CompanyAdminPrincipalId, PrincipalTypeId = "user", DisplayName = "Company Admin" },
-            new SqlzibarPrincipal { Id = ChainManagerWalmartPrincipalId, PrincipalTypeId = "user", DisplayName = "Walmart Chain Manager" },
-            new SqlzibarPrincipal { Id = ChainManagerTargetPrincipalId, PrincipalTypeId = "user", DisplayName = "Target Chain Manager" },
-            new SqlzibarPrincipal { Id = StoreManager001PrincipalId, PrincipalTypeId = "user", DisplayName = "Store 001 Manager" },
-            new SqlzibarPrincipal { Id = StoreManager002PrincipalId, PrincipalTypeId = "user", DisplayName = "Store 002 Manager" },
-            new SqlzibarPrincipal { Id = StoreClerk001PrincipalId, PrincipalTypeId = "user", DisplayName = "Store 001 Clerk" },
-            new SqlzibarPrincipal { Id = NoGrantsPrincipalId, PrincipalTypeId = "user", DisplayName = "No Grants User" },
-            // Group principal + group member users
-            new SqlzibarPrincipal { Id = WalmartRegionalGroupPrincipalId, PrincipalTypeId = "group", DisplayName = "Walmart Regional Managers" },
-            new SqlzibarPrincipal { Id = RegionalUserAlicePrincipalId, PrincipalTypeId = "user", DisplayName = "Alice (Regional)" },
-            new SqlzibarPrincipal { Id = RegionalUserBobPrincipalId, PrincipalTypeId = "user", DisplayName = "Bob (Regional)" }
+        // 2. Create subjects (users + group subject)
+        _context.Set<SqlzibarSubject>().AddRange(
+            new SqlzibarSubject { Id = CompanyAdminSubjectId, SubjectTypeId = "user", DisplayName = "Company Admin" },
+            new SqlzibarSubject { Id = ChainManagerWalmartSubjectId, SubjectTypeId = "user", DisplayName = "Walmart Chain Manager" },
+            new SqlzibarSubject { Id = ChainManagerTargetSubjectId, SubjectTypeId = "user", DisplayName = "Target Chain Manager" },
+            new SqlzibarSubject { Id = StoreManager001SubjectId, SubjectTypeId = "user", DisplayName = "Store 001 Manager" },
+            new SqlzibarSubject { Id = StoreManager002SubjectId, SubjectTypeId = "user", DisplayName = "Store 002 Manager" },
+            new SqlzibarSubject { Id = StoreClerk001SubjectId, SubjectTypeId = "user", DisplayName = "Store 001 Clerk" },
+            new SqlzibarSubject { Id = NoGrantsSubjectId, SubjectTypeId = "user", DisplayName = "No Grants User" },
+            // Group subject + group member users
+            new SqlzibarSubject { Id = WalmartRegionalGroupSubjectId, SubjectTypeId = "group", DisplayName = "Walmart Regional Managers" },
+            new SqlzibarSubject { Id = RegionalUserAliceSubjectId, SubjectTypeId = "user", DisplayName = "Alice (Regional)" },
+            new SqlzibarSubject { Id = RegionalUserBobSubjectId, SubjectTypeId = "user", DisplayName = "Bob (Regional)" }
         );
         await _context.SaveChangesAsync(ct);
 
         // 2b. Create user group and memberships
         _context.Set<SqlzibarUserGroup>().Add(
-            new SqlzibarUserGroup { Id = WalmartRegionalGroupId, Name = "Walmart Regional Managers", PrincipalId = WalmartRegionalGroupPrincipalId }
+            new SqlzibarUserGroup { Id = WalmartRegionalGroupId, Name = "Walmart Regional Managers", SubjectId = WalmartRegionalGroupSubjectId }
         );
         await _context.SaveChangesAsync(ct);
 
         _context.Set<SqlzibarUserGroupMembership>().AddRange(
-            new SqlzibarUserGroupMembership { PrincipalId = RegionalUserAlicePrincipalId, UserGroupId = WalmartRegionalGroupId },
-            new SqlzibarUserGroupMembership { PrincipalId = RegionalUserBobPrincipalId, UserGroupId = WalmartRegionalGroupId }
+            new SqlzibarUserGroupMembership { SubjectId = RegionalUserAliceSubjectId, UserGroupId = WalmartRegionalGroupId },
+            new SqlzibarUserGroupMembership { SubjectId = RegionalUserBobSubjectId, UserGroupId = WalmartRegionalGroupId }
         );
         await _context.SaveChangesAsync(ct);
 
-        // 2c. Add SqlzibarUser records for user principals (for Users dashboard)
+        // 2c. Add SqlzibarUser records for user subjects (for Users dashboard)
         _context.Set<SqlzibarUser>().AddRange(
-            new SqlzibarUser { Id = "usr_company_admin", PrincipalId = CompanyAdminPrincipalId, Email = "admin@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_chain_mgr_walmart", PrincipalId = ChainManagerWalmartPrincipalId, Email = "walmart.manager@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_chain_mgr_target", PrincipalId = ChainManagerTargetPrincipalId, Email = "target.manager@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_store_mgr_001", PrincipalId = StoreManager001PrincipalId, Email = "store001.mgr@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_store_mgr_002", PrincipalId = StoreManager002PrincipalId, Email = "store002.mgr@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_store_clerk_001", PrincipalId = StoreClerk001PrincipalId, Email = "store001.clerk@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_no_grants", PrincipalId = NoGrantsPrincipalId, IsActive = true },
-            new SqlzibarUser { Id = "usr_regional_alice", PrincipalId = RegionalUserAlicePrincipalId, Email = "alice@retail.example.com", IsActive = true },
-            new SqlzibarUser { Id = "usr_regional_bob", PrincipalId = RegionalUserBobPrincipalId, Email = "bob@retail.example.com", IsActive = true }
+            new SqlzibarUser { Id = "usr_company_admin", SubjectId = CompanyAdminSubjectId, Email = "admin@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_chain_mgr_walmart", SubjectId = ChainManagerWalmartSubjectId, Email = "walmart.manager@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_chain_mgr_target", SubjectId = ChainManagerTargetSubjectId, Email = "target.manager@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_store_mgr_001", SubjectId = StoreManager001SubjectId, Email = "store001.mgr@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_store_mgr_002", SubjectId = StoreManager002SubjectId, Email = "store002.mgr@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_store_clerk_001", SubjectId = StoreClerk001SubjectId, Email = "store001.clerk@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_no_grants", SubjectId = NoGrantsSubjectId, IsActive = true },
+            new SqlzibarUser { Id = "usr_regional_alice", SubjectId = RegionalUserAliceSubjectId, Email = "alice@retail.example.com", IsActive = true },
+            new SqlzibarUser { Id = "usr_regional_bob", SubjectId = RegionalUserBobSubjectId, Email = "bob@retail.example.com", IsActive = true }
         );
         await _context.SaveChangesAsync(ct);
 
-        // 2d. Create agent and service account via service (demonstrates all 4 principal types)
-        var inventorySyncAgent = await _principalService.CreateAgentAsync(
+        // 2d. Create agent and service account via service (demonstrates all 4 subject types)
+        var inventorySyncAgent = await _subjectService.CreateAgentAsync(
             "Inventory Sync Agent",
             agentType: "background_job",
             description: "Nightly inventory synchronization");
-        InventorySyncAgentPrincipalId = inventorySyncAgent.PrincipalId;
+        InventorySyncAgentSubjectId = inventorySyncAgent.SubjectId;
 
-        var apiServiceAccount = await _principalService.CreateServiceAccountAsync(
+        var apiServiceAccount = await _subjectService.CreateServiceAccountAsync(
             "API Integration",
             clientId: "retail_api_client",
             clientSecretHash: "hashed_secret_placeholder",
             description: "External API integration service");
-        ApiIntegrationServiceAccountPrincipalId = apiServiceAccount.PrincipalId;
+        ApiIntegrationServiceAccountSubjectId = apiServiceAccount.SubjectId;
 
-        await _principalService.AddToGroupAsync(inventorySyncAgent.PrincipalId, WalmartRegionalGroupId);
+        await _subjectService.AddToGroupAsync(inventorySyncAgent.SubjectId, WalmartRegionalGroupId);
 
         await _context.SaveChangesAsync(ct);
 
@@ -281,19 +281,19 @@ public class RetailSeedService
         var storeClerkRole = await _context.Set<SqlzibarRole>().FirstAsync(r => r.Key == RetailRoleKeys.StoreClerk, ct);
 
         _context.Set<SqlzibarGrant>().AddRange(
-            new SqlzibarGrant { Id = "grant_company_admin", PrincipalId = CompanyAdminPrincipalId, ResourceId = "retail_root", RoleId = companyAdminRole.Id },
-            new SqlzibarGrant { Id = "grant_chain_mgr_walmart", PrincipalId = ChainManagerWalmartPrincipalId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
-            new SqlzibarGrant { Id = "grant_chain_mgr_target", PrincipalId = ChainManagerTargetPrincipalId, ResourceId = TargetChainResourceId, RoleId = chainManagerRole.Id },
-            new SqlzibarGrant { Id = "grant_store_mgr_001", PrincipalId = StoreManager001PrincipalId, ResourceId = Store001ResourceId, RoleId = storeManagerRole.Id },
-            new SqlzibarGrant { Id = "grant_store_mgr_002", PrincipalId = StoreManager002PrincipalId, ResourceId = Store002ResourceId, RoleId = storeManagerRole.Id },
-            new SqlzibarGrant { Id = "grant_store_clerk_001", PrincipalId = StoreClerk001PrincipalId, ResourceId = Store001ResourceId, RoleId = storeClerkRole.Id },
+            new SqlzibarGrant { Id = "grant_company_admin", SubjectId = CompanyAdminSubjectId, ResourceId = "retail_root", RoleId = companyAdminRole.Id },
+            new SqlzibarGrant { Id = "grant_chain_mgr_walmart", SubjectId = ChainManagerWalmartSubjectId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_chain_mgr_target", SubjectId = ChainManagerTargetSubjectId, ResourceId = TargetChainResourceId, RoleId = chainManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_store_mgr_001", SubjectId = StoreManager001SubjectId, ResourceId = Store001ResourceId, RoleId = storeManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_store_mgr_002", SubjectId = StoreManager002SubjectId, ResourceId = Store002ResourceId, RoleId = storeManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_store_clerk_001", SubjectId = StoreClerk001SubjectId, ResourceId = Store001ResourceId, RoleId = storeClerkRole.Id },
             // Group grant: Walmart Regional Managers group gets ChainManager on Walmart chain
-            new SqlzibarGrant { Id = "grant_walmart_regional_group", PrincipalId = WalmartRegionalGroupPrincipalId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_walmart_regional_group", SubjectId = WalmartRegionalGroupSubjectId, ResourceId = WalmartChainResourceId, RoleId = chainManagerRole.Id },
             // Agent grant: Inventory Sync Agent gets StoreManager on Walmart (also inherits via group)
-            new SqlzibarGrant { Id = "grant_inventory_sync", PrincipalId = InventorySyncAgentPrincipalId!, ResourceId = WalmartChainResourceId, RoleId = storeManagerRole.Id },
+            new SqlzibarGrant { Id = "grant_inventory_sync", SubjectId = InventorySyncAgentSubjectId!, ResourceId = WalmartChainResourceId, RoleId = storeManagerRole.Id },
             // Service account grant: API Integration gets read-only (StoreClerk) at root
-            new SqlzibarGrant { Id = "grant_api_integration", PrincipalId = ApiIntegrationServiceAccountPrincipalId!, ResourceId = "retail_root", RoleId = storeClerkRole.Id }
-            // NoGrantsPrincipalId, RegionalUserAlice, RegionalUserBob have no direct grants
+            new SqlzibarGrant { Id = "grant_api_integration", SubjectId = ApiIntegrationServiceAccountSubjectId!, ResourceId = "retail_root", RoleId = storeClerkRole.Id }
+            // NoGrantsSubjectId, RegionalUserAlice, RegionalUserBob have no direct grants
             // — Alice and Bob inherit access via their group membership
         );
 

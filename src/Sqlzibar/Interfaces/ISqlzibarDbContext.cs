@@ -13,10 +13,10 @@ public interface ISqlzibarDbContext
 {
     /// <summary>
     /// TVF for authorization query composition.
-    /// Implementation: =&gt; FromExpression(() =&gt; IsResourceAccessible(resourceId, principalIds, permissionId));
+    /// Implementation: =&gt; FromExpression(() =&gt; IsResourceAccessible(resourceId, subjectIds, permissionId));
     /// </summary>
     IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId);
+        string resourceId, string subjectIds, string permissionId);
 
     /// <summary>
     /// Access to entity sets. Already on DbContext — auto-implemented.

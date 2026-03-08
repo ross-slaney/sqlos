@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Sqlzibar.Example.Api.Data;
-using Sqlzibar.Example.Api.Dtos;
 using Sqlzibar.Example.Api.Middleware;
+using Sqlzibar.Example.Api.Dtos;
 using Sqlzibar.Example.Api.Models;
 using Sqlzibar.Example.Api.Seeding;
 using Sqlzibar.Extensions;
@@ -26,7 +26,7 @@ public static class ChainEndpoints
             string? sortBy = null,
             string? sortDir = null) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             var spec = PagedSpec.For<Chain>(c => c.Id)
                 .RequirePermission(RetailPermissionKeys.ChainView)
@@ -37,7 +37,7 @@ public static class ChainEndpoints
                 .Build(pageSize, cursor, sortBy, sortDir);
 
             var result = await executor.ExecuteAsync(
-                context.Chains, spec, principalId,
+                context.Chains, spec, subjectId,
                 c => new ChainDto
                 {
                     Id = c.Id,
@@ -56,12 +56,12 @@ public static class ChainEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
             return await authService.AuthorizedDetailAsync(
                 context.Chains.Include(c => c.Locations),
                 c => c.Id == id,
-                principalId, RetailPermissionKeys.ChainView,
+                subjectId, RetailPermissionKeys.ChainView,
                 chain => new ChainDetailDto
                 {
                     Id = chain.Id,
@@ -81,9 +81,9 @@ public static class ChainEndpoints
             ISqlzibarAuthService authService,
             HttpContext http) =>
         {
-            var principalId = http.GetPrincipalId();
+            var subjectId = http.GetSubjectId();
 
-            var access = await authService.CheckAccessAsync(principalId, RetailPermissionKeys.ChainEdit, "retail_root");
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.ChainEdit, "retail_root");
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
             var resourceId = context.CreateResource("retail_root", request.Name, RetailResourceTypeIds.Chain);

@@ -19,8 +19,8 @@ Sqlzibar's integration tests use .NET Aspire to spin up a real SQL Server contai
 public class TestSqlzibarDbContext : DbContext, ISqlzibarDbContext
 {
     public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, principalIds, permissionId));
+        string resourceId, string subjectIds, string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -21,5 +21,5 @@ public class SqlzibarAccessTrace
     public string? ResourceName { get; set; }
     public string? GrantId { get; set; }
     public string? RoleName { get; set; }
-    public string? PrincipalName { get; set; }
+    public string? SubjectName { get; set; }
 }

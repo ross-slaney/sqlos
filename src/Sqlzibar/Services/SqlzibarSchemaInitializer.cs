@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -10,8 +11,6 @@ namespace Sqlzibar.Services;
 
 public class SqlzibarSchemaInitializer
 {
-    private const int CurrentSchemaVersion = 2;
-
     private readonly ISqlzibarDbContext _context;
     private readonly SqlzibarOptions _options;
     private readonly ILogger<SqlzibarSchemaInitializer> _logger;
@@ -32,6 +31,17 @@ public class SqlzibarSchemaInitializer
 
         var schema = _options.Schema;
 
+        // Discover all migration scripts (NNN_Name.sql pattern)
+        var migrations = DiscoverMigrations();
+        if (migrations.Count == 0)
+        {
+            _logger.LogWarning("No migration scripts found.");
+            return;
+        }
+
+        var maxVersion = migrations.Max(m => m.Version);
+        _logger.LogDebug("Found {Count} migration scripts (max version: {MaxVersion})", migrations.Count, maxVersion);
+
         // Ensure the version tracking table exists
         var ensureVersionTableSql = $@"
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlzibarSchema' AND schema_id = SCHEMA_ID('{schema}'))
@@ -41,12 +51,65 @@ END";
         await _context.Database.ExecuteSqlRawAsync(ensureVersionTableSql, cancellationToken);
 
         // Read the current version
+        var currentVersion = await GetCurrentVersionAsync(schema, cancellationToken);
+
+        if (currentVersion == null)
+        {
+            _logger.LogInformation("Fresh install detected. Running all migrations (v1 -> v{MaxVersion})...", maxVersion);
+            foreach (var migration in migrations.OrderBy(m => m.Version))
+            {
+                _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
+                await RunScriptAsync(migration.ResourceName, cancellationToken);
+            }
+            _logger.LogInformation("Schema v{Version} installed successfully.", maxVersion);
+        }
+        else if (currentVersion < maxVersion)
+        {
+            _logger.LogInformation("Schema upgrade needed: v{Current} -> v{Target}", currentVersion, maxVersion);
+            var pendingMigrations = migrations.Where(m => m.Version > currentVersion).OrderBy(m => m.Version);
+            foreach (var migration in pendingMigrations)
+            {
+                _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
+                await RunScriptAsync(migration.ResourceName, cancellationToken);
+            }
+            _logger.LogInformation("Schema upgraded to v{Version}.", maxVersion);
+        }
+        else
+        {
+            _logger.LogInformation("Schema is up to date (v{Version}).", currentVersion);
+        }
+    }
+
+    private List<MigrationScript> DiscoverMigrations()
+    {
+        var assembly = typeof(SqlzibarSchemaInitializer).Assembly;
+        var resourceNames = assembly.GetManifestResourceNames();
+        var migrations = new List<MigrationScript>();
+
+        // Pattern: Sqlzibar.Schema.NNN_Name.sql where NNN is a number
+        var pattern = new Regex(@"^Sqlzibar\.Schema\.(\d+)_(.+)\.sql$", RegexOptions.IgnoreCase);
+
+        foreach (var resourceName in resourceNames)
+        {
+            var match = pattern.Match(resourceName);
+            if (match.Success)
+            {
+                var version = int.Parse(match.Groups[1].Value);
+                var name = match.Groups[2].Value;
+                migrations.Add(new MigrationScript(version, name, resourceName));
+            }
+        }
+
+        return migrations;
+    }
+
+    private async Task<int?> GetCurrentVersionAsync(string schema, CancellationToken cancellationToken)
+    {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == System.Data.ConnectionState.Open;
         if (!wasOpen)
             await connection.OpenAsync(cancellationToken);
 
-        int? currentVersion = null;
         try
         {
             using var cmd = connection.CreateCommand();
@@ -56,36 +119,17 @@ END";
 
             var result = await cmd.ExecuteScalarAsync(cancellationToken);
             if (result != null && result != DBNull.Value)
-                currentVersion = Convert.ToInt32(result);
+                return Convert.ToInt32(result);
+            return null;
         }
         finally
         {
             if (!wasOpen)
                 await connection.CloseAsync();
         }
-
-        if (currentVersion == null)
-        {
-            _logger.LogInformation("Fresh install detected. Running initial schema creation (v{Version})...", CurrentSchemaVersion);
-            await RunScriptAsync("Sqlzibar.Schema.001_Initial.sql", cancellationToken);
-            if (CurrentSchemaVersion >= 2)
-                await RunScriptAsync("Sqlzibar.Schema.002_UsersAndAgents.sql", cancellationToken);
-            _logger.LogInformation("Schema v{Version} installed successfully.", CurrentSchemaVersion);
-        }
-        else if (currentVersion < CurrentSchemaVersion)
-        {
-            _logger.LogInformation("Schema upgrade needed: v{Current} -> v{Target}", currentVersion, CurrentSchemaVersion);
-
-            if (currentVersion < 2)
-                await RunScriptAsync("Sqlzibar.Schema.002_UsersAndAgents.sql", cancellationToken);
-
-            _logger.LogInformation("Schema upgraded to v{Version}.", CurrentSchemaVersion);
-        }
-        else
-        {
-            _logger.LogInformation("Schema is up to date (v{Version}).", currentVersion);
-        }
     }
+
+    private record MigrationScript(int Version, string Name, string ResourceName);
 
     private async Task RunScriptAsync(string resourceName, CancellationToken cancellationToken)
     {
@@ -118,8 +162,8 @@ END";
 
         return sql
             .Replace("{Schema}", _options.Schema)
-            .Replace("{PrincipalTypes}", tables.PrincipalTypes)
-            .Replace("{Principals}", tables.Principals)
+            .Replace("{SubjectTypes}", tables.SubjectTypes)
+            .Replace("{Subjects}", tables.Subjects)
             .Replace("{UserGroups}", tables.UserGroups)
             .Replace("{UserGroupMemberships}", tables.UserGroupMemberships)
             .Replace("{ResourceTypes}", tables.ResourceTypes)

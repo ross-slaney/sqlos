@@ -55,7 +55,7 @@ public static class SqlzibarConvenienceExtensions
     /// return await authService.AuthorizedDetailAsync(
     ///     context.Chains.Include(c => c.Locations),
     ///     c => c.Id == id,
-    ///     principalId, "CHAIN_VIEW",
+    ///     subjectId, "CHAIN_VIEW",
     ///     c => new ChainDto { Id = c.Id, Name = c.Name });
     /// </code>
     /// </example>
@@ -64,7 +64,7 @@ public static class SqlzibarConvenienceExtensions
         this ISqlzibarAuthService authService,
         IQueryable<TEntity> query,
         Expression<Func<TEntity, bool>> predicate,
-        string principalId,
+        string subjectId,
         string permissionKey,
         Func<TEntity, TDto> selector)
         where TEntity : class, IHasResourceId
@@ -73,7 +73,7 @@ public static class SqlzibarConvenienceExtensions
         if (entity is null)
             return Results.NotFound();
 
-        var access = await authService.CheckAccessAsync(principalId, permissionKey, entity.ResourceId);
+        var access = await authService.CheckAccessAsync(subjectId, permissionKey, entity.ResourceId);
         if (!access.Allowed)
             return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 

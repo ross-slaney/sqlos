@@ -14,7 +14,7 @@ Sqlzibar provides a complete authorization system that plugs into any EF Core ap
 - **Group Membership** — Users and service accounts can belong to groups. Group grants apply to all members.
 - **Time-Bounded Grants** — Optional `EffectiveFrom` / `EffectiveTo` for temporary access.
 - **Specification Executor** — Paginated, authorized queries with cursor pagination, sorting, and search out of the box.
-- **Built-in Dashboard** — Embedded web UI at `/sqlzibar` to browse resources, principals, grants, roles, and permissions.
+- **Built-in Dashboard** — Embedded web UI at `/sqlzibar` to browse resources, subjects, grants, roles, and permissions.
 - **Access Tracing** — Full diagnostic trace of why access was granted or denied.
 
 ## Quick Start
@@ -41,8 +41,8 @@ public class AppDbContext : DbContext, ISqlzibarDbContext
     public DbSet<Project> Projects => Set<Project>();
 
     public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, principalIds, permissionId));
+        string resourceId, string subjectIds, string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,13 +108,13 @@ portal_root
       └── project:dashboard
 ```
 
-A grant at `agency:acme` with role `Admin` gives the principal admin access to `project:website` and `project:mobile_app`. The TVF walks up the ancestor chain for any target resource, matching grants at each level.
+A grant at `agency:acme` with role `Admin` gives the subject admin access to `project:website` and `project:mobile_app`. The TVF walks up the ancestor chain for any target resource, matching grants at each level.
 
 | Concept        | Description                                                          |
 | -------------- | -------------------------------------------------------------------- |
-| **Principal**  | A user, group, or service account that can receive grants            |
+| **Subject**    | A user, group, or service account that can receive grants            |
 | **Resource**   | A node in the hierarchy (agency, project, team, etc.)                |
-| **Grant**      | Links a principal to a resource with a role, optionally time-bounded |
+| **Grant**      | Links a subject to a resource with a role, optionally time-bounded |
 | **Role**       | A named set of permissions (e.g., Admin, Viewer)                     |
 | **Permission** | A specific capability (e.g., `PROJECT_EDIT`)                         |
 
@@ -157,7 +157,7 @@ app.MapGet("/api/projects", async (
     string? sortBy = null,
     string? sortDir = null) =>
 {
-    var principalId = http.GetPrincipalId();
+    var subjectId = http.GetSubjectId();
 
     var spec = PagedSpec.For<Project>(p => p.Id)
         .RequirePermission("PROJECT_VIEW")
@@ -169,7 +169,7 @@ app.MapGet("/api/projects", async (
         .Build(pageSize, cursor, sortBy, sortDir);
 
     var result = await executor.ExecuteAsync(
-        context.Projects, spec, principalId,
+        context.Projects, spec, subjectId,
         p => new { p.Id, p.Name, p.Status, Agency = p.Agency.Name });
 
     return Results.Ok(result);
@@ -178,7 +178,7 @@ app.MapGet("/api/projects", async (
 
 This single call:
 
-- Filters to only rows the principal is authorized to see (via TVF)
+- Filters to only rows the subject is authorized to see (via TVF)
 - Applies search across the specified fields (case-insensitive OR)
 - Sorts by the requested field with cursor-based pagination
 - Returns a `PaginatedResult<T>` with `Data`, `NextCursor`, and `HasMore`
@@ -194,12 +194,12 @@ app.MapGet("/api/projects/{id}", async (
     ISqlzibarAuthService authService,
     HttpContext http) =>
 {
-    var principalId = http.GetPrincipalId();
+    var subjectId = http.GetSubjectId();
 
     return await authService.AuthorizedDetailAsync(
         context.Projects.Include(p => p.Agency),
         p => p.Id == id,
-        principalId, "PROJECT_VIEW",
+        subjectId, "PROJECT_VIEW",
         p => new { p.Id, p.Name, p.Description, Agency = p.Agency.Name });
 });
 ```
@@ -217,10 +217,10 @@ app.MapPost("/api/projects", async (
     ISqlzibarAuthService authService,
     HttpContext http) =>
 {
-    var principalId = http.GetPrincipalId();
+    var subjectId = http.GetSubjectId();
 
     var access = await authService.CheckAccessAsync(
-        principalId, "PROJECT_EDIT", request.AgencyResourceId);
+        subjectId, "PROJECT_EDIT", request.AgencyResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
@@ -273,7 +273,7 @@ For mutation operations, check access explicitly:
 
 ```csharp
 var result = await authService.CheckAccessAsync(
-    principalId, "PROJECT_EDIT", project.ResourceId);
+    subjectId, "PROJECT_EDIT", project.ResourceId);
 
 if (!result.Allowed)
     return Results.Json(new { error = "Permission denied" }, statusCode: 403);
@@ -294,7 +294,7 @@ bool isAdmin = await authService.HasCapabilityAsync(principalId, "ADMIN_ACCESS")
 ```csharp
 // Get the authorization filter — this is just an Expression<Func<Order, bool>>
 var authFilter = await _authService.GetAuthorizationFilterAsync<Order>(
-    principalId, "ORDER_VIEW");
+    subjectId, "ORDER_VIEW");
 
 // Use it like any other LINQ predicate
 var recentOrders = await _context.Orders
@@ -335,7 +335,7 @@ src/Sqlzibar/
 ├── Interfaces/          # ISqlzibarDbContext, ISqlzibarAuthService, etc.
 ├── Models/              # All entity models (14 files)
 ├── Schema/              # Versioned SQL scripts (001_Initial.sql, etc.)
-├── Services/            # AuthService, PrincipalService, SeedService, SchemaInitializer
+├── Services/            # AuthService, SubjectService, SeedService, SchemaInitializer
 └── Specifications/      # PagedSpecification, SortablePagedSpecification, PagedSpecBuilder
 ```
 

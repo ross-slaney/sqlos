@@ -15,8 +15,8 @@ public class RetailDbContext : DbContext, ISqlzibarDbContext
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
 
     public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, principalIds, permissionId));
+        string resourceId, string subjectIds, string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

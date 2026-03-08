@@ -29,6 +29,12 @@ public static class ApplicationBuilderExtensions
             var seeder = scope.ServiceProvider.GetRequiredService<SqlzibarSeedService>();
             await seeder.SeedCoreAsync();
         }
+
+        if (!string.IsNullOrEmpty(options.SchemaYamlPath) && File.Exists(options.SchemaYamlPath))
+        {
+            var seeder = scope.ServiceProvider.GetRequiredService<SqlzibarSeedService>();
+            await seeder.SeedFromYamlFileAsync(options.SchemaYamlPath);
+        }
     }
 
     public static IApplicationBuilder UseSqlzibarDashboard(

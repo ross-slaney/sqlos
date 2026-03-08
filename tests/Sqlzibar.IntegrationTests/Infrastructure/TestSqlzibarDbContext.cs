@@ -10,8 +10,8 @@ public class TestSqlzibarDbContext : DbContext, ISqlzibarDbContext
     public TestSqlzibarDbContext(DbContextOptions<TestSqlzibarDbContext> options) : base(options) { }
 
     public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string principalIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, principalIds, permissionId));
+        string resourceId, string subjectIds, string permissionId)
+        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

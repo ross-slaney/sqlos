@@ -10,7 +10,7 @@ namespace Sqlzibar.Example.IntegrationTests;
 public class ChainApiTests
 {
     private HttpClient _client = null!;
-    private const string AdminPrincipalId = "prin_company_admin";
+    private const string AdminSubjectId = "subj_company_admin";
 
     [TestInitialize]
     public void TestInit()
@@ -22,7 +22,7 @@ public class ChainApiTests
     public async Task GetChains_ReturnsPaginatedResult()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -37,7 +37,7 @@ public class ChainApiTests
     public async Task GetChains_WithSearch_FiltersCorrectly()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains?search=walmart");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -52,7 +52,7 @@ public class ChainApiTests
     public async Task GetChain_ValidId_ReturnsDetail()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains/chain_walmart");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -67,7 +67,7 @@ public class ChainApiTests
     public async Task GetChain_InvalidId_Returns404()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/chains/nonexistent");
-        request.Headers.Add("X-Principal-Id", AdminPrincipalId);
+        request.Headers.Add("X-Subject-Id", AdminSubjectId);
 
         var response = await _client.SendAsync(request);
 

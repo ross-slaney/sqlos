@@ -14,7 +14,7 @@ builder.Services.AddSqlzibar<AppDbContext>(options =>
 
     // Auto-initialization (default: true for both)
     options.InitializeFunctions = true;  // Create/update TVF on startup
-    options.SeedCoreData = true;         // Seed principal types + root resource
+    options.SeedCoreData = true;         // Seed subject types + root resource
 
     // Dashboard path (default: "/sqlzibar")
     options.DashboardPathPrefix = "/admin/auth";
@@ -58,8 +58,8 @@ app.UseSqlzibarDashboard("/sqlzibar", dashboard =>
 The dashboard provides:
 
 - **Resources** — Lazy-loading hierarchical tree view with paginated children
-- **Principals** — Tabbed by type (users, groups, service accounts), click into a principal to see detail page with info, group memberships, and paginated role grants
-- **Grants** — Principal + role + resource with effective dates
+- **Subjects** — Tabbed by type (users, groups, service accounts), click into a subject to see detail page with info, group memberships, and paginated role grants
+- **Grants** — Subject + role + resource with effective dates
 - **Roles** — With expandable permission lists (click a role to see its permissions)
 - **Permissions** — All permissions with resource type associations
 - **Access Tester** — Interactive tool to trace access decisions
@@ -81,7 +81,9 @@ All table views support pagination and search.
 | `GET /sqlzibar/api/roles?page=1&pageSize=25&search=`                | Roles with permission counts, paginated                         |
 | `GET /sqlzibar/api/roles/{id}/permissions`                          | Permissions for a role                                          |
 | `GET /sqlzibar/api/permissions?page=1&pageSize=25&search=`          | All permissions, paginated                                      |
-| `POST /sqlzibar/api/trace`                                          | Access trace (body: `{principalId, resourceId, permissionKey}`) |
+| `POST /sqlzibar/api/trace`                                          | Access trace (body: `{subjectId, resourceId, permissionKey}`) |
+| `GET /sqlzibar/api/schema/export`                                   | Export schema as YAML                                           |
+| `POST /sqlzibar/api/schema/import`                                  | Import schema from YAML (body: raw YAML content)                |
 
 ## Schema Versioning
 

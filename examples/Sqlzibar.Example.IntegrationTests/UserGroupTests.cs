@@ -18,9 +18,9 @@ public class UserGroupTests
 {
     private HttpClient _client = null!;
 
-    private const string Alice = "prin_regional_alice";
-    private const string Bob = "prin_regional_bob";
-    private const string NoGrants = "prin_no_grants";
+    private const string Alice = "subj_regional_alice";
+    private const string Bob = "subj_regional_bob";
+    private const string NoGrants = "subj_no_grants";
 
     [TestInitialize]
     public void TestInit()
@@ -135,7 +135,7 @@ public class UserGroupTests
     public async Task GroupMember_Alice_CanCreateLocationInWalmartChain()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains/chain_walmart/locations");
-        request.Headers.Add("X-Principal-Id", Alice);
+        request.Headers.Add("X-Subject-Id", Alice);
         request.Content = JsonContent.Create(new
         {
             Name = "Alice Test Store",
@@ -156,7 +156,7 @@ public class UserGroupTests
     {
         // ChainManager has no CHAIN_EDIT permission
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/chains");
-        request.Headers.Add("X-Principal-Id", Alice);
+        request.Headers.Add("X-Subject-Id", Alice);
         request.Content = JsonContent.Create(new { Name = "Forbidden Chain" });
 
         var response = await _client.SendAsync(request);
@@ -220,16 +220,16 @@ public class UserGroupTests
     // ====================================================================
 
     private async Task<PaginatedResult<ChainItem>> GetChainsAsync(
-        string principalId, string? search = null)
+        string subjectId, string? search = null)
     {
         var url = "/api/chains?pageSize=10";
         if (search != null) url += $"&search={search}";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<ChainItem>>();
         result.Should().NotBeNull();
@@ -237,15 +237,15 @@ public class UserGroupTests
     }
 
     private async Task<PaginatedResult<LocationItem>> GetLocationsAsync(
-        string principalId, string chainId)
+        string subjectId, string chainId)
     {
         var url = $"/api/chains/{chainId}/locations?pageSize=10";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<LocationItem>>();
         result.Should().NotBeNull();
@@ -253,15 +253,15 @@ public class UserGroupTests
     }
 
     private async Task<PaginatedResult<InventoryItemResult>> GetInventoryAsync(
-        string principalId, string locationId)
+        string subjectId, string locationId)
     {
         var url = $"/api/locations/{locationId}/inventory?pageSize=10";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Principal-Id", principalId);
+        request.Headers.Add("X-Subject-Id", subjectId);
 
         var response = await _client.SendAsync(request);
-        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {principalId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"GET {url} as {subjectId}");
 
         var result = await response.Content.ReadFromJsonAsync<PaginatedResult<InventoryItemResult>>();
         result.Should().NotBeNull();

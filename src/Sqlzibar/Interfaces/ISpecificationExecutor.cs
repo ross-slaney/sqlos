@@ -15,7 +15,7 @@ public interface ISpecificationExecutor
     Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
         DbSet<TEntity> dbSet,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         Func<TEntity, TDto> selector,
         CancellationToken cancellationToken = default)
         where TEntity : class, IHasResourceId;
@@ -26,7 +26,7 @@ public interface ISpecificationExecutor
     Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
         IQueryable<TEntity> query,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         string permissionKey,
         Func<TEntity, TDto> selector,
         CancellationToken cancellationToken = default)
@@ -41,7 +41,7 @@ public interface ISpecificationExecutor
     Task<long> CountAsync<TEntity>(
         DbSet<TEntity> dbSet,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         CancellationToken cancellationToken = default)
         where TEntity : class, IHasResourceId;
 }

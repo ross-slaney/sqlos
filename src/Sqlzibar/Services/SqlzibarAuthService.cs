@@ -24,14 +24,14 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         _logger = logger;
     }
 
-    public async Task<bool> HasCapabilityAsync(string principalId, string permissionKey)
+    public async Task<bool> HasCapabilityAsync(string subjectId, string permissionKey)
     {
-        var result = await CheckAccessAsync(principalId, permissionKey, _options.RootResourceId);
+        var result = await CheckAccessAsync(subjectId, permissionKey, _options.RootResourceId);
         return result.Allowed;
     }
 
     public async Task<SqlzibarAccessCheckResult> CheckAccessAsync(
-        string principalId,
+        string subjectId,
         string permissionKey,
         string resourceId)
     {
@@ -66,10 +66,10 @@ public class SqlzibarAuthService : ISqlzibarAuthService
             Detail = $"Looking for permission: {permission.Name}",
         });
 
-        var allPrincipals = await ResolvePrincipalsAsync(principalId, trace);
-        if (allPrincipals.Count == 0)
+        var allSubjects = await ResolveSubjectsAsync(subjectId, trace);
+        if (allSubjects.Count == 0)
         {
-            return new SqlzibarAccessCheckResult { Allowed = false, Trace = trace, Error = "No principals found" };
+            return new SqlzibarAccessCheckResult { Allowed = false, Trace = trace, Error = "No subjects found" };
         }
 
         var ancestorResources = await GetAncestorResourcesAsync(resourceId);
@@ -90,10 +90,10 @@ public class SqlzibarAuthService : ISqlzibarAuthService
                 ResourceName = ancestorResource.Name,
             });
 
-            foreach (var pid in allPrincipals)
+            foreach (var sid in allSubjects)
             {
-                var principalData = await _context.Set<SqlzibarPrincipal>().FirstOrDefaultAsync(p => p.Id == pid);
-                var grants = await GetActiveGrantsAsync(pid, ancestorResource.Id);
+                var subjectData = await _context.Set<SqlzibarSubject>().FirstOrDefaultAsync(s => s.Id == sid);
+                var grants = await GetActiveGrantsAsync(sid, ancestorResource.Id);
 
                 foreach (var grant in grants)
                 {
@@ -113,7 +113,7 @@ public class SqlzibarAuthService : ISqlzibarAuthService
                             ResourceName = ancestorResource.Name,
                             GrantId = grant.Id,
                             RoleName = role.Name,
-                            PrincipalName = principalData?.DisplayName,
+                            SubjectName = subjectData?.DisplayName,
                         });
                         return new SqlzibarAccessCheckResult { Allowed = true, Trace = trace };
                     }
@@ -140,13 +140,13 @@ public class SqlzibarAuthService : ISqlzibarAuthService
     }
 
     public async Task<SqlzibarResourceAccessTrace> TraceResourceAccessAsync(
-        string principalId,
+        string subjectId,
         string resourceId,
         string permissionKey)
     {
         var trace = new SqlzibarResourceAccessTrace
         {
-            PrincipalId = principalId,
+            SubjectId = subjectId,
             PermissionKey = permissionKey
         };
 
@@ -166,16 +166,16 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         trace.TargetResourceName = resource.Name;
         trace.TargetResourceType = resource.ResourceType?.Name ?? resource.ResourceTypeId;
 
-        var principal = await _context.Set<SqlzibarPrincipal>().FirstOrDefaultAsync(p => p.Id == principalId);
-        if (principal == null)
+        var subject = await _context.Set<SqlzibarSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
+        if (subject == null)
         {
             trace.AccessGranted = false;
-            trace.DenialReason = $"Principal '{principalId}' not found";
-            trace.DecisionSummary = $"Access denied because the principal '{principalId}' does not exist.";
+            trace.DenialReason = $"Subject '{subjectId}' not found";
+            trace.DecisionSummary = $"Access denied because the subject '{subjectId}' does not exist.";
             return trace;
         }
 
-        trace.PrincipalDisplayName = principal.DisplayName;
+        trace.SubjectDisplayName = subject.DisplayName;
 
         var permission = await _context.Set<SqlzibarPermission>().FirstOrDefaultAsync(p => p.Key == permissionKey);
         if (permission == null)
@@ -188,10 +188,10 @@ public class SqlzibarAuthService : ISqlzibarAuthService
 
         trace.PermissionName = permission.Name;
 
-        var allPrincipals = await ResolvePrincipalsWithInfoAsync(principalId);
-        trace.PrincipalsChecked = allPrincipals;
+        var allSubjects = await ResolveSubjectsWithInfoAsync(subjectId);
+        trace.SubjectsChecked = allSubjects;
 
-        var principalIds = allPrincipals.Select(p => p.PrincipalId).ToList();
+        var subjectIds = allSubjects.Select(s => s.SubjectId).ToList();
         var ancestorResources = await GetAncestorResourcesAsync(resourceId);
         var pathNodes = new List<SqlzibarResourcePathNodeTrace>();
         var allGrantsUsed = new List<SqlzibarGrantTrace>();
@@ -221,9 +221,9 @@ public class SqlzibarAuthService : ISqlzibarAuthService
 
             var grantsOnNode = await _context.Set<SqlzibarGrant>()
                 .Include(g => g.Role)
-                .Include(g => g.Principal)
+                .Include(g => g.Subject)
                 .Where(g => g.ResourceId == ancestorResource.Id &&
-                           principalIds.Contains(g.PrincipalId) &&
+                           subjectIds.Contains(g.SubjectId) &&
                            (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
                            (g.EffectiveTo == null || g.EffectiveTo >= now))
                 .ToListAsync();
@@ -240,9 +240,9 @@ public class SqlzibarAuthService : ISqlzibarAuthService
 
                 var hasRequestedPermission = rolePermissions.Any(rp => rp.PermissionId == permission.Id);
 
-                var principalInfo = allPrincipals.FirstOrDefault(p => p.PrincipalId == grant.PrincipalId);
-                var isDirect = principalInfo?.IsDirect ?? false;
-                var viaGroupName = !isDirect ? principalInfo?.DisplayName : null;
+                var subjectInfo = allSubjects.FirstOrDefault(s => s.SubjectId == grant.SubjectId);
+                var isDirect = subjectInfo?.IsDirect ?? false;
+                var viaGroupName = !isDirect ? subjectInfo?.DisplayName : null;
 
                 var grantTrace = new SqlzibarGrantTrace
                 {
@@ -252,9 +252,9 @@ public class SqlzibarAuthService : ISqlzibarAuthService
                     ResourceType = pathNode.ResourceType,
                     RoleKey = role.Key,
                     RoleName = role.Name,
-                    PrincipalId = grant.PrincipalId,
-                    PrincipalDisplayName = grant.Principal?.DisplayName ?? grant.PrincipalId,
-                    AppliesToPrincipal = true,
+                    SubjectId = grant.SubjectId,
+                    SubjectDisplayName = grant.Subject?.DisplayName ?? grant.SubjectId,
+                    AppliesToSubject = true,
                     IsDirectGrant = isDirect,
                     ViaGroupName = viaGroupName,
                     ContributedToDecision = hasRequestedPermission && !accessGranted
@@ -299,7 +299,7 @@ public class SqlzibarAuthService : ISqlzibarAuthService
                     pathNode.PermissionFoundHere = true;
                     grantingNodeName = ancestorResource.Name;
                     grantingRoleName = role.Name;
-                    grantingPrincipalName = grant.Principal?.DisplayName ?? grant.PrincipalId;
+                    grantingPrincipalName = grant.Subject?.DisplayName ?? grant.SubjectId;
                     grantedViaGroup = !isDirect;
                     grantingGroupName = viaGroupName;
                 }
@@ -332,12 +332,12 @@ public class SqlzibarAuthService : ISqlzibarAuthService
                 var targetNode = pathNodes.FirstOrDefault(n => n.IsTarget);
                 if (targetNode != null && targetNode.PermissionFoundHere)
                 {
-                    trace.DecisionSummary = $"Access granted because {trace.PrincipalDisplayName} has role '{grantingRoleName}' " +
+                    trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
                                            $"directly on this resource, and '{grantingRoleName}' includes permission '{permissionKey}'.";
                 }
                 else
                 {
-                    trace.DecisionSummary = $"Access granted because {trace.PrincipalDisplayName} has role '{grantingRoleName}' " +
+                    trace.DecisionSummary = $"Access granted because {trace.SubjectDisplayName} has role '{grantingRoleName}' " +
                                            $"on parent resource '{grantingNodeName}', and '{grantingRoleName}' includes permission '{permissionKey}' " +
                                            $"which is inherited by child resources.";
                 }
@@ -347,8 +347,8 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         {
             if (allGrantsUsed.Count == 0)
             {
-                trace.DenialReason = $"No grants found for {trace.PrincipalDisplayName} (or their groups) on this resource or any ancestor resources.";
-                trace.DecisionSummary = $"Access denied. No roles are assigned to {trace.PrincipalDisplayName} on '{trace.TargetResourceName}' " +
+                trace.DenialReason = $"No grants found for {trace.SubjectDisplayName} (or their groups) on this resource or any ancestor resources.";
+                trace.DecisionSummary = $"Access denied. No roles are assigned to {trace.SubjectDisplayName} on '{trace.TargetResourceName}' " +
                                        $"or any of its parent resources.";
                 trace.Suggestion = $"To grant access, assign a role that includes '{permissionKey}' on this resource or on a parent.";
             }
@@ -356,7 +356,7 @@ public class SqlzibarAuthService : ISqlzibarAuthService
             {
                 var roleNames = allRolesUsed.Values.Select(r => r.RoleName).Distinct().ToList();
                 trace.DenialReason = $"Grants were found, but none of the roles ({string.Join(", ", roleNames)}) include permission '{permissionKey}'.";
-                trace.DecisionSummary = $"Access denied. {trace.PrincipalDisplayName} has grants on ancestor resources, " +
+                trace.DecisionSummary = $"Access denied. {trace.SubjectDisplayName} has grants on ancestor resources, " +
                                        $"but none of the assigned roles include permission '{permissionKey}'.";
                 trace.Suggestion = $"Either assign a different role that includes '{permissionKey}', or add '{permissionKey}' " +
                                   $"to one of the existing roles ({string.Join(", ", roleNames)}).";
@@ -367,13 +367,13 @@ public class SqlzibarAuthService : ISqlzibarAuthService
     }
 
     public async Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
-        string principalId,
+        string subjectId,
         string permissionKey) where T : IHasResourceId
     {
-        var principalIds = await ResolvePrincipalIdsAsync(principalId);
-        if (principalIds.Count == 0)
+        var subjectIds = await ResolveSubjectIdsAsync(subjectId);
+        if (subjectIds.Count == 0)
         {
-            _logger.LogWarning("No principals found for {PrincipalId}", principalId);
+            _logger.LogWarning("No subjects found for {SubjectId}", subjectId);
             return entity => false;
         }
 
@@ -387,7 +387,7 @@ public class SqlzibarAuthService : ISqlzibarAuthService
             return entity => false;
         }
 
-        var principalIdsStr = string.Join(",", principalIds);
+        var subjectIdsStr = string.Join(",", subjectIds);
         var permissionId = permission.Id;
 
         // Build the expression using the concrete DbContext type's method
@@ -410,7 +410,7 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         var contextExpr = Expression.Constant(_context, contextType);
         var tvfCall = Expression.Call(contextExpr, tvfMethod,
             resourceIdProp,
-            Expression.Constant(principalIdsStr),
+            Expression.Constant(subjectIdsStr),
             Expression.Constant(permissionId));
 
         var anyMethod = typeof(Queryable).GetMethods()
@@ -421,53 +421,53 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         return Expression.Lambda<Func<T, bool>>(anyCall, entityParam);
     }
 
-    private async Task<List<string>> ResolvePrincipalsAsync(string principalId, List<SqlzibarAccessTrace> trace)
+    private async Task<List<string>> ResolveSubjectsAsync(string subjectId, List<SqlzibarAccessTrace> trace)
     {
-        var principals = await ResolvePrincipalIdsAsync(principalId);
+        var subjects = await ResolveSubjectIdsAsync(subjectId);
 
-        var principalData = await _context.Set<SqlzibarPrincipal>().FirstOrDefaultAsync(p => p.Id == principalId);
-        var groupCount = principals.Count - 1;
+        var subjectData = await _context.Set<SqlzibarSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
+        var groupCount = subjects.Count - 1;
         trace.Add(new SqlzibarAccessTrace
         {
-            Step = "Principal Resolution",
-            Detail = $"Principal \"{principalData?.DisplayName}\" + {groupCount} group membership(s)",
-            PrincipalName = principalData?.DisplayName,
+            Step = "Subject Resolution",
+            Detail = $"Subject \"{subjectData?.DisplayName}\" + {groupCount} group membership(s)",
+            SubjectName = subjectData?.DisplayName,
         });
 
-        return principals;
+        return subjects;
     }
 
-    private async Task<List<string>> ResolvePrincipalIdsAsync(string principalId)
+    private async Task<List<string>> ResolveSubjectIdsAsync(string subjectId)
     {
-        var principals = new List<string> { principalId };
+        var subjects = new List<string> { subjectId };
 
-        var groupPrincipalIds = await _context.Set<SqlzibarUserGroupMembership>()
-            .Where(m => m.PrincipalId == principalId)
+        var groupSubjectIds = await _context.Set<SqlzibarUserGroupMembership>()
+            .Where(m => m.SubjectId == subjectId)
             .Join(_context.Set<SqlzibarUserGroup>(),
                 m => m.UserGroupId,
                 g => g.Id,
-                (m, g) => g.PrincipalId)
+                (m, g) => g.SubjectId)
             .ToListAsync();
 
-        principals.AddRange(groupPrincipalIds);
-        return principals;
+        subjects.AddRange(groupSubjectIds);
+        return subjects;
     }
 
-    private async Task<List<SqlzibarPrincipalInfo>> ResolvePrincipalsWithInfoAsync(string principalId)
+    private async Task<List<SqlzibarSubjectInfo>> ResolveSubjectsWithInfoAsync(string subjectId)
     {
-        var result = new List<SqlzibarPrincipalInfo>();
+        var result = new List<SqlzibarSubjectInfo>();
 
-        var principal = await _context.Set<SqlzibarPrincipal>().FirstOrDefaultAsync(p => p.Id == principalId);
-        result.Add(new SqlzibarPrincipalInfo
+        var subject = await _context.Set<SqlzibarSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
+        result.Add(new SqlzibarSubjectInfo
         {
-            PrincipalId = principalId,
-            DisplayName = principal?.DisplayName ?? principalId,
+            SubjectId = subjectId,
+            DisplayName = subject?.DisplayName ?? subjectId,
             Type = "user",
             IsDirect = true
         });
 
         var memberships = await _context.Set<SqlzibarUserGroupMembership>()
-            .Where(m => m.PrincipalId == principalId)
+            .Where(m => m.SubjectId == subjectId)
             .ToListAsync();
 
         foreach (var membership in memberships)
@@ -475,9 +475,9 @@ public class SqlzibarAuthService : ISqlzibarAuthService
             var group = await _context.Set<SqlzibarUserGroup>().FirstOrDefaultAsync(g => g.Id == membership.UserGroupId);
             if (group != null)
             {
-                result.Add(new SqlzibarPrincipalInfo
+                result.Add(new SqlzibarSubjectInfo
                 {
-                    PrincipalId = group.PrincipalId,
+                    SubjectId = group.SubjectId,
                     DisplayName = group.Name,
                     Type = "usergroup",
                     IsDirect = false
@@ -504,12 +504,12 @@ public class SqlzibarAuthService : ISqlzibarAuthService
         return ancestors;
     }
 
-    private async Task<List<SqlzibarGrant>> GetActiveGrantsAsync(string principalId, string resourceId)
+    private async Task<List<SqlzibarGrant>> GetActiveGrantsAsync(string subjectId, string resourceId)
     {
         var now = DateTime.UtcNow;
 
         return await _context.Set<SqlzibarGrant>()
-            .Where(g => g.PrincipalId == principalId &&
+            .Where(g => g.SubjectId == subjectId &&
                        g.ResourceId == resourceId &&
                        (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
                        (g.EffectiveTo == null || g.EffectiveTo >= now))

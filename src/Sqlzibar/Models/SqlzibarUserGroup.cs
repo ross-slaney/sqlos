@@ -9,11 +9,11 @@ public class SqlzibarUserGroup
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? GroupType { get; set; }
-    public string PrincipalId { get; set; } = string.Empty;
+    public string SubjectId { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public SqlzibarPrincipal? Principal { get; set; }
+    public SqlzibarSubject? Subject { get; set; }
     public ICollection<SqlzibarUserGroupMembership> Memberships { get; set; } = new List<SqlzibarUserGroupMembership>();
 }

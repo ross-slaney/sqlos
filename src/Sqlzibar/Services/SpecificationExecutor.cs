@@ -21,7 +21,7 @@ public class SpecificationExecutor : ISpecificationExecutor
     public async Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
         DbSet<TEntity> dbSet,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         Func<TEntity, TDto> selector,
         CancellationToken cancellationToken = default)
         where TEntity : class, IHasResourceId
@@ -35,21 +35,21 @@ public class SpecificationExecutor : ISpecificationExecutor
         var query = specification.ConfigureQuery(dbSet.AsQueryable());
 
         return await ExecuteAsync(
-            query, specification, principalId, specification.RequiredPermission,
+            query, specification, subjectId, specification.RequiredPermission,
             selector, cancellationToken);
     }
 
     public async Task<PaginatedResult<TDto>> ExecuteAsync<TEntity, TDto>(
         IQueryable<TEntity> query,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         string permissionKey,
         Func<TEntity, TDto> selector,
         CancellationToken cancellationToken = default)
         where TEntity : class, IHasResourceId
     {
         var authFilter = await _authorizationService.GetAuthorizationFilterAsync<TEntity>(
-            principalId, permissionKey);
+            subjectId, permissionKey);
 
         query = query.Where(authFilter);
 
@@ -101,7 +101,7 @@ public class SpecificationExecutor : ISpecificationExecutor
     public async Task<long> CountAsync<TEntity>(
         DbSet<TEntity> dbSet,
         PagedSpecification<TEntity> specification,
-        string principalId,
+        string subjectId,
         CancellationToken cancellationToken = default)
         where TEntity : class, IHasResourceId
     {
@@ -114,7 +114,7 @@ public class SpecificationExecutor : ISpecificationExecutor
         var query = specification.ConfigureQuery(dbSet.AsQueryable());
 
         var authFilter = await _authorizationService.GetAuthorizationFilterAsync<TEntity>(
-            principalId, specification.RequiredPermission);
+            subjectId, specification.RequiredPermission);
 
         query = query.Where(authFilter);
 

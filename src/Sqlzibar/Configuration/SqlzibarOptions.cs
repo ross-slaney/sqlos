@@ -12,6 +12,10 @@ public class SqlzibarOptions
     public string RootResourceName { get; set; } = "Root";
     public bool InitializeFunctions { get; set; } = true;
     public bool SeedCoreData { get; set; } = true;
+    /// <summary>
+    /// Optional path to a YAML schema file. If set, schema (resource types, permissions, roles) will be seeded from this file on startup.
+    /// </summary>
+    public string? SchemaYamlPath { get; set; }
     public string DashboardPathPrefix { get; set; } = "/sqlzibar";
     public SqlzibarDashboardOptions Dashboard { get; set; } = new();
     public SqlzibarTableNames TableNames { get; set; } = new();
@@ -46,8 +50,8 @@ public class SqlzibarDashboardOptions
 /// </summary>
 public class SqlzibarTableNames
 {
-    public string PrincipalTypes { get; set; } = "SqlzibarPrincipalTypes";
-    public string Principals { get; set; } = "SqlzibarPrincipals";
+    public string SubjectTypes { get; set; } = "SqlzibarSubjectTypes";
+    public string Subjects { get; set; } = "SqlzibarSubjects";
     public string UserGroups { get; set; } = "SqlzibarUserGroups";
     public string UserGroupMemberships { get; set; } = "SqlzibarUserGroupMemberships";
     public string ResourceTypes { get; set; } = "SqlzibarResourceTypes";

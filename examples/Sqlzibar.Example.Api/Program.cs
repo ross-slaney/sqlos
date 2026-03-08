@@ -22,19 +22,19 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "Sqlzibar Retail Example API", Version = "v1" });
-    c.AddSecurityDefinition("PrincipalId", new OpenApiSecurityScheme
+    c.AddSecurityDefinition("SubjectId", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.ApiKey,
         In = ParameterLocation.Header,
-        Name = "X-Principal-Id",
-        Description = "The principal ID to use for authorization (e.g. prin_company_admin, prin_chain_mgr_walmart, prin_store_mgr_001)"
+        Name = "X-Subject-Id",
+        Description = "The subject ID to use for authorization (e.g. subj_company_admin, subj_chain_mgr_walmart, subj_store_mgr_001)"
     });
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "PrincipalId" }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "SubjectId" }
             },
             Array.Empty<string>()
         }
@@ -63,7 +63,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseSwagger();
 app.UseSwaggerUI();
-app.UsePrincipalIdMiddleware();
+app.UseSubjectIdMiddleware();
 app.UseSqlzibarDashboard("/sqlzibar");
 
 app.MapChainEndpoints();

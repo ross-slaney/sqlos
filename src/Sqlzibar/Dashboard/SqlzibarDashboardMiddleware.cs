@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Sqlzibar.Configuration;
 using Sqlzibar.Interfaces;
 using Sqlzibar.Models;
+using Sqlzibar.Services;
 
 namespace Sqlzibar.Dashboard;
 
@@ -96,34 +97,121 @@ public class SqlzibarDashboardMiddleware
         if (endpoint.Equals("trace", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
         {
             var body = await JsonSerializer.DeserializeAsync<TraceRequest>(context.Request.Body, JsonOptions);
-            if (body == null || string.IsNullOrEmpty(body.PrincipalId) || string.IsNullOrEmpty(body.ResourceId) || string.IsNullOrEmpty(body.PermissionKey))
+            if (body == null || string.IsNullOrEmpty(body.SubjectId) || string.IsNullOrEmpty(body.ResourceId) || string.IsNullOrEmpty(body.PermissionKey))
             {
                 context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("{\"error\":\"principalId, resourceId, and permissionKey are required\"}");
+                await context.Response.WriteAsync("{\"error\":\"subjectId, resourceId, and permissionKey are required\"}");
                 return;
             }
             var authService = scope.ServiceProvider.GetRequiredService<ISqlzibarAuthService>();
-            var trace = await authService.TraceResourceAccessAsync(body.PrincipalId, body.ResourceId, body.PermissionKey);
+            var trace = await authService.TraceResourceAccessAsync(body.SubjectId, body.ResourceId, body.PermissionKey);
             await context.Response.WriteAsync(JsonSerializer.Serialize(trace, JsonOptions));
             return;
         }
 
-        // Handle roles/{id}/permissions before the main switch
-        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/permissions"))
+        // Handle POST grants
+        if (endpoint.Equals("grants", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        {
+            await HandleCreateGrant(context, dbContext);
+            return;
+        }
+
+        // Handle DELETE grants/{id}
+        if (endpoint.StartsWith("grants/", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "DELETE")
+        {
+            var grantId = endpoint[7..]; // extract id after "grants/"
+            await HandleDeleteGrant(context, dbContext, grantId);
+            return;
+        }
+
+        // Handle roles/{id}/permissions (GET list)
+        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/permissions") && !endpoint.Contains("/permissions/"))
         {
             var roleId = endpoint[6..^12]; // extract id between "roles/" and "/permissions"
-            var perms = await dbContext.Set<SqlzibarRolePermission>()
-                .Include(rp => rp.Permission)
-                .Where(rp => rp.RoleId == roleId)
-                .Select(rp => new
-                {
-                    rp.Permission!.Id,
-                    rp.Permission.Key,
-                    rp.Permission.Name,
-                    rp.Permission.Description
-                })
-                .ToListAsync();
-            await context.Response.WriteAsync(JsonSerializer.Serialize(perms, JsonOptions));
+            if (context.Request.Method == "GET")
+            {
+                var perms = await dbContext.Set<SqlzibarRolePermission>()
+                    .Include(rp => rp.Permission)
+                    .Where(rp => rp.RoleId == roleId)
+                    .Select(rp => new
+                    {
+                        rp.Permission!.Id,
+                        rp.Permission.Key,
+                        rp.Permission.Name,
+                        rp.Permission.Description
+                    })
+                    .ToListAsync();
+                await context.Response.WriteAsync(JsonSerializer.Serialize(perms, JsonOptions));
+                return;
+            }
+            if (context.Request.Method == "POST")
+            {
+                await HandleAddRolePermission(context, dbContext, roleId);
+                return;
+            }
+        }
+
+        // Handle roles/{id}/permissions/{permId} (DELETE)
+        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "DELETE")
+        {
+            var parts = endpoint[6..].Split('/'); // after "roles/"
+            if (parts.Length == 3 && parts[1].Equals("permissions", StringComparison.OrdinalIgnoreCase))
+            {
+                var roleId = parts[0];
+                var permId = parts[2];
+                await HandleRemoveRolePermission(context, dbContext, roleId, permId);
+                return;
+            }
+        }
+
+        // Handle roles (POST) and roles/{id} (GET, PUT, DELETE)
+        if (endpoint.Equals("roles", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        {
+            await HandleCreateRole(context, dbContext);
+            return;
+        }
+        if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && !endpoint[6..].Contains('/'))
+        {
+            var roleId = endpoint[6..];
+            if (context.Request.Method == "GET")
+            {
+                await HandleGetRoleDetail(context, dbContext, roleId);
+                return;
+            }
+            if (context.Request.Method == "PUT")
+            {
+                await HandleUpdateRole(context, dbContext, roleId);
+                return;
+            }
+            if (context.Request.Method == "DELETE")
+            {
+                await HandleDeleteRole(context, dbContext, roleId);
+                return;
+            }
+        }
+
+        // Handle POST permissions
+        if (endpoint.Equals("permissions", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        {
+            await HandleCreatePermission(context, dbContext);
+            return;
+        }
+
+        // Handle GET schema/export
+        if (endpoint.Equals("schema/export", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "GET")
+        {
+            var seedService = scope.ServiceProvider.GetRequiredService<SqlzibarSeedService>();
+            var yaml = seedService.ExportToYaml();
+            context.Response.ContentType = "application/x-yaml";
+            context.Response.Headers.ContentDisposition = "attachment; filename=\"sqlzibar-schema.yaml\"";
+            await context.Response.WriteAsync(yaml);
+            return;
+        }
+
+        // Handle POST schema/import
+        if (endpoint.Equals("schema/import", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
+        {
+            await HandleSchemaImport(context, scope);
             return;
         }
 
@@ -135,26 +223,53 @@ public class SqlzibarDashboardMiddleware
             return;
         }
 
-        // Handle principals/{id}/grants
-        if (endpoint.StartsWith("principals/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants"))
+        // Handle resources/{id}/access
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/access") && context.Request.Method == "GET")
         {
-            var principalId = endpoint[11..^7]; // extract id between "principals/" and "/grants"
-            await HandlePrincipalGrants(context, dbContext, principalId);
+            var resourceId = endpoint[10..^7]; // extract id between "resources/" and "/access"
+            await HandleResourceAccess(context, dbContext, resourceId);
             return;
         }
 
-        // Handle principals/{id} (single principal detail) — must be after /grants check
-        if (endpoint.StartsWith("principals/", StringComparison.OrdinalIgnoreCase) && !endpoint[11..].Contains('/'))
+        // Handle resources/{id}/grants (direct grants on this resource, paginated - for hover popup)
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants") && context.Request.Method == "GET")
         {
-            var principalId = endpoint[11..];
-            await HandlePrincipalDetail(context, dbContext, principalId);
+            var resourceId = endpoint[10..^7]; // extract id between "resources/" and "/grants"
+            await HandleResourceGrants(context, dbContext, resourceId);
+            return;
+        }
+
+        // Handle resources/{id} (single resource detail) — exclude "tree" which is handled by the switch
+        if (endpoint.StartsWith("resources/", StringComparison.OrdinalIgnoreCase) && 
+            !endpoint[10..].Contains('/') && 
+            !endpoint.Equals("resources/tree", StringComparison.OrdinalIgnoreCase) &&
+            context.Request.Method == "GET")
+        {
+            var resourceId = endpoint[10..];
+            await HandleResourceDetail(context, dbContext, resourceId);
+            return;
+        }
+
+        // Handle subjects/{id}/grants
+        if (endpoint.StartsWith("subjects/", StringComparison.OrdinalIgnoreCase) && endpoint.EndsWith("/grants"))
+        {
+            var subjectId = endpoint[9..^7]; // extract id between "subjects/" and "/grants"
+            await HandleSubjectGrants(context, dbContext, subjectId);
+            return;
+        }
+
+        // Handle subjects/{id} (single subject detail) — must be after /grants check
+        if (endpoint.StartsWith("subjects/", StringComparison.OrdinalIgnoreCase) && !endpoint[9..].Contains('/'))
+        {
+            var subjectId = endpoint[9..];
+            await HandleSubjectDetail(context, dbContext, subjectId);
             return;
         }
 
         object? result = endpoint.ToLowerInvariant() switch
         {
             "resources/tree" => await GetResourceTreeAsync(dbContext, context),
-            "principals" => await GetPrincipalsAsync(dbContext, context),
+            "subjects" => await GetSubjectsAsync(dbContext, context),
             "users" => await GetUsersAsync(dbContext, context),
             "agents" => await GetAgentsAsync(dbContext, context),
             "service-accounts" => await GetServiceAccountsAsync(dbContext, context),
@@ -162,10 +277,11 @@ public class SqlzibarDashboardMiddleware
             "grants" => await GetGrantsAsync(dbContext, context),
             "roles" => await GetRolesAsync(dbContext, context),
             "permissions" => await GetPermissionsAsync(dbContext, context),
+            "resource-types" => await GetResourceTypesAsync(dbContext, context),
             "stats" => new
             {
                 Resources = await dbContext.Set<SqlzibarResource>().CountAsync(),
-                Principals = await dbContext.Set<SqlzibarPrincipal>().CountAsync(),
+                Subjects = await dbContext.Set<SqlzibarSubject>().CountAsync(),
                 Users = await dbContext.Set<SqlzibarUser>().CountAsync(),
                 Agents = await dbContext.Set<SqlzibarAgent>().CountAsync(),
                 ServiceAccounts = await dbContext.Set<SqlzibarServiceAccount>().CountAsync(),
@@ -288,68 +404,196 @@ public class SqlzibarDashboardMiddleware
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
     }
 
-    // --- Principal detail ---
-
-    private static async Task HandlePrincipalDetail(HttpContext context, ISqlzibarDbContext dbContext, string principalId)
+    private static async Task HandleResourceDetail(HttpContext context, ISqlzibarDbContext dbContext, string resourceId)
     {
-        var principal = await dbContext.Set<SqlzibarPrincipal>()
-            .Include(p => p.PrincipalType)
-            .Where(p => p.Id == principalId)
-            .Select(p => new
+        var resource = await dbContext.Set<SqlzibarResource>()
+            .Include(r => r.ResourceType)
+            .Where(r => r.Id == resourceId)
+            .Select(r => new
             {
-                p.Id, p.DisplayName, p.PrincipalTypeId,
-                PrincipalType = p.PrincipalType != null ? p.PrincipalType.Name : p.PrincipalTypeId,
-                p.OrganizationId, p.ExternalRef, p.CreatedAt, p.UpdatedAt
+                r.Id,
+                r.ParentId,
+                r.Name,
+                r.Description,
+                ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId,
+                r.ResourceTypeId,
+                r.IsActive,
+                r.CreatedAt,
+                r.UpdatedAt,
+                ChildCount = dbContext.Set<SqlzibarResource>().Count(c => c.ParentId == r.Id && c.IsActive),
+                GrantsCount = dbContext.Set<SqlzibarGrant>().Count(g => g.ResourceId == r.Id)
             })
             .FirstOrDefaultAsync();
 
-        if (principal == null)
+        if (resource == null)
         {
             context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Principal not found\"}");
+            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
             return;
         }
 
-        // Get group memberships (groups this principal belongs to)
+        // Build breadcrumb path from root to this resource
+        var breadcrumbs = new List<object>();
+        var currentId = resource.ParentId;
+        while (!string.IsNullOrEmpty(currentId))
+        {
+            var parent = await dbContext.Set<SqlzibarResource>()
+                .Where(r => r.Id == currentId)
+                .Select(r => new { r.Id, r.Name })
+                .FirstOrDefaultAsync();
+            if (parent == null) break;
+            breadcrumbs.Insert(0, parent);
+            var res = await dbContext.Set<SqlzibarResource>().Where(r => r.Id == currentId).Select(r => r.ParentId).FirstOrDefaultAsync();
+            currentId = res;
+        }
+
+        var result = new { Resource = resource, Breadcrumbs = breadcrumbs };
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
+    }
+
+    private static async Task HandleResourceAccess(HttpContext context, ISqlzibarDbContext dbContext, string resourceId)
+    {
+        var resource = await dbContext.Set<SqlzibarResource>().Where(r => r.Id == resourceId).Select(r => new { r.Id, r.ParentId }).FirstOrDefaultAsync();
+        if (resource == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
+            return;
+        }
+
+        var ancestorIds = new List<string> { resourceId };
+        var currentId = resource.ParentId;
+        while (!string.IsNullOrEmpty(currentId))
+        {
+            ancestorIds.Add(currentId);
+            var parentId = await dbContext.Set<SqlzibarResource>().Where(r => r.Id == currentId).Select(r => r.ParentId).FirstOrDefaultAsync();
+            currentId = parentId;
+        }
+
+        var grants = await dbContext.Set<SqlzibarGrant>()
+            .Include(g => g.Subject)
+            .Include(g => g.Resource)
+            .Include(g => g.Role)
+            .Where(g => ancestorIds.Contains(g.ResourceId))
+            .Select(g => new
+            {
+                SubjectId = g.SubjectId,
+                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+                RoleId = g.RoleId,
+                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+                SourceResourceId = g.ResourceId,
+                SourceResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
+                IsInherited = g.ResourceId != resourceId
+            })
+            .ToListAsync();
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(grants, JsonOptions));
+    }
+
+    // --- Resource grants (direct grants only, paginated - for hover popup) ---
+
+    private static async Task HandleResourceGrants(HttpContext context, ISqlzibarDbContext dbContext, string resourceId)
+    {
+        var page = GetIntParam(context, "page", 1);
+        var pageSize = Math.Clamp(GetIntParam(context, "pageSize", 10), 1, 50);
+
+        var query = dbContext.Set<SqlzibarGrant>()
+            .Include(g => g.Subject).ThenInclude(s => s!.SubjectType)
+            .Include(g => g.Role)
+            .Where(g => g.ResourceId == resourceId);
+
+        var total = await query.CountAsync();
+        var grants = await query
+            .OrderBy(g => g.Subject != null ? g.Subject.DisplayName : g.SubjectId)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(g => new
+            {
+                g.Id,
+                SubjectId = g.SubjectId,
+                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+                SubjectType = g.Subject != null && g.Subject.SubjectType != null ? g.Subject.SubjectType.Name : null,
+                RoleId = g.RoleId,
+                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+                g.EffectiveFrom,
+                g.EffectiveTo
+            })
+            .ToListAsync();
+
+        var result = new
+        {
+            data = grants,
+            page,
+            pageSize,
+            total,
+            totalPages = (int)Math.Ceiling((double)total / pageSize)
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
+    }
+
+    // --- Subject detail ---
+
+    private static async Task HandleSubjectDetail(HttpContext context, ISqlzibarDbContext dbContext, string subjectId)
+    {
+        var subject = await dbContext.Set<SqlzibarSubject>()
+            .Include(s => s.SubjectType)
+            .Where(s => s.Id == subjectId)
+            .Select(s => new
+            {
+                s.Id, s.DisplayName, s.SubjectTypeId,
+                SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
+                s.OrganizationId, s.ExternalRef, s.CreatedAt, s.UpdatedAt
+            })
+            .FirstOrDefaultAsync();
+
+        if (subject == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Subject not found\"}");
+            return;
+        }
+
+        // Get group memberships (groups this subject belongs to)
         var groups = await dbContext.Set<SqlzibarUserGroupMembership>()
             .Include(m => m.UserGroup)
-            .Where(m => m.PrincipalId == principalId)
+            .Where(m => m.SubjectId == subjectId)
             .Select(m => new
             {
                 m.UserGroup!.Id,
                 m.UserGroup.Name,
                 m.UserGroup.GroupType,
-                m.UserGroup.PrincipalId,
+                m.UserGroup.SubjectId,
                 m.CreatedAt
             })
             .ToListAsync();
 
-        // If this principal IS a group, get its members
+        // If this subject IS a group, get its members
         var members = await dbContext.Set<SqlzibarUserGroupMembership>()
-            .Include(m => m.Principal)
-            .Where(m => m.UserGroup != null && m.UserGroup.PrincipalId == principalId)
+            .Include(m => m.Subject)
+            .Where(m => m.UserGroup != null && m.UserGroup.SubjectId == subjectId)
             .Select(m => new
             {
-                m.Principal!.Id,
-                m.Principal.DisplayName,
-                m.Principal.PrincipalTypeId,
+                m.Subject!.Id,
+                m.Subject.DisplayName,
+                m.Subject.SubjectTypeId,
                 m.CreatedAt
             })
             .ToListAsync();
 
-        var result = new { Principal = principal, Groups = groups, Members = members };
+        var result = new { Subject = subject, Groups = groups, Members = members };
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
     }
 
-    private static async Task HandlePrincipalGrants(
-        HttpContext context, ISqlzibarDbContext dbContext, string principalId)
+    private static async Task HandleSubjectGrants(
+        HttpContext context, ISqlzibarDbContext dbContext, string subjectId)
     {
         var (page, pageSize) = GetPaginationParams(context);
 
         var query = dbContext.Set<SqlzibarGrant>()
             .Include(g => g.Resource)
             .Include(g => g.Role)
-            .Where(g => g.PrincipalId == principalId);
+            .Where(g => g.SubjectId == subjectId);
 
         var totalCount = await query.CountAsync();
         var data = await query
@@ -383,32 +627,32 @@ public class SqlzibarDashboardMiddleware
 
     // --- Paginated table endpoints ---
 
-    private static async Task<object> GetPrincipalsAsync(ISqlzibarDbContext dbContext, HttpContext context)
+    private static async Task<object> GetSubjectsAsync(ISqlzibarDbContext dbContext, HttpContext context)
     {
         var (page, pageSize) = GetPaginationParams(context);
         var type = context.Request.Query["type"].FirstOrDefault();
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlzibarPrincipal>()
-            .Include(p => p.PrincipalType)
+        var query = dbContext.Set<SqlzibarSubject>()
+            .Include(s => s.SubjectType)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(type))
-            query = query.Where(p => p.PrincipalTypeId == type);
+            query = query.Where(s => s.SubjectTypeId == type);
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(p => p.DisplayName.Contains(search) || p.Id.Contains(search));
+            query = query.Where(s => s.DisplayName.Contains(search) || s.Id.Contains(search));
 
         var totalCount = await query.CountAsync();
         var data = await query
-            .OrderBy(p => p.DisplayName)
+            .OrderBy(s => s.DisplayName)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(p => new
+            .Select(s => new
             {
-                p.Id, p.DisplayName, p.PrincipalTypeId,
-                PrincipalType = p.PrincipalType != null ? p.PrincipalType.Name : p.PrincipalTypeId,
-                p.OrganizationId, p.ExternalRef, p.CreatedAt
+                s.Id, s.DisplayName, s.SubjectTypeId,
+                SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
+                s.OrganizationId, s.ExternalRef, s.CreatedAt
             })
             .ToListAsync();
 
@@ -422,24 +666,24 @@ public class SqlzibarDashboardMiddleware
         var search = context.Request.Query["search"].FirstOrDefault();
 
         var query = dbContext.Set<SqlzibarUser>()
-            .Include(u => u.Principal)
+            .Include(u => u.Subject)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(u =>
-                (u.Principal != null && (u.Principal.DisplayName.Contains(search) || u.Principal.Id.Contains(search))) ||
+                (u.Subject != null && (u.Subject.DisplayName.Contains(search) || u.Subject.Id.Contains(search))) ||
                 (u.Email != null && u.Email.Contains(search)));
 
         var totalCount = await query.CountAsync();
         var data = await query
-            .OrderBy(u => u.Principal != null ? u.Principal.DisplayName : u.Id)
+            .OrderBy(u => u.Subject != null ? u.Subject.DisplayName : u.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(u => new
             {
                 u.Id,
-                u.PrincipalId,
-                DisplayName = u.Principal != null ? u.Principal.DisplayName : u.Id,
+                u.SubjectId,
+                DisplayName = u.Subject != null ? u.Subject.DisplayName : u.Id,
                 u.Email,
                 u.IsActive,
                 u.LastLoginAt,
@@ -457,25 +701,25 @@ public class SqlzibarDashboardMiddleware
         var search = context.Request.Query["search"].FirstOrDefault();
 
         var query = dbContext.Set<SqlzibarAgent>()
-            .Include(a => a.Principal)
+            .Include(a => a.Subject)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(a =>
-                (a.Principal != null && (a.Principal.DisplayName.Contains(search) || a.Principal.Id.Contains(search))) ||
+                (a.Subject != null && (a.Subject.DisplayName.Contains(search) || a.Subject.Id.Contains(search))) ||
                 (a.AgentType != null && a.AgentType.Contains(search)) ||
                 (a.Description != null && a.Description.Contains(search)));
 
         var totalCount = await query.CountAsync();
         var data = await query
-            .OrderBy(a => a.Principal != null ? a.Principal.DisplayName : a.Id)
+            .OrderBy(a => a.Subject != null ? a.Subject.DisplayName : a.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(a => new
             {
                 a.Id,
-                a.PrincipalId,
-                DisplayName = a.Principal != null ? a.Principal.DisplayName : a.Id,
+                a.SubjectId,
+                DisplayName = a.Subject != null ? a.Subject.DisplayName : a.Id,
                 a.AgentType,
                 a.Description,
                 a.LastRunAt,
@@ -493,25 +737,25 @@ public class SqlzibarDashboardMiddleware
         var search = context.Request.Query["search"].FirstOrDefault();
 
         var query = dbContext.Set<SqlzibarServiceAccount>()
-            .Include(s => s.Principal)
+            .Include(s => s.Subject)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(s =>
-                (s.Principal != null && (s.Principal.DisplayName.Contains(search) || s.Principal.Id.Contains(search))) ||
+                (s.Subject != null && (s.Subject.DisplayName.Contains(search) || s.Subject.Id.Contains(search))) ||
                 s.ClientId.Contains(search) ||
                 (s.Description != null && s.Description.Contains(search)));
 
         var totalCount = await query.CountAsync();
         var data = await query
-            .OrderBy(s => s.Principal != null ? s.Principal.DisplayName : s.Id)
+            .OrderBy(s => s.Subject != null ? s.Subject.DisplayName : s.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(s => new
             {
                 s.Id,
-                s.PrincipalId,
-                DisplayName = s.Principal != null ? s.Principal.DisplayName : s.Id,
+                s.SubjectId,
+                DisplayName = s.Subject != null ? s.Subject.DisplayName : s.Id,
                 s.ClientId,
                 s.Description,
                 s.LastUsedAt,
@@ -530,13 +774,13 @@ public class SqlzibarDashboardMiddleware
         var search = context.Request.Query["search"].FirstOrDefault();
 
         var query = dbContext.Set<SqlzibarUserGroup>()
-            .Include(g => g.Principal)
+            .Include(g => g.Subject)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(g =>
                 g.Name.Contains(search) ||
-                (g.Principal != null && g.Principal.DisplayName.Contains(search)) ||
+                (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
                 (g.Description != null && g.Description.Contains(search)));
 
         var totalCount = await query.CountAsync();
@@ -547,7 +791,7 @@ public class SqlzibarDashboardMiddleware
             .Select(g => new
             {
                 g.Id,
-                g.PrincipalId,
+                g.SubjectId,
                 g.Name,
                 g.Description,
                 g.GroupType,
@@ -575,7 +819,7 @@ public class SqlzibarDashboardMiddleware
         var dataWithCounts = data.Select(g => new
         {
             g.Id,
-            g.PrincipalId,
+            g.SubjectId,
             g.Name,
             g.Description,
             g.GroupType,
@@ -593,14 +837,14 @@ public class SqlzibarDashboardMiddleware
         var search = context.Request.Query["search"].FirstOrDefault();
 
         var query = dbContext.Set<SqlzibarGrant>()
-            .Include(g => g.Principal)
+            .Include(g => g.Subject)
             .Include(g => g.Resource)
             .Include(g => g.Role)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
             query = query.Where(g =>
-                (g.Principal != null && g.Principal.DisplayName.Contains(search)) ||
+                (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
                 (g.Resource != null && g.Resource.Name.Contains(search)) ||
                 (g.Role != null && g.Role.Name.Contains(search)));
 
@@ -612,8 +856,8 @@ public class SqlzibarDashboardMiddleware
             .Select(g => new
             {
                 g.Id,
-                PrincipalName = g.Principal != null ? g.Principal.DisplayName : g.PrincipalId,
-                g.PrincipalId,
+                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+                g.SubjectId,
                 ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
                 g.ResourceId,
                 RoleName = g.Role != null ? g.Role.Name : g.RoleId,
@@ -682,6 +926,28 @@ public class SqlzibarDashboardMiddleware
         return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
     }
 
+    private static async Task<object> GetResourceTypesAsync(ISqlzibarDbContext dbContext, HttpContext context)
+    {
+        var (page, pageSize) = GetPaginationParams(context);
+        var search = context.Request.Query["search"].FirstOrDefault();
+
+        var query = dbContext.Set<SqlzibarResourceType>().AsQueryable();
+
+        if (!string.IsNullOrEmpty(search))
+            query = query.Where(rt => rt.Name.Contains(search) || rt.Id.Contains(search));
+
+        var totalCount = await query.CountAsync();
+        var data = await query
+            .OrderBy(rt => rt.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(rt => new { rt.Id, Key = rt.Id, rt.Name, rt.Description })
+            .ToListAsync();
+
+        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+    }
+
     // --- Helpers ---
 
     private static (int Page, int PageSize) GetPaginationParams(HttpContext context)
@@ -739,5 +1005,330 @@ public class SqlzibarDashboardMiddleware
         _ => "application/octet-stream"
     };
 
-    private record TraceRequest(string PrincipalId, string ResourceId, string PermissionKey);
+    private static async Task HandleCreateGrant(HttpContext context, ISqlzibarDbContext dbContext)
+    {
+        var body = await JsonSerializer.DeserializeAsync<CreateGrantRequest>(context.Request.Body, JsonOptions);
+        if (body == null || string.IsNullOrEmpty(body.SubjectId) || string.IsNullOrEmpty(body.RoleId) || string.IsNullOrEmpty(body.ResourceId))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"subjectId, roleId, and resourceId are required\"}");
+            return;
+        }
+
+        var subjectExists = await dbContext.Set<SqlzibarSubject>().AnyAsync(s => s.Id == body.SubjectId);
+        if (!subjectExists)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Subject not found\"}");
+            return;
+        }
+
+        var roleExists = await dbContext.Set<SqlzibarRole>().AnyAsync(r => r.Id == body.RoleId);
+        if (!roleExists)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        var resourceExists = await dbContext.Set<SqlzibarResource>().AnyAsync(r => r.Id == body.ResourceId);
+        if (!resourceExists)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Resource not found\"}");
+            return;
+        }
+
+        var grantId = $"grant_{Guid.NewGuid():N}"[..30];
+        var grant = new SqlzibarGrant
+        {
+            Id = grantId,
+            SubjectId = body.SubjectId,
+            RoleId = body.RoleId,
+            ResourceId = body.ResourceId,
+            EffectiveFrom = body.EffectiveFrom,
+            EffectiveTo = body.EffectiveTo,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        dbContext.Set<SqlzibarGrant>().Add(grant);
+        await dbContext.SaveChangesAsync();
+
+        var created = await dbContext.Set<SqlzibarGrant>()
+            .Include(g => g.Subject)
+            .Include(g => g.Resource)
+            .Include(g => g.Role)
+            .Where(g => g.Id == grantId)
+            .Select(g => new
+            {
+                g.Id,
+                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+                g.SubjectId,
+                ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
+                g.ResourceId,
+                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+                g.RoleId,
+                g.EffectiveFrom, g.EffectiveTo, g.CreatedAt
+            })
+            .FirstOrDefaultAsync();
+
+        context.Response.StatusCode = 201;
+        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
+    }
+
+    private static async Task HandleDeleteGrant(HttpContext context, ISqlzibarDbContext dbContext, string grantId)
+    {
+        var grant = await dbContext.Set<SqlzibarGrant>().FirstOrDefaultAsync(g => g.Id == grantId);
+        if (grant == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Grant not found\"}");
+            return;
+        }
+
+        dbContext.Set<SqlzibarGrant>().Remove(grant);
+        await dbContext.SaveChangesAsync();
+
+        context.Response.StatusCode = 204;
+    }
+
+    private static async Task HandleAddRolePermission(HttpContext context, ISqlzibarDbContext dbContext, string roleId)
+    {
+        var body = await JsonSerializer.DeserializeAsync<AddRolePermissionRequest>(context.Request.Body, JsonOptions);
+        if (body == null || string.IsNullOrEmpty(body.PermissionId))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"permissionId is required\"}");
+            return;
+        }
+
+        var roleExists = await dbContext.Set<SqlzibarRole>().AnyAsync(r => r.Id == roleId);
+        if (!roleExists)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        var permExists = await dbContext.Set<SqlzibarPermission>().AnyAsync(p => p.Id == body.PermissionId);
+        if (!permExists)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Permission not found\"}");
+            return;
+        }
+
+        var exists = await dbContext.Set<SqlzibarRolePermission>()
+            .AnyAsync(rp => rp.RoleId == roleId && rp.PermissionId == body.PermissionId);
+        if (exists)
+        {
+            context.Response.StatusCode = 409;
+            await context.Response.WriteAsync("{\"error\":\"Permission already in role\"}");
+            return;
+        }
+
+        dbContext.Set<SqlzibarRolePermission>().Add(new SqlzibarRolePermission
+        {
+            RoleId = roleId,
+            PermissionId = body.PermissionId
+        });
+        await dbContext.SaveChangesAsync();
+
+        context.Response.StatusCode = 204;
+    }
+
+    private static async Task HandleRemoveRolePermission(HttpContext context, ISqlzibarDbContext dbContext, string roleId, string permId)
+    {
+        var rp = await dbContext.Set<SqlzibarRolePermission>()
+            .FirstOrDefaultAsync(x => x.RoleId == roleId && x.PermissionId == permId);
+        if (rp == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Role-permission link not found\"}");
+            return;
+        }
+
+        dbContext.Set<SqlzibarRolePermission>().Remove(rp);
+        await dbContext.SaveChangesAsync();
+
+        context.Response.StatusCode = 204;
+    }
+
+    private static async Task HandleGetRoleDetail(HttpContext context, ISqlzibarDbContext dbContext, string roleId)
+    {
+        var role = await dbContext.Set<SqlzibarRole>()
+            .Include(r => r.RolePermissions)
+            .Where(r => r.Id == roleId)
+            .Select(r => new
+            {
+                r.Id, r.Key, r.Name, r.Description, r.IsVirtual,
+                PermissionCount = r.RolePermissions.Count
+            })
+            .FirstOrDefaultAsync();
+
+        if (role == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(role, JsonOptions));
+    }
+
+    private static async Task HandleCreateRole(HttpContext context, ISqlzibarDbContext dbContext)
+    {
+        var body = await JsonSerializer.DeserializeAsync<CreateRoleRequest>(context.Request.Body, JsonOptions);
+        if (body == null || string.IsNullOrEmpty(body.Key) || string.IsNullOrEmpty(body.Name))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
+            return;
+        }
+
+        var roleId = $"role_{Guid.NewGuid():N}"[..30];
+        var role = new SqlzibarRole
+        {
+            Id = roleId,
+            Key = body.Key,
+            Name = body.Name,
+            Description = body.Description,
+            IsVirtual = body.IsVirtual ?? false
+        };
+        dbContext.Set<SqlzibarRole>().Add(role);
+        await dbContext.SaveChangesAsync();
+
+        var created = await dbContext.Set<SqlzibarRole>()
+            .Where(r => r.Id == roleId)
+            .Select(r => new { r.Id, r.Key, r.Name, r.Description, r.IsVirtual, PermissionCount = 0 })
+            .FirstOrDefaultAsync();
+
+        context.Response.StatusCode = 201;
+        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
+    }
+
+    private static async Task HandleUpdateRole(HttpContext context, ISqlzibarDbContext dbContext, string roleId)
+    {
+        var role = await dbContext.Set<SqlzibarRole>().FirstOrDefaultAsync(r => r.Id == roleId);
+        if (role == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        var body = await JsonSerializer.DeserializeAsync<UpdateRoleRequest>(context.Request.Body, JsonOptions);
+        if (body == null)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Invalid body\"}");
+            return;
+        }
+
+        if (body.Name != null) role.Name = body.Name;
+        if (body.Description != null) role.Description = body.Description;
+        if (body.IsVirtual.HasValue) role.IsVirtual = body.IsVirtual.Value;
+
+        await dbContext.SaveChangesAsync();
+
+        var updated = await dbContext.Set<SqlzibarRole>()
+            .Where(r => r.Id == roleId)
+            .Select(r => new { r.Id, r.Key, r.Name, r.Description, r.IsVirtual, PermissionCount = r.RolePermissions.Count })
+            .FirstOrDefaultAsync();
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(updated, JsonOptions));
+    }
+
+    private static async Task HandleDeleteRole(HttpContext context, ISqlzibarDbContext dbContext, string roleId)
+    {
+        var role = await dbContext.Set<SqlzibarRole>()
+            .Include(r => r.Grants)
+            .Include(r => r.RolePermissions)
+            .FirstOrDefaultAsync(r => r.Id == roleId);
+        if (role == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        if (role.Grants.Count > 0)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"Cannot delete role with existing grants. Revoke grants first.\"}");
+            return;
+        }
+
+        dbContext.Set<SqlzibarRolePermission>().RemoveRange(role.RolePermissions);
+        dbContext.Set<SqlzibarRole>().Remove(role);
+        await dbContext.SaveChangesAsync();
+
+        context.Response.StatusCode = 204;
+    }
+
+    private static async Task HandleCreatePermission(HttpContext context, ISqlzibarDbContext dbContext)
+    {
+        var body = await JsonSerializer.DeserializeAsync<CreatePermissionRequest>(context.Request.Body, JsonOptions);
+        if (body == null || string.IsNullOrEmpty(body.Key) || string.IsNullOrEmpty(body.Name))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
+            return;
+        }
+
+        var permId = $"perm_{Guid.NewGuid():N}"[..30];
+        var perm = new SqlzibarPermission
+        {
+            Id = permId,
+            Key = body.Key,
+            Name = body.Name,
+            Description = body.Description,
+            ResourceTypeId = body.ResourceTypeId
+        };
+        dbContext.Set<SqlzibarPermission>().Add(perm);
+        await dbContext.SaveChangesAsync();
+
+        var created = await dbContext.Set<SqlzibarPermission>()
+            .Include(p => p.ResourceType)
+            .Where(p => p.Id == permId)
+            .Select(p => new { p.Id, p.Key, p.Name, p.Description, ResourceType = p.ResourceType != null ? p.ResourceType.Name : (string?)null })
+            .FirstOrDefaultAsync();
+
+        context.Response.StatusCode = 201;
+        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
+    }
+
+    private static async Task HandleSchemaImport(HttpContext context, IServiceScope scope)
+    {
+        try
+        {
+            using var reader = new StreamReader(context.Request.Body);
+            var yaml = await reader.ReadToEndAsync();
+
+            if (string.IsNullOrWhiteSpace(yaml))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = "Request body is empty" }, JsonOptions));
+                return;
+            }
+
+            var seedService = scope.ServiceProvider.GetRequiredService<SqlzibarSeedService>();
+            await seedService.SeedFromYamlAsync(yaml);
+
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { success = true, message = "Schema imported successfully" }, JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
+        }
+    }
+
+    private record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);
+    private record CreateGrantRequest(string SubjectId, string RoleId, string ResourceId, DateTime? EffectiveFrom, DateTime? EffectiveTo);
+    private record AddRolePermissionRequest(string PermissionId);
+    private record CreateRoleRequest(string Key, string Name, string? Description, bool? IsVirtual);
+    private record UpdateRoleRequest(string? Name, string? Description, bool? IsVirtual);
+    private record CreatePermissionRequest(string Key, string Name, string? Description, string? ResourceTypeId);
 }

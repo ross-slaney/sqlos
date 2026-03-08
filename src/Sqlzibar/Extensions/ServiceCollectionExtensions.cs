@@ -23,13 +23,14 @@ public static class ServiceCollectionExtensions
             o.RootResourceName = options.RootResourceName;
             o.InitializeFunctions = options.InitializeFunctions;
             o.SeedCoreData = options.SeedCoreData;
+            o.SchemaYamlPath = options.SchemaYamlPath;
             o.DashboardPathPrefix = options.DashboardPathPrefix;
             o.TableNames = options.TableNames;
         });
 
         services.AddScoped<ISqlzibarDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlzibarAuthService, SqlzibarAuthService>();
-        services.AddScoped<ISqlzibarPrincipalService, SqlzibarPrincipalService>();
+        services.AddScoped<ISqlzibarSubjectService, SqlzibarSubjectService>();
         services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();
         services.AddScoped<SqlzibarSeedService>();
         services.AddScoped<SqlzibarFunctionInitializer>();

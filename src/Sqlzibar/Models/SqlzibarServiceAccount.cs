@@ -6,7 +6,7 @@ namespace Sqlzibar.Models;
 public class SqlzibarServiceAccount
 {
     public string Id { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
+    public string SubjectId { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecretHash { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -16,5 +16,5 @@ public class SqlzibarServiceAccount
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public SqlzibarPrincipal? Principal { get; set; }
+    public SqlzibarSubject? Subject { get; set; }
 }

@@ -1,12 +1,12 @@
 namespace Sqlzibar.Models;
 
 /// <summary>
-/// Automated agent principal (job, worker, AI).
+/// Automated agent subject (job, worker, AI).
 /// </summary>
 public class SqlzibarAgent
 {
     public string Id { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
+    public string SubjectId { get; set; } = string.Empty;
     public string? AgentType { get; set; }
     public string? Description { get; set; }
     public DateTime? LastRunAt { get; set; }
@@ -14,5 +14,5 @@ public class SqlzibarAgent
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public SqlzibarPrincipal? Principal { get; set; }
+    public SqlzibarSubject? Subject { get; set; }
 }
