@@ -1,0 +1,92 @@
+body {
+    margin: 0;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, #f7f7f1 0%, #ebe8dc 100%);
+    color: #1f2419;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    padding: 24px 28px;
+    background: #293126;
+    color: #f3f1e8;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 34px;
+}
+
+header p {
+    margin: 6px 0 0;
+    opacity: 0.8;
+}
+
+header input {
+    width: 280px;
+}
+
+main {
+    padding: 24px;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+}
+
+.panel {
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(41, 49, 38, 0.15);
+    border-radius: 18px;
+    box-shadow: 0 14px 32px rgba(41, 49, 38, 0.08);
+    padding: 18px;
+    margin-bottom: 18px;
+}
+
+form {
+    display: grid;
+    gap: 10px;
+}
+
+input,
+textarea,
+button {
+    font: inherit;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(41, 49, 38, 0.2);
+}
+
+textarea {
+    min-height: 110px;
+}
+
+button {
+    background: #53624b;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+}
+
+.list-item {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(41, 49, 38, 0.1);
+}
+
+.list-item:last-child {
+    border-bottom: none;
+}
+
+.callout {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(83, 98, 75, 0.1);
+    border: 1px solid rgba(83, 98, 75, 0.2);
+    display: grid;
+    gap: 8px;
+}

@@ -1,49 +1,31 @@
 # Testing
 
-## Unit Tests (InMemory)
+The repo now has one shared test tree:
 
-For unit tests with EF Core InMemory provider, use the overload **without** `GetType()` to skip TVF registration (TVFs require real SQL Server):
+- `tests/SqlOS.Tests`
+- `tests/SqlOS.IntegrationTests`
+- `tests/SqlOS.IntegrationTests.AppHost`
+- `examples/SqlOS.Example.Tests`
+- `examples/SqlOS.Example.IntegrationTests`
+- `tests/SqlOS.Benchmarks`
 
-```csharp
-protected override void OnModelCreating(ModelBuilder modelBuilder)
-{
-    modelBuilder.ApplySqlzibarModel(); // No GetType() — skips TVF registration
-}
-```
-
-## Integration Tests (Real SQL Server)
-
-Sqlzibar's integration tests use .NET Aspire to spin up a real SQL Server container. The `TestSqlzibarDbContext` uses the full registration including TVF:
-
-```csharp
-public class TestSqlzibarDbContext : DbContext, ISqlzibarDbContext
-{
-    public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
-        string resourceId, string subjectIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.ApplySqlzibarModel(GetType()); // With TVF registration
-    }
-}
-```
-
-## Running Tests
-
-**Docker must be running** for integration tests. Aspire spins up a SQL Server Linux container automatically — no manual setup required.
+## Run Everything
 
 ```bash
-# Unit tests (no Docker needed)
-dotnet test tests/Sqlzibar.Tests/
-
-# Integration tests (requires Docker)
-dotnet test tests/Sqlzibar.IntegrationTests/
-
-# Example project unit tests (no Docker needed)
-dotnet test examples/Sqlzibar.Example.Tests/
-
-# Example project integration tests (requires Docker)
-dotnet test examples/Sqlzibar.Example.IntegrationTests/
+dotnet test SqlOS.sln
 ```
+
+## Real SQL Coverage
+
+The integration suites use Aspire plus a real SQL Server container.
+
+That covers:
+- auth schema bootstrap
+- FGA schema bootstrap and TVF registration
+- auth flows
+- FGA checks and query composition
+- shared example API and web flows
+
+## Coverage Settings
+
+Coverage filters live in `tests/coverlet.runsettings`.

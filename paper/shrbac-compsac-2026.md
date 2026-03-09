@@ -337,9 +337,9 @@ AND p.Id > @cursor
 ORDER BY p.Id
 ```
 
-Point checks use the same TVF against a single ResourceId. Query plans verified to use nested loops with index seeks on the `Products(Id)` clustered index and `SqlzibarResources(Id)` primary key.
+Point checks use the same TVF against a single ResourceId. Query plans verified to use nested loops with index seeks on the `Products(Id)` clustered index and `SqlOSResources(Id)` primary key.
 
-**Schema.** The Sqlzibar schema (SqlzibarResources, SqlzibarGrants, SqlzibarRolePermissions, SqlzibarPrincipals, etc.) is created fresh for each benchmark configuration. Domain tables (Chains, Regions, Stores, Products, and for D = 10: Divisions, Districts, Areas, Zones, Departments, Sections) are created alongside, each with a `ResourceId` foreign key to the resource tree and a nonclustered index on `ResourceId`.
+**Schema.** The SqlOS schema (SqlOSResources, SqlOSGrants, SqlOSRolePermissions, SqlOSPrincipals, etc.) is created fresh for each benchmark configuration. Domain tables (Chains, Regions, Stores, Products, and for D = 10: Divisions, Districts, Areas, Zones, Departments, Sections) are created alongside, each with a `ResourceId` foreign key to the resource tree and a nonclustered index on `ResourceId`.
 
 **D = 5 hierarchy** (Benchmarks 8–10): root → 15 chains → 150 regions → 15,000 stores → 1,200,000 products = **1,215,166 resources**. Branching: 15 × 10 × 100 × 80. Principals at four scope levels: company admin (all 1.2M products), chain manager (~80K), region manager (~8K), store manager (~80). Each principal resolves to M = 3 identities (user + 2 groups).
 

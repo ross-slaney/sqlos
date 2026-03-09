@@ -2,7 +2,7 @@
 title: "Row-Level Security with EF Core and SQL Server TVFs"
 description: "Implement database-level authorization filtering using Table-Valued Functions for maximum security and performance."
 date: "2026-03-05"
-author: "Sqlzibar Team"
+author: "SqlOS Team"
 tags: ["EF Core", "SQL Server", "Security", "Performance"]
 ---
 
@@ -72,18 +72,18 @@ This function:
 First, tell EF Core about the TVF. The key insight is using `FromExpression` to map a C# method to the SQL function:
 
 ```csharp
-public class AppDbContext : DbContext, ISqlzibarDbContext
+public class AppDbContext : DbContext, ISqlOSDbContext
 {
     public DbSet<Document> Documents => Set<Document>();
     
-    public IQueryable<SqlzibarAccessibleResource> IsResourceAccessible(
+    public IQueryable<SqlOSAccessibleResource> IsResourceAccessible(
         string resourceId, string subjectIds, string permissionId)
         => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.ApplySqlzibarModel(GetType());
+        modelBuilder.ApplySqlOSModel(GetType());
     }
 }
 ```
@@ -112,7 +112,7 @@ CROSS APPLY dbo.fn_IsResourceAccessible(d.ResourceId, @p0, @p1) acc
 
 ### Step 3: Use the Specification Executor
 
-For real applications, Sqlzibar provides a higher-level API that handles pagination, sorting, and authorization in one call:
+For real applications, SqlOS provides a higher-level API that handles pagination, sorting, and authorization in one call:
 
 ```csharp
 var spec = PagedSpec.For<Document>(d => d.Id)

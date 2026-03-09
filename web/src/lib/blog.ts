@@ -48,7 +48,7 @@ export function getAllPosts(): BlogPost[] {
         title: data.title || slug,
         description: data.description || "",
         date: data.date || new Date().toISOString(),
-        author: data.author || "Sqlzibar Team",
+        author: data.author || "SqlOS Team",
         tags: data.tags || [],
         content,
       };
@@ -103,7 +103,7 @@ export function getPostBySlug(slug: string): BlogPost | null {
     title: data.title || slug,
     description: data.description || "",
     date: data.date || new Date().toISOString(),
-    author: data.author || "Sqlzibar Team",
+    author: data.author || "SqlOS Team",
     tags: data.tags || [],
     content,
   };

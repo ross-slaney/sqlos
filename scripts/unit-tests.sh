@@ -5,7 +5,7 @@ echo "=== Running Unit Tests ==="
 
 mkdir -p TestResults/Unit
 
-dotnet test tests/Sqlzibar.Tests/Sqlzibar.Tests.csproj \
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
     --configuration Release \
     --no-build \
     --collect:"XPlat Code Coverage" \
@@ -14,7 +14,7 @@ dotnet test tests/Sqlzibar.Tests/Sqlzibar.Tests.csproj \
     --logger "console;verbosity=normal" \
     --logger "trx;LogFileName=UnitTests.trx"
 
-dotnet test examples/Sqlzibar.Example.Tests/Sqlzibar.Example.Tests.csproj \
+dotnet test examples/SqlOS.Example.Tests/SqlOS.Example.Tests.csproj \
     --configuration Release \
     --no-build \
     --collect:"XPlat Code Coverage" \

@@ -1,0 +1,134 @@
+using System.Security.Claims;
+
+namespace SqlOS.AuthServer.Contracts;
+
+public sealed record SqlOSOrganizationOption(string Id, string Slug, string Name, string Role);
+
+public sealed record SqlOSTokenResponse(
+    string AccessToken,
+    string RefreshToken,
+    string SessionId,
+    string ClientId,
+    string? OrganizationId,
+    DateTime AccessTokenExpiresAt,
+    DateTime RefreshTokenExpiresAt);
+
+public sealed record SqlOSLoginResult(
+    bool RequiresOrganizationSelection,
+    string? PendingAuthToken,
+    IReadOnlyList<SqlOSOrganizationOption> Organizations,
+    SqlOSTokenResponse? Tokens);
+
+public sealed record SqlOSValidatedToken(
+    ClaimsPrincipal Principal,
+    string SessionId,
+    string? UserId,
+    string? OrganizationId,
+    string? ClientId);
+
+public sealed record SqlOSSignupRequest(
+    string DisplayName,
+    string Email,
+    string Password,
+    string? OrganizationName,
+    string? ClientId,
+    string? OrganizationId);
+
+public sealed record SqlOSPasswordLoginRequest(
+    string Email,
+    string Password,
+    string? ClientId,
+    string? OrganizationId);
+
+public sealed record SqlOSSelectOrganizationRequest(
+    string PendingAuthToken,
+    string OrganizationId);
+
+public sealed record SqlOSRefreshRequest(
+    string RefreshToken,
+    string? OrganizationId);
+
+public sealed record SqlOSExchangeCodeRequest(
+    string Code,
+    string ClientId);
+
+public sealed record SqlOSForgotPasswordRequest(string Email);
+
+public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
+
+public sealed record SqlOSCreateVerificationTokenRequest(string Email);
+
+public sealed record SqlOSVerifyEmailRequest(string Token);
+
+public sealed record SqlOSCreateOrganizationRequest(string Name, string? Slug, string? PrimaryDomain = null);
+
+public sealed record SqlOSCreateMembershipRequest(string UserId, string Role);
+
+public sealed record SqlOSCreateUserRequest(string DisplayName, string Email, string? Password);
+
+public sealed record SqlOSCreateClientRequest(string ClientId, string Name, string Audience, List<string> RedirectUris);
+
+public sealed record SqlOSCreateSsoConnectionRequest(
+    string OrganizationId,
+    string DisplayName,
+    string IdentityProviderEntityId,
+    string SingleSignOnUrl,
+    string X509CertificatePem,
+    bool AutoProvisionUsers,
+    bool AutoLinkByEmail,
+    string? EmailAttributeName,
+    string? FirstNameAttributeName,
+    string? LastNameAttributeName);
+
+public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
+
+public sealed record SqlOSCreateWorkspaceRequest(string Name);
+
+public sealed record SqlOSHomeRealmDiscoveryRequest(string Email);
+
+public sealed record SqlOSHomeRealmDiscoveryResult(
+    string Mode,
+    string? OrganizationId,
+    string? OrganizationName,
+    string? PrimaryDomain,
+    string? ConnectionId);
+
+public sealed record SqlOSCreateSsoConnectionDraftRequest(
+    string OrganizationId,
+    string DisplayName,
+    string? PrimaryDomain,
+    bool AutoProvisionUsers,
+    bool AutoLinkByEmail);
+
+public sealed record SqlOSImportSsoMetadataRequest(string MetadataXml);
+
+public sealed record SqlOSSsoAuthorizationStartRequest(
+    string Email,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string CodeChallenge,
+    string CodeChallengeMethod);
+
+public sealed record SqlOSSsoAuthorizationStartResult(
+    string AuthorizationUrl,
+    string OrganizationId,
+    string OrganizationName,
+    string PrimaryDomain);
+
+public sealed record SqlOSPkceExchangeRequest(
+    string Code,
+    string ClientId,
+    string RedirectUri,
+    string CodeVerifier);
+
+public sealed record SqlOSSecuritySettingsDto(
+    int RefreshTokenLifetimeMinutes,
+    int SessionIdleTimeoutMinutes,
+    int SessionAbsoluteLifetimeMinutes,
+    DateTime UpdatedAt);
+
+public sealed record SqlOSUpdateSecuritySettingsRequest(
+    int RefreshTokenLifetimeMinutes,
+    int SessionIdleTimeoutMinutes,
+    int SessionAbsoluteLifetimeMinutes);

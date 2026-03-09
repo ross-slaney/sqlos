@@ -21,7 +21,7 @@ export async function generateMetadata({ params }: PageProps) {
   }
 
   return {
-    title: `${post.title} - Sqlzibar Blog`,
+    title: `${post.title} - SqlOS Blog`,
     description: post.description,
   };
 }

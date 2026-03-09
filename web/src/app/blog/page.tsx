@@ -2,9 +2,9 @@ import Link from "next/link";
 import { getPaginatedPosts } from "@/lib/blog";
 
 export const metadata = {
-  title: "Blog - Sqlzibar",
+  title: "Blog - SqlOS",
   description:
-    "Articles about authorization, RBAC, and building secure .NET applications.",
+    "Notes on embedded auth, hierarchical authorization, EF Core, and SQL-backed application security.",
 };
 
 const PAGE_SIZE = 5;
@@ -28,8 +28,8 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
     <div className="mx-auto max-w-4xl px-6 py-16">
       <h1 className="text-4xl font-bold text-zinc-900 dark:text-white">Blog</h1>
       <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
-        Articles about authorization, RBAC, and building secure .NET
-        applications.
+        Notes on embedded auth, hierarchical authorization, EF Core, and
+        practical .NET application security.
       </p>
 
       {/* Pagination controls - always at top, always visible */}

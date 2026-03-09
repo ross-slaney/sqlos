@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "SqlOS.Example.AppHost": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_URLS": "https://localhost:18888",
+        "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "http://localhost:18889",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true"
+      }
+    }
+  }
+}

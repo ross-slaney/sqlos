@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SqlOS Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div>
+            <h1>SqlOS</h1>
+            <p>Embedded identity, sessions, organizations, and SSO.</p>
+        </div>
+    </header>
+    <main>
+        <section id="stats" class="panel"></section>
+        <section class="panel">
+            <h2>Create Organization</h2>
+            <form id="create-org-form">
+                <input name="name" placeholder="Organization name" required>
+                <input name="slug" placeholder="Slug (optional)">
+                <input name="primaryDomain" placeholder="Primary domain (optional)">
+                <button type="submit">Create</button>
+            </form>
+        </section>
+        <section class="panel">
+            <h2>Create User</h2>
+            <form id="create-user-form">
+                <input name="displayName" placeholder="Display name" required>
+                <input name="email" placeholder="Email" required>
+                <input name="password" type="password" placeholder="Password">
+                <button type="submit">Create</button>
+            </form>
+        </section>
+        <section class="panel">
+            <h2>Create Membership</h2>
+            <form id="create-membership-form">
+                <input name="organizationId" placeholder="Organization ID" required>
+                <input name="userId" placeholder="User ID" required>
+                <input name="role" placeholder="Role" value="member" required>
+                <button type="submit">Create</button>
+            </form>
+        </section>
+        <section class="panel">
+            <h2>Create Client</h2>
+            <form id="create-client-form">
+                <input name="clientId" placeholder="Client ID" required>
+                <input name="name" placeholder="Name" required>
+                <input name="audience" placeholder="Audience" value="sqlos">
+                <textarea name="redirectUris" placeholder="One redirect URI per line"></textarea>
+                <button type="submit">Create</button>
+            </form>
+        </section>
+        <section class="panel">
+            <h2>Security Settings</h2>
+            <form id="security-settings-form">
+                <input name="refreshTokenLifetimeMinutes" type="number" min="1" placeholder="Refresh token lifetime (minutes)" required>
+                <input name="sessionIdleTimeoutMinutes" type="number" min="1" placeholder="Session idle timeout (minutes)" required>
+                <input name="sessionAbsoluteLifetimeMinutes" type="number" min="1" placeholder="Session absolute lifetime (minutes)" required>
+                <button type="submit">Save settings</button>
+            </form>
+        </section>
+        <section class="panel">
+            <h2>Create SSO Draft</h2>
+            <form id="create-sso-draft-form">
+                <input name="organizationId" placeholder="Organization ID" required>
+                <input name="displayName" placeholder="Display name" required>
+                <input name="primaryDomain" placeholder="Primary domain (example.com)">
+                <label><input type="checkbox" name="autoProvisionUsers" checked> Auto provision users</label>
+                <label><input type="checkbox" name="autoLinkByEmail"> Auto link by email</label>
+                <button type="submit">Create draft</button>
+            </form>
+            <div id="sso-setup-result" class="callout"></div>
+        </section>
+        <section class="panel">
+            <h2>Import Entra Metadata</h2>
+            <form id="import-sso-metadata-form">
+                <input name="connectionId" placeholder="Connection ID" required>
+                <textarea name="metadataXml" placeholder="Paste the Entra federation metadata XML" required></textarea>
+                <button type="submit">Import metadata</button>
+            </form>
+        </section>
+        <div class="grid">
+            <section class="panel"><h2>Organizations</h2><div id="organizations"></div></section>
+            <section class="panel"><h2>Users</h2><div id="users"></div></section>
+            <section class="panel"><h2>Memberships</h2><div id="memberships"></div></section>
+            <section class="panel"><h2>Clients</h2><div id="clients"></div></section>
+            <section class="panel"><h2>SAML Connections</h2><div id="sso-connections"></div></section>
+            <section class="panel"><h2>Sessions</h2><div id="sessions"></div></section>
+            <section class="panel"><h2>Audit Events</h2><div id="audit-events"></div></section>
+        </div>
+    </main>
+    <script src="app.js"></script>
+</body>
+</html>

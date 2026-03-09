@@ -5,7 +5,7 @@ echo "=== Running Integration Tests ==="
 
 mkdir -p TestResults/Integration
 
-dotnet test tests/Sqlzibar.IntegrationTests/Sqlzibar.IntegrationTests.csproj \
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
     --configuration Release \
     --no-build \
     --collect:"XPlat Code Coverage" \
@@ -14,7 +14,7 @@ dotnet test tests/Sqlzibar.IntegrationTests/Sqlzibar.IntegrationTests.csproj \
     --logger "console;verbosity=normal" \
     --logger "trx;LogFileName=IntegrationTests.trx"
 
-dotnet test examples/Sqlzibar.Example.IntegrationTests/Sqlzibar.Example.IntegrationTests.csproj \
+dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj \
     --configuration Release \
     --no-build \
     --collect:"XPlat Code Coverage" \

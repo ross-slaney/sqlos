@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sqlzibar - Hierarchical RBAC for .NET",
+  title: "SqlOS - Embedded Auth And Authorization For .NET",
   description:
-    "Hierarchical role-based access control for .NET applications. Built for EF Core and SQL Server with TVF-based row-level security.",
+    "Open source embedded auth and authorization for .NET apps, with AuthServer and Fga modules, shared example code, and SQL-backed tests.",
 };
 
 export default function RootLayout({
