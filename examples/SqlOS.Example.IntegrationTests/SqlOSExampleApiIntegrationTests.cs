@@ -168,6 +168,20 @@ public sealed class SqlOSExampleApiIntegrationTests
         content.Should().Contain("organizations");
     }
 
+    [DataTestMethod]
+    [DataRow("/sqlos/")]
+    [DataRow("/sqlos/admin/auth/organizations")]
+    [DataRow("/sqlos/admin/auth/clients")]
+    [DataRow("/sqlos/admin/fga/resources")]
+    public async Task DashboardShell_PageRoutes_Render(string path)
+    {
+        var response = await ExampleApiFixture.Client.GetAsync(path);
+
+        response.EnsureSuccessStatusCode();
+        var html = await response.Content.ReadAsStringAsync();
+        html.Should().Contain("SqlOS Dashboard");
+    }
+
     private static async Task<HttpResponseMessage> AdminPostAsync(string path, object body)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path)

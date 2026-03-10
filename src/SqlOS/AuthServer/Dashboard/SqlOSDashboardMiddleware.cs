@@ -58,6 +58,14 @@ public sealed class SqlOSDashboardMiddleware
             return;
         }
 
+        var embedMode = string.Equals(context.Request.Query["embed"], "1", StringComparison.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(relativePath) && !embedMode)
+        {
+            context.Response.Redirect($"{GetDashboardShellPrefix()}admin/auth/overview", false);
+            return;
+        }
+
         if (string.IsNullOrEmpty(relativePath) && !path.EndsWith('/'))
         {
             context.Response.Redirect($"{_pathPrefix}/", false);
@@ -74,6 +82,14 @@ public sealed class SqlOSDashboardMiddleware
         context.Response.ContentType = GetContentType(file.Name);
         await using var stream = file.CreateReadStream();
         await stream.CopyToAsync(context.Response.Body);
+    }
+
+    private string GetDashboardShellPrefix()
+    {
+        var suffix = "/admin/auth";
+        return _pathPrefix.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? _pathPrefix[..^suffix.Length] + "/"
+            : $"{_pathPrefix}/";
     }
 
     private static string GetContentType(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch

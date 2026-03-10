@@ -1,6 +1,7 @@
 # Example App
 
 The shared example demonstrates the merged runtime end to end:
+
 - local password login
 - org membership
 - SAML SSO initiation and callback flow
@@ -39,3 +40,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 3. Confirm `/app` shows session and token debug data.
 4. Create and list workspaces through the protected app flow.
 5. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+
+For a customer-tenant SAML walkthrough with Microsoft Entra ID, use:
+
+- [Entra SSO Testing](ENTRA_SSO.md)

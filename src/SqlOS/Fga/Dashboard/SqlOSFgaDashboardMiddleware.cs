@@ -67,6 +67,13 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         var relativePath = path[_pathPrefix.Length..].TrimStart('/');
+        var embedMode = string.Equals(context.Request.Query["embed"], "1", StringComparison.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(relativePath) && !embedMode)
+        {
+            context.Response.Redirect($"{GetDashboardShellPrefix()}admin/fga/resources", permanent: false);
+            return;
+        }
 
         // Redirect /sqlzibar to /sqlzibar/ so relative paths (style.css, app.js) resolve correctly
         if (string.IsNullOrEmpty(relativePath) && !path.EndsWith('/'))
@@ -991,6 +998,14 @@ public class SqlOSFgaDashboardMiddleware
 
         await using var stream = fileInfo.CreateReadStream();
         await stream.CopyToAsync(context.Response.Body);
+    }
+
+    private string GetDashboardShellPrefix()
+    {
+        var suffix = "/admin/fga";
+        return _pathPrefix.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? _pathPrefix[..^suffix.Length] + "/"
+            : $"{_pathPrefix}/";
     }
 
     private static string GetContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

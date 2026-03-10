@@ -1,6 +1,22 @@
 const statsElement = document.getElementById("stats");
 const setupResultElement = document.getElementById("sso-setup-result");
 const adminApiBasePath = "/sqlos/admin/auth/api";
+const embedMode = new URLSearchParams(window.location.search).get("embed") === "1";
+const sectionMap = {
+  overview: "section-overview",
+  organizations: "section-organizations",
+  users: "section-users",
+  memberships: "section-memberships",
+  clients: "section-clients",
+  sso: "section-sso",
+  security: "section-security",
+  sessions: "section-sessions",
+  audit: "section-audit"
+};
+
+if (embedMode) {
+  document.body.classList.add("embed-mode");
+}
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -104,6 +120,17 @@ function renderDashboardUnavailable(err) {
     <h2>Dashboard unavailable</h2>
     <p>${message}</p>
   `;
+}
+
+function scrollToCurrentSection() {
+  const sectionKey = window.location.hash.replace(/^#/, "") || "overview";
+  const sectionId = sectionMap[sectionKey];
+  if (!sectionId) {
+    return;
+  }
+
+  const element = document.getElementById(sectionId);
+  element?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 document.getElementById("create-org-form").addEventListener("submit", async (event) => {
@@ -219,6 +246,12 @@ document.getElementById("import-sso-metadata-form").addEventListener("submit", a
   await refresh();
 });
 
-refresh().catch(err => {
+window.addEventListener("hashchange", () => {
+  scrollToCurrentSection();
+});
+
+refresh().then(() => {
+  scrollToCurrentSection();
+}).catch(err => {
   renderDashboardUnavailable(err);
 });

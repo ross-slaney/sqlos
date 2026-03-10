@@ -39,6 +39,14 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: var(--font-sans); background: var(--zinc-100); color: var(--zinc-800); font-size: 0.875rem; line-height: 1.5; }
 
+body.embed-mode { background: transparent; }
+body.embed-mode .layout { grid-template-columns: 1fr; min-height: auto; }
+body.embed-mode .sidebar,
+body.embed-mode .topbar { display: none; }
+body.embed-mode main { padding: 0; max-width: none; }
+body.embed-mode .card,
+body.embed-mode .stat-card { box-shadow: none; }
+
 /* ── Layout ── */
 .layout { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
 .main-wrapper { min-width: 0; }

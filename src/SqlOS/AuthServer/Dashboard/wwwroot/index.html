@@ -14,8 +14,10 @@
         </div>
     </header>
     <main>
-        <section id="stats" class="panel"></section>
-        <section class="panel">
+        <section id="section-overview" class="panel">
+            <div id="stats"></div>
+        </section>
+        <section id="section-organizations" class="panel">
             <h2>Create Organization</h2>
             <form id="create-org-form">
                 <input name="name" placeholder="Organization name" required>
@@ -24,7 +26,7 @@
                 <button type="submit">Create</button>
             </form>
         </section>
-        <section class="panel">
+        <section id="section-users" class="panel">
             <h2>Create User</h2>
             <form id="create-user-form">
                 <input name="displayName" placeholder="Display name" required>
@@ -33,7 +35,7 @@
                 <button type="submit">Create</button>
             </form>
         </section>
-        <section class="panel">
+        <section id="section-memberships" class="panel">
             <h2>Create Membership</h2>
             <form id="create-membership-form">
                 <input name="organizationId" placeholder="Organization ID" required>
@@ -42,7 +44,7 @@
                 <button type="submit">Create</button>
             </form>
         </section>
-        <section class="panel">
+        <section id="section-clients" class="panel">
             <h2>Create Client</h2>
             <form id="create-client-form">
                 <input name="clientId" placeholder="Client ID" required>
@@ -52,7 +54,7 @@
                 <button type="submit">Create</button>
             </form>
         </section>
-        <section class="panel">
+        <section id="section-security" class="panel">
             <h2>Security Settings</h2>
             <form id="security-settings-form">
                 <input name="refreshTokenLifetimeMinutes" type="number" min="1" placeholder="Refresh token lifetime (minutes)" required>
@@ -61,7 +63,7 @@
                 <button type="submit">Save settings</button>
             </form>
         </section>
-        <section class="panel">
+        <section id="section-sso" class="panel">
             <h2>Create SSO Draft</h2>
             <form id="create-sso-draft-form">
                 <input name="organizationId" placeholder="Organization ID" required>
@@ -82,13 +84,13 @@
             </form>
         </section>
         <div class="grid">
-            <section class="panel"><h2>Organizations</h2><div id="organizations"></div></section>
-            <section class="panel"><h2>Users</h2><div id="users"></div></section>
-            <section class="panel"><h2>Memberships</h2><div id="memberships"></div></section>
-            <section class="panel"><h2>Clients</h2><div id="clients"></div></section>
-            <section class="panel"><h2>SAML Connections</h2><div id="sso-connections"></div></section>
-            <section class="panel"><h2>Sessions</h2><div id="sessions"></div></section>
-            <section class="panel"><h2>Audit Events</h2><div id="audit-events"></div></section>
+            <section id="section-organizations-list" class="panel"><h2>Organizations</h2><div id="organizations"></div></section>
+            <section id="section-users-list" class="panel"><h2>Users</h2><div id="users"></div></section>
+            <section id="section-memberships-list" class="panel"><h2>Memberships</h2><div id="memberships"></div></section>
+            <section id="section-clients-list" class="panel"><h2>Clients</h2><div id="clients"></div></section>
+            <section id="section-sso-list" class="panel"><h2>SAML Connections</h2><div id="sso-connections"></div></section>
+            <section id="section-sessions" class="panel"><h2>Sessions</h2><div id="sessions"></div></section>
+            <section id="section-audit" class="panel"><h2>Audit Events</h2><div id="audit-events"></div></section>
         </div>
     </main>
     <script src="app.js"></script>

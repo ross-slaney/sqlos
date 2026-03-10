@@ -78,9 +78,44 @@ Then use:
 - FGA dashboard: `http://localhost:5062/sqlos/admin/fga/`
 - example web app: `http://localhost:3001/`
 
+## Run Tests
+
+From the repo root:
+
+Library tests:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj
+```
+
+Library integration tests:
+
+```bash
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj
+```
+
+Example app tests:
+
+```bash
+dotnet test examples/SqlOS.Example.Tests/SqlOS.Example.Tests.csproj
+```
+
+Example app integration tests:
+
+```bash
+dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj
+```
+
+Run the full suite:
+
+```bash
+dotnet test SqlOS.sln
+```
+
 ## Docs
 
 - [Configuration](docs/CONFIGURATION.md)
+- [Entra SSO Testing](docs/ENTRA_SSO.md)
 - [Example App](docs/EXAMPLE_APP.md)
 - [Testing](docs/TESTING.md)
 - [Release](docs/RELEASE_VERSION.md)

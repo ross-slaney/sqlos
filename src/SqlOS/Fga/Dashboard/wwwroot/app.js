@@ -1,4 +1,9 @@
 (function() {
+    const embedMode = new URLSearchParams(window.location.search).get('embed') === '1';
+    if (embedMode) {
+        document.body.classList.add('embed-mode');
+    }
+
     const basePath = window.location.pathname.replace(/\/$/, '');
     const api = (endpoint) => fetch(`${basePath}/api/${endpoint}`).then(r => r.json());
     const apiPost = (endpoint, body) => fetch(`${basePath}/api/${endpoint}`, {

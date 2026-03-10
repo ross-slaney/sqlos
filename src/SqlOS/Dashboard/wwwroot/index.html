@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SqlOS Dashboard</title>
+    <link rel="stylesheet" href="__SQL_OS_BASE_PATH__/style.css">
+</head>
+<body>
+    <script>window.__SQL_OS_BASE_PATH__ = "__SQL_OS_BASE_PATH__";</script>
+    <div class="layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">So</div>
+                <span class="sidebar-title">SqlOS</span>
+                <button class="sidebar-close" id="sidebar-close">&times;</button>
+            </div>
+            <nav>
+                <div class="nav-group">
+                    <div class="nav-label">Dashboard</div>
+                    <a href="#" data-route="home" class="active">Home</a>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Auth Server</div>
+                    <a href="#" data-route="auth-overview">Overview</a>
+                    <a href="#" data-route="auth-organizations">Organizations</a>
+                    <a href="#" data-route="auth-users">Users</a>
+                    <a href="#" data-route="auth-memberships">Memberships</a>
+                    <a href="#" data-route="auth-clients">Clients</a>
+                    <a href="#" data-route="auth-sso">SSO</a>
+                    <a href="#" data-route="auth-security">Security</a>
+                    <a href="#" data-route="auth-sessions">Sessions</a>
+                    <a href="#" data-route="auth-audit">Audit Events</a>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Fine-Grained Auth</div>
+                    <a href="#" data-route="fga-resources">Resources</a>
+                    <a href="#" data-route="fga-grants">Grants</a>
+                    <a href="#" data-route="fga-roles">Roles</a>
+                    <a href="#" data-route="fga-permissions">Permissions</a>
+                    <a href="#" data-route="fga-users">Users</a>
+                    <a href="#" data-route="fga-agents">Agents</a>
+                    <a href="#" data-route="fga-service-accounts">Service Accounts</a>
+                    <a href="#" data-route="fga-user-groups">User Groups</a>
+                    <a href="#" data-route="fga-access-tester">Access Tester</a>
+                </div>
+            </nav>
+        </aside>
+        <div class="main-wrapper">
+            <div class="topbar">
+                <button class="hamburger" id="hamburger">&#9776;</button>
+                <span class="topbar-title" id="topbar-title">SqlOS Dashboard</span>
+            </div>
+            <main>
+                <header class="page-header">
+                    <div>
+                        <div class="page-eyebrow" id="page-eyebrow">Dashboard</div>
+                        <h1 id="page-title">SqlOS Dashboard</h1>
+                        <p id="page-description">Authentication, organizations, sessions, SSO, and authorization in one embedded control plane.</p>
+                    </div>
+                </header>
+                <div id="content" class="content-area"></div>
+            </main>
+        </div>
+    </div>
+    <script src="__SQL_OS_BASE_PATH__/app.js"></script>
+</body>
+</html>
