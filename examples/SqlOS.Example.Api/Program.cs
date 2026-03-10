@@ -3,6 +3,9 @@ using Microsoft.OpenApi.Models;
 using SqlOS.Example.Api.Configuration;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Endpoints;
+using SqlOS.Example.Api.FgaRetail.Endpoints;
+using SqlOS.Example.Api.FgaRetail.Middleware;
+using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Seeding;
 using SqlOS.Example.Api.Services;
@@ -33,6 +36,7 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
 
 builder.Services.AddScoped<ExampleSeedService>();
 builder.Services.AddScoped<ExampleFgaService>();
+builder.Services.AddScoped<RetailSeedService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("example-frontend", policy =>
@@ -72,17 +76,22 @@ await app.UseSqlOSAsync();
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<ExampleSeedService>().SeedAsync();
+    await scope.ServiceProvider.GetRequiredService<RetailSeedService>().SeedAsync();
 }
 
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("example-frontend");
 app.UseExampleBearerTokenMiddleware();
+app.UseSubjectIdMiddleware();
 app.UseSqlOSDashboard("/sqlos");
 
 app.MapAuthServer("/sqlos/auth");
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
+app.MapChainEndpoints();
+app.MapLocationEndpoints();
+app.MapInventoryEndpoints();
 
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 

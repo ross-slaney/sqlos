@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -113,6 +114,77 @@ public sealed class SqlOSExampleWebAuthIntegrationTests
         discoverJson.RootElement.GetProperty("primaryDomain").GetString().Should().Be(domain);
     }
 
+    [TestMethod]
+    public async Task Login_WithMultipleMemberships_RequiresOrganizationSelection()
+    {
+        var email = $"multiorg-{Guid.NewGuid():N}@example.com";
+
+        var firstOrgId = await CreateOrganizationAsync($"First Org {Guid.NewGuid():N}");
+        var secondOrgId = await CreateOrganizationAsync($"Second Org {Guid.NewGuid():N}");
+        var userId = await CreateUserAsync(email, "Multi Org User", "P@ssword123!");
+
+        await CreateMembershipAsync(firstOrgId, userId, "member");
+        await CreateMembershipAsync(secondOrgId, userId, "admin");
+
+        var loginResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email,
+            password = "P@ssword123!"
+        });
+        loginResponse.EnsureSuccessStatusCode();
+
+        var loginJson = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        loginJson.RootElement.GetProperty("requiresOrganizationSelection").GetBoolean().Should().BeTrue();
+        loginJson.RootElement.GetProperty("organizations").GetArrayLength().Should().Be(2);
+
+        var pendingAuthToken = loginJson.RootElement.GetProperty("pendingAuthToken").GetString();
+        pendingAuthToken.Should().NotBeNullOrWhiteSpace();
+
+        var selectResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/select-organization", new
+        {
+            pendingAuthToken,
+            organizationId = secondOrgId
+        });
+        selectResponse.EnsureSuccessStatusCode();
+
+        var selectJson = JsonDocument.Parse(await selectResponse.Content.ReadAsStringAsync());
+        selectJson.RootElement.GetProperty("organizationId").GetString().Should().Be(secondOrgId);
+    }
+
+    [TestMethod]
+    public async Task Logout_RevokesRefreshToken()
+    {
+        var email = $"logout-{Guid.NewGuid():N}@example.com";
+        var organizationId = await CreateOrganizationAsync($"Logout Org {Guid.NewGuid():N}");
+        var userId = await CreateUserAsync(email, "Logout User", "P@ssword123!");
+        await CreateMembershipAsync(organizationId, userId, "member");
+
+        var loginResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email,
+            password = "P@ssword123!",
+            organizationId
+        });
+        loginResponse.EnsureSuccessStatusCode();
+        var loginJson = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        var refreshToken = loginJson.RootElement.GetProperty("refreshToken").GetString();
+        var sessionId = loginJson.RootElement.GetProperty("sessionId").GetString();
+
+        var logoutResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/logout", new
+        {
+            refreshToken,
+            sessionId
+        });
+        logoutResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var refreshResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/refresh", new
+        {
+            refreshToken,
+            organizationId
+        });
+        refreshResponse.IsSuccessStatusCode.Should().BeFalse();
+    }
+
     private static string BuildFederationMetadata(string entityId, string singleSignOnUrl, X509Certificate2 certificate)
     {
         var rawCertificate = Convert.ToBase64String(certificate.Export(X509ContentType.Cert));
@@ -130,5 +202,37 @@ public sealed class SqlOSExampleWebAuthIntegrationTests
           </IDPSSODescriptor>
         </EntityDescriptor>
         """;
+    }
+
+    private static async Task<string> CreateOrganizationAsync(string name)
+    {
+        var response = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/admin/auth/api/organizations", new { name });
+        response.EnsureSuccessStatusCode();
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return json.RootElement.GetProperty("id").GetString()!;
+    }
+
+    private static async Task<string> CreateUserAsync(string email, string displayName, string password)
+    {
+        var response = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new
+        {
+            displayName,
+            email,
+            password
+        });
+        response.EnsureSuccessStatusCode();
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return json.RootElement.GetProperty("id").GetString()!;
+    }
+
+    private static async Task CreateMembershipAsync(string organizationId, string userId, string role)
+    {
+        var response = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/admin/auth/api/memberships", new
+        {
+            organizationId,
+            userId,
+            role
+        });
+        response.EnsureSuccessStatusCode();
     }
 }

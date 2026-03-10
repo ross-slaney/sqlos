@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SqlOS.Example.Api.FgaRetail.Data;
+using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Models;
@@ -18,7 +18,7 @@ public static class LocationEndpoints
 
         group.MapGet("/chains/{chainId}/locations", async (
             string chainId,
-            RetailDbContext context,
+            ExampleAppDbContext context,
             ISpecificationExecutor executor,
             HttpContext http,
             int pageSize = 10,
@@ -46,7 +46,7 @@ public static class LocationEndpoints
 
         group.MapGet("/locations/{id}", async (
             string id,
-            RetailDbContext context,
+            ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
             HttpContext http) =>
         {
@@ -77,7 +77,7 @@ public static class LocationEndpoints
         group.MapPost("/chains/{chainId}/locations", async (
             string chainId,
             CreateLocationRequest request,
-            RetailDbContext context,
+            ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
             HttpContext http) =>
         {

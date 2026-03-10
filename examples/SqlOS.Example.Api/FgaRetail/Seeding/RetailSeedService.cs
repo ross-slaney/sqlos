@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SqlOS.Example.Api.FgaRetail.Data;
+using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -9,7 +9,7 @@ namespace SqlOS.Example.Api.FgaRetail.Seeding;
 
 public class RetailSeedService
 {
-    private readonly RetailDbContext _context;
+    private readonly ExampleAppDbContext _context;
     private readonly SqlOSFgaSeedService _seedService;
     private readonly ISqlOSFgaSubjectService _subjectService;
 
@@ -43,7 +43,7 @@ public class RetailSeedService
     public const string Store100ResourceId = "res_location_100";
 
     public RetailSeedService(
-        RetailDbContext context,
+        ExampleAppDbContext context,
         SqlOSFgaSeedService seedService,
         ISqlOSFgaSubjectService subjectService)
     {
@@ -153,6 +153,15 @@ public class RetailSeedService
         await _context.SaveChangesAsync(ct);
 
         // 3. Create resources in the hierarchy
+        _context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = "retail_root",
+            ParentId = "root",
+            Name = "Retail Root",
+            ResourceTypeId = "root"
+        });
+        await _context.SaveChangesAsync(ct);
+
         // Chains
         _context.Set<SqlOSFgaResource>().AddRange(
             new SqlOSFgaResource { Id = WalmartChainResourceId, ParentId = "retail_root", Name = "Walmart", ResourceTypeId = RetailResourceTypeIds.Chain },
