@@ -15,6 +15,7 @@ public sealed class ExampleBearerTokenMiddleware
     {
         var path = context.Request.Path.Value ?? string.Empty;
         var requiresAuth = path.StartsWith("/api/workspaces", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/hello", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/api/me", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/api/v1/auth/session", StringComparison.OrdinalIgnoreCase);
 

@@ -13,19 +13,108 @@
 
     let flashMessage = null;
     let latestSsoDraft = null;
+    const pagerState = new Map();
 
     const authViews = {
-        overview: { title: "Auth Server", description: "Organizations, users, sessions, SSO, clients, and security settings." },
+        overview: { title: "Auth Server", description: "Organizations, users, sessions, clients, and security settings." },
         organizations: { title: "Organizations", description: "Create and manage organizations and their primary domains." },
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Clients", description: "Register clients, audiences, and redirect URIs." },
-        oidc: { title: "OIDC", description: "Configure global Google, Microsoft, Apple, and custom OIDC connections." },
-        sso: { title: "SSO", description: "Create SAML drafts, import Entra metadata, and review setup state." },
+        oidc: { title: "OIDC", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
         audit: { title: "Audit Events", description: "Review recent auth and admin activity." }
     };
+    const oidcProviderGuideTemplates = {
+        Google: {
+            heading: "Google Setup",
+            description: "Create a Google OAuth Web app and wire its redirect URI to SqlOS for social login.",
+            docsLabel: "Google credentials",
+            docsUrl: "https://console.cloud.google.com/apis/credentials",
+            steps: [
+                "In Google Cloud Console, create or open an OAuth 2.0 Web client.",
+                "Add this callback URI: {callback}.",
+                "Copy Client ID + Client Secret from Google into SqlOS.",
+                "Keep discovery enabled so SqlOS reads discovery, scopes, and endpoints automatically."
+            ],
+            rows: [
+                { label: "Provider type", value: "Google" },
+                { label: "Discovery", value: "On (recommended)" },
+                { label: "Discovery URL", value: "https://accounts.google.com/.well-known/openid-configuration" },
+                { label: "User info", value: "Automatic from discovery" },
+                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Suggested scopes", value: "openid, profile, email" },
+                { label: "Claim mapping", value: "Default mapping is usually enough" }
+            ],
+            integration: "After enabling, your app should call <span class=\"inline-code\">GET /api/v1/auth/oidc/providers</span> and then start login with <span class=\"inline-code\">POST /api/v1/auth/oidc/start</span>."
+        },
+        Microsoft: {
+            heading: "Microsoft Entra Setup",
+            description: "Register an Entra app, set redirect URI and authority, then let SqlOS connect it for social login.",
+            docsLabel: "Azure app registration",
+            docsUrl: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+            steps: [
+                "Create or open an App Registration in Entra ID.",
+                "Under Authentication, add this Web redirect URI: {callback}.",
+                "Generate a client secret and copy the client id/secret into SqlOS.",
+                "Set tenant to specific directory id if you want tenant locked sign-in."
+            ],
+            rows: [
+                { label: "Provider type", value: "Microsoft" },
+                { label: "Discovery", value: "On (recommended)" },
+                { label: "Discovery URL", value: "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration" },
+                { label: "Tenant", value: "Common or specific tenant ID" },
+                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Scopes", value: "openid, profile, email" }
+            ],
+            integration: "Use Microsoft tenant-scoped login by filling the Tenant field, then enable the connection and launch social login via SqlOS endpoints."
+        },
+        Apple: {
+            heading: "Apple Setup",
+            description: "Create a Services ID and Sign in with Apple key pair, then attach key material in SqlOS.",
+            docsLabel: "Apple identifier setup",
+            docsUrl: "https://developer.apple.com/account/resources/identifiers/list/serviceId",
+            steps: [
+                "Create a Service ID in Apple Developer and enable Sign in with Apple.",
+                "Upload your .p8 private key and note Team ID and Key ID.",
+                "Add callback URL in Service ID settings: {callback} (must be HTTPS).",
+                "Set provider to Apple and paste Team ID, Key ID, and key PEM into SqlOS."
+            ],
+            rows: [
+                { label: "Provider type", value: "Apple" },
+                { label: "Discovery", value: "On (recommended)" },
+                { label: "Discovery URL", value: "https://appleid.apple.com/.well-known/openid-configuration" },
+                { label: "Required fields", value: "Team ID, Key ID, Apple private key (.p8)" },
+                { label: "Callback requirement", value: "Public HTTPS callback URL required" },
+                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" }
+            ],
+            integration: "Test Apple social login by enabling the connection and using SqlOS-issued auth start URL from your app login button."
+        },
+        Custom: {
+            heading: "Custom OIDC Setup",
+            description: "Use discovery when possible, otherwise configure all endpoints manually.",
+            docsLabel: "OIDC discovery spec",
+            docsUrl: "https://datatracker.ietf.org/doc/html/rfc8414",
+            steps: [
+                "Enable discovery and set a valid metadata URL if the provider exposes one.",
+                "If discovery is not available, disable it and complete Issuer / endpoints manually.",
+                "Add callback URLs to include the SqlOS callback.",
+                "Update claim mapping only when the provider uses non-standard claim names."
+            ],
+            rows: [
+                { label: "Provider type", value: "Custom" },
+                { label: "Discovery", value: "On if supported, otherwise Manual" },
+                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Sample claim mapping", value: "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}" },
+                { label: "Best practice", value: "Prefer discovery and keep user info enabled unless the provider blocks it." }
+            ],
+            integration: "For each environment, verify callback URL and allowed origin settings before enabling and enable the provider only after one successful callback test."
+        }
+    };
+
+    const organizationTabs = new Set(["general", "users", "sso"]);
+    const userTabs = new Set(["general", "organizations", "sessions"]);
 
     const fgaViews = {
         resources: { title: "Resources", description: "Inspect the resource hierarchy and navigate the authorization graph.", hash: "/resources" },
@@ -144,6 +233,24 @@
         return `<a class="quick-link" data-dashboard-route="${route}" href="${esc(pathForRoute(route))}">${esc(label)} <span>&rarr;</span></a>`;
     }
 
+    function organizationDetailPath(organizationId, tab = "general") {
+        const normalizedTab = organizationTabs.has(tab) ? tab : "general";
+        return `${authDashboardPath}/organizations/${encodeURIComponent(organizationId)}/${normalizedTab}`;
+    }
+
+    function userDetailPath(userId, tab = "general") {
+        const normalizedTab = userTabs.has(tab) ? tab : "general";
+        return `${authDashboardPath}/users/${encodeURIComponent(userId)}/${normalizedTab}`;
+    }
+
+    function decodeRouteSegment(value) {
+        try {
+            return decodeURIComponent(value);
+        } catch {
+            return value;
+        }
+    }
+
     function currentRoute() {
         const pathname = window.location.pathname;
         const relativePath = pathname.startsWith(dashboardBasePath)
@@ -162,6 +269,32 @@
 
         if (segments[1] === "auth") {
             const view = authViews[segments[2]] ? segments[2] : "overview";
+            if (view === "organizations" && segments[3]) {
+                const organizationId = decodeRouteSegment(segments[3]);
+                const organizationTab = organizationTabs.has(segments[4]) ? segments[4] : "general";
+                return {
+                    kind: "auth",
+                    view,
+                    organizationId,
+                    organizationTab,
+                    key: "auth-organizations",
+                    canonicalPath: organizationDetailPath(organizationId, organizationTab)
+                };
+            }
+
+            if (view === "users" && segments[3]) {
+                const userId = decodeRouteSegment(segments[3]);
+                const userTab = userTabs.has(segments[4]) ? segments[4] : "general";
+                return {
+                    kind: "auth",
+                    view,
+                    userId,
+                    userTab,
+                    key: "auth-users",
+                    canonicalPath: userDetailPath(userId, userTab)
+                };
+            }
+
             return {
                 kind: "auth",
                 view,
@@ -248,6 +381,57 @@
         }
     }
 
+    function normalizeOidcProviderType(value) {
+        const raw = String(value || "Custom").toLowerCase();
+        if (raw === "google") {
+            return "Google";
+        }
+
+        if (raw === "microsoft") {
+            return "Microsoft";
+        }
+
+        if (raw === "apple") {
+            return "Apple";
+        }
+
+        return "Custom";
+    }
+
+    function renderOidcProviderGuide(providerType, callbackTemplate) {
+        const normalized = normalizeOidcProviderType(providerType);
+        const callbackUri = callbackTemplate || `${window.location.origin}${dashboardBasePath}/api/v1/auth/oidc/callback/{connectionId}`;
+        const callback = esc(callbackUri);
+        const template = oidcProviderGuideTemplates[normalized] || oidcProviderGuideTemplates.Custom;
+        const renderedRows = (template.rows || []).map((row) => ({
+            ...row,
+            value: row.value ? row.value.replaceAll("{tenant-id}", "your tenant id") : row.value,
+            html: row.html ? row.html.replaceAll("{callback}", callback) : row.html
+        }));
+        const steps = template.steps || [];
+
+        return `
+            <div class="provider-guide">
+                <div class="provider-guide-header">
+                    <div>
+                        <h3>${esc(template.heading || "OIDC Setup")}</h3>
+                        <p>${esc(template.description || "Follow provider-specific social login setup steps and register this app with SqlOS.")}</p>
+                    </div>
+                    <a class="inline-link" href="${esc(template.docsUrl || "#")}" target="_blank" rel="noreferrer">${esc(template.docsLabel || "Read docs")}</a>
+                </div>
+                <ol class="provider-guide-steps">
+                    ${steps.map(step => `<li>${step.replaceAll("{callback}", callback)}</li>`).join("")}
+                </ol>
+                <div class="provider-guide-grid">
+                    ${renderMetadataRows(renderedRows)}
+                    <div class="callout">
+                        <strong>Social login integration:</strong> ${template.integration || "Enable the connection and point your app at SqlOS OIDC start endpoint for auth."}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     function renderMetadataRows(rows) {
         return `<div class="meta-list">${rows
             .filter(row => row.html || (row.value !== null && row.value !== undefined && row.value !== ""))
@@ -320,6 +504,68 @@
         content.innerHTML = `<div class="loading">${esc(message)}</div>`;
     }
 
+    function getPagerState(key, defaultPageSize = 10) {
+        if (!pagerState.has(key)) {
+            pagerState.set(key, { page: 1, pageSize: defaultPageSize });
+        }
+
+        return pagerState.get(key);
+    }
+
+    function setPagerPage(key, page) {
+        const current = getPagerState(key);
+        current.page = Math.max(1, page);
+    }
+
+    function renderPagination(page, totalPages, totalCount) {
+        const safePage = Math.max(1, page || 1);
+        const safeTotalPages = Math.max(1, totalPages || 1);
+        let html = '<div class="pagination">';
+        html += `<button class="pg-btn" data-page="${safePage - 1}" ${safePage <= 1 ? 'disabled' : ''}>Prev</button>`;
+
+        const pages = buildPageNumbers(safePage, safeTotalPages);
+        pages.forEach(item => {
+            if (item === "...") {
+                html += '<span class="pg-ellipsis">...</span>';
+            } else {
+                html += `<button class="pg-btn ${item === safePage ? 'pg-active' : ''}" data-page="${item}">${item}</button>`;
+            }
+        });
+
+        html += `<button class="pg-btn" data-page="${safePage + 1}" ${safePage >= safeTotalPages ? 'disabled' : ''}>Next</button>`;
+        html += `<span class="pg-info">${totalCount ?? 0} item${(totalCount ?? 0) === 1 ? "" : "s"}</span>`;
+        html += '</div>';
+        return html;
+    }
+
+    function buildPageNumbers(current, total) {
+        if (total <= 7) {
+            return Array.from({ length: total }, (_, index) => index + 1);
+        }
+
+        const pages = [1];
+        if (current > 3) {
+            pages.push("...");
+        }
+
+        for (let page = Math.max(2, current - 1); page <= Math.min(total - 1, current + 1); page += 1) {
+            pages.push(page);
+        }
+
+        if (current < total - 2) {
+            pages.push("...");
+        }
+
+        pages.push(total);
+        return pages;
+    }
+
+    function bindPagination(containerSelector, callback) {
+        document.querySelectorAll(`${containerSelector} .pg-btn:not([disabled])`).forEach(button => {
+            button.addEventListener("click", () => callback(Number(button.dataset.page)));
+        });
+    }
+
     async function render() {
         const route = currentRoute();
         if (window.location.pathname !== route.canonicalPath) {
@@ -335,7 +581,7 @@
             }
 
             if (route.kind === "auth") {
-                await renderAuthRoute(route.view);
+                await renderAuthRoute(route);
                 return;
             }
 
@@ -367,7 +613,6 @@
                     { key: "users", label: "Users" },
                     { key: "clients", label: "Clients" },
                     { key: "oidcConnections", label: "OIDC Connections" },
-                    { key: "ssoConnections", label: "SSO Connections" },
                     { key: "sessions", label: "Sessions" },
                     { key: "auditEvents", label: "Audit Events" }
                 ])}
@@ -384,12 +629,11 @@
                 ])}
                 <section class="card">
                     <h2>Auth Server</h2>
-                    <p>Use the direct routes for organizations, clients, SSO setup, sessions, and security settings.</p>
+                    <p>Use the direct routes for organizations, clients, sessions, and security settings.</p>
                     <div class="link-list">
                         ${quickLink("auth-organizations", "Organizations")}
                         ${quickLink("auth-users", "Users")}
                         ${quickLink("auth-oidc", "OIDC")}
-                        ${quickLink("auth-sso", "SSO")}
                         ${quickLink("auth-security", "Security")}
                     </div>
                 </section>
@@ -407,19 +651,28 @@
         `;
     }
 
-    async function renderAuthRoute(view) {
+    async function renderAuthRoute(route) {
+        const view = route.view;
         if (view === "overview") {
             await renderAuthOverview();
             return;
         }
 
         if (view === "organizations") {
-            await renderAuthOrganizations();
+            if (route.organizationId) {
+                await renderAuthOrganizationDetail(route.organizationId, route.organizationTab || "general");
+            } else {
+                await renderAuthOrganizations();
+            }
             return;
         }
 
         if (view === "users") {
-            await renderAuthUsers();
+            if (route.userId) {
+                await renderAuthUserDetail(route.userId, route.userTab || "general");
+            } else {
+                await renderAuthUsers();
+            }
             return;
         }
 
@@ -435,11 +688,6 @@
 
         if (view === "oidc") {
             await renderAuthOidc();
-            return;
-        }
-
-        if (view === "sso") {
-            await renderAuthSso();
             return;
         }
 
@@ -461,10 +709,9 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading auth overview...");
 
-        const [stats, settings, ssoConnections] = await Promise.all([
+        const [stats, settings] = await Promise.all([
             fetchJson(`${authApiBasePath}/stats`),
-            fetchJson(`${authApiBasePath}/settings/security`),
-            fetchJson(`${authApiBasePath}/sso-connections`)
+            fetchJson(`${authApiBasePath}/settings/security`)
         ]);
 
         content.innerHTML = `
@@ -475,7 +722,6 @@
                     { key: "users", label: "Users" },
                     { key: "clients", label: "Clients" },
                     { key: "oidcConnections", label: "OIDC Connections" },
-                    { key: "ssoConnections", label: "SSO Connections" },
                     { key: "sessions", label: "Sessions" },
                     { key: "auditEvents", label: "Audit Events" }
                 ])}
@@ -488,22 +734,6 @@
                             { label: "Idle timeout", value: `${settings.sessionIdleTimeoutMinutes} minutes` },
                             { label: "Absolute lifetime", value: `${settings.sessionAbsoluteLifetimeMinutes} minutes` }
                         ])}
-                    </section>
-                    <section class="panel">
-                        <h2>SSO Connections</h2>
-                        <p>Use the SSO page for draft creation and metadata import.</p>
-                        ${renderList(
-                            ssoConnections.slice(0, 5),
-                            item => `
-                                <strong>${esc(item.displayName)}</strong>
-                                ${renderMetadataRows([
-                                    { label: "Organization", value: item.organization },
-                                    { label: "Primary domain", value: item.primaryDomain || "n/a" },
-                                    { label: "Status", value: `${item.setupStatus} | Enabled: ${item.isEnabled}` }
-                                ])}
-                            `,
-                            "No SSO connections yet."
-                        )}
                     </section>
                     <section class="panel">
                         <h2>OIDC Providers</h2>
@@ -522,7 +752,8 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading organizations...");
 
-        const organizations = await fetchJson(`${authApiBasePath}/organizations`);
+        const pager = getPagerState("auth-organizations");
+        const organizations = await fetchJson(`${authApiBasePath}/organizations?page=${pager.page}&pageSize=${pager.pageSize}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -538,11 +769,17 @@
                     </form>
                 </section>
                 <section class="panel">
-                    <h2>Organizations</h2>
+                    <div class="panel-actions">
+                        <h2>Organizations</h2>
+                        <div id="organizations-pagination-top">${renderPagination(organizations.page, organizations.totalPages, organizations.totalCount)}</div>
+                    </div>
                     ${renderList(
-                        organizations,
+                        organizations.data,
                         item => `
-                            <strong>${esc(item.name)}</strong>
+                            <div class="list-item-header">
+                                <strong>${esc(item.name)}</strong>
+                                <a class="inline-link" href="${esc(organizationDetailPath(item.id, "general"))}">Open</a>
+                            </div>
                             ${renderMetadataRows([
                                 { label: "ID", value: item.id },
                                 { label: "Slug", value: item.slug },
@@ -568,6 +805,280 @@
             });
             setFlash("success", "Organization created.");
         });
+
+        bindPagination("#organizations-pagination-top", async page => {
+            setPagerPage("auth-organizations", page);
+            await render();
+        });
+    }
+
+    async function renderAuthOrganizationDetail(organizationId, tab) {
+        const config = authViews.organizations;
+        setHeader("Auth Server", config.title, "Manage organization details, memberships, and SSO in one place.");
+        renderLoading("Loading organization details...");
+
+        const usersPager = getPagerState(`auth-org-${organizationId}-users`);
+        const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
+        const [organization, users, memberships, ssoConnections] = await Promise.all([
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
+            fetchJson(`${authApiBasePath}/users?page=1&pageSize=500`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`)
+        ]);
+        const latestOrganizationDraft = latestSsoDraft && latestSsoDraft.organizationId === organizationId ? latestSsoDraft : null;
+
+        const summaryHtml = `
+            <div class="detail-summary-grid">
+                <div class="summary-card">
+                    <div class="summary-label">Primary domain</div>
+                    <div class="summary-value">${esc(organization.primaryDomain || "n/a")}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Members</div>
+                    <div class="summary-value">${esc(organization.membershipCount || memberships.totalCount || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">SSO connections</div>
+                    <div class="summary-value">${esc(organization.ssoConnectionCount || ssoConnections.totalCount || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Enabled SSO</div>
+                    <div class="summary-value">${esc(organization.enabledSsoConnections ?? 0)}</div>
+                </div>
+            </div>
+        `;
+
+        const tabNav = `
+            <div class="tab-strip">
+                ${renderTabLink("general", "General", tab, organizationId)}
+                ${renderTabLink("users", "Users", tab, organizationId)}
+                ${renderTabLink("sso", "SSO", tab, organizationId)}
+            </div>
+        `;
+
+        let tabContent = "";
+        if (tab === "general") {
+            tabContent = `
+                <div class="panel-grid">
+                    <section class="panel">
+                        <div class="panel-actions">
+                            <div>
+                                <h2>General Info</h2>
+                                <p>Update the organization profile and primary login domain.</p>
+                            </div>
+                            <a class="inline-link" href="${esc(pathForRoute("auth-organizations"))}">Back to organizations</a>
+                        </div>
+                        <form id="update-org-form">
+                            <input name="name" value="${esc(organization.name)}" placeholder="Organization name" required>
+                            <input name="slug" value="${esc(organization.slug)}" placeholder="Slug">
+                            <input name="primaryDomain" value="${esc(organization.primaryDomain || "")}" placeholder="Primary domain">
+                            <label class="checkbox-row"><input name="isActive" type="checkbox" ${organization.isActive ? "checked" : ""}> Organization is active</label>
+                            <button type="submit">Save organization</button>
+                        </form>
+                    </section>
+                    <section class="panel">
+                        <h2>Organization Summary</h2>
+                        ${renderMetadataRows([
+                            { label: "ID", value: organization.id },
+                            { label: "Slug", value: organization.slug },
+                            { label: "Primary domain", value: organization.primaryDomain || "n/a" },
+                            { label: "Active", value: organization.isActive ? "Yes" : "No" },
+                            { label: "Members", value: organization.membershipCount || memberships.totalCount || 0 },
+                            { label: "Enabled SSO", value: organization.enabledSsoConnections ?? 0 }
+                        ])}
+                    </section>
+                </div>
+            `;
+        } else if (tab === "users") {
+            tabContent = `
+                <div class="panel-grid">
+                    <section class="panel">
+                        <h2>Add User To Organization</h2>
+                        <p>Create or update a membership for this organization.</p>
+                        <form id="create-org-membership-form">
+                            <select name="userId" required>
+                                <option value="">Select a user</option>
+                                ${users.data.map(user => `<option value="${esc(user.id)}">${esc(user.displayName)}${user.defaultEmail ? ` (${esc(user.defaultEmail)})` : ""}</option>`).join("")}
+                            </select>
+                            <input name="role" placeholder="Role" value="member" required>
+                            <button type="submit">Add membership</button>
+                        </form>
+                    </section>
+                    <section class="panel">
+                        <h2>Organization Users</h2>
+                        <div id="organization-users-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
+                        ${renderList(
+                            memberships.data,
+                            item => `
+                                <div class="list-item-header">
+                                    <strong>${esc(item.user)}</strong>
+                                    <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open</a>
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "User ID", value: item.userId },
+                                    { label: "Email", value: item.userEmail || "n/a" },
+                                    { label: "Role", value: item.role },
+                                    { label: "Active", value: item.isActive ? "Yes" : "No" }
+                                ])}
+                            `,
+                            "No memberships yet."
+                        )}
+                    </section>
+                </div>
+            `;
+        } else {
+            tabContent = `
+                <div class="panel-stack">
+                    ${latestOrganizationDraft ? `
+                        <section class="panel">
+                            <h2>Latest Draft Output</h2>
+                            <div class="callout">
+                                <div><strong>Draft created:</strong> ${esc(latestOrganizationDraft.id)}</div>
+                                <div><strong>SP Entity ID</strong><br><span class="inline-code">${esc(latestOrganizationDraft.serviceProviderEntityId)}</span></div>
+                                <div><strong>ACS URL</strong><br><span class="inline-code">${esc(latestOrganizationDraft.assertionConsumerServiceUrl)}</span></div>
+                                <div><strong>Primary domain</strong><br>${esc(latestOrganizationDraft.primaryDomain || organization.primaryDomain || "Set the organization primary domain before enabling SSO.")}</div>
+                            </div>
+                        </section>
+                    ` : ""}
+                    <div class="panel-grid">
+                        <section class="panel">
+                            <h2>Create SSO Draft</h2>
+                            <p>Create the SAML draft directly from this organization, then import Entra metadata on the resulting connection.</p>
+                            <form id="create-org-sso-draft-form">
+                                <input name="displayName" placeholder="Display name" value="${esc(organization.name)} SSO" required>
+                                <input name="primaryDomain" placeholder="Primary domain" value="${esc(organization.primaryDomain || "")}">
+                                <label class="checkbox-row"><input type="checkbox" name="autoProvisionUsers" checked> Auto provision users</label>
+                                <label class="checkbox-row"><input type="checkbox" name="autoLinkByEmail"> Auto link by email</label>
+                                <button type="submit">Create SSO draft</button>
+                            </form>
+                        </section>
+                        <section class="panel">
+                            <h2>Current SSO State</h2>
+                            ${renderMetadataRows([
+                                { label: "Primary domain", value: organization.primaryDomain || "n/a" },
+                                { label: "Total connections", value: organization.ssoConnectionCount || ssoConnections.totalCount || 0 },
+                                { label: "Enabled connections", value: organization.enabledSsoConnections ?? 0 }
+                            ])}
+                        </section>
+                    </div>
+                    <section class="panel">
+                        <h2>Organization SSO Connections</h2>
+                        <div id="organization-sso-pagination-top">${renderPagination(ssoConnections.page, ssoConnections.totalPages, ssoConnections.totalCount)}</div>
+                        ${renderList(
+                            ssoConnections.data,
+                            item => `
+                                <div class="list-item-header">
+                                    <strong>${esc(item.displayName)}</strong>
+                                    <span class="inline-code">${esc(item.setupStatus)}</span>
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "Connection ID", value: item.id },
+                                    { label: "Primary domain", value: item.primaryDomain || "n/a" },
+                                    { label: "Enabled", value: item.isEnabled ? "Yes" : "No" },
+                                    { label: "SP Entity ID", value: item.serviceProviderEntityId },
+                                    { label: "ACS URL", value: item.assertionConsumerServiceUrl }
+                                ])}
+                                <form id="import-sso-metadata-${esc(item.id)}" class="nested-form">
+                                    <textarea name="metadataXml" placeholder="Paste the Entra federation metadata XML" required></textarea>
+                                    <button type="submit">Import metadata</button>
+                                </form>
+                            `,
+                            "No SSO connections yet."
+                        )}
+                    </section>
+                </div>
+            `;
+        }
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <section class="panel detail-hero">
+                <div class="panel-actions">
+                    <div>
+                        <div class="page-eyebrow">Organization Detail</div>
+                        <h2>${esc(organization.name)}</h2>
+                        <p>Manage the organization profile, memberships, and SAML SSO from one detail view.</p>
+                    </div>
+                    <a class="inline-link" href="${esc(pathForRoute("auth-organizations"))}">All organizations</a>
+                </div>
+                ${summaryHtml}
+                ${tabNav}
+            </section>
+            ${tabContent}
+        `;
+
+        if (tab === "general") {
+            bindForm("update-org-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations/${organizationId}`, {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        name: form.get("name"),
+                        slug: form.get("slug") || null,
+                        primaryDomain: form.get("primaryDomain") || null,
+                        isActive: form.get("isActive") === "on"
+                    })
+                });
+                setFlash("success", "Organization updated.");
+            });
+        } else if (tab === "users") {
+            bindForm("create-org-membership-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        userId: form.get("userId"),
+                        role: form.get("role") || "member"
+                    })
+                });
+                setFlash("success", "Organization membership saved.");
+            });
+
+            bindPagination("#organization-users-pagination-top", async page => {
+                setPagerPage(`auth-org-${organizationId}-users`, page);
+                await render();
+            });
+        } else {
+            bindForm("create-org-sso-draft-form", async form => {
+                const result = await fetchJson(`${authApiBasePath}/sso-connections/draft`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        organizationId,
+                        displayName: form.get("displayName"),
+                        primaryDomain: form.get("primaryDomain") || null,
+                        autoProvisionUsers: form.get("autoProvisionUsers") === "on",
+                        autoLinkByEmail: form.get("autoLinkByEmail") === "on"
+                    })
+                });
+
+                latestSsoDraft = {
+                    ...result,
+                    organizationId,
+                    primaryDomain: form.get("primaryDomain") || organization.primaryDomain || null
+                };
+                setFlash("success", "SSO draft created.");
+            });
+
+            organizationSsoConnections.forEach(item => {
+                bindForm(`import-sso-metadata-${item.id}`, async form => {
+                    await fetchJson(`${authApiBasePath}/sso-connections/${item.id}/metadata`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            metadataXml: form.get("metadataXml")
+                        })
+                    });
+                    setFlash("success", "Federation metadata imported.");
+                });
+            });
+
+            bindPagination("#organization-sso-pagination-top", async page => {
+                setPagerPage(`auth-org-${organizationId}-sso`, page);
+                await render();
+            });
+        }
+    }
+
+    function renderTabLink(tab, label, activeTab, organizationId) {
+        const activeClass = tab === activeTab ? "active" : "";
+        return `<a class="tab-link ${activeClass}" href="${esc(organizationDetailPath(organizationId, tab))}">${esc(label)}</a>`;
     }
 
     async function renderAuthUsers() {
@@ -575,7 +1086,8 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading users...");
 
-        const users = await fetchJson(`${authApiBasePath}/users`);
+        const pager = getPagerState("auth-users");
+        const users = await fetchJson(`${authApiBasePath}/users?page=${pager.page}&pageSize=${pager.pageSize}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -591,14 +1103,21 @@
                     </form>
                 </section>
                 <section class="panel">
-                    <h2>Users</h2>
+                    <div class="panel-actions">
+                        <h2>Users</h2>
+                        <div id="users-pagination-top">${renderPagination(users.page, users.totalPages, users.totalCount)}</div>
+                    </div>
                     ${renderList(
-                        users,
+                        users.data,
                         item => `
-                            <strong>${esc(item.displayName)}</strong>
+                            <div class="list-item-header">
+                                <strong>${esc(item.displayName)}</strong>
+                                <a class="inline-link" href="${esc(userDetailPath(item.id, "general"))}">Open</a>
+                            </div>
                             ${renderMetadataRows([
                                 { label: "ID", value: item.id },
                                 { label: "Email", value: item.defaultEmail || "n/a" },
+                                { label: "Memberships", value: item.membershipCount ?? 0 },
                                 { label: "Created", value: formatDate(item.createdAt) }
                             ])}
                         `,
@@ -619,6 +1138,169 @@
             });
             setFlash("success", "User created.");
         });
+
+        bindPagination("#users-pagination-top", async page => {
+            setPagerPage("auth-users", page);
+            await render();
+        });
+    }
+
+    async function renderAuthUserDetail(userId, tab) {
+        const config = authViews.users;
+        setHeader("Auth Server", config.title, "Inspect the user profile, organization memberships, and recent sessions.");
+        renderLoading("Loading user details...");
+
+        const membershipsPager = getPagerState(`auth-user-${userId}-memberships`);
+        const sessionsPager = getPagerState(`auth-user-${userId}-sessions`);
+        const [user, memberships, sessions] = await Promise.all([
+            fetchJson(`${authApiBasePath}/users/${userId}`),
+            fetchJson(`${authApiBasePath}/users/${userId}/memberships?page=${membershipsPager.page}&pageSize=${membershipsPager.pageSize}`),
+            fetchJson(`${authApiBasePath}/users/${userId}/sessions?page=${sessionsPager.page}&pageSize=${sessionsPager.pageSize}`)
+        ]);
+
+        const summaryHtml = `
+            <div class="detail-summary-grid">
+                <div class="summary-card">
+                    <div class="summary-label">Default email</div>
+                    <div class="summary-value">${esc(user.defaultEmail || "n/a")}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Organizations</div>
+                    <div class="summary-value">${esc(user.membershipCount || memberships.totalCount || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Active sessions</div>
+                    <div class="summary-value">${esc(user.sessionCount || sessions.totalCount || 0)}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">External identities</div>
+                    <div class="summary-value">${esc(user.externalIdentityCount || 0)}</div>
+                </div>
+            </div>
+        `;
+
+        const tabNav = `
+            <div class="tab-strip">
+                ${renderUserTabLink("general", "General", tab, userId)}
+                ${renderUserTabLink("organizations", "Organizations", tab, userId)}
+                ${renderUserTabLink("sessions", "Sessions", tab, userId)}
+            </div>
+        `;
+
+        let tabContent = "";
+        if (tab === "general") {
+            tabContent = `
+                <div class="panel-grid">
+                    <section class="panel">
+                        <div class="panel-actions">
+                            <div>
+                                <h2>User Profile</h2>
+                                <p>This user detail page is the starting point for memberships and session inspection.</p>
+                            </div>
+                            <a class="inline-link" href="${esc(pathForRoute("auth-users"))}">All users</a>
+                        </div>
+                        ${renderMetadataRows([
+                            { label: "User ID", value: user.id },
+                            { label: "Display name", value: user.displayName },
+                            { label: "Default email", value: user.defaultEmail || "n/a" },
+                            { label: "Active", value: user.isActive ? "Yes" : "No" },
+                            { label: "Created", value: formatDate(user.createdAt) },
+                            { label: "Updated", value: formatDate(user.updatedAt) }
+                        ])}
+                    </section>
+                    <section class="panel">
+                        <h2>Identity Summary</h2>
+                        ${renderMetadataRows([
+                            { label: "Organizations", value: user.membershipCount || memberships.totalCount || 0 },
+                            { label: "Active sessions", value: user.sessionCount || sessions.totalCount || 0 },
+                            { label: "External identities", value: user.externalIdentityCount || 0 }
+                        ])}
+                    </section>
+                </div>
+            `;
+        } else if (tab === "organizations") {
+            tabContent = `
+                <section class="panel">
+                    <div class="panel-actions">
+                        <h2>Organization Memberships</h2>
+                        <div id="user-memberships-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
+                    </div>
+                    ${renderList(
+                        memberships.data,
+                        item => `
+                            <div class="list-item-header">
+                                <strong>${esc(item.organization)}</strong>
+                                <a class="inline-link" href="${esc(organizationDetailPath(item.organizationId, "general"))}">Open org</a>
+                            </div>
+                            ${renderMetadataRows([
+                                { label: "Organization ID", value: item.organizationId },
+                                { label: "Role", value: item.role },
+                                { label: "Active", value: item.isActive ? "Yes" : "No" },
+                                { label: "Added", value: formatDate(item.createdAt) }
+                            ])}
+                        `,
+                        "No memberships yet."
+                    )}
+                </section>
+            `;
+        } else {
+            tabContent = `
+                <section class="panel">
+                    <div class="panel-actions">
+                        <h2>Sessions</h2>
+                        <div id="user-sessions-pagination-top">${renderPagination(sessions.page, sessions.totalPages, sessions.totalCount)}</div>
+                    </div>
+                    ${renderList(
+                        sessions.data,
+                        item => `
+                            <strong>${esc(item.id)}</strong>
+                            ${renderMetadataRows([
+                                { label: "Authentication", value: item.authenticationMethod || "unknown" },
+                                { label: "Client", value: item.clientApplicationId || "n/a" },
+                                { label: "Created", value: formatDate(item.createdAt) },
+                                { label: "Last seen", value: formatDate(item.lastSeenAt) },
+                                { label: "Revoked", value: formatDate(item.revokedAt) }
+                            ])}
+                        `,
+                        "No sessions yet."
+                    )}
+                </section>
+            `;
+        }
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <section class="panel detail-hero">
+                <div class="panel-actions">
+                    <div>
+                        <div class="page-eyebrow">User Detail</div>
+                        <h2>${esc(user.displayName)}</h2>
+                        <p>Follow the user through organizations and sessions without leaving the auth dashboard shell.</p>
+                    </div>
+                    <a class="inline-link" href="${esc(pathForRoute("auth-users"))}">All users</a>
+                </div>
+                ${summaryHtml}
+                ${tabNav}
+            </section>
+            ${tabContent}
+        `;
+
+        if (tab === "organizations") {
+            bindPagination("#user-memberships-pagination-top", async page => {
+                setPagerPage(`auth-user-${userId}-memberships`, page);
+                await render();
+            });
+        } else if (tab === "sessions") {
+            bindPagination("#user-sessions-pagination-top", async page => {
+                setPagerPage(`auth-user-${userId}-sessions`, page);
+                await render();
+            });
+        }
+    }
+
+    function renderUserTabLink(tab, label, activeTab, userId) {
+        const activeClass = tab === activeTab ? "active" : "";
+        return `<a class="tab-link ${activeClass}" href="${esc(userDetailPath(userId, tab))}">${esc(label)}</a>`;
     }
 
     async function renderAuthMemberships() {
@@ -626,7 +1308,8 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading memberships...");
 
-        const memberships = await fetchJson(`${authApiBasePath}/memberships`);
+        const pager = getPagerState("auth-memberships");
+        const memberships = await fetchJson(`${authApiBasePath}/memberships?page=${pager.page}&pageSize=${pager.pageSize}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -642,11 +1325,17 @@
                     </form>
                 </section>
                 <section class="panel">
-                    <h2>Memberships</h2>
+                    <div class="panel-actions">
+                        <h2>Memberships</h2>
+                        <div id="memberships-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
+                    </div>
                     ${renderList(
-                        memberships,
+                        memberships.data,
                         item => `
-                            <strong>${esc(item.organization)}</strong>
+                            <div class="list-item-header">
+                                <strong>${esc(item.organization)}</strong>
+                                <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open user</a>
+                            </div>
                             ${renderMetadataRows([
                                 { label: "Organization ID", value: item.organizationId },
                                 { label: "User", value: `${item.user} (${item.userEmail || "no email"})` },
@@ -670,6 +1359,11 @@
                 })
             });
             setFlash("success", "Membership created.");
+        });
+
+        bindPagination("#memberships-pagination-top", async page => {
+            setPagerPage("auth-memberships", page);
+            await render();
         });
     }
 
@@ -737,6 +1431,7 @@
 
     async function renderAuthOidc() {
         const config = authViews.oidc;
+        const callbackTemplate = `${window.location.origin}${dashboardBasePath}/api/v1/auth/oidc/callback/{connectionId}`;
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading OIDC connections...");
 
@@ -750,7 +1445,7 @@
                         <h2>Create OIDC Connection</h2>
                         <p>Preset providers use discovery by default. Custom providers can use discovery or fully manual endpoints and claim mapping.</p>
                         <form id="create-oidc-connection-form">
-                            <select name="providerType" required>
+                            <select id="oidc-provider-type" name="providerType" required>
                                 <option value="Google">Google</option>
                                 <option value="Microsoft">Microsoft</option>
                                 <option value="Apple">Apple</option>
@@ -783,14 +1478,9 @@
                         </form>
                     </section>
                     <section class="panel">
-                        <h2>Provider Setup Notes</h2>
-                        <p>Copy the exact callback URI from each configured connection after it is created. Apple requires a public HTTPS callback and will not accept localhost.</p>
-                        ${renderMetadataRows([
-                            { label: "Example callback pattern", value: "http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}" },
-                            { label: "Google / Microsoft", value: "The example app backend owns the callback and completes OIDC through SqlOS services." },
-                            { label: "Apple", value: "Use a public HTTPS callback for real testing, then paste the Team ID, Key ID, and private key into the dashboard." },
-                            { label: "Custom OIDC", value: "Use discovery when possible; switch to manual mode only when the provider discovery document is incomplete." }
-                        ])}
+                        <h2>Social Login Guide</h2>
+                        <p>Pick a provider type in the form; this section updates to show the most relevant integration checklist.</p>
+                        <div id="oidc-provider-guide"></div>
                     </section>
                 </div>
                 <section class="panel">
@@ -873,6 +1563,19 @@
             </div>
         `;
 
+        const guideContainer = content.querySelector("#oidc-provider-guide");
+        const guideProviderSelect = content.querySelector("#oidc-provider-type");
+        const updateGuide = () => {
+            if (!guideContainer) {
+                return;
+            }
+
+            const selectedProvider = guideProviderSelect ? guideProviderSelect.value : "Google";
+            guideContainer.innerHTML = renderOidcProviderGuide(selectedProvider, callbackTemplate);
+        };
+        updateGuide();
+        guideProviderSelect?.addEventListener("change", updateGuide);
+
         bindForm("create-oidc-connection-form", async form => {
             await fetchJson(`${authApiBasePath}/oidc-connections`, {
                 method: "POST",
@@ -934,7 +1637,7 @@
                 <div class="panel-grid">
                     <section class="panel">
                         <h2>Create SSO Draft</h2>
-                        <p>Create the org-scoped draft first, then import the customer's federation metadata XML.</p>
+                        <p>Create the org-scoped draft first, then import the customer's federation metadata XML. For day-to-day setup, prefer the SSO tab on each organization detail page.</p>
                         <form id="create-sso-draft-form">
                             <input name="organizationId" placeholder="Organization ID" required>
                             <input name="displayName" placeholder="Display name" required>
@@ -989,6 +1692,7 @@
 
             latestSsoDraft = {
                 ...result,
+                organizationId: form.get("organizationId"),
                 primaryDomain: form.get("primaryDomain") || null
             };
             setFlash("success", "SSO draft created.");
@@ -1054,16 +1758,23 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading sessions...");
 
-        const sessions = await fetchJson(`${authApiBasePath}/sessions`);
+        const pager = getPagerState("auth-sessions");
+        const sessions = await fetchJson(`${authApiBasePath}/sessions?page=${pager.page}&pageSize=${pager.pageSize}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
             <section class="panel">
-                <h2>Sessions</h2>
+                <div class="panel-actions">
+                    <h2>Sessions</h2>
+                    <div id="sessions-pagination-top">${renderPagination(sessions.page, sessions.totalPages, sessions.totalCount)}</div>
+                </div>
                 ${renderList(
-                    sessions,
+                    sessions.data,
                     item => `
-                        <strong>${esc(item.user)}</strong>
+                        <div class="list-item-header">
+                            <strong>${esc(item.user)}</strong>
+                            ${item.userId ? `<a class="inline-link" href="${esc(userDetailPath(item.userId, "sessions"))}">Open user</a>` : ""}
+                        </div>
                         ${renderMetadataRows([
                             { label: "Session ID", value: item.id },
                             { label: "Authentication", value: item.authenticationMethod || "unknown" },
@@ -1077,6 +1788,11 @@
                 )}
             </section>
         `;
+
+        bindPagination("#sessions-pagination-top", async page => {
+            setPagerPage("auth-sessions", page);
+            await render();
+        });
     }
 
     async function renderAuthAudit() {

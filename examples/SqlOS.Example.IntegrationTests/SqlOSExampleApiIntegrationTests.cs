@@ -255,6 +255,8 @@ public sealed class SqlOSExampleApiIntegrationTests
     [DataTestMethod]
     [DataRow("/sqlos/")]
     [DataRow("/sqlos/admin/auth/organizations")]
+    [DataRow("/sqlos/admin/auth/organizations/example/general")]
+    [DataRow("/sqlos/admin/auth/users/example/general")]
     [DataRow("/sqlos/admin/auth/clients")]
     [DataRow("/sqlos/admin/fga/resources")]
     public async Task DashboardShell_PageRoutes_Render(string path)
@@ -264,6 +266,83 @@ public sealed class SqlOSExampleApiIntegrationTests
         response.EnsureSuccessStatusCode();
         var html = await response.Content.ReadAsStringAsync();
         html.Should().Contain("SqlOS Dashboard");
+    }
+
+    [TestMethod]
+    public async Task Organization_CanBeUpdatedThroughAdminApi()
+    {
+        var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Update Org {Guid.NewGuid():N}"
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var organizationId = createJson.RootElement.GetProperty("id").GetString();
+
+        var updateResponse = await ExampleApiFixture.Client.PutAsJsonAsync($"/sqlos/admin/auth/api/organizations/{organizationId}", new
+        {
+            name = "Updated Org Name",
+            slug = "updated-org-name",
+            primaryDomain = "updated.example.com",
+            isActive = true
+        });
+
+        updateResponse.EnsureSuccessStatusCode();
+        var updateJson = JsonDocument.Parse(await updateResponse.Content.ReadAsStringAsync());
+        updateJson.RootElement.GetProperty("name").GetString().Should().Be("Updated Org Name");
+        updateJson.RootElement.GetProperty("primaryDomain").GetString().Should().Be("updated.example.com");
+    }
+
+    [TestMethod]
+    public async Task AuthAdmin_ListEndpoints_ReturnPaginationEnvelope()
+    {
+        var userResponse = await AdminPostAsync("/sqlos/admin/auth/api/users", new
+        {
+            displayName = $"Paged User {Guid.NewGuid():N}",
+            email = $"paged-{Guid.NewGuid():N}@example.com"
+        });
+        userResponse.EnsureSuccessStatusCode();
+        var userJson = JsonDocument.Parse(await userResponse.Content.ReadAsStringAsync());
+        var userId = userJson.RootElement.GetProperty("id").GetString();
+
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Paged Org {Guid.NewGuid():N}"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        var membershipResponse = await AdminPostAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships", new
+        {
+            userId,
+            role = "member"
+        });
+        membershipResponse.EnsureSuccessStatusCode();
+
+        var usersResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/users?page=1&pageSize=5");
+        usersResponse.EnsureSuccessStatusCode();
+        var usersJson = JsonDocument.Parse(await usersResponse.Content.ReadAsStringAsync());
+        usersJson.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Array);
+        usersJson.RootElement.GetProperty("page").GetInt32().Should().Be(1);
+        usersJson.RootElement.GetProperty("totalPages").GetInt32().Should().BeGreaterThanOrEqualTo(1);
+
+        var orgMembershipsResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships?page=1&pageSize=5");
+        orgMembershipsResponse.EnsureSuccessStatusCode();
+        var membershipsJson = JsonDocument.Parse(await orgMembershipsResponse.Content.ReadAsStringAsync());
+        membershipsJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
+        membershipsJson.RootElement.GetProperty("totalCount").GetInt32().Should().BeGreaterThan(0);
+
+        var sessionsResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/sessions?page=1&pageSize=5");
+        sessionsResponse.EnsureSuccessStatusCode();
+        var sessionsJson = JsonDocument.Parse(await sessionsResponse.Content.ReadAsStringAsync());
+        sessionsJson.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Array);
+        if (sessionsJson.RootElement.GetProperty("data").GetArrayLength() > 0)
+        {
+            var firstSession = sessionsJson.RootElement.GetProperty("data")[0];
+            firstSession.TryGetProperty("idleExpiresAt", out _).Should().BeTrue();
+            firstSession.TryGetProperty("absoluteExpiresAt", out _).Should().BeTrue();
+        }
     }
 
     private static async Task<HttpResponseMessage> AdminPostAsync(string path, object body)

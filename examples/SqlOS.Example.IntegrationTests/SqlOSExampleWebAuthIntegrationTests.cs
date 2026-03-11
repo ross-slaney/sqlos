@@ -14,7 +14,7 @@ namespace SqlOS.Example.IntegrationTests;
 public sealed class SqlOSExampleWebAuthIntegrationTests
 {
     [TestMethod]
-    public async Task BackendLocalLogin_AndSessionEndpoint_Work()
+    public async Task BackendLocalLogin_AndAuthorizedHelloEndpoint_Work()
     {
         var email = $"local-{Guid.NewGuid():N}@example.com";
 
@@ -66,6 +66,15 @@ public sealed class SqlOSExampleWebAuthIntegrationTests
         var sessionJson = JsonDocument.Parse(await sessionResponse.Content.ReadAsStringAsync());
         sessionJson.RootElement.GetProperty("user").GetProperty("email").GetString().Should().Be(email);
         sessionJson.RootElement.GetProperty("token").GetProperty("organizationId").GetString().Should().Be(organizationId);
+
+        var helloRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello");
+        helloRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var helloResponse = await ExampleApiFixture.Client.SendAsync(helloRequest);
+        helloResponse.EnsureSuccessStatusCode();
+
+        var helloJson = JsonDocument.Parse(await helloResponse.Content.ReadAsStringAsync());
+        helloJson.RootElement.GetProperty("message").GetString().Should().Be("hello");
+        helloJson.RootElement.GetProperty("organizationId").GetString().Should().Be(organizationId);
     }
 
     [TestMethod]

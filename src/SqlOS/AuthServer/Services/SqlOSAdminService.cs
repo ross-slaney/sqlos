@@ -150,6 +150,29 @@ public sealed class SqlOSAdminService
         return organization;
     }
 
+    public async Task<SqlOSOrganization> UpdateOrganizationAsync(string organizationId, SqlOSUpdateOrganizationRequest request, CancellationToken cancellationToken = default)
+    {
+        var organization = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+
+        var slug = string.IsNullOrWhiteSpace(request.Slug) ? Slugify(request.Name) : Slugify(request.Slug);
+        var slugExists = await _context.Set<SqlOSOrganization>()
+            .AnyAsync(x => x.Id != organizationId && x.Slug == slug, cancellationToken);
+        if (slugExists)
+        {
+            slug = $"{slug}-{Guid.NewGuid():N}"[..Math.Min(slug.Length + 9, 120)];
+        }
+
+        organization.Name = request.Name.Trim();
+        organization.Slug = slug;
+        organization.PrimaryDomain = NormalizeDomain(request.PrimaryDomain);
+        organization.IsActive = request.IsActive;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return organization;
+    }
+
     public async Task<SqlOSMembership> CreateMembershipAsync(string organizationId, SqlOSCreateMembershipRequest request, CancellationToken cancellationToken = default)
     {
         var existing = await _context.Set<SqlOSMembership>().FirstOrDefaultAsync(
@@ -476,8 +499,29 @@ public sealed class SqlOSAdminService
         return new { users, organizations = orgs, sessions, ssoConnections = connections, oidcConnections, clients, auditEvents = eventsCount };
     }
 
-    public async Task<List<object>> ListUsersAsync(CancellationToken cancellationToken = default)
+    public async Task<object> GetUserAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSUser>()
+            .Where(x => x.Id == userId)
+            .Select(x => new
+            {
+                x.Id,
+                x.DisplayName,
+                x.DefaultEmail,
+                x.IsActive,
+                x.CreatedAt,
+                x.UpdatedAt,
+                MembershipCount = x.Memberships.Count(m => m.IsActive),
+                SessionCount = x.Sessions.Count(s => s.RevokedAt == null),
+                ExternalIdentityCount = x.ExternalIdentities.Count
+            })
+            .FirstOrDefaultAsync(cancellationToken)
+        ?? throw new InvalidOperationException("User not found.");
+
+    public async Task<object> ListUsersAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSUser>()
+            .AsNoTracking()
             .OrderBy(x => x.DisplayName)
             .Select(x => new
             {
@@ -485,13 +529,36 @@ public sealed class SqlOSAdminService
                 x.DisplayName,
                 x.DefaultEmail,
                 x.IsActive,
-                x.CreatedAt
-            })
-            .Cast<object>()
-            .ToListAsync(cancellationToken);
+                x.CreatedAt,
+                MembershipCount = x.Memberships.Count(m => m.IsActive)
+            });
 
-    public async Task<List<object>> ListOrganizationsAsync(CancellationToken cancellationToken = default)
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
+
+    public async Task<object> GetOrganizationAsync(string organizationId, CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSOrganization>()
+            .Where(x => x.Id == organizationId)
+            .Select(x => new
+            {
+                x.Id,
+                x.Name,
+                x.Slug,
+                x.PrimaryDomain,
+                x.IsActive,
+                x.CreatedAt,
+                MembershipCount = x.Memberships.Count(m => m.IsActive),
+                SsoConnectionCount = x.SsoConnections.Count,
+                EnabledSsoConnections = x.SsoConnections.Count(c => c.IsEnabled)
+            })
+            .FirstOrDefaultAsync(cancellationToken)
+        ?? throw new InvalidOperationException("Organization not found.");
+
+    public async Task<object> ListOrganizationsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSOrganization>()
+            .AsNoTracking()
             .OrderBy(x => x.Name)
             .Select(x => new
             {
@@ -500,14 +567,18 @@ public sealed class SqlOSAdminService
                 x.Slug,
                 x.PrimaryDomain,
                 x.IsActive,
-                MembershipCount = x.Memberships.Count,
+                MembershipCount = x.Memberships.Count(m => m.IsActive),
                 EnabledSsoConnections = x.SsoConnections.Count(c => c.IsEnabled)
-            })
-            .Cast<object>()
-            .ToListAsync(cancellationToken);
+            });
 
-    public async Task<List<object>> ListMembershipsAsync(CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSMembership>()
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
+
+    public async Task<object> ListMembershipsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSMembership>()
+            .AsNoTracking()
             .Include(x => x.Organization)
             .Include(x => x.User)
             .OrderBy(x => x.Organization!.Name)
@@ -522,9 +593,58 @@ public sealed class SqlOSAdminService
                 x.Role,
                 x.IsActive,
                 x.CreatedAt
-            })
-            .Cast<object>()
-            .ToListAsync(cancellationToken);
+            });
+
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
+
+    public async Task<object> ListOrganizationMembershipsAsync(string organizationId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSMembership>()
+            .AsNoTracking()
+            .Include(x => x.Organization)
+            .Include(x => x.User)
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.User!.DisplayName)
+            .Select(x => new
+            {
+                x.OrganizationId,
+                Organization = x.Organization!.Name,
+                x.UserId,
+                User = x.User!.DisplayName,
+                UserEmail = x.User!.DefaultEmail,
+                x.Role,
+                x.IsActive,
+                x.CreatedAt
+            });
+
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
+
+    public async Task<object> ListUserMembershipsAsync(string userId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSMembership>()
+            .AsNoTracking()
+            .Include(x => x.Organization)
+            .Include(x => x.User)
+            .Where(x => x.UserId == userId)
+            .OrderBy(x => x.Organization!.Name)
+            .Select(x => new
+            {
+                x.OrganizationId,
+                Organization = x.Organization!.Name,
+                x.UserId,
+                User = x.User!.DisplayName,
+                UserEmail = x.User!.DefaultEmail,
+                x.Role,
+                x.IsActive,
+                x.CreatedAt
+            });
+
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
 
     public async Task<List<object>> ListClientsAsync(CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSClientApplication>()
@@ -607,25 +727,116 @@ public sealed class SqlOSAdminService
             .ToList();
     }
 
-    public async Task<List<object>> ListSessionsAsync(CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSSession>()
+    public async Task<object> ListOrganizationSsoConnectionsAsync(string organizationId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSSsoConnection>()
+            .AsNoTracking()
+            .Include(x => x.Organization)
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.DisplayName)
+            .Select(x => new
+            {
+                x.Id,
+                x.DisplayName,
+                x.IdentityProviderEntityId,
+                x.SingleSignOnUrl,
+                x.IsEnabled,
+                OrganizationName = x.Organization!.Name,
+                x.OrganizationId,
+                PrimaryDomain = x.Organization!.PrimaryDomain,
+                x.AutoProvisionUsers,
+                x.AutoLinkByEmail,
+                SetupStatus = string.IsNullOrWhiteSpace(x.IdentityProviderEntityId) || string.IsNullOrWhiteSpace(x.SingleSignOnUrl) || string.IsNullOrWhiteSpace(x.X509CertificatePem)
+                    ? "draft"
+                    : "configured"
+            });
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
+        var data = await query
+            .Skip((resolvedPage - 1) * resolvedPageSize)
+            .Take(resolvedPageSize)
+            .ToListAsync(cancellationToken);
+        var serviceProviderEntityId = GetServiceProviderEntityId();
+
+        return new
+        {
+            Data = data.Select(x => new
+            {
+                x.Id,
+                x.DisplayName,
+                x.IdentityProviderEntityId,
+                x.SingleSignOnUrl,
+                x.IsEnabled,
+                Organization = x.OrganizationName,
+                x.OrganizationId,
+                PrimaryDomain = x.PrimaryDomain,
+                x.AutoProvisionUsers,
+                x.AutoLinkByEmail,
+                x.SetupStatus,
+                ServiceProviderEntityId = serviceProviderEntityId,
+                AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)
+            }).ToList(),
+            Page = resolvedPage,
+            PageSize = resolvedPageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages
+        };
+    }
+
+    public async Task<object> ListSessionsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSSession>()
+            .AsNoTracking()
             .Include(x => x.User)
             .OrderByDescending(x => x.CreatedAt)
-            .Take(100)
             .Select(x => new
             {
                 x.Id,
                 x.AuthenticationMethod,
                 User = x.User!.DisplayName,
+                x.UserId,
                 x.ClientApplicationId,
                 x.CreatedAt,
                 x.LastSeenAt,
+                x.IdleExpiresAt,
+                x.AbsoluteExpiresAt,
                 x.RevokedAt,
                 x.UserAgent,
                 x.IpAddress
-            })
-            .Cast<object>()
-            .ToListAsync(cancellationToken);
+            });
+
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
+
+    public async Task<object> ListUserSessionsAsync(string userId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        var query = _context.Set<SqlOSSession>()
+            .AsNoTracking()
+            .Include(x => x.User)
+            .Where(x => x.UserId == userId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new
+            {
+                x.Id,
+                x.AuthenticationMethod,
+                User = x.User!.DisplayName,
+                x.UserId,
+                x.ClientApplicationId,
+                x.CreatedAt,
+                x.LastSeenAt,
+                x.IdleExpiresAt,
+                x.AbsoluteExpiresAt,
+                x.RevokedAt,
+                x.UserAgent,
+                x.IpAddress
+            });
+
+        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+    }
 
     public async Task<List<object>> ListAuditEventsAsync(CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSAuditEvent>()
@@ -645,6 +856,34 @@ public sealed class SqlOSAdminService
             })
             .Cast<object>()
             .ToListAsync(cancellationToken);
+
+    private static (int Page, int PageSize) NormalizePagination(int? page, int? pageSize)
+    {
+        var resolvedPage = page.GetValueOrDefault(1);
+        var resolvedPageSize = pageSize.GetValueOrDefault(10);
+        resolvedPage = Math.Max(1, resolvedPage);
+        resolvedPageSize = Math.Clamp(resolvedPageSize, 1, 100);
+        return (resolvedPage, resolvedPageSize);
+    }
+
+    private static async Task<object> PaginateAsync<T>(IQueryable<T> query, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        var totalCount = await query.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+        var data = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return new
+        {
+            Data = data,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages
+        };
+    }
 
     public async Task RecordAuditAsync(
         string eventType,

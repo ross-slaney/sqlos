@@ -25,20 +25,81 @@ type TokenResponse = {
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5062";
+const pendingRefreshes = new Map<string, Promise<JWT>>();
 
 async function refreshAccessToken(token: JWT): Promise<JWT> {
-  try {
-    const response = await fetch(`${apiUrl}/api/v1/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        refreshToken: token.refreshToken,
-        organizationId: token.organizationId ?? null
-      })
-    });
+  const currentRefreshToken = typeof token.refreshToken === "string" ? token.refreshToken : "";
+  if (!currentRefreshToken) {
+    console.warn("[Auth] Refresh requested without a refresh token.");
+    return {
+      ...token,
+      error: "RefreshAccessTokenError",
+      accessToken: "",
+      refreshToken: ""
+    };
+  }
 
-    const data = await response.json();
-    if (!response.ok) {
+  const inFlight = pendingRefreshes.get(currentRefreshToken);
+  if (inFlight) {
+    console.info("[Auth] Reusing in-flight refresh request.", {
+      sessionId: token.sessionId ?? null
+    });
+    return await inFlight;
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      console.info("[Auth] Refreshing access token.", {
+        sessionId: token.sessionId ?? null,
+        organizationId: token.organizationId ?? null
+      });
+
+      const response = await fetch(`${apiUrl}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          refreshToken: currentRefreshToken,
+          organizationId: token.organizationId ?? null
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.warn("[Auth] Refresh failed.", {
+          status: response.status,
+          message: data?.message ?? null,
+          sessionId: token.sessionId ?? null
+        });
+
+        return {
+          ...token,
+          error: "RefreshAccessTokenError",
+          accessToken: "",
+          refreshToken: ""
+        };
+      }
+
+      const refreshedDecoded = jwtDecode<DecodedToken>(data.accessToken);
+      console.info("[Auth] Refresh succeeded.", {
+        sessionId: data.sessionId ?? token.sessionId ?? null,
+        accessTokenExpiresAt: new Date(refreshedDecoded.exp * 1000).toISOString()
+      });
+
+      return {
+        ...token,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        sessionId: data.sessionId,
+        organizationId: data.organizationId ?? refreshedDecoded.org_id ?? null,
+        exp: refreshedDecoded.exp,
+        error: undefined
+      };
+    } catch (error) {
+      console.error("[Auth] Refresh threw unexpectedly.", {
+        sessionId: token.sessionId ?? null,
+        error
+      });
+
       return {
         ...token,
         error: "RefreshAccessTokenError",
@@ -46,24 +107,13 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         refreshToken: ""
       };
     }
+  })();
 
-    const refreshedDecoded = jwtDecode<DecodedToken>(data.accessToken);
-    return {
-      ...token,
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken,
-      sessionId: data.sessionId,
-      organizationId: data.organizationId ?? refreshedDecoded.org_id ?? null,
-      exp: refreshedDecoded.exp,
-      error: undefined
-    };
-  } catch {
-    return {
-      ...token,
-      error: "RefreshAccessTokenError",
-      accessToken: "",
-      refreshToken: ""
-    };
+  pendingRefreshes.set(currentRefreshToken, refreshPromise);
+  try {
+    return await refreshPromise;
+  } finally {
+    pendingRefreshes.delete(currentRefreshToken);
   }
 }
 
@@ -163,7 +213,7 @@ export const authOptions: AuthOptions = {
       try {
         const decoded = jwtDecode<DecodedToken>(token.accessToken as string);
         const currentTimeSeconds = Math.floor(Date.now() / 1000);
-        if (decoded.exp && currentTimeSeconds >= decoded.exp - 60) {
+        if (decoded.exp && currentTimeSeconds >= decoded.exp) {
           return await refreshAccessToken(token);
         }
       } catch {

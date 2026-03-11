@@ -13,6 +13,24 @@ public static class ExampleEndpoints
 {
     public static void MapExampleEndpoints(this WebApplication app)
     {
+        app.MapGet("/api/hello", (HttpContext context) =>
+        {
+            var subjectId = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(new
+            {
+                message = "hello",
+                userId = subjectId,
+                email = context.User.FindFirst("email")?.Value,
+                organizationId = context.User.FindFirst("org_id")?.Value,
+                authenticationMethod = context.User.FindFirst("amr")?.Value
+            });
+        });
+
         app.MapGet("/api/me", (HttpContext context) =>
         {
             var claims = context.User.Claims.Select(x => new { x.Type, x.Value });

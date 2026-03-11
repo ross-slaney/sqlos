@@ -1,14 +1,6 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 import { LoginPanel } from "@/components/login-panel";
-import { authOptions } from "@/lib/auth";
 
 export default async function LoginPage() {
-  const session = await getServerSession(authOptions);
-  if (session?.user && session.accessToken) {
-    redirect("/app");
-  }
-
   return (
     <main className="shell">
       <div className="stack">

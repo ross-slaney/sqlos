@@ -90,6 +90,8 @@ public sealed record SqlOSVerifyEmailRequest(string Token);
 
 public sealed record SqlOSCreateOrganizationRequest(string Name, string? Slug, string? PrimaryDomain = null);
 
+public sealed record SqlOSUpdateOrganizationRequest(string Name, string? Slug, string? PrimaryDomain = null, bool IsActive = true);
+
 public sealed record SqlOSCreateMembershipRequest(string UserId, string Role);
 
 public sealed record SqlOSCreateUserRequest(string DisplayName, string Email, string? Password);
