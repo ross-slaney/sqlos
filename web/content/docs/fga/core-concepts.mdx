@@ -1,0 +1,55 @@
+---
+title: "Core Concepts"
+description: "Resources, subjects, roles, permissions, and grants in FGA."
+order: 1
+section: fga
+---
+
+# Core Concepts
+
+**What this guide covers**: The five building blocks of the FGA authorization model.
+
+---
+
+## Resource
+
+A resource is a node in a tree hierarchy. Every resource has a type, a parent (except root), and a name. Resources are stored in `SqlOSFgaResource`.
+
+```csharp
+public class SqlOSFgaResource
+{
+    public string Id { get; set; }
+    public string ParentId { get; set; }
+    public string Name { get; set; }
+    public string ResourceTypeId { get; set; }
+    public bool IsActive { get; set; }
+}
+```
+
+## Subject
+
+A subject is the entity being authorized. Subjects have a type (user, agent, service account, group) and are stored in `SqlOSFgaSubject`.
+
+## Role
+
+A role is a named set of permissions. Example: `viewer` has `CHAIN_VIEW`; `editor` has `CHAIN_VIEW` + `CHAIN_EDIT`. Roles are linked to permissions via a join table.
+
+## Permission
+
+A permission is a capability key scoped to a resource type. Example: `CHAIN_VIEW` applies to resources of type `chain`.
+
+## Grant
+
+A grant assigns a role to a subject on a specific resource. Because resources form a tree, a grant on a parent applies to all descendants.
+
+```text
+Subject "user-1" + Role "viewer" + Resource "org::acme"
+  → user-1 can CHAIN_VIEW on org::acme and all children
+```
+
+## How They Fit Together
+
+1. Define resource types, roles, and permissions in the schema
+2. Create resources in the hierarchy
+3. Create grants linking subjects to roles on resources
+4. At query time, FGA walks the tree to determine access

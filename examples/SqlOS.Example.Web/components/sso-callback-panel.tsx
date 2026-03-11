@@ -9,14 +9,21 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5062";
 export function SsoCallbackPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [message, setMessage] = useState("Completing SSO sign-in...");
+  const [message, setMessage] = useState("Completing sign-in...");
 
   useEffect(() => {
+    const handoff = searchParams.get("handoff");
     const code = searchParams.get("code");
     const state = searchParams.get("state");
+    const error = searchParams.get("error");
 
-    if (!code || !state) {
-      setMessage("The callback is missing the code or state value.");
+    if (error) {
+      setMessage(error);
+      return;
+    }
+
+    if (!handoff && (!code || !state)) {
+      setMessage("The callback is missing the expected handoff or code/state values.");
       return;
     }
 
@@ -24,16 +31,23 @@ export function SsoCallbackPanel() {
 
     async function completeSignIn() {
       try {
-        const response = await fetch(`${apiUrl}/api/v1/auth/sso/exchange`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, state })
-        });
+        const response = handoff
+          ? await fetch(`${apiUrl}/api/v1/auth/oidc/complete`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ handoff })
+            })
+          : await fetch(`${apiUrl}/api/v1/auth/sso/exchange`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code, state })
+            });
 
         const data = await response.json();
         if (!response.ok) {
-          throw new Error(data.message || "SSO exchange failed.");
+          throw new Error(data.message || (handoff ? "OIDC sign-in failed." : "SSO exchange failed."));
         }
 
         const result = await signIn("credentials", {

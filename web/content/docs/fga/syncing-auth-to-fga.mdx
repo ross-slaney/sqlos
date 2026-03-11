@@ -1,0 +1,53 @@
+---
+title: "Syncing Auth to FGA"
+description: "Sync AuthServer users and memberships into the FGA model."
+order: 14
+section: fga
+---
+
+# Syncing Auth to FGA
+
+**What this guide covers**: The pattern for syncing AuthServer users and organization memberships into FGA subjects, resources, and grants.
+
+---
+
+When a user logs in and selects an organization, you need to ensure they exist as an FGA subject with a grant on the organization resource. The example app does this in `ExampleFgaService.EnsureUserAccessAsync`.
+
+## Code Example
+
+```csharp
+public async Task EnsureUserAccessAsync(
+    string userId, string organizationId, CancellationToken cancellationToken)
+{
+    var user = await _context.Set<SqlOSUser>()
+        .FirstAsync(x => x.Id == userId, cancellationToken);
+    var organization = await _context.Set<SqlOSOrganization>()
+        .FirstAsync(x => x.Id == organizationId, cancellationToken);
+    var membership = await _context.Set<SqlOSMembership>()
+        .FirstAsync(x => x.UserId == userId
+            && x.OrganizationId == organizationId
+            && x.IsActive, cancellationToken);
+
+    await EnsureSubjectAsync(user, organizationId, cancellationToken);
+    await EnsureOrganizationResourceAsync(organization, cancellationToken);
+    await EnsureMembershipGrantAsync(userId, organizationId, membership.Role, cancellationToken);
+}
+```
+
+## What It Does
+
+1. **Ensure subject** — creates or updates `SqlOSFgaSubject` and `SqlOSFgaUser` for the auth user
+2. **Ensure organization resource** — creates `SqlOSFgaResource` for the org under `root` if it doesn't exist
+3. **Ensure membership grant** — creates a `SqlOSFgaGrant` linking the subject to a role on the org resource, mapping the auth membership role to an FGA role (`admin`/`owner` → `org_admin`, otherwise → `org_member`)
+
+## When to Call
+
+Call `EnsureUserAccessAsync` after successful login, during token creation. The example app calls it in `ToTokenResponseAsync`:
+
+```csharp
+if (!string.IsNullOrWhiteSpace(tokens.OrganizationId))
+{
+    await fgaService.EnsureUserAccessAsync(
+        user.Id, tokens.OrganizationId, cancellationToken);
+}
+```

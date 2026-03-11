@@ -78,18 +78,52 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSOidcConnection>(entity =>
+        {
+            entity.ToTable("SqlOSAuthOidcConnections", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ProviderType)
+                .HasConversion<string>()
+                .HasMaxLength(40);
+            entity.Property(x => x.ClientAuthMethod)
+                .HasConversion<string>()
+                .HasMaxLength(40);
+            entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.ClientId).HasMaxLength(300);
+            entity.Property(x => x.DiscoveryUrl).HasMaxLength(500);
+            entity.Property(x => x.Issuer).HasMaxLength(500);
+            entity.Property(x => x.AuthorizationEndpoint).HasMaxLength(1000);
+            entity.Property(x => x.TokenEndpoint).HasMaxLength(1000);
+            entity.Property(x => x.UserInfoEndpoint).HasMaxLength(1000);
+            entity.Property(x => x.JwksUri).HasMaxLength(1000);
+            entity.Property(x => x.MicrosoftTenant).HasMaxLength(200);
+            entity.Property(x => x.AppleTeamId).HasMaxLength(100);
+            entity.Property(x => x.AppleKeyId).HasMaxLength(100);
+        });
+
         modelBuilder.Entity<SqlOSExternalIdentity>(entity =>
         {
             entity.ToTable("SqlOSExternalIdentities", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => new { x.ConnectionId, x.Subject }).IsUnique();
+            entity.Property(x => x.SsoConnectionId).HasColumnName("ConnectionId");
+            entity.Property(x => x.OidcConnectionId).HasColumnName("OidcConnectionId");
+            entity.HasIndex(x => new { x.SsoConnectionId, x.Subject })
+                .IsUnique()
+                .HasFilter("[ConnectionId] IS NOT NULL");
+            entity.HasIndex(x => new { x.OidcConnectionId, x.Subject })
+                .IsUnique()
+                .HasFilter("[OidcConnectionId] IS NOT NULL");
             entity.HasOne(x => x.User)
                 .WithMany(x => x.ExternalIdentities)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(x => x.Connection)
+            entity.HasOne(x => x.SsoConnection)
                 .WithMany(x => x.ExternalIdentities)
-                .HasForeignKey(x => x.ConnectionId)
+                .HasForeignKey(x => x.SsoConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.OidcConnection)
+                .WithMany(x => x.ExternalIdentities)
+                .HasForeignKey(x => x.OidcConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

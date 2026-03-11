@@ -1,0 +1,36 @@
+---
+title: "Microsoft OIDC"
+description: "Configure Microsoft Entra OAuth for SqlOS AuthServer."
+order: 5.12
+section: authserver
+---
+
+# Microsoft OIDC
+
+**Dashboard path**: Auth Server → OIDC
+
+## Setup
+
+1. Create an app registration in Microsoft Entra.
+2. Create the Microsoft OIDC connection in SqlOS.
+3. Copy the connection ID from the OIDC connections list.
+4. Register this final callback URI in Entra:
+
+```text
+http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+```
+
+5. Update the SqlOS allowed callback URI list to the same value.
+
+## SqlOS Fields
+
+- Provider: `Microsoft`
+- Client ID
+- Client secret
+- Optional tenant override, otherwise `common`
+- Allowed callback URIs
+
+## Notes
+
+- SqlOS accepts `preferred_username` when `email` is not returned.
+- Org SAML still wins when the entered email domain matches an enabled SSO org.

@@ -1,0 +1,49 @@
+---
+title: "Permissions"
+description: "Permission keys scoped to resource types."
+order: 3
+section: fga
+---
+
+# Permissions
+
+**What this guide covers**: Permission model, resource type scoping, permission keys.
+
+**Dashboard path**: Fine-Grained Auth → Permissions  
+**URL**: `http://localhost:5062/sqlos/admin/fga/permissions`
+
+---
+
+A permission is a capability key associated with a resource type. It defines what action can be performed on resources of that type.
+
+## Model
+
+```csharp
+public class SqlOSFgaPermission
+{
+    public string Id { get; set; }
+    public string Key { get; set; }            // e.g., "CHAIN_VIEW"
+    public string DisplayName { get; set; }
+    public string ResourceTypeId { get; set; } // e.g., "chain"
+}
+```
+
+## Naming Convention
+
+Permission keys are typically `RESOURCETYPE_ACTION` in uppercase:
+
+| Key | Resource Type | Action |
+|-----|---------------|--------|
+| `CHAIN_VIEW` | `chain` | Read access |
+| `CHAIN_EDIT` | `chain` | Write access |
+| `LOCATION_VIEW` | `location` | Read access |
+| `INVENTORY_EDIT` | `inventory` | Write access |
+
+## Usage
+
+Permissions are referenced by key in authorization checks:
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+```

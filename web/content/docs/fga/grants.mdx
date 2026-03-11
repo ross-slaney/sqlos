@@ -1,0 +1,59 @@
+---
+title: "Grants"
+description: "Assign roles to subjects on resources with downward inheritance."
+order: 4
+section: fga
+---
+
+# Grants
+
+**What this guide covers**: Grant model, inheritance, creating and revoking grants.
+
+**Dashboard path**: Fine-Grained Auth → Grants  
+**URL**: `http://localhost:5062/sqlos/admin/fga/grants`
+
+---
+
+A grant links a subject, a role, and a resource. Because resources form a tree, a grant on a parent resource gives the subject that role on all descendants.
+
+## Model
+
+```csharp
+public class SqlOSFgaGrant
+{
+    public string Id { get; set; }
+    public string SubjectId { get; set; }
+    public string ResourceId { get; set; }
+    public string RoleId { get; set; }
+    public string? Description { get; set; }
+}
+```
+
+## Inheritance
+
+Grant on `org::acme` with role `org_member` (which has `CHAIN_VIEW`) means the subject can view all chains under `org::acme`:
+
+```text
+org::acme          ← grant: user-1 / org_member
+  ├── chain-1      ← user-1 inherits CHAIN_VIEW
+  ├── chain-2      ← user-1 inherits CHAIN_VIEW
+  └── chain-3      ← user-1 inherits CHAIN_VIEW
+```
+
+## Code Example
+
+```csharp
+_context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+{
+    Id = "grant_user1_acme",
+    SubjectId = "user-1",
+    ResourceId = "org::acme",
+    RoleId = orgMemberRole.Id,
+    Description = "Synced from auth membership."
+});
+await _context.SaveChangesAsync(cancellationToken);
+```
+
+## Dashboard
+
+The Grants page lets you inspect and manage all grants. You can filter by subject, resource, or role.

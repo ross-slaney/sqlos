@@ -1,0 +1,42 @@
+---
+title: "Clients"
+description: "Register client applications with IDs, audiences, and redirect URIs."
+order: 4.6
+section: authserver
+---
+
+# Clients
+
+**What this guide covers**: Client applications, client ID, audience, redirect URIs.
+
+**Dashboard path**: Auth Server → Clients  
+**URL**: `http://localhost:5062/sqlos/admin/auth/clients`
+
+---
+
+A client represents an application that authenticates users through SqlOS. Each client has a unique client ID and optional redirect URIs for OAuth/OIDC flows.
+
+## Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| **Client ID** | Yes | Unique identifier (e.g., `example-web`) |
+| **Name** | Yes | Display name |
+| **Audience** | No | Token audience claim |
+| **Redirect URIs** | No | Allowed callback URIs for OAuth flows |
+
+## Default Client
+
+SqlOS creates a default client at bootstrap via `EnsureDefaultClientAsync`. The example app uses the client ID configured in `ExampleWebOptions.ClientId`.
+
+## Code Example
+
+```csharp
+var client = await adminService.CreateClientAsync(new CreateClientRequest
+{
+    ClientId = "my-web-app",
+    Name = "My Web Application",
+    Audience = "my-web-app",
+    RedirectUris = new[] { "http://localhost:3001/callback" }
+});
+```

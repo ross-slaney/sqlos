@@ -1,0 +1,52 @@
+---
+title: "OIDC Auth"
+description: "Configure Google, Microsoft, Apple, and custom OIDC login in SqlOS AuthServer."
+order: 5.1
+section: authserver
+---
+
+# OIDC Auth
+
+**Dashboard path**: Auth Server → OIDC  
+**URL**: `http://localhost:5062/sqlos/admin/auth/oidc`
+
+SqlOS AuthServer supports first-party OIDC login for:
+
+- Google
+- Microsoft
+- Apple
+- custom OpenID Connect providers
+
+The example frontend still talks only to the example backend. The backend uses `SqlOSOidcAuthService` directly.
+
+## Callback Pattern
+
+Each OIDC connection gets its own callback URI:
+
+```text
+http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+```
+
+Create the connection first, then copy the connection ID from the OIDC connection list and update both:
+
+- the provider redirect URI
+- the SqlOS allowed callback URI list
+
+## Flow
+
+1. Frontend loads providers from `GET /api/v1/auth/oidc/providers`
+2. User clicks provider → `POST /api/v1/auth/oidc/start`
+3. Backend runs home realm discovery first
+4. If the domain matches org SSO, backend starts SAML instead
+5. Otherwise backend redirects to the OIDC provider
+6. Provider returns to `GET|POST /api/v1/auth/oidc/callback/{connectionId}`
+7. Backend completes the provider flow through `SqlOSOidcAuthService`
+8. Backend redirects to the frontend with a short-lived handoff token
+9. Frontend completes sign-in with `POST /api/v1/auth/oidc/complete`
+
+## Providers
+
+- [Google OIDC](/docs/guides/authserver/google-oidc)
+- [Microsoft OIDC](/docs/guides/authserver/microsoft-oidc)
+- [Apple OIDC](/docs/guides/authserver/apple-oidc)
+- [Custom OIDC](/docs/guides/authserver/custom-oidc)

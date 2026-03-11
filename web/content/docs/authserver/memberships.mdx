@@ -1,0 +1,38 @@
+---
+title: "Memberships"
+description: "Assign users to organizations with roles."
+order: 4.5
+section: authserver
+---
+
+# Memberships
+
+**What this guide covers**: Create membership, assign role, organization-user linking.
+
+**Dashboard path**: Auth Server → Memberships  
+**URL**: `http://localhost:5062/sqlos/admin/auth/memberships`
+
+---
+
+## Memberships Page
+
+![Memberships page](/docs/memberships-page.png)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| **Organization ID** | Yes | From Organizations page |
+| **User ID** | Yes | From Users page |
+| **Role** | Yes | e.g., `member`, `admin` |
+
+The role is stored with the membership for application authorization.
+
+## Code Example
+
+```csharp
+var membership = await adminService.CreateMembershipAsync(new CreateMembershipRequest
+{
+    OrganizationId = org.Id,
+    UserId = user.Id,
+    Role = "admin"
+});
+```

@@ -197,6 +197,148 @@ public sealed class SqlOSAdminService
         return client;
     }
 
+    public async Task<SqlOSOidcConnection> CreateOidcConnectionAsync(SqlOSCreateOidcConnectionRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.ProviderType != SqlOSOidcProviderType.Custom &&
+            await _context.Set<SqlOSOidcConnection>().AnyAsync(x => x.ProviderType == request.ProviderType, cancellationToken))
+        {
+            throw new InvalidOperationException($"An OIDC connection for provider '{request.ProviderType}' already exists.");
+        }
+
+        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris);
+        if (callbacks.Count == 0)
+        {
+            throw new InvalidOperationException("At least one callback URI is required.");
+        }
+
+        var normalized = NormalizeOidcConfiguration(
+            request.ProviderType,
+            request.UseDiscovery,
+            request.DiscoveryUrl,
+            request.Issuer,
+            request.AuthorizationEndpoint,
+            request.TokenEndpoint,
+            request.UserInfoEndpoint,
+            request.JwksUri,
+            request.MicrosoftTenant,
+            request.Scopes,
+            request.ClaimMapping,
+            request.ClientAuthMethod,
+            request.UseUserInfo,
+            request.AppleTeamId,
+            request.AppleKeyId);
+
+        var connection = new SqlOSOidcConnection
+        {
+            Id = _cryptoService.GenerateId("oidc"),
+            ProviderType = request.ProviderType,
+            DisplayName = request.DisplayName,
+            ClientId = request.ClientId.Trim(),
+            ClientSecretEncrypted = string.IsNullOrWhiteSpace(request.ClientSecret) ? null : _cryptoService.ProtectSecret(request.ClientSecret.Trim()),
+            AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks),
+            UseDiscovery = normalized.UseDiscovery,
+            DiscoveryUrl = normalized.DiscoveryUrl,
+            Issuer = normalized.Issuer,
+            AuthorizationEndpoint = normalized.AuthorizationEndpoint,
+            TokenEndpoint = normalized.TokenEndpoint,
+            UserInfoEndpoint = normalized.UserInfoEndpoint,
+            JwksUri = normalized.JwksUri,
+            MicrosoftTenant = normalized.MicrosoftTenant,
+            ScopesJson = JsonSerializer.Serialize(normalized.Scopes),
+            ClaimMappingJson = JsonSerializer.Serialize(normalized.ClaimMapping),
+            ClientAuthMethod = normalized.ClientAuthMethod,
+            UseUserInfo = normalized.UseUserInfo,
+            AppleTeamId = normalized.AppleTeamId,
+            AppleKeyId = normalized.AppleKeyId,
+            ApplePrivateKeyEncrypted = string.IsNullOrWhiteSpace(request.ApplePrivateKeyPem) ? null : _cryptoService.ProtectSecret(NormalizePrivateKey(request.ApplePrivateKeyPem)),
+            IsEnabled = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        ValidateOidcSecretRequirements(connection);
+
+        _context.Set<SqlOSOidcConnection>().Add(connection);
+        await _context.SaveChangesAsync(cancellationToken);
+        return connection;
+    }
+
+    public async Task<SqlOSOidcConnection> UpdateOidcConnectionAsync(string connectionId, SqlOSUpdateOidcConnectionRequest request, CancellationToken cancellationToken = default)
+    {
+        var connection = await _context.Set<SqlOSOidcConnection>()
+            .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
+            ?? throw new InvalidOperationException("OIDC connection not found.");
+
+        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris);
+        if (callbacks.Count == 0)
+        {
+            throw new InvalidOperationException("At least one callback URI is required.");
+        }
+
+        var normalized = NormalizeOidcConfiguration(
+            connection.ProviderType,
+            request.UseDiscovery,
+            request.DiscoveryUrl,
+            request.Issuer,
+            request.AuthorizationEndpoint,
+            request.TokenEndpoint,
+            request.UserInfoEndpoint,
+            request.JwksUri,
+            request.MicrosoftTenant,
+            request.Scopes,
+            request.ClaimMapping,
+            request.ClientAuthMethod,
+            request.UseUserInfo,
+            request.AppleTeamId,
+            request.AppleKeyId);
+
+        connection.DisplayName = request.DisplayName;
+        connection.ClientId = request.ClientId.Trim();
+        connection.AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks);
+        connection.UseDiscovery = normalized.UseDiscovery;
+        connection.DiscoveryUrl = normalized.DiscoveryUrl;
+        connection.Issuer = normalized.Issuer;
+        connection.AuthorizationEndpoint = normalized.AuthorizationEndpoint;
+        connection.TokenEndpoint = normalized.TokenEndpoint;
+        connection.UserInfoEndpoint = normalized.UserInfoEndpoint;
+        connection.JwksUri = normalized.JwksUri;
+        connection.MicrosoftTenant = normalized.MicrosoftTenant;
+        connection.ScopesJson = JsonSerializer.Serialize(normalized.Scopes);
+        connection.ClaimMappingJson = JsonSerializer.Serialize(normalized.ClaimMapping);
+        connection.ClientAuthMethod = normalized.ClientAuthMethod;
+        connection.UseUserInfo = normalized.UseUserInfo;
+        connection.AppleTeamId = normalized.AppleTeamId;
+        connection.AppleKeyId = normalized.AppleKeyId;
+        connection.UpdatedAt = DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(request.ClientSecret))
+        {
+            connection.ClientSecretEncrypted = _cryptoService.ProtectSecret(request.ClientSecret.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ApplePrivateKeyPem))
+        {
+            connection.ApplePrivateKeyEncrypted = _cryptoService.ProtectSecret(NormalizePrivateKey(request.ApplePrivateKeyPem));
+        }
+
+        ValidateOidcSecretRequirements(connection);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return connection;
+    }
+
+    public async Task<SqlOSOidcConnection> SetOidcConnectionEnabledAsync(string connectionId, bool isEnabled, CancellationToken cancellationToken = default)
+    {
+        var connection = await _context.Set<SqlOSOidcConnection>()
+            .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
+            ?? throw new InvalidOperationException("OIDC connection not found.");
+
+        connection.IsEnabled = isEnabled;
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        return connection;
+    }
+
     public async Task<SqlOSSsoConnection> CreateSsoConnectionAsync(SqlOSCreateSsoConnectionRequest request, CancellationToken cancellationToken = default)
     {
         var connection = new SqlOSSsoConnection
@@ -328,9 +470,10 @@ public sealed class SqlOSAdminService
         var orgs = await _context.Set<SqlOSOrganization>().CountAsync(cancellationToken);
         var sessions = await _context.Set<SqlOSSession>().CountAsync(cancellationToken);
         var connections = await _context.Set<SqlOSSsoConnection>().CountAsync(cancellationToken);
+        var oidcConnections = await _context.Set<SqlOSOidcConnection>().CountAsync(cancellationToken);
         var clients = await _context.Set<SqlOSClientApplication>().CountAsync(cancellationToken);
         var eventsCount = await _context.Set<SqlOSAuditEvent>().CountAsync(cancellationToken);
-        return new { users, organizations = orgs, sessions, ssoConnections = connections, clients, auditEvents = eventsCount };
+        return new { users, organizations = orgs, sessions, ssoConnections = connections, oidcConnections, clients, auditEvents = eventsCount };
     }
 
     public async Task<List<object>> ListUsersAsync(CancellationToken cancellationToken = default)
@@ -397,6 +540,42 @@ public sealed class SqlOSAdminService
             })
             .Cast<object>()
             .ToListAsync(cancellationToken);
+
+    public async Task<List<object>> ListOidcConnectionsAsync(CancellationToken cancellationToken = default)
+    {
+        var connections = await _context.Set<SqlOSOidcConnection>()
+            .OrderBy(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+
+        return connections
+            .Select(x => new
+            {
+                x.Id,
+                ProviderType = x.ProviderType.ToString(),
+                x.DisplayName,
+                x.ClientId,
+                AllowedCallbackUris = x.AllowedCallbackUrisJson,
+                x.UseDiscovery,
+                x.DiscoveryUrl,
+                x.Issuer,
+                x.AuthorizationEndpoint,
+                x.TokenEndpoint,
+                x.UserInfoEndpoint,
+                x.JwksUri,
+                x.MicrosoftTenant,
+                Scopes = x.ScopesJson,
+                x.ClaimMappingJson,
+                ClientAuthMethod = x.ClientAuthMethod.ToString(),
+                x.UseUserInfo,
+                x.AppleTeamId,
+                x.AppleKeyId,
+                x.IsEnabled,
+                x.CreatedAt,
+                x.UpdatedAt
+            })
+            .Cast<object>()
+            .ToList();
+    }
 
     public async Task<List<object>> ListSsoConnectionsAsync(CancellationToken cancellationToken = default)
     {
@@ -517,7 +696,57 @@ public sealed class SqlOSAdminService
     public string GetServiceProviderEntityId() => _options.Issuer;
 
     public string GetAssertionConsumerServiceUrl(string connectionId)
-        => $"{_options.Issuer.TrimEnd('/')}/saml/acs/{connectionId}";
+    {
+        if (Uri.TryCreate(_options.Issuer, UriKind.Absolute, out var issuerUri))
+        {
+            var authority = issuerUri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+            var basePath = _options.BasePath.Trim();
+            if (!basePath.StartsWith("/", StringComparison.Ordinal))
+            {
+                basePath = "/" + basePath;
+            }
+
+            return $"{authority}{basePath.TrimEnd('/')}/saml/acs/{connectionId}";
+        }
+
+        return $"{_options.Issuer.TrimEnd('/')}/saml/acs/{connectionId}";
+    }
+
+    public static List<string> NormalizeCallbackUris(IEnumerable<string>? values)
+        => values?
+            .Select(value => value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+        ?? [];
+
+    public static List<string> NormalizeScopes(IEnumerable<string>? values)
+        => values?
+            .Select(value => value?.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+        ?? [];
+
+    public static SqlOSOidcClaimMapping NormalizeClaimMapping(SqlOSOidcClaimMapping? value)
+    {
+        value ??= new SqlOSOidcClaimMapping();
+
+        return new SqlOSOidcClaimMapping
+        {
+            SubjectClaim = string.IsNullOrWhiteSpace(value.SubjectClaim) ? "sub" : value.SubjectClaim.Trim(),
+            EmailClaim = NormalizeOptionalClaim(value.EmailClaim, "email"),
+            EmailVerifiedClaim = NormalizeOptionalClaim(value.EmailVerifiedClaim, "email_verified"),
+            DisplayNameClaim = NormalizeOptionalClaim(value.DisplayNameClaim, "name"),
+            FirstNameClaim = NormalizeOptionalClaim(value.FirstNameClaim, "given_name"),
+            LastNameClaim = NormalizeOptionalClaim(value.LastNameClaim, "family_name"),
+            PreferredUsernameClaim = NormalizeOptionalClaim(value.PreferredUsernameClaim, "preferred_username")
+        };
+    }
 
     public static string Slugify(string value)
     {
@@ -574,8 +803,186 @@ public sealed class SqlOSAdminService
         return $"-----BEGIN CERTIFICATE-----\n{base64}\n-----END CERTIFICATE-----";
     }
 
+    private static string? NormalizeMicrosoftTenant(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeOptionalClaim(string? value, string? fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static string NormalizeRequiredUrl(string? value, string message)
+        => string.IsNullOrWhiteSpace(value) ? throw new InvalidOperationException(message) : value.Trim();
+
+    private static string? NormalizeOptionalUrl(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizePrivateKey(string value)
+        => value.Trim().Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    private static void ValidateOidcSecretRequirements(SqlOSOidcConnection connection)
+    {
+        if (connection.ProviderType == SqlOSOidcProviderType.Apple)
+        {
+            if (string.IsNullOrWhiteSpace(connection.AppleTeamId) ||
+                string.IsNullOrWhiteSpace(connection.AppleKeyId) ||
+                string.IsNullOrWhiteSpace(connection.ApplePrivateKeyEncrypted))
+            {
+                throw new InvalidOperationException("Apple OIDC connections require team ID, key ID, and a private key.");
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(connection.ClientSecretEncrypted))
+        {
+            throw new InvalidOperationException("This OIDC connection requires a client secret.");
+        }
+    }
+
+    private static NormalizedOidcConfiguration NormalizeOidcConfiguration(
+        SqlOSOidcProviderType providerType,
+        bool useDiscovery,
+        string? discoveryUrl,
+        string? issuer,
+        string? authorizationEndpoint,
+        string? tokenEndpoint,
+        string? userInfoEndpoint,
+        string? jwksUri,
+        string? microsoftTenant,
+        IEnumerable<string>? scopes,
+        SqlOSOidcClaimMapping? claimMapping,
+        SqlOSOidcClientAuthMethod? clientAuthMethod,
+        bool? useUserInfo,
+        string? appleTeamId,
+        string? appleKeyId)
+    {
+        var normalizedScopes = NormalizeScopes(scopes);
+        var normalizedClaimMapping = NormalizeClaimMapping(claimMapping);
+        var normalizedTenant = providerType == SqlOSOidcProviderType.Microsoft ? NormalizeMicrosoftTenant(microsoftTenant) : null;
+        var effectiveUseDiscovery = providerType != SqlOSOidcProviderType.Custom || useDiscovery;
+        var effectiveClientAuthMethod = clientAuthMethod ?? SqlOSOidcClientAuthMethod.ClientSecretPost;
+        var effectiveUseUserInfo = useUserInfo ?? providerType != SqlOSOidcProviderType.Apple;
+
+        if (providerType == SqlOSOidcProviderType.Google)
+        {
+            return new NormalizedOidcConfiguration(
+                true,
+                "https://accounts.google.com/.well-known/openid-configuration",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                normalizedScopes,
+                normalizedClaimMapping,
+                effectiveClientAuthMethod,
+                true,
+                null,
+                null);
+        }
+
+        if (providerType == SqlOSOidcProviderType.Microsoft)
+        {
+            var tenant = normalizedTenant ?? "common";
+            return new NormalizedOidcConfiguration(
+                true,
+                $"https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration",
+                null,
+                null,
+                null,
+                null,
+                null,
+                tenant,
+                normalizedScopes,
+                normalizedClaimMapping,
+                effectiveClientAuthMethod,
+                true,
+                null,
+                null);
+        }
+
+        if (providerType == SqlOSOidcProviderType.Apple)
+        {
+            return new NormalizedOidcConfiguration(
+                true,
+                "https://appleid.apple.com/.well-known/openid-configuration",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                normalizedScopes,
+                new SqlOSOidcClaimMapping
+                {
+                    SubjectClaim = "sub",
+                    EmailClaim = "email",
+                    EmailVerifiedClaim = "email_verified",
+                    DisplayNameClaim = null,
+                    FirstNameClaim = "given_name",
+                    LastNameClaim = "family_name",
+                    PreferredUsernameClaim = null
+                },
+                SqlOSOidcClientAuthMethod.ClientSecretPost,
+                false,
+                string.IsNullOrWhiteSpace(appleTeamId) ? null : appleTeamId.Trim(),
+                string.IsNullOrWhiteSpace(appleKeyId) ? null : appleKeyId.Trim());
+        }
+
+        if (effectiveUseDiscovery)
+        {
+            return new NormalizedOidcConfiguration(
+                true,
+                NormalizeRequiredUrl(discoveryUrl, "A discovery URL is required for custom OIDC connections when discovery mode is enabled."),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                normalizedScopes,
+                normalizedClaimMapping,
+                effectiveClientAuthMethod,
+                effectiveUseUserInfo,
+                null,
+                null);
+        }
+
+        return new NormalizedOidcConfiguration(
+            false,
+            null,
+            NormalizeRequiredUrl(issuer, "An issuer is required for manual OIDC connections."),
+            NormalizeRequiredUrl(authorizationEndpoint, "An authorization endpoint is required for manual OIDC connections."),
+            NormalizeRequiredUrl(tokenEndpoint, "A token endpoint is required for manual OIDC connections."),
+            NormalizeOptionalUrl(userInfoEndpoint),
+            NormalizeRequiredUrl(jwksUri, "A JWKS URI is required for manual OIDC connections."),
+            null,
+            normalizedScopes,
+            normalizedClaimMapping,
+            effectiveClientAuthMethod,
+            effectiveUseUserInfo,
+            null,
+            null);
+    }
+
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,
         string SingleSignOnUrl,
         string X509CertificatePem);
+
+    private sealed record NormalizedOidcConfiguration(
+        bool UseDiscovery,
+        string? DiscoveryUrl,
+        string? Issuer,
+        string? AuthorizationEndpoint,
+        string? TokenEndpoint,
+        string? UserInfoEndpoint,
+        string? JwksUri,
+        string? MicrosoftTenant,
+        List<string> Scopes,
+        SqlOSOidcClaimMapping ClaimMapping,
+        SqlOSOidcClientAuthMethod ClientAuthMethod,
+        bool UseUserInfo,
+        string? AppleTeamId,
+        string? AppleKeyId);
 }

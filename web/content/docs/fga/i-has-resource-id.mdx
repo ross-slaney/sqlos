@@ -1,0 +1,61 @@
+---
+title: "IHasResourceId"
+description: "Entity contract that links domain entities to FGA resources."
+order: 7
+section: fga
+---
+
+# IHasResourceId
+
+**What this guide covers**: The `IHasResourceId` interface, how to implement it on domain entities.
+
+---
+
+`IHasResourceId` is the contract that connects your domain entities to the FGA resource tree. Any entity that needs authorization filtering must implement it.
+
+## Interface
+
+```csharp
+public interface IHasResourceId
+{
+    string ResourceId { get; }
+}
+```
+
+## Implementation
+
+```csharp
+public class Chain : IHasResourceId
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string ResourceId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public List<Location> Locations { get; set; } = new();
+}
+```
+
+The `ResourceId` property maps the entity to its corresponding `SqlOSFgaResource.Id` in the hierarchy.
+
+## Usage in Authorization
+
+When you call `GetAuthorizationFilterAsync<Chain>`, the filter uses `ResourceId` to join against the accessible resources for the subject:
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+var chains = await dbContext.Chains
+    .Where(filter)
+    .ToListAsync();
+```
+
+## When Creating Entities
+
+Assign a `ResourceId` when creating the entity by calling `CreateResource`:
+
+```csharp
+var resourceId = context.CreateResource("org::acme", "New Chain", "chain");
+chain.ResourceId = resourceId;
+```

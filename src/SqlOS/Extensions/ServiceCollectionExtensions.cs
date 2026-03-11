@@ -31,6 +31,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));
         services.AddSingleton(Options.Create(options.Fga));
+        services.AddDataProtection();
+        services.AddHttpClient();
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());
@@ -42,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSAdminService>();
         services.AddScoped<SqlOSAuthService>();
         services.AddScoped<SqlOSHomeRealmDiscoveryService>();
+        services.AddScoped<SqlOSOidcAuthService>();
         services.AddScoped<SqlOSSamlService>();
         services.AddScoped<SqlOSSsoAuthorizationService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();

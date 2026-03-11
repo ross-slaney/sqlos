@@ -1,3 +1,5 @@
+using SqlOS.AuthServer.Contracts;
+
 namespace SqlOS.AuthServer.Models;
 
 public sealed class SqlOSOrganization
@@ -91,18 +93,50 @@ public sealed class SqlOSSsoConnection
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
 }
 
+public sealed class SqlOSOidcConnection
+{
+    public string Id { get; set; } = string.Empty;
+    public SqlOSOidcProviderType ProviderType { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string ClientId { get; set; } = string.Empty;
+    public string? ClientSecretEncrypted { get; set; }
+    public string AllowedCallbackUrisJson { get; set; } = "[]";
+    public bool UseDiscovery { get; set; } = true;
+    public string? DiscoveryUrl { get; set; }
+    public string? Issuer { get; set; }
+    public string? AuthorizationEndpoint { get; set; }
+    public string? TokenEndpoint { get; set; }
+    public string? UserInfoEndpoint { get; set; }
+    public string? JwksUri { get; set; }
+    public string? MicrosoftTenant { get; set; }
+    public string ScopesJson { get; set; } = "[]";
+    public string ClaimMappingJson { get; set; } = "{}";
+    public SqlOSOidcClientAuthMethod ClientAuthMethod { get; set; } = SqlOSOidcClientAuthMethod.ClientSecretPost;
+    public bool UseUserInfo { get; set; } = true;
+    public string? AppleTeamId { get; set; }
+    public string? AppleKeyId { get; set; }
+    public string? ApplePrivateKeyEncrypted { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
+}
+
 public sealed class SqlOSExternalIdentity
 {
     public string Id { get; set; } = string.Empty;
     public string UserId { get; set; } = string.Empty;
-    public string ConnectionId { get; set; } = string.Empty;
+    public string? SsoConnectionId { get; set; }
+    public string? OidcConnectionId { get; set; }
     public string Issuer { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public string? Email { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public SqlOSUser? User { get; set; }
-    public SqlOSSsoConnection? Connection { get; set; }
+    public SqlOSSsoConnection? SsoConnection { get; set; }
+    public SqlOSOidcConnection? OidcConnection { get; set; }
 }
 
 public sealed class SqlOSSession

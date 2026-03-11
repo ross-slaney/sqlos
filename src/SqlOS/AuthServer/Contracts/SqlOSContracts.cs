@@ -1,6 +1,34 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 
 namespace SqlOS.AuthServer.Contracts;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SqlOSOidcProviderType
+{
+    Google,
+    Microsoft,
+    Apple,
+    Custom
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SqlOSOidcClientAuthMethod
+{
+    ClientSecretPost,
+    ClientSecretBasic
+}
+
+public sealed class SqlOSOidcClaimMapping
+{
+    public string SubjectClaim { get; init; } = "sub";
+    public string? EmailClaim { get; init; } = "email";
+    public string? EmailVerifiedClaim { get; init; } = "email_verified";
+    public string? DisplayNameClaim { get; init; } = "name";
+    public string? FirstNameClaim { get; init; } = "given_name";
+    public string? LastNameClaim { get; init; } = "family_name";
+    public string? PreferredUsernameClaim { get; init; } = "preferred_username";
+}
 
 public sealed record SqlOSOrganizationOption(string Id, string Slug, string Name, string Role);
 
@@ -80,6 +108,49 @@ public sealed record SqlOSCreateSsoConnectionRequest(
     string? FirstNameAttributeName,
     string? LastNameAttributeName);
 
+public sealed record SqlOSCreateOidcConnectionRequest(
+    SqlOSOidcProviderType ProviderType,
+    string DisplayName,
+    string ClientId,
+    string? ClientSecret,
+    List<string> AllowedCallbackUris,
+    bool UseDiscovery,
+    string? DiscoveryUrl,
+    string? Issuer,
+    string? AuthorizationEndpoint,
+    string? TokenEndpoint,
+    string? UserInfoEndpoint,
+    string? JwksUri,
+    string? MicrosoftTenant,
+    List<string>? Scopes,
+    SqlOSOidcClaimMapping? ClaimMapping,
+    SqlOSOidcClientAuthMethod? ClientAuthMethod,
+    bool? UseUserInfo,
+    string? AppleTeamId = null,
+    string? AppleKeyId = null,
+    string? ApplePrivateKeyPem = null);
+
+public sealed record SqlOSUpdateOidcConnectionRequest(
+    string DisplayName,
+    string ClientId,
+    string? ClientSecret,
+    List<string> AllowedCallbackUris,
+    bool UseDiscovery,
+    string? DiscoveryUrl,
+    string? Issuer,
+    string? AuthorizationEndpoint,
+    string? TokenEndpoint,
+    string? UserInfoEndpoint,
+    string? JwksUri,
+    string? MicrosoftTenant,
+    List<string>? Scopes,
+    SqlOSOidcClaimMapping? ClaimMapping,
+    SqlOSOidcClientAuthMethod? ClientAuthMethod,
+    bool? UseUserInfo,
+    string? AppleTeamId = null,
+    string? AppleKeyId = null,
+    string? ApplePrivateKeyPem = null);
+
 public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
 
 public sealed record SqlOSCreateWorkspaceRequest(string Name);
@@ -115,6 +186,41 @@ public sealed record SqlOSSsoAuthorizationStartResult(
     string OrganizationId,
     string OrganizationName,
     string PrimaryDomain);
+
+public sealed record SqlOSStartOidcAuthorizationRequest(
+    string ConnectionId,
+    string Email,
+    string ClientId,
+    string CallbackUri,
+    string State,
+    string Nonce,
+    string CodeChallenge,
+    string CodeChallengeMethod);
+
+public sealed record SqlOSStartOidcAuthorizationResult(
+    string AuthorizationUrl,
+    string ConnectionId,
+    SqlOSOidcProviderType ProviderType,
+    string DisplayName,
+    IReadOnlyList<string> AllowedCallbackUris);
+
+public sealed record SqlOSCompleteOidcAuthorizationRequest(
+    string ConnectionId,
+    string ClientId,
+    string CallbackUri,
+    string Code,
+    string CodeVerifier,
+    string Nonce,
+    string? UserPayloadJson);
+
+public sealed record SqlOSCompleteOidcAuthorizationResult(
+    string ConnectionId,
+    SqlOSOidcProviderType ProviderType,
+    string UserId,
+    string Email,
+    string DisplayName,
+    string? OrganizationId,
+    string AuthenticationMethod);
 
 public sealed record SqlOSPkceExchangeRequest(
     string Code,

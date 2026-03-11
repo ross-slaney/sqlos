@@ -1,0 +1,56 @@
+---
+title: "AuthServer Overview"
+description: "Identity, sessions, organizations, and SSO in one embedded module."
+order: 0
+section: authserver
+---
+
+# AuthServer Overview
+
+**What this guide covers**: AuthServer scope, available services, registration, and the authentication flow.
+
+---
+
+AuthServer is the identity module in SqlOS. It handles organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML organization SSO inside your application database.
+
+## Services
+
+| Service | Purpose |
+|---------|---------|
+| `SqlOSAuthService` | Login, refresh, logout, token validation, session creation |
+| `SqlOSAdminService` | Create orgs, users, memberships, clients, SSO drafts |
+| `SqlOSCryptoService` | Token generation, PKCE, password hashing, JWKS |
+| `SqlOSHomeRealmDiscoveryService` | Discover login mode by email domain |
+| `SqlOSSsoAuthorizationService` | SAML SSO authorization and code exchange |
+| `SqlOSOidcAuthService` | Google, Microsoft, Apple, and custom OIDC authorization |
+| `SqlOSSettingsService` | Security settings (session lifetimes) |
+
+## Registration
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseAuthServer();
+});
+```
+
+## Startup
+
+```csharp
+await app.UseSqlOSAsync();
+app.MapAuthServer("/sqlos/auth");
+app.UseSqlOSDashboard("/sqlos");
+```
+
+## Authentication Flow
+
+1. **Discover** — `POST /api/v1/auth/discover` with email → returns mode (`password`, `sso`)
+2. **Password** — `LoginWithPasswordAsync` → may require org selection → returns tokens
+3. **SSO** — `StartAuthorizationAsync` → SAML redirect → `ExchangeCodeAsync` → tokens
+4. **OIDC** — `StartAuthorizationAsync` → provider redirect → callback → `CompleteAuthorizationAsync` → tokens
+5. **Refresh** — `RefreshAsync` with refresh token → rotated tokens
+6. **Logout** — `LogoutAsync` → session and tokens revoked
+
+## Dashboard
+
+Auth admin UI is available at `/sqlos/admin/auth/` with pages for organizations, users, memberships, clients, OIDC connections, SSO, security settings, sessions, and audit events.

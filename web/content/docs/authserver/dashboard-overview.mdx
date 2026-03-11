@@ -1,0 +1,61 @@
+---
+title: "Dashboard Overview"
+description: "SqlOS control plane: home page, navigation, stats, and URLs."
+order: 1
+section: authserver
+---
+
+# Dashboard Overview
+
+**What this guide covers**: Dashboard home page, navigation structure, stats cards, and all dashboard URLs.
+
+**URL**: `http://localhost:5062/sqlos/` (when example stack is running)
+
+---
+
+The SqlOS dashboard is a single control plane for AuthServer and Fine-Grained Authorization. It runs embedded in your app.
+
+## Dashboard Home
+
+![Dashboard home](/docs/dashboard-home.png)
+
+**Auth Server stats**: Organizations, Users, Clients, SSO Connections, Sessions, Audit Events
+
+**Fine-Grained Auth stats**: Resources, Subjects, Users, Agents, Service Accounts, User Groups, Grants, Roles, Permissions
+
+## Navigation Structure
+
+| Section | Routes |
+|---------|--------|
+| **Dashboard** | Home (`/sqlos/`) |
+| **Auth Server** | Overview, Organizations, Users, Memberships, Clients, OIDC, SSO, Security, Sessions, Audit Events |
+| **Fine-Grained Auth** | Resources, Grants, Roles, Permissions, Users, Agents, Service Accounts, User Groups, Access Tester |
+
+## Dashboard URLs
+
+| Path | Purpose |
+|------|---------|
+| `/sqlos/` | Home |
+| `/sqlos/admin/auth/overview` | Auth overview |
+| `/sqlos/admin/auth/organizations` | Create/list orgs |
+| `/sqlos/admin/auth/users` | Create/list users |
+| `/sqlos/admin/auth/memberships` | Create/list memberships |
+| `/sqlos/admin/auth/clients` | Create/list clients |
+| `/sqlos/admin/auth/oidc` | OIDC connections |
+| `/sqlos/admin/auth/sso` | SAML drafts, metadata import |
+| `/sqlos/admin/auth/security` | Session lifetimes |
+| `/sqlos/admin/auth/sessions` | Active sessions |
+| `/sqlos/admin/auth/audit` | Audit events |
+| `/sqlos/admin/fga/resources` | Resource hierarchy |
+| `/sqlos/admin/fga/grants` | Subject grants |
+| `/sqlos/admin/fga/access-tester` | Access decision tracer |
+
+## Run the Example
+
+```bash
+cd examples/SqlOS.Example.Web && npm install
+cd /path/to/SqlOS
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Then open `http://localhost:5062/sqlos/`.

@@ -1,0 +1,63 @@
+---
+title: "Detail Endpoint"
+description: "Single-entity authorization with AuthorizedDetailAsync."
+order: 10
+section: fga
+---
+
+# Detail Endpoint
+
+**What this guide covers**: `AuthorizedDetailAsync` for fetch-and-check-in-one-call detail endpoints.
+
+---
+
+`AuthorizedDetailAsync` is a convenience method that fetches a single entity, checks authorization, and returns the appropriate HTTP result (404, 403, or 200).
+
+## Code Example
+
+From the retail example — getting a single chain:
+
+```csharp
+group.MapGet("/{id}", async (
+    string id,
+    ExampleAppDbContext context,
+    ISqlOSFgaAuthService authService,
+    HttpContext http) =>
+{
+    var subjectId = http.GetSubjectId();
+
+    return await authService.AuthorizedDetailAsync(
+        context.Chains.Include(c => c.Locations),
+        c => c.Id == id,
+        subjectId, RetailPermissionKeys.ChainView,
+        chain => new ChainDetailDto
+        {
+            Id = chain.Id,
+            ResourceId = chain.ResourceId,
+            Name = chain.Name,
+            Description = chain.Description,
+            LocationCount = chain.Locations.Count,
+            CreatedAt = chain.CreatedAt,
+            UpdatedAt = chain.UpdatedAt
+        });
+});
+```
+
+## Method Signature
+
+```csharp
+Task<IResult> AuthorizedDetailAsync<TEntity, TDto>(
+    IQueryable<TEntity> query,
+    Expression<Func<TEntity, bool>> predicate,
+    string subjectId,
+    string permissionKey,
+    Func<TEntity, TDto> selector) where TEntity : class, IHasResourceId;
+```
+
+## Return Values
+
+| Condition | HTTP Result |
+|-----------|-------------|
+| Entity not found | `404 Not Found` |
+| Access denied | `403 { error: "Permission denied" }` |
+| Access granted | `200` with mapped DTO |

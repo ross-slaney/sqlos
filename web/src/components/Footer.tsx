@@ -34,7 +34,15 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/docs#example-stack"
+                  href="/docs/guides"
+                  className="text-sm text-stone-600 hover:text-stone-950"
+                >
+                  Dashboard guides
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/docs/guides/getting-started"
                   className="text-sm text-stone-600 hover:text-stone-950"
                 >
                   Example stack

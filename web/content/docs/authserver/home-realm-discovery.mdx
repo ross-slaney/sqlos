@@ -1,0 +1,40 @@
+---
+title: "Home Realm Discovery"
+description: "Determine login mode by email domain: password or SSO, before OIDC starts."
+order: 4.8
+section: authserver
+---
+
+# Home Realm Discovery
+
+**What this guide covers**: Discover login mode by email, routing to password or SSO before OIDC starts.
+
+---
+
+Home realm discovery inspects an email address and returns the appropriate login method. It checks whether the email domain matches an organization with SAML SSO enabled or whether the user should use password login. If password is returned, the login screen can still offer configured OIDC providers.
+
+## Response Modes
+
+| Mode | Meaning |
+|------|---------|
+| `password` | User should log in with email + password |
+| `sso` | Email domain matches an org with SAML SSO; redirect to IdP |
+
+## Code Example
+
+```csharp
+var discovery = await discoveryService.DiscoverAsync(
+    new SqlOSHomeRealmDiscoveryRequest("user@acme.com"),
+    cancellationToken);
+
+// discovery.Mode → "password" | "sso"
+// discovery.OrganizationId / PrimaryDomain → matching SSO org if applicable
+```
+
+## How It Works
+
+1. Normalize the email domain
+2. Check for an organization with a matching primary domain that has an active SSO connection → mode `sso`
+3. Default → mode `password`
+
+The example frontend uses this on the login page to decide which UI to show.

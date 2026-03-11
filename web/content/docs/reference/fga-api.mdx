@@ -1,0 +1,403 @@
+---
+title: "FGA API Reference"
+description: "Per-method reference for the FGA authorization SDK: CheckAccess, GetAuthorizationFilter, CreateResource, and more."
+order: 10
+section: reference
+---
+
+# FGA API Reference
+
+Every public method in the FGA module, with parameters, return types, and code examples.
+
+**Namespace**: `SqlOS.Fga.Interfaces`, `SqlOS.Fga.Extensions`, `SqlOS.Fga.Specifications`
+
+---
+
+## ISqlOSFgaAuthService
+
+The core authorization service. Injected via DI as `ISqlOSFgaAuthService`.
+
+---
+
+### CheckAccessAsync
+
+Check if a subject has access to a specific resource with a given permission. Walks up the resource hierarchy from the target resource to the root, looking for grants whose role includes the required permission.
+
+```csharp
+var access = await authService.CheckAccessAsync(subjectId, "CHAIN_VIEW", "chain-1");
+if (!access.Allowed)
+    return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `subjectId` | `string` | The subject (user, agent, etc.) to check access for. |
+| `permissionKey` | `string` | The permission key to check (e.g., `"CHAIN_VIEW"`). |
+| `resourceId` | `string` | The resource ID to check access on. |
+
+**Returns**
+
+`Task<SqlOSFgaAccessCheckResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Allowed` | `bool` | Whether the subject has the permission on the resource. |
+| `Trace` | `List<SqlOSFgaAccessTrace>?` | Step-by-step trace of how the decision was made. |
+| `Error` | `string?` | Error message if the check failed unexpectedly. |
+
+---
+
+### HasCapabilityAsync
+
+Check if a subject has a specific permission at root level — i.e., anywhere in the resource tree. Use for global capability gates.
+
+```csharp
+var canEdit = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
+if (!canEdit)
+    return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `subjectId` | `string` | The subject to check. |
+| `permissionKey` | `string` | The permission key to check. |
+
+**Returns**
+
+`Task<bool>` — `true` if the subject has any grant with a role that includes the permission.
+
+---
+
+### GetAuthorizationFilterAsync
+
+Produce a LINQ expression that filters an `IQueryable<T>` to only entities the subject can access. The expression translates to a SQL Server table-valued function call at query time.
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+var chains = await dbContext.Chains
+    .Where(filter)
+    .OrderBy(c => c.Name)
+    .ToListAsync();
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `subjectId` | `string` | The subject to filter for. |
+| `permissionKey` | `string` | The permission key that determines which resources are visible. |
+
+**Type constraint**: `T : IHasResourceId` — the entity must expose a `ResourceId` property.
+
+**Returns**
+
+`Task<Expression<Func<T, bool>>>` — an EF Core-compatible expression you pass to `.Where()`.
+
+---
+
+### TraceResourceAccessAsync
+
+Produce a detailed, structured trace of a resource access decision. Shows every step of the hierarchy walk and which grants matched or didn't. Useful for debugging authorization issues.
+
+```csharp
+var trace = await authService.TraceResourceAccessAsync(
+    subjectId, "chain-1", "CHAIN_VIEW");
+// trace contains the full decision path
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `subjectId` | `string` | The subject to trace access for. |
+| `resourceId` | `string` | The target resource. |
+| `permissionKey` | `string` | The permission to trace. |
+
+**Returns**
+
+`Task<SqlOSFgaResourceAccessTrace>` — structured trace of the full decision.
+
+---
+
+## SqlOSFgaConvenienceExtensions
+
+Extension methods that reduce endpoint boilerplate. Available via `using SqlOS.Fga.Extensions`.
+
+---
+
+### CreateResource
+
+Create an `SqlOSFgaResource` in the hierarchy. Adds to the change tracker but does **not** call `SaveChangesAsync`. Returns the resource ID so you can assign it to your domain entity.
+
+```csharp
+var resourceId = context.CreateResource(
+    parentId: "retail_root",
+    name: request.Name,
+    resourceTypeId: "chain"
+);
+
+var chain = new Chain { ResourceId = resourceId, Name = request.Name };
+context.Chains.Add(chain);
+await context.SaveChangesAsync();
+```
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `context` | `ISqlOSFgaDbContext` | Yes | The DbContext (called as extension method). |
+| `parentId` | `string` | Yes | Parent resource ID in the hierarchy. |
+| `name` | `string` | Yes | Display name for the resource. |
+| `resourceTypeId` | `string` | Yes | Resource type identifier (e.g., `"chain"`, `"location"`). |
+| `id` | `string?` | No | Custom resource ID. If `null`, a GUID is generated. |
+
+**Returns**
+
+`string` — the resource ID (either the provided `id` or the auto-generated GUID).
+
+---
+
+### AuthorizedDetailAsync
+
+Fetch a single entity by predicate, check authorization, and return the appropriate HTTP result in one call. Replaces the pattern of fetch → check → map → return.
+
+```csharp
+return await authService.AuthorizedDetailAsync(
+    context.Chains.Include(c => c.Locations),
+    c => c.Id == id,
+    subjectId,
+    "CHAIN_VIEW",
+    chain => new ChainDetailDto
+    {
+        Id = chain.Id,
+        Name = chain.Name,
+        LocationCount = chain.Locations.Count
+    });
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `authService` | `ISqlOSFgaAuthService` | The auth service (called as extension method). |
+| `query` | `IQueryable<TEntity>` | The queryable to fetch from (can include `.Include()`). |
+| `predicate` | `Expression<Func<TEntity, bool>>` | Filter to find the single entity (e.g., `c => c.Id == id`). |
+| `subjectId` | `string` | The subject to authorize. |
+| `permissionKey` | `string` | The permission to check on the entity's resource. |
+| `selector` | `Func<TEntity, TDto>` | Maps the entity to a DTO for the response body. |
+
+**Type constraint**: `TEntity : class, IHasResourceId`
+
+**Returns**
+
+`Task<IResult>` — one of:
+
+| Condition | HTTP Result |
+|-----------|-------------|
+| Entity not found | `404 Not Found` |
+| Access denied | `403 { "error": "Permission denied" }` |
+| Access granted | `200` with the mapped DTO |
+
+---
+
+## PagedSpec Builder
+
+Fluent builder for creating cursor-paginated, sorted, searchable, authorization-filtered queries.
+
+---
+
+### PagedSpec.For
+
+Start building a paged specification. The `idSelector` identifies the unique tiebreaker column for cursor pagination.
+
+```csharp
+var spec = PagedSpec.For<Chain>(c => c.Id)
+    .RequirePermission("CHAIN_VIEW")
+    .SortByString("name", c => c.Name, isDefault: true)
+    .SortByString("description", c => c.Description ?? "")
+    .Search(search, c => c.Name, c => c.Description)
+    .Configure(q => q.Include(c => c.Locations))
+    .Build(pageSize, cursor, sortBy, sortDir);
+```
+
+**Builder Methods**
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| `For<T>(idSelector)` | `Expression<Func<T, string>>` | Start builder with the ID/tiebreaker column. |
+| `.RequirePermission(key)` | `string` | Set the FGA permission key for authorization filtering. |
+| `.SortByString(name, selector, isDefault?)` | `string`, `Expression<Func<T, string>>`, `bool` | Register a named string sort column. |
+| `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string>>[]` | Add text search across the given fields. |
+| `.Where(predicate)` | `Expression<Func<T, bool>>` | Add a static filter. |
+| `.Configure(action)` | `Action<IQueryable<T>>` | Configure the query (e.g., `.Include()`). |
+| `.Build(pageSize, cursor, sortBy, sortDir)` | `int`, `string?`, `string?`, `string?` | Build the final `PagedSpecification<T>`. |
+
+---
+
+## ISpecificationExecutor
+
+Executes a `PagedSpecification<T>` against a queryable, combining user filters with FGA authorization and cursor pagination. Injected via DI.
+
+---
+
+### ExecuteAsync
+
+Execute a paged specification and return a paginated result.
+
+```csharp
+var result = await executor.ExecuteAsync(
+    context.Chains, spec, subjectId,
+    c => new ChainDto
+    {
+        Id = c.Id,
+        Name = c.Name,
+        LocationCount = c.Locations.Count
+    });
+
+// result.Items     — the page of DTOs
+// result.NextCursor — pass to next request for pagination
+// result.HasMore   — whether more pages exist
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `dbSet` / `query` | `DbSet<TEntity>` or `IQueryable<TEntity>` | The base query. |
+| `specification` | `PagedSpecification<TEntity>` | The spec built by `PagedSpec.For<T>().Build()`. |
+| `subjectId` | `string` | The subject for FGA authorization filtering. |
+| `selector` | `Func<TEntity, TDto>` | Maps entities to DTOs. |
+| `cancellationToken` | `CancellationToken` | Optional cancellation token. |
+
+**Type constraint**: `TEntity : class, IHasResourceId`
+
+**Returns**
+
+`Task<PaginatedResult<TDto>>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Items` | `List<TDto>` | The current page of results. |
+| `NextCursor` | `string?` | Opaque cursor for the next page. `null` if no more pages. |
+| `HasMore` | `bool` | Whether additional pages exist. |
+
+---
+
+### CountAsync
+
+Count total matching entities (with authorization filtering) without fetching data.
+
+```csharp
+var total = await executor.CountAsync(context.Chains, spec, subjectId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `dbSet` | `DbSet<TEntity>` | The base query. |
+| `specification` | `PagedSpecification<TEntity>` | The spec. |
+| `subjectId` | `string` | The subject for authorization. |
+
+**Returns**
+
+`Task<long>` — total count of accessible, matching entities.
+
+---
+
+## IHasResourceId
+
+Interface that connects domain entities to FGA resources. Required for `GetAuthorizationFilterAsync`, `AuthorizedDetailAsync`, and `ISpecificationExecutor`.
+
+```csharp
+public interface IHasResourceId
+{
+    string ResourceId { get; }
+}
+```
+
+**Implementation**
+
+```csharp
+public class Chain : IHasResourceId
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string ResourceId { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+```
+
+---
+
+## FGA Models
+
+### SqlOSFgaAccessCheckResult
+
+```csharp
+public class SqlOSFgaAccessCheckResult
+{
+    public bool Allowed { get; set; }
+    public List<SqlOSFgaAccessTrace>? Trace { get; set; }
+    public string? Error { get; set; }
+}
+```
+
+### SqlOSFgaAccessTrace
+
+```csharp
+public class SqlOSFgaAccessTrace
+{
+    public string Step { get; set; }
+    public string Detail { get; set; }
+    public string? ResourceId { get; set; }
+    public string? ResourceName { get; set; }
+    public string? GrantId { get; set; }
+    public string? RoleName { get; set; }
+    public string? SubjectName { get; set; }
+}
+```
+
+### SqlOSFgaResource
+
+```csharp
+public class SqlOSFgaResource
+{
+    public string Id { get; set; }
+    public string ParentId { get; set; }
+    public string Name { get; set; }
+    public string ResourceTypeId { get; set; }
+    public bool IsActive { get; set; }
+}
+```
+
+### SqlOSFgaGrant
+
+```csharp
+public class SqlOSFgaGrant
+{
+    public string Id { get; set; }
+    public string SubjectId { get; set; }
+    public string ResourceId { get; set; }
+    public string RoleId { get; set; }
+    public string? Description { get; set; }
+}
+```
+
+### SqlOSFgaSubject
+
+```csharp
+public class SqlOSFgaSubject
+{
+    public string Id { get; set; }
+    public string SubjectTypeId { get; set; }
+    public string DisplayName { get; set; }
+    public string? OrganizationId { get; set; }
+    public string? ExternalRef { get; set; }
+}
+```

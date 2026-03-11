@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.Testing;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Example.Api.Data;
 
@@ -39,6 +40,10 @@ public static class ExampleApiFixture
                 builder.UseSetting("environment", "Development");
                 builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
                 builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos");
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<IHttpClientFactory, FakeOidcProviderHttpClientFactory>();
+                });
             });
 
         Client = _factory.CreateClient(new WebApplicationFactoryClientOptions

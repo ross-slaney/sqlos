@@ -1,0 +1,47 @@
+---
+title: "FGA Resources and Authorization"
+description: "Resource hierarchy, grants, and EF Core integration."
+order: 8
+section: fga
+---
+
+# FGA Resources and Authorization
+
+**What this guide covers**: Resource tree, grants, Access Tester, EF Core authorization filter.
+
+**Dashboard paths**: Fine-Grained Auth → Resources, Grants, Access Tester  
+**URLs**: `http://localhost:5062/sqlos/admin/fga/resources`, `.../grants`, `.../access-tester`
+
+---
+
+The Fga module models resources as a tree. Grants on parent nodes inherit downward.
+
+## Resources View
+
+![FGA Resources](/docs/fga-resources.png)
+
+Each resource has a type and can have children. Grants on a parent apply to all descendants.
+
+## Grants View
+
+![FGA Grants](/docs/fga-grants.png)
+
+Inspect and manage subject grants: which subjects (users, agents, service accounts, groups) have which roles on which resources.
+
+## Access Tester
+
+Enter subject ID, resource, and permission key to trace whether access is allowed and why.
+
+## EF Core Integration
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Project>(subjectId, "PROJECT_VIEW");
+
+var projects = await dbContext.Projects
+    .Where(filter)
+    .OrderBy(x => x.Name)
+    .ToListAsync();
+```
+
+The library translates the filter into a SQL Server table-valued function for query-time authorization.

@@ -20,6 +20,7 @@
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Clients", description: "Register clients, audiences, and redirect URIs." },
+        oidc: { title: "OIDC", description: "Configure global Google, Microsoft, Apple, and custom OIDC connections." },
         sso: { title: "SSO", description: "Create SAML drafts, import Entra metadata, and review setup state." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
@@ -230,6 +231,23 @@
         }
     }
 
+    function parseJsonObject(value, fallback = {}) {
+        if (!value) {
+            return fallback;
+        }
+
+        if (typeof value === "object" && !Array.isArray(value)) {
+            return value;
+        }
+
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback;
+        } catch {
+            return fallback;
+        }
+    }
+
     function renderMetadataRows(rows) {
         return `<div class="meta-list">${rows
             .filter(row => row.html || (row.value !== null && row.value !== undefined && row.value !== ""))
@@ -248,6 +266,38 @@
         }
 
         return `<div class="list-stack">${items.map(item => `<div class="list-item">${formatter(item)}</div>`).join("")}</div>`;
+    }
+
+    function buildOidcPayload(form) {
+        const claimMappingText = String(form.get("claimMapping") || "").trim();
+        return {
+            providerType: form.get("providerType") || null,
+            displayName: form.get("displayName"),
+            clientId: form.get("clientId"),
+            clientSecret: form.get("clientSecret") || null,
+            allowedCallbackUris: String(form.get("allowedCallbackUris") || "")
+                .split("\n")
+                .map(value => value.trim())
+                .filter(Boolean),
+            useDiscovery: form.get("useDiscovery") === "on",
+            discoveryUrl: form.get("discoveryUrl") || null,
+            issuer: form.get("issuer") || null,
+            authorizationEndpoint: form.get("authorizationEndpoint") || null,
+            tokenEndpoint: form.get("tokenEndpoint") || null,
+            userInfoEndpoint: form.get("userInfoEndpoint") || null,
+            jwksUri: form.get("jwksUri") || null,
+            microsoftTenant: form.get("microsoftTenant") || null,
+            scopes: String(form.get("scopes") || "")
+                .split("\n")
+                .map(value => value.trim())
+                .filter(Boolean),
+            claimMapping: claimMappingText ? parseJsonObject(claimMappingText, null) : null,
+            clientAuthMethod: form.get("clientAuthMethod") || null,
+            useUserInfo: form.get("useUserInfo") === "on",
+            appleTeamId: form.get("appleTeamId") || null,
+            appleKeyId: form.get("appleKeyId") || null,
+            applePrivateKeyPem: form.get("applePrivateKeyPem") || null
+        };
     }
 
     function renderStatsGroup(title, stats, keys) {
@@ -316,6 +366,7 @@
                     { key: "organizations", label: "Organizations" },
                     { key: "users", label: "Users" },
                     { key: "clients", label: "Clients" },
+                    { key: "oidcConnections", label: "OIDC Connections" },
                     { key: "ssoConnections", label: "SSO Connections" },
                     { key: "sessions", label: "Sessions" },
                     { key: "auditEvents", label: "Audit Events" }
@@ -337,6 +388,7 @@
                     <div class="link-list">
                         ${quickLink("auth-organizations", "Organizations")}
                         ${quickLink("auth-users", "Users")}
+                        ${quickLink("auth-oidc", "OIDC")}
                         ${quickLink("auth-sso", "SSO")}
                         ${quickLink("auth-security", "Security")}
                     </div>
@@ -381,6 +433,11 @@
             return;
         }
 
+        if (view === "oidc") {
+            await renderAuthOidc();
+            return;
+        }
+
         if (view === "sso") {
             await renderAuthSso();
             return;
@@ -417,6 +474,7 @@
                     { key: "organizations", label: "Organizations" },
                     { key: "users", label: "Users" },
                     { key: "clients", label: "Clients" },
+                    { key: "oidcConnections", label: "OIDC Connections" },
                     { key: "ssoConnections", label: "SSO Connections" },
                     { key: "sessions", label: "Sessions" },
                     { key: "auditEvents", label: "Audit Events" }
@@ -446,6 +504,13 @@
                             `,
                             "No SSO connections yet."
                         )}
+                    </section>
+                    <section class="panel">
+                        <h2>OIDC Providers</h2>
+                        <p>Google, Microsoft, Apple, and custom providers are configured globally for the auth server.</p>
+                        <div class="link-list">
+                            ${quickLink("auth-oidc", "Open OIDC")}
+                        </div>
                     </section>
                 </div>
             </div>
@@ -667,6 +732,180 @@
                 })
             });
             setFlash("success", "Client created.");
+        });
+    }
+
+    async function renderAuthOidc() {
+        const config = authViews.oidc;
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading OIDC connections...");
+
+        const oidcConnections = await fetchJson(`${authApiBasePath}/oidc-connections`);
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <div class="panel-stack">
+                <div class="panel-grid">
+                    <section class="panel">
+                        <h2>Create OIDC Connection</h2>
+                        <p>Preset providers use discovery by default. Custom providers can use discovery or fully manual endpoints and claim mapping.</p>
+                        <form id="create-oidc-connection-form">
+                            <select name="providerType" required>
+                                <option value="Google">Google</option>
+                                <option value="Microsoft">Microsoft</option>
+                                <option value="Apple">Apple</option>
+                                <option value="Custom">Custom</option>
+                            </select>
+                            <input name="displayName" placeholder="Display name" required>
+                            <input name="clientId" placeholder="Provider client ID / service ID" required>
+                            <input name="clientSecret" type="password" placeholder="Client secret (not used for Apple)">
+                            <label class="checkbox-line"><input name="useDiscovery" type="checkbox" checked> Use discovery</label>
+                            <input name="discoveryUrl" placeholder="Discovery URL (custom only when discovery is enabled)">
+                            <input name="issuer" placeholder="Issuer (manual custom only)">
+                            <input name="authorizationEndpoint" placeholder="Authorization endpoint (manual custom only)">
+                            <input name="tokenEndpoint" placeholder="Token endpoint (manual custom only)">
+                            <input name="userInfoEndpoint" placeholder="User info endpoint (optional)">
+                            <input name="jwksUri" placeholder="JWKS URI (manual custom only)">
+                            <label class="checkbox-line"><input name="useUserInfo" type="checkbox" checked> Use user info endpoint</label>
+                            <select name="clientAuthMethod">
+                                <option value="">Default</option>
+                                <option value="ClientSecretPost">ClientSecretPost</option>
+                                <option value="ClientSecretBasic">ClientSecretBasic</option>
+                            </select>
+                            <input name="microsoftTenant" placeholder="Microsoft tenant (optional, defaults to common)">
+                            <input name="appleTeamId" placeholder="Apple team ID">
+                            <input name="appleKeyId" placeholder="Apple key ID">
+                            <textarea name="applePrivateKeyPem" placeholder="Apple private key PEM (.p8)"></textarea>
+                            <textarea name="allowedCallbackUris" placeholder="One callback URI per line" required></textarea>
+                            <textarea name="scopes" placeholder="Optional scopes, one per line"></textarea>
+                            <textarea name="claimMapping" placeholder='Claim mapping JSON, for example {\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}'></textarea>
+                            <button type="submit">Create OIDC connection</button>
+                        </form>
+                    </section>
+                    <section class="panel">
+                        <h2>Provider Setup Notes</h2>
+                        <p>Copy the exact callback URI from each configured connection after it is created. Apple requires a public HTTPS callback and will not accept localhost.</p>
+                        ${renderMetadataRows([
+                            { label: "Example callback pattern", value: "http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}" },
+                            { label: "Google / Microsoft", value: "The example app backend owns the callback and completes OIDC through SqlOS services." },
+                            { label: "Apple", value: "Use a public HTTPS callback for real testing, then paste the Team ID, Key ID, and private key into the dashboard." },
+                            { label: "Custom OIDC", value: "Use discovery when possible; switch to manual mode only when the provider discovery document is incomplete." }
+                        ])}
+                    </section>
+                </div>
+                <section class="panel">
+                    <h2>OIDC Connections</h2>
+                    ${renderList(
+                        oidcConnections,
+                        item => `
+                            <strong>${esc(item.displayName)}</strong>
+                            ${renderMetadataRows([
+                                { label: "Provider", value: item.providerType },
+                                { label: "Connection ID", value: item.id },
+                                { label: "Client ID", value: item.clientId },
+                                { label: "Discovery", value: item.useDiscovery ? "Enabled" : "Manual" },
+                                { label: "Discovery URL", value: item.discoveryUrl },
+                                { label: "Issuer", value: item.issuer },
+                                { label: "Authorization endpoint", value: item.authorizationEndpoint },
+                                { label: "Token endpoint", value: item.tokenEndpoint },
+                                { label: "User info endpoint", value: item.userInfoEndpoint },
+                                { label: "JWKS URI", value: item.jwksUri },
+                                { label: "Microsoft tenant", value: item.microsoftTenant || "common" },
+                                { label: "Client auth method", value: item.clientAuthMethod || "Default" },
+                                { label: "Use user info", value: item.useUserInfo ? "Yes" : "No" },
+                                { label: "Apple team ID", value: item.appleTeamId },
+                                { label: "Apple key ID", value: item.appleKeyId },
+                                {
+                                    label: "Callback URIs",
+                                    value: parseJsonArray(item.allowedCallbackUris).length > 0 ? "" : "none",
+                                    html: parseJsonArray(item.allowedCallbackUris).length > 0
+                                        ? parseJsonArray(item.allowedCallbackUris).map(uri => `<div class="inline-code">${esc(uri)}</div>`).join("")
+                                        : "none"
+                                },
+                                {
+                                    label: "Scopes",
+                                    value: parseJsonArray(item.scopes).length > 0 ? "" : "default",
+                                    html: parseJsonArray(item.scopes).length > 0
+                                        ? parseJsonArray(item.scopes).map(scope => `<div class="inline-code">${esc(scope)}</div>`).join("")
+                                        : "default"
+                                },
+                                {
+                                    label: "Claim mapping",
+                                    html: `<pre>${esc(JSON.stringify(parseJsonObject(item.claimMapping), null, 2))}</pre>`
+                                },
+                                { label: "Enabled", value: item.isEnabled ? "Yes" : "No" }
+                            ])}
+                            <form id="edit-oidc-${esc(item.id)}" class="nested-form">
+                                <input name="displayName" value="${esc(item.displayName)}" required>
+                                <input name="clientId" value="${esc(item.clientId)}" required>
+                                <input name="clientSecret" type="password" placeholder="Leave blank to keep the current secret">
+                                <label class="checkbox-line"><input name="useDiscovery" type="checkbox" ${item.useDiscovery ? "checked" : ""}> Use discovery</label>
+                                <input name="discoveryUrl" value="${esc(item.discoveryUrl || "")}" placeholder="Discovery URL">
+                                <input name="issuer" value="${esc(item.issuer || "")}" placeholder="Issuer">
+                                <input name="authorizationEndpoint" value="${esc(item.authorizationEndpoint || "")}" placeholder="Authorization endpoint">
+                                <input name="tokenEndpoint" value="${esc(item.tokenEndpoint || "")}" placeholder="Token endpoint">
+                                <input name="userInfoEndpoint" value="${esc(item.userInfoEndpoint || "")}" placeholder="User info endpoint">
+                                <input name="jwksUri" value="${esc(item.jwksUri || "")}" placeholder="JWKS URI">
+                                <label class="checkbox-line"><input name="useUserInfo" type="checkbox" ${item.useUserInfo ? "checked" : ""}> Use user info endpoint</label>
+                                <select name="clientAuthMethod">
+                                    <option value="" ${!item.clientAuthMethod ? "selected" : ""}>Default</option>
+                                    <option value="ClientSecretPost" ${item.clientAuthMethod === "ClientSecretPost" ? "selected" : ""}>ClientSecretPost</option>
+                                    <option value="ClientSecretBasic" ${item.clientAuthMethod === "ClientSecretBasic" ? "selected" : ""}>ClientSecretBasic</option>
+                                </select>
+                                <input name="microsoftTenant" value="${esc(item.microsoftTenant || "")}" placeholder="Microsoft tenant">
+                                <input name="appleTeamId" value="${esc(item.appleTeamId || "")}" placeholder="Apple team ID">
+                                <input name="appleKeyId" value="${esc(item.appleKeyId || "")}" placeholder="Apple key ID">
+                                <textarea name="applePrivateKeyPem" placeholder="Leave blank to keep the current Apple private key"></textarea>
+                                <textarea name="allowedCallbackUris" required>${esc(parseJsonArray(item.allowedCallbackUris).join("\n"))}</textarea>
+                                <textarea name="scopes">${esc(parseJsonArray(item.scopes).join("\n"))}</textarea>
+                                <textarea name="claimMapping">${esc(JSON.stringify(parseJsonObject(item.claimMapping), null, 2))}</textarea>
+                                <div class="actions">
+                                    <button type="submit">Save</button>
+                                    <button type="button" class="secondary" data-oidc-toggle="${esc(item.id)}" data-enabled="${item.isEnabled ? "true" : "false"}">
+                                        ${item.isEnabled ? "Disable" : "Enable"}
+                                    </button>
+                                </div>
+                            </form>
+                        `,
+                        "No OIDC connections yet."
+                    )}
+                </section>
+            </div>
+        `;
+
+        bindForm("create-oidc-connection-form", async form => {
+            await fetchJson(`${authApiBasePath}/oidc-connections`, {
+                method: "POST",
+                body: JSON.stringify(buildOidcPayload(form))
+            });
+            setFlash("success", "OIDC connection created.");
+        });
+
+        oidcConnections.forEach(item => {
+            bindForm(`edit-oidc-${item.id}`, async form => {
+                await fetchJson(`${authApiBasePath}/oidc-connections/${item.id}`, {
+                    method: "PUT",
+                    body: JSON.stringify(buildOidcPayload(form))
+                });
+                setFlash("success", "OIDC connection updated.");
+            });
+        });
+
+        document.querySelectorAll("[data-oidc-toggle]").forEach(button => {
+            button.addEventListener("click", async () => {
+                try {
+                    const connectionId = button.getAttribute("data-oidc-toggle");
+                    const enabled = button.getAttribute("data-enabled") === "true";
+                    await fetchJson(`${authApiBasePath}/oidc-connections/${connectionId}/${enabled ? "disable" : "enable"}`, {
+                        method: "POST"
+                    });
+                    setFlash("success", enabled ? "OIDC connection disabled." : "OIDC connection enabled.");
+                    await render();
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                    await render();
+                }
+            });
         });
     }
 

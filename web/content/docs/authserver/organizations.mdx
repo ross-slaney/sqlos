@@ -1,0 +1,44 @@
+---
+title: "Creating an Organization"
+description: "Create tenants and set primary domains for SSO."
+order: 2
+section: authserver
+---
+
+# Creating an Organization
+
+**What this guide covers**: Create organization form, fields, primary domain for SSO.
+
+**Dashboard path**: Auth Server → Organizations  
+**URL**: `http://localhost:5062/sqlos/admin/auth/organizations`
+
+---
+
+Organizations are top-level tenants. Each has users, memberships, and optional SSO.
+
+## Create Organization Form
+
+![Organizations page](/docs/organizations-page.png)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| **Organization name** | Yes | Display name (e.g., "Acme Corp") |
+| **Slug** | No | URL-friendly identifier |
+| **Primary domain** | No | Login domain for SSO (e.g., `acme.com`). Users with `@acme.com` emails are routed to this org's SSO. |
+
+## Primary Domain and SSO
+
+Set **primary domain** when using SAML SSO. It must match the email domain of SSO users. Example: users with `@customer.com` → set primary domain to `customer.com`.
+
+## Code Example
+
+```csharp
+var org = await adminService.CreateOrganizationAsync(new CreateOrganizationRequest
+{
+    Name = "Acme Corp",
+    Slug = "acme",
+    PrimaryDomain = "acme.com"
+});
+```
+
+**Next**: [Adding SSO to an organization](/docs/guides/authserver/saml-sso)

@@ -1,0 +1,55 @@
+---
+title: "Token Validation"
+description: "Validate bearer access tokens and extract claims."
+order: 5.0
+section: authserver
+---
+
+# Token Validation
+
+**What this guide covers**: Validate JWT access tokens, extract user/session/org claims.
+
+---
+
+Access tokens are JWTs signed with the AuthServer's RSA key. Validate them server-side using `SqlOSAuthService.ValidateAccessTokenAsync`.
+
+## Code Example
+
+```csharp
+var bearerToken = httpContext.Request.Headers.Authorization.ToString();
+if (!bearerToken.StartsWith("Bearer "))
+    return Results.Unauthorized();
+
+var validated = await authService.ValidateAccessTokenAsync(
+    bearerToken["Bearer ".Length..].Trim(),
+    cancellationToken);
+
+if (validated == null)
+    return Results.Unauthorized();
+
+// validated.UserId
+// validated.SessionId
+// validated.ClientId
+// validated.OrganizationId
+// validated.Principal.Claims
+```
+
+## ValidatedToken Fields
+
+| Field | Description |
+|-------|-------------|
+| `UserId` | The authenticated user's ID |
+| `SessionId` | Active session ID |
+| `ClientId` | Client application that issued the token |
+| `OrganizationId` | Scoped organization (nullable) |
+| `Principal` | `ClaimsPrincipal` with all JWT claims |
+
+## JWKS Endpoint
+
+The public key for token validation is exposed at:
+
+```text
+GET /sqlos/auth/.well-known/jwks.json
+```
+
+External services can use this endpoint to validate SqlOS-issued JWTs without calling the SqlOS API.

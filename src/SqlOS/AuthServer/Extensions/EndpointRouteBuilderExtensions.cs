@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 
 namespace SqlOS.AuthServer.Extensions;
@@ -19,6 +20,9 @@ public static class EndpointRouteBuilderExtensions
         var adminPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
             ? $"{authPrefix[..^5]}/admin/auth"
             : $"{authPrefix}/admin";
+        var legacySamlPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
+            ? authPrefix[..^5]
+            : null;
 
         var auth = endpoints.MapGroup(authPrefix);
         var adminRoot = endpoints.MapGroup(adminPrefix);
@@ -82,7 +86,7 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/saml/login/{connectionId}", async (string connectionId, string requestToken, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
             Results.Redirect(await samlService.BuildIdentityProviderRedirectAsync(connectionId, requestToken, cancellationToken)));
 
-        auth.MapPost("/saml/acs/{connectionId}", async (string connectionId, HttpContext httpContext, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
+        static async Task<IResult> HandleSamlAcsAsync(string connectionId, HttpContext httpContext, SqlOSSamlService samlService, CancellationToken cancellationToken)
         {
             var form = await httpContext.Request.ReadFormAsync(cancellationToken);
             var samlResponse = form["SAMLResponse"].ToString();
@@ -94,7 +98,13 @@ public static class EndpointRouteBuilderExtensions
 
             var redirectUrl = await samlService.HandleAcsAsync(connectionId, samlResponse, relayState, cancellationToken);
             return Results.Redirect(redirectUrl);
-        });
+        }
+
+        auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);
+        if (!string.IsNullOrWhiteSpace(legacySamlPrefix))
+        {
+            endpoints.MapPost($"{legacySamlPrefix}/saml/acs/{{connectionId}}", HandleSamlAcsAsync);
+        }
 
         adminApi.MapGet("/stats", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
@@ -247,6 +257,114 @@ public static class EndpointRouteBuilderExtensions
             });
         });
 
+        api.MapGet("/oidc-connections", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await adminService.ListOidcConnectionsAsync(cancellationToken));
+        });
+
+        api.MapPost("/oidc-connections", async (HttpContext context, CreateOidcConnectionRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            if (!Enum.TryParse<SqlOSOidcProviderType>(request.ProviderType, ignoreCase: true, out var providerType))
+            {
+                return Results.BadRequest(new { message = $"Unsupported OIDC provider '{request.ProviderType}'." });
+            }
+
+            if (!TryParseClientAuthMethod(request.ClientAuthMethod, out var clientAuthMethod))
+            {
+                return Results.BadRequest(new { message = $"Unsupported OIDC client auth method '{request.ClientAuthMethod}'." });
+            }
+
+            var connection = await adminService.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+                providerType,
+                request.DisplayName,
+                request.ClientId,
+                request.ClientSecret,
+                request.AllowedCallbackUris,
+                request.UseDiscovery,
+                request.DiscoveryUrl,
+                request.Issuer,
+                request.AuthorizationEndpoint,
+                request.TokenEndpoint,
+                request.UserInfoEndpoint,
+                request.JwksUri,
+                request.MicrosoftTenant,
+                request.Scopes,
+                request.ClaimMapping,
+                clientAuthMethod,
+                request.UseUserInfo,
+                request.AppleTeamId,
+                request.AppleKeyId,
+                request.ApplePrivateKeyPem), cancellationToken);
+            return Results.Ok(ToOidcConnectionResponse(connection));
+        });
+
+        api.MapPut("/oidc-connections/{connectionId}", async (HttpContext context, string connectionId, UpdateOidcConnectionRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            if (!TryParseClientAuthMethod(request.ClientAuthMethod, out var clientAuthMethod))
+            {
+                return Results.BadRequest(new { message = $"Unsupported OIDC client auth method '{request.ClientAuthMethod}'." });
+            }
+
+            var connection = await adminService.UpdateOidcConnectionAsync(connectionId, new SqlOSUpdateOidcConnectionRequest(
+                request.DisplayName,
+                request.ClientId,
+                request.ClientSecret,
+                request.AllowedCallbackUris,
+                request.UseDiscovery,
+                request.DiscoveryUrl,
+                request.Issuer,
+                request.AuthorizationEndpoint,
+                request.TokenEndpoint,
+                request.UserInfoEndpoint,
+                request.JwksUri,
+                request.MicrosoftTenant,
+                request.Scopes,
+                request.ClaimMapping,
+                clientAuthMethod,
+                request.UseUserInfo,
+                request.AppleTeamId,
+                request.AppleKeyId,
+                request.ApplePrivateKeyPem), cancellationToken);
+            return Results.Ok(ToOidcConnectionResponse(connection));
+        });
+
+        api.MapPost("/oidc-connections/{connectionId}/enable", async (HttpContext context, string connectionId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var connection = await adminService.SetOidcConnectionEnabledAsync(connectionId, true, cancellationToken);
+            return Results.Ok(new { connection.Id, connection.IsEnabled, connection.UpdatedAt });
+        });
+
+        api.MapPost("/oidc-connections/{connectionId}/disable", async (HttpContext context, string connectionId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var connection = await adminService.SetOidcConnectionEnabledAsync(connectionId, false, cancellationToken);
+            return Results.Ok(new { connection.Id, connection.IsEnabled, connection.UpdatedAt });
+        });
+
         api.MapGet("/sso-connections", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -373,4 +491,90 @@ public static class EndpointRouteBuilderExtensions
     private sealed record LogoutRequest(string? RefreshToken, string? SessionId);
     private sealed record LogoutAllRequest(string UserId);
     private sealed record CreateMembershipRequest(string OrganizationId, string UserId, string Role);
+    private static bool TryParseClientAuthMethod(string? value, out SqlOSOidcClientAuthMethod? method)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            method = null;
+            return true;
+        }
+
+        if (Enum.TryParse<SqlOSOidcClientAuthMethod>(value, ignoreCase: true, out var parsed))
+        {
+            method = parsed;
+            return true;
+        }
+
+        method = null;
+        return false;
+    }
+
+    private static object ToOidcConnectionResponse(SqlOSOidcConnection connection) => new
+    {
+        connection.Id,
+        ProviderType = connection.ProviderType.ToString(),
+        connection.DisplayName,
+        connection.ClientId,
+        AllowedCallbackUris = connection.AllowedCallbackUrisJson,
+        connection.UseDiscovery,
+        connection.DiscoveryUrl,
+        connection.Issuer,
+        connection.AuthorizationEndpoint,
+        connection.TokenEndpoint,
+        connection.UserInfoEndpoint,
+        connection.JwksUri,
+        connection.MicrosoftTenant,
+        Scopes = connection.ScopesJson,
+        ClaimMapping = connection.ClaimMappingJson,
+        ClientAuthMethod = connection.ClientAuthMethod.ToString(),
+        connection.UseUserInfo,
+        connection.AppleTeamId,
+        connection.AppleKeyId,
+        connection.IsEnabled,
+        connection.CreatedAt,
+        connection.UpdatedAt
+    };
+
+    private sealed record CreateOidcConnectionRequest(
+        string ProviderType,
+        string DisplayName,
+        string ClientId,
+        string? ClientSecret,
+        List<string> AllowedCallbackUris,
+        bool UseDiscovery,
+        string? DiscoveryUrl,
+        string? Issuer,
+        string? AuthorizationEndpoint,
+        string? TokenEndpoint,
+        string? UserInfoEndpoint,
+        string? JwksUri,
+        string? MicrosoftTenant,
+        List<string>? Scopes,
+        SqlOSOidcClaimMapping? ClaimMapping,
+        string? ClientAuthMethod,
+        bool? UseUserInfo,
+        string? AppleTeamId,
+        string? AppleKeyId,
+        string? ApplePrivateKeyPem);
+
+    private sealed record UpdateOidcConnectionRequest(
+        string DisplayName,
+        string ClientId,
+        string? ClientSecret,
+        List<string> AllowedCallbackUris,
+        bool UseDiscovery,
+        string? DiscoveryUrl,
+        string? Issuer,
+        string? AuthorizationEndpoint,
+        string? TokenEndpoint,
+        string? UserInfoEndpoint,
+        string? JwksUri,
+        string? MicrosoftTenant,
+        List<string>? Scopes,
+        SqlOSOidcClaimMapping? ClaimMapping,
+        string? ClientAuthMethod,
+        bool? UseUserInfo,
+        string? AppleTeamId,
+        string? AppleKeyId,
+        string? ApplePrivateKeyPem);
 }

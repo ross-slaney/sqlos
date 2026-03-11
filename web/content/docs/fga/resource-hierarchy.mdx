@@ -1,0 +1,50 @@
+---
+title: "Resource Hierarchy"
+description: "Parent-child resource tree and ancestor-based permission inheritance."
+order: 5
+section: fga
+---
+
+# Resource Hierarchy
+
+**What this guide covers**: Resource tree structure, parent-child relationships, ancestor-based inheritance.
+
+---
+
+Resources form a tree. Each resource has exactly one parent (except the root). When checking access, FGA walks up the tree from the target resource to the root, looking for grants that include the required permission.
+
+## Tree Structure
+
+```text
+root
+├── org::acme
+│   ├── chain-1
+│   │   ├── location-1
+│   │   └── location-2
+│   └── chain-2
+└── org::globex
+    └── chain-3
+```
+
+## Creating Resources
+
+Use `CreateResource` to add a resource as a child of an existing parent:
+
+```csharp
+var resourceId = context.CreateResource(
+    parentId: "org::acme",
+    name: "Downtown Store",
+    resourceTypeId: "chain"
+);
+```
+
+The resource is added to the `SqlOSFgaResource` table with the given parent. It inherits all grants from its ancestors.
+
+## How Inheritance Works
+
+When checking `CHAIN_VIEW` on `chain-1`:
+
+1. Check grants on `chain-1` → any grant with a role that includes `CHAIN_VIEW`?
+2. Check grants on `org::acme` (parent) → any matching grant?
+3. Check grants on `root` (grandparent) → any matching grant?
+4. If any ancestor has a matching grant → access allowed

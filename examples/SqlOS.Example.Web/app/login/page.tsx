@@ -15,8 +15,9 @@ export default async function LoginPage() {
         <section className="hero">
           <h1>Login</h1>
           <p>
-            Local email/password remains a direct backend API login. Organization SSO uses
-            home-realm discovery plus a backend-mediated PKCE exchange.
+            Local email/password remains a direct backend API login. OIDC login and organization
+            SSO are both backend-mediated, and org SSO wins when the email domain matches a
+            configured SAML connection.
           </p>
         </section>
         <LoginPanel />

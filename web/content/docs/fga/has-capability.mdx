@@ -1,0 +1,36 @@
+---
+title: "HasCapability"
+description: "Root-level capability check for global permissions."
+order: 12
+section: fga
+---
+
+# HasCapability
+
+**What this guide covers**: `HasCapabilityAsync` for checking if a subject has a permission at root level.
+
+---
+
+`HasCapabilityAsync` checks whether a subject has a specific permission anywhere in the resource tree (effectively at root level). Use it for global capability gates.
+
+## Code Example
+
+```csharp
+var canManageChains = await authService.HasCapabilityAsync(
+    subjectId, "CHAIN_EDIT");
+
+if (!canManageChains)
+    return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+```
+
+## Method Signature
+
+```csharp
+Task<bool> HasCapabilityAsync(string subjectId, string permissionKey);
+```
+
+## When to Use
+
+- **Global gates** — "can this user create anything at all?"
+- **UI toggles** — show/hide buttons based on broad capabilities
+- For resource-specific checks, use `CheckAccessAsync` with a resource ID instead

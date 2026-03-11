@@ -3,6 +3,7 @@ using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Text.Json;
 using System.Security;
+using System.IO.Compression;
 using System.Xml;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -192,7 +193,14 @@ public sealed class SqlOSSamlService
         </samlp:AuthnRequest>
         """;
 
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
+        using var output = new MemoryStream();
+        using (var deflater = new DeflateStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            var bytes = Encoding.UTF8.GetBytes(xml);
+            deflater.Write(bytes, 0, bytes.Length);
+        }
+
+        return Convert.ToBase64String(output.ToArray());
     }
 
     private string BuildIdentityProviderRedirectUrl(SqlOSSsoConnection connection, string relayState)
@@ -272,7 +280,7 @@ public sealed class SqlOSSamlService
         CancellationToken cancellationToken)
     {
         var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
-            .FirstOrDefaultAsync(x => x.ConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
+            .FirstOrDefaultAsync(x => x.SsoConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
         if (externalIdentity != null)
         {
             return await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
@@ -329,7 +337,7 @@ public sealed class SqlOSSamlService
         {
             Id = _cryptoService.GenerateId("ext"),
             UserId = user.Id,
-            ConnectionId = connection.Id,
+            SsoConnectionId = connection.Id,
             Issuer = principal.Issuer,
             Subject = principal.Subject,
             Email = email,

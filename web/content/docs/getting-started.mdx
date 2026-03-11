@@ -1,0 +1,153 @@
+---
+title: "Getting Started"
+description: "Wire SqlOS into your .NET app: install, configure, and run the example stack."
+order: 0
+---
+
+# Getting Started
+
+**What this guide covers**: Install, service registration, DbContext setup, startup bootstrap, example stack URLs, AuthServer and Fga module overview.
+
+**Key files**: `examples/SqlOS.Example.Api/Program.cs`, `examples/SqlOS.Example.AppHost/Program.cs`
+
+---
+
+SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into your ASP.NET + EF Core app with a single package and minimal configuration.
+
+## Quick Reference
+
+| Item | Value |
+|------|-------|
+| Package | `SqlOS` |
+| NuGet | `dotnet add package SqlOS` |
+| DbContext interfaces | `ISqlOSAuthServerDbContext`, `ISqlOSFgaDbContext` |
+| Bootstrap | `await app.UseSqlOSAsync()` |
+| Dashboard base | `/sqlos` |
+
+## Overview
+
+- **AuthServer**: Organizations, users, credentials, sessions, refresh tokens, OIDC providers, SAML organization SSO
+- **Fga**: Hierarchical resources, grants, roles, permission keys, query-time filtering
+- **Shared**: Startup bootstrap, dashboard shell, SQL-backed tests
+
+## Install
+
+```bash
+dotnet add package SqlOS
+```
+
+## Runtime shape
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseFGA();
+    options.UseAuthServer();
+});
+```
+
+## DbContext setup
+
+Your context implements both interfaces and registers both module models:
+
+```csharp
+public sealed class AppDbContext : DbContext,
+    ISqlOSAuthServerDbContext,
+    ISqlOSFgaDbContext
+{
+    public DbSet<Project> Projects => Set<Project>();
+
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+        string subjectId,
+        string permissionKey)
+        => FromExpression(() =>
+            IsResourceAccessible(subjectId, permissionKey));
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.UseAuthServer();
+        modelBuilder.UseFGA(GetType());
+    }
+}
+```
+
+## Startup
+
+```csharp
+var app = builder.Build();
+
+await app.UseSqlOSAsync();
+app.MapAuthServer("/sqlos/auth");
+app.UseSqlOSDashboard("/sqlos");
+```
+
+**Default routes**:
+
+| Path | Purpose |
+|------|---------|
+| `/sqlos` | Dashboard shell |
+| `/sqlos/admin/auth` | Auth admin UI |
+| `/sqlos/admin/fga` | FGA admin UI |
+| `/sqlos/auth/*` | Auth runtime endpoints |
+
+## Example stack
+
+**Projects**: `SqlOS.Example.Api`, `SqlOS.Example.Web`, `SqlOS.Example.AppHost`
+
+```bash
+cd examples/SqlOS.Example.Web
+npm install
+
+cd /path/to/SqlOS
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+**URLs**:
+
+| URL | Purpose |
+|-----|---------|
+| `http://localhost:5062/sqlos/` | Dashboard |
+| `http://localhost:5062/sqlos/admin/auth/` | Auth admin |
+| `http://localhost:5062/sqlos/admin/fga/` | FGA admin |
+| `http://localhost:5062/swagger` | Swagger UI |
+| `http://localhost:3001/` | Example web app |
+
+## AuthServer module
+
+- Organizations, memberships, users, emails, password credentials
+- Sessions, refresh rotation, logout, revoke
+- SAML org SSO, Google/Microsoft/Apple/custom OIDC login
+- Admin UI: orgs, users, clients, sessions, SSO, OIDC
+
+## Fga module
+
+- Resource tree, grants, roles, permissions
+- Authorization filters for EF Core queries
+- Point checks for mutations
+- FGA dashboard for resources and grants
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Project>(subjectId, "PROJECT_VIEW");
+
+var projects = await dbContext.Projects
+    .Where(filter)
+    .OrderBy(x => x.Name)
+    .ToListAsync();
+```
+
+## Schema management
+
+- Library-owned SQL schema
+- Embedded versioned SQL scripts
+- Idempotent bootstrap via `UseSqlOSAsync()`
+- Consumer migrations do not own SqlOS tables
+
+## Testing
+
+```bash
+dotnet test SqlOS.sln
+```
+
+Integration tests run against SQL Server via Aspire.

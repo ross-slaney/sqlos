@@ -1,0 +1,35 @@
+---
+title: "Custom OIDC"
+description: "Configure discovery-based or manual custom OIDC providers in SqlOS AuthServer."
+order: 5.14
+section: authserver
+---
+
+# Custom OIDC
+
+**Dashboard path**: Auth Server → OIDC
+
+SqlOS supports both:
+
+- discovery-based custom OIDC connections
+- manual endpoint configuration
+
+## Setup
+
+1. Create the custom OIDC connection in SqlOS.
+2. If discovery is available, use the discovery URL.
+3. Otherwise provide issuer, authorization endpoint, token endpoint, and JWKS URI manually.
+4. Copy the connection ID from the OIDC connections list.
+5. Register the final callback URI:
+
+```text
+http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+```
+
+6. If the provider uses nonstandard claims, configure claim mapping JSON.
+
+## Notes
+
+- Prefer discovery when possible.
+- Use `ClientSecretPost` or `ClientSecretBasic` depending on the provider.
+- Enable the userinfo endpoint only when the ID token alone is not enough.

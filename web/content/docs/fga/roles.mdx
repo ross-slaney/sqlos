@@ -1,0 +1,40 @@
+---
+title: "Roles"
+description: "Define roles as named sets of permissions."
+order: 2
+section: fga
+---
+
+# Roles
+
+**What this guide covers**: Role model, role-permission linking, built-in vs custom roles.
+
+**Dashboard path**: Fine-Grained Auth → Roles  
+**URL**: `http://localhost:5062/sqlos/admin/fga/roles`
+
+---
+
+A role is a flat set of permissions. Roles are stored in `SqlOSFgaRole` and linked to permissions via `SqlOSFgaRolePermission`.
+
+## Model
+
+```csharp
+public class SqlOSFgaRole
+{
+    public string Id { get; set; }
+    public string Key { get; set; }        // e.g., "org_member"
+    public string DisplayName { get; set; } // e.g., "Organization Member"
+    public string? Description { get; set; }
+}
+```
+
+## Example Roles (Retail)
+
+| Role Key | Permissions |
+|----------|-------------|
+| `org_member` | `CHAIN_VIEW`, `LOCATION_VIEW`, `INVENTORY_VIEW` |
+| `org_admin` | `CHAIN_VIEW`, `CHAIN_EDIT`, `LOCATION_VIEW`, `LOCATION_EDIT`, `INVENTORY_VIEW`, `INVENTORY_EDIT` |
+
+## Dashboard
+
+The Roles page lists all roles with their linked permissions. You can create roles and link permissions through the dashboard.

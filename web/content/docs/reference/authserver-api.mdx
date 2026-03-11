@@ -1,0 +1,1025 @@
+---
+title: "AuthServer API Reference"
+description: "Per-method reference for the AuthServer SDK: login, signup, token management, SSO, OIDC, and administration."
+order: 11
+section: reference
+---
+
+# AuthServer API Reference
+
+Every public method in the AuthServer module, with parameters, return types, and code examples.
+
+**Namespace**: `SqlOS.AuthServer.Services`, `SqlOS.AuthServer.Contracts`
+
+---
+
+## SqlOSAuthService
+
+Core authentication service. Handles login, signup, sessions, tokens, and password management.
+
+---
+
+### LoginWithPasswordAsync
+
+Authenticate a user with email and password. If the user belongs to multiple organizations and no `OrganizationId` is specified, returns `RequiresOrganizationSelection = true` with a `PendingAuthToken` and the list of organizations.
+
+```csharp
+var result = await authService.LoginWithPasswordAsync(
+    new SqlOSPasswordLoginRequest(
+        Email: request.Email,
+        Password: request.Password,
+        ClientId: "my-app",
+        OrganizationId: null),
+    httpContext);
+
+if (result.RequiresOrganizationSelection)
+    return Results.Ok(new
+    {
+        requiresOrgSelection = true,
+        pendingAuthToken = result.PendingAuthToken,
+        organizations = result.Organizations
+    });
+
+return Results.Ok(result.Tokens);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request` | `SqlOSPasswordLoginRequest` | Login credentials. |
+| `httpContext` | `HttpContext` | Current HTTP context (used for IP and user agent). |
+| `cancellationToken` | `CancellationToken` | Optional cancellation token. |
+
+**SqlOSPasswordLoginRequest**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Email` | `string` | User's email address. |
+| `Password` | `string` | User's password. |
+| `ClientId` | `string?` | Client application ID. |
+| `OrganizationId` | `string?` | If set, skips org selection and logs in directly. |
+
+**Returns**
+
+`Task<SqlOSLoginResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `RequiresOrganizationSelection` | `bool` | `true` if the user must pick an org before tokens can be issued. |
+| `PendingAuthToken` | `string?` | Temporary token for `SelectOrganizationAsync`. |
+| `Organizations` | `IReadOnlyList<SqlOSOrganizationOption>` | Available organizations. |
+| `Tokens` | `SqlOSTokenResponse?` | Issued tokens (null if org selection required). |
+
+---
+
+### SignUpAsync
+
+Create a new user with email and password. Optionally creates an organization at the same time.
+
+```csharp
+var result = await authService.SignUpAsync(
+    new SqlOSSignupRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@example.com",
+        Password: "s3cureP@ss",
+        OrganizationName: "Acme Corp",
+        ClientId: "my-app",
+        OrganizationId: null),
+    httpContext);
+
+return Results.Ok(result.Tokens);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request` | `SqlOSSignupRequest` | Signup details. |
+| `httpContext` | `HttpContext` | Current HTTP context. |
+
+**SqlOSSignupRequest**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `DisplayName` | `string` | User's display name. |
+| `Email` | `string` | User's email address. |
+| `Password` | `string` | User's password. |
+| `OrganizationName` | `string?` | If set, a new organization is created and the user is added. |
+| `ClientId` | `string?` | Client application ID. |
+| `OrganizationId` | `string?` | Join existing org instead of creating one. |
+
+**Returns**
+
+`Task<SqlOSLoginResult>` — same shape as `LoginWithPasswordAsync`.
+
+---
+
+### SelectOrganizationAsync
+
+Complete login by selecting an organization. Called when `LoginWithPasswordAsync` returns `RequiresOrganizationSelection = true`.
+
+```csharp
+var tokens = await authService.SelectOrganizationAsync(
+    new SqlOSSelectOrganizationRequest(
+        PendingAuthToken: result.PendingAuthToken!,
+        OrganizationId: selectedOrgId),
+    httpContext);
+
+return Results.Ok(tokens);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.PendingAuthToken` | `string` | The pending auth token from the login result. |
+| `request.OrganizationId` | `string` | The selected organization ID. |
+| `httpContext` | `HttpContext` | Current HTTP context. |
+
+**Returns**
+
+`Task<SqlOSTokenResponse>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AccessToken` | `string` | JWT access token. |
+| `RefreshToken` | `string` | Opaque refresh token. |
+| `SessionId` | `string` | Session identifier. |
+| `ClientId` | `string` | Client application ID. |
+| `OrganizationId` | `string?` | Organization the user is logged into. |
+| `AccessTokenExpiresAt` | `DateTime` | Access token expiry (UTC). |
+| `RefreshTokenExpiresAt` | `DateTime` | Refresh token expiry (UTC). |
+
+---
+
+### RefreshAsync
+
+Exchange a refresh token for new access and refresh tokens.
+
+```csharp
+var tokens = await authService.RefreshAsync(
+    new SqlOSRefreshRequest(
+        RefreshToken: request.RefreshToken,
+        OrganizationId: null));
+
+return Results.Ok(tokens);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.RefreshToken` | `string` | The current refresh token. |
+| `request.OrganizationId` | `string?` | Optionally switch organization during refresh. |
+
+**Returns**
+
+`Task<SqlOSTokenResponse>` — new token pair. The previous refresh token is revoked.
+
+---
+
+### LogoutAsync
+
+Revoke a session by refresh token or session ID. Provide at least one.
+
+```csharp
+await authService.LogoutAsync(
+    refreshToken: request.RefreshToken,
+    sessionId: null);
+
+return Results.Ok();
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `refreshToken` | `string?` | The refresh token to revoke. |
+| `sessionId` | `string?` | The session ID to revoke. |
+
+**Returns**
+
+`Task` — completes when the session/token is invalidated.
+
+---
+
+### LogoutAllAsync
+
+Revoke all sessions for a user.
+
+```csharp
+await authService.LogoutAllAsync(userId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `userId` | `string` | The user whose sessions to revoke. |
+
+**Returns**
+
+`Task`
+
+---
+
+### ValidateAccessTokenAsync
+
+Validate a JWT access token and extract the claims principal.
+
+```csharp
+var validated = await authService.ValidateAccessTokenAsync(rawToken);
+if (validated is null)
+    return Results.Unauthorized();
+
+var userId = validated.UserId;
+var orgId = validated.OrganizationId;
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `rawToken` | `string` | The raw JWT access token string. |
+
+**Returns**
+
+`Task<SqlOSValidatedToken?>` — `null` if the token is invalid or expired.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Principal` | `ClaimsPrincipal` | The validated claims principal. |
+| `SessionId` | `string` | The session the token belongs to. |
+| `UserId` | `string?` | The authenticated user's ID. |
+| `OrganizationId` | `string?` | The organization from the token. |
+| `ClientId` | `string?` | The client application ID. |
+
+---
+
+### ExchangeCodeAsync
+
+Exchange an authorization code for tokens. Used in SSO callback flows.
+
+```csharp
+var tokens = await authService.ExchangeCodeAsync(
+    new SqlOSExchangeCodeRequest(
+        Code: code,
+        ClientId: "my-app"),
+    httpContext);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Code` | `string` | The authorization code. |
+| `request.ClientId` | `string` | The client application ID. |
+| `httpContext` | `HttpContext` | Current HTTP context. |
+
+**Returns**
+
+`Task<SqlOSTokenResponse>`
+
+---
+
+### CreatePasswordResetTokenAsync
+
+Generate a one-time password reset token. Send the returned token to the user via email.
+
+```csharp
+var token = await authService.CreatePasswordResetTokenAsync(
+    new SqlOSForgotPasswordRequest(Email: request.Email));
+
+// Send token via email (you provide the email transport)
+await emailService.SendResetEmail(request.Email, token);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Email` | `string` | The user's email address. |
+
+**Returns**
+
+`Task<string>` — the raw reset token to deliver to the user.
+
+---
+
+### ResetPasswordAsync
+
+Consume a password reset token and set the new password.
+
+```csharp
+await authService.ResetPasswordAsync(
+    new SqlOSResetPasswordRequest(
+        Token: request.Token,
+        NewPassword: request.NewPassword));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Token` | `string` | The reset token from `CreatePasswordResetTokenAsync`. |
+| `request.NewPassword` | `string` | The new password. |
+
+**Returns**
+
+`Task`
+
+---
+
+### CreateEmailVerificationTokenAsync
+
+Generate an email verification token. Send the returned token to the user via email.
+
+```csharp
+var token = await authService.CreateEmailVerificationTokenAsync(
+    new SqlOSCreateVerificationTokenRequest(Email: request.Email));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Email` | `string` | The email to verify. |
+
+**Returns**
+
+`Task<string>` — the raw verification token.
+
+---
+
+### VerifyEmailAsync
+
+Consume a verification token and mark the email as verified.
+
+```csharp
+await authService.VerifyEmailAsync(
+    new SqlOSVerifyEmailRequest(Token: request.Token));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Token` | `string` | The verification token. |
+
+**Returns**
+
+`Task`
+
+---
+
+### CreateSessionTokensForUserAsync
+
+Directly issue session tokens for a user. Used after OIDC/SSO flows complete, when you have a resolved user but need to create the SqlOS session.
+
+```csharp
+var tokens = await authService.CreateSessionTokensForUserAsync(
+    user, client, organizationId: org.Id,
+    authenticationMethod: "oidc",
+    userAgent: httpContext.Request.Headers.UserAgent,
+    ipAddress: httpContext.Connection.RemoteIpAddress?.ToString());
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `user` | `SqlOSUser` | The authenticated user entity. |
+| `client` | `SqlOSClientApplication` | The client application. |
+| `organizationId` | `string?` | The organization to scope the session to. |
+| `authenticationMethod` | `string` | How the user authenticated (e.g., `"password"`, `"oidc"`, `"saml"`). |
+| `userAgent` | `string?` | Browser user agent. |
+| `ipAddress` | `string?` | Client IP address. |
+
+**Returns**
+
+`Task<SqlOSTokenResponse>`
+
+---
+
+## SqlOSAdminService
+
+Administrative operations for managing organizations, users, memberships, clients, and SSO connections.
+
+---
+
+### CreateOrganizationAsync
+
+Create a new organization.
+
+```csharp
+var org = await adminService.CreateOrganizationAsync(
+    new SqlOSCreateOrganizationRequest(
+        Name: "Acme Corp",
+        Slug: "acme",
+        PrimaryDomain: "acme.com"));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Name` | `string` | Organization display name. |
+| `request.Slug` | `string?` | URL-safe slug. Auto-generated from name if null. |
+| `request.PrimaryDomain` | `string?` | Primary email domain for SSO/home-realm discovery. |
+
+**Returns**
+
+`Task<SqlOSOrganization>` — the created organization entity.
+
+---
+
+### CreateUserAsync
+
+Create a new user.
+
+```csharp
+var user = await adminService.CreateUserAsync(
+    new SqlOSCreateUserRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@acme.com",
+        Password: "s3cureP@ss"));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.DisplayName` | `string` | Display name. |
+| `request.Email` | `string` | Email address (normalized and deduplicated). |
+| `request.Password` | `string?` | Password. If null, the user can only log in via SSO/OIDC. |
+
+**Returns**
+
+`Task<SqlOSUser>` — the created user entity.
+
+---
+
+### CreateMembershipAsync
+
+Add a user to an organization with a role.
+
+```csharp
+var membership = await adminService.CreateMembershipAsync(
+    organizationId: org.Id,
+    new SqlOSCreateMembershipRequest(
+        UserId: user.Id,
+        Role: "admin"));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `organizationId` | `string` | The organization to add the user to. |
+| `request.UserId` | `string` | The user to add. |
+| `request.Role` | `string` | The membership role (e.g., `"admin"`, `"member"`). |
+
+**Returns**
+
+`Task<SqlOSMembership>` — the created membership.
+
+---
+
+### CreateClientAsync
+
+Register a client application.
+
+```csharp
+var client = await adminService.CreateClientAsync(
+    new SqlOSCreateClientRequest(
+        ClientId: "my-app",
+        Name: "My Application",
+        Audience: "https://api.example.com",
+        RedirectUris: ["https://example.com/callback"]));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.ClientId` | `string` | Unique client identifier. |
+| `request.Name` | `string` | Display name. |
+| `request.Audience` | `string` | The JWT audience claim. |
+| `request.RedirectUris` | `List<string>` | Allowed redirect URIs. |
+
+**Returns**
+
+`Task<SqlOSClientApplication>` — the created client.
+
+---
+
+### CreateSsoConnectionDraftAsync
+
+Create a SAML SSO connection draft. After creating the draft, upload IdP metadata with `ImportSsoMetadataAsync`.
+
+```csharp
+var draft = await adminService.CreateSsoConnectionDraftAsync(
+    new SqlOSCreateSsoConnectionDraftRequest(
+        OrganizationId: org.Id,
+        DisplayName: "Acme Okta SSO",
+        PrimaryDomain: "acme.com",
+        AutoProvisionUsers: true,
+        AutoLinkByEmail: true));
+
+// Now import the metadata:
+await adminService.ImportSsoMetadataAsync(
+    draft.Id,
+    new SqlOSImportSsoMetadataRequest(MetadataXml: xml));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.OrganizationId` | `string` | The organization this connection belongs to. |
+| `request.DisplayName` | `string` | Display name for the connection. |
+| `request.PrimaryDomain` | `string?` | Email domain for home-realm discovery. |
+| `request.AutoProvisionUsers` | `bool` | Create users on first SSO login. |
+| `request.AutoLinkByEmail` | `bool` | Link existing users by email during SSO. |
+
+**Returns**
+
+`Task<SqlOSSsoConnectionDraft>` — the created draft with an ID.
+
+---
+
+### ImportSsoMetadataAsync
+
+Upload SAML IdP metadata XML for an existing SSO connection draft.
+
+```csharp
+await adminService.ImportSsoMetadataAsync(
+    connectionId,
+    new SqlOSImportSsoMetadataRequest(MetadataXml: metadataXml));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `connectionId` | `string` | The SSO connection ID. |
+| `request.MetadataXml` | `string` | The raw SAML IdP metadata XML. |
+
+**Returns**
+
+`Task`
+
+---
+
+### CreateOidcConnectionAsync
+
+Register an OIDC social login provider (Google, Microsoft, Apple, or custom).
+
+```csharp
+var conn = await adminService.CreateOidcConnectionAsync(
+    new SqlOSCreateOidcConnectionRequest(
+        ProviderType: SqlOSOidcProviderType.Google,
+        DisplayName: "Sign in with Google",
+        ClientId: "google-client-id",
+        ClientSecret: "google-client-secret",
+        AllowedCallbackUris: ["https://example.com/callback"],
+        UseDiscovery: true,
+        DiscoveryUrl: "https://accounts.google.com/.well-known/openid-configuration",
+        // remaining fields null/default
+        Issuer: null, AuthorizationEndpoint: null,
+        TokenEndpoint: null, UserInfoEndpoint: null,
+        JwksUri: null, MicrosoftTenant: null,
+        Scopes: null, ClaimMapping: null,
+        ClientAuthMethod: null, UseUserInfo: null));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `Apple`, or `Custom`. |
+| `request.DisplayName` | `string` | Display name for the provider. |
+| `request.ClientId` | `string` | OAuth client ID from the provider. |
+| `request.ClientSecret` | `string?` | OAuth client secret. |
+| `request.AllowedCallbackUris` | `List<string>` | Allowed callback URIs. |
+| `request.UseDiscovery` | `bool` | Whether to use OIDC discovery. |
+| `request.DiscoveryUrl` | `string?` | The `.well-known/openid-configuration` URL. |
+| `request.MicrosoftTenant` | `string?` | Azure AD tenant ID (Microsoft only). |
+| `request.Scopes` | `List<string>?` | Custom scopes to request. |
+
+**Returns**
+
+`Task<SqlOSOidcConnection>` — the created connection.
+
+---
+
+### GetUserOrganizationsAsync
+
+List all organizations a user belongs to.
+
+```csharp
+var orgs = await adminService.GetUserOrganizationsAsync(userId);
+// Returns: [{ Id, Slug, Name, Role }, ...]
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `userId` | `string` | The user's ID. |
+
+**Returns**
+
+`Task<List<SqlOSOrganizationOption>>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Id` | `string` | Organization ID. |
+| `Slug` | `string` | Organization slug. |
+| `Name` | `string` | Organization name. |
+| `Role` | `string` | The user's role in this org. |
+
+---
+
+### UserHasMembershipAsync
+
+Check if a user belongs to an organization.
+
+```csharp
+var isMember = await adminService.UserHasMembershipAsync(userId, orgId);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `userId` | `string` | The user's ID. |
+| `organizationId` | `string` | The organization ID. |
+
+**Returns**
+
+`Task<bool>`
+
+---
+
+### NormalizeEmail
+
+Normalize an email address (lowercase, trim).
+
+```csharp
+var email = SqlOSAdminService.NormalizeEmail("  Jane@ACME.com ");
+// "jane@acme.com"
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `email` | `string` | The email to normalize. |
+
+**Returns**
+
+`string`
+
+---
+
+## SqlOSHomeRealmDiscoveryService
+
+Determines how a user should authenticate based on their email domain.
+
+---
+
+### DiscoverAsync
+
+Look up the authentication method for an email address. Returns whether the domain maps to an SSO connection, OIDC provider, or password login.
+
+```csharp
+var result = await hrdService.DiscoverAsync(
+    new SqlOSHomeRealmDiscoveryRequest(Email: request.Email));
+
+// result.Mode: "password" | "sso" | "oidc"
+// result.ConnectionId: SSO/OIDC connection ID (if applicable)
+// result.OrganizationId: matched org ID
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Email` | `string` | The email to discover. |
+
+**Returns**
+
+`Task<SqlOSHomeRealmDiscoveryResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Mode` | `string` | Authentication mode: `"password"`, `"sso"`, or `"oidc"`. |
+| `OrganizationId` | `string?` | Matched organization. |
+| `OrganizationName` | `string?` | Organization display name. |
+| `PrimaryDomain` | `string?` | The matched domain. |
+| `ConnectionId` | `string?` | SSO or OIDC connection ID to use. |
+
+---
+
+## SqlOSSsoAuthorizationService
+
+SAML SSO authorization flow.
+
+---
+
+### StartAuthorizationAsync
+
+Start a SAML SSO login flow. Returns the IdP authorization URL to redirect the user to.
+
+```csharp
+var ssoResult = await ssoService.StartAuthorizationAsync(
+    new SqlOSSsoAuthorizationStartRequest(
+        Email: request.Email,
+        ClientId: "my-app",
+        RedirectUri: "https://example.com/callback",
+        State: state,
+        CodeChallenge: codeChallenge,
+        CodeChallengeMethod: "S256"));
+
+// Redirect the user:
+return Results.Redirect(ssoResult.AuthorizationUrl);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Email` | `string` | User's email (determines the SSO connection via domain). |
+| `request.ClientId` | `string` | Client application ID. |
+| `request.RedirectUri` | `string` | Where to redirect after SSO. |
+| `request.State` | `string` | CSRF state parameter. |
+| `request.CodeChallenge` | `string` | PKCE code challenge. |
+| `request.CodeChallengeMethod` | `string` | `"S256"`. |
+
+**Returns**
+
+`Task<SqlOSSsoAuthorizationStartResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AuthorizationUrl` | `string` | The SAML IdP URL to redirect to. |
+| `OrganizationId` | `string` | The matched organization. |
+| `OrganizationName` | `string` | Organization name. |
+| `PrimaryDomain` | `string` | The matched domain. |
+
+---
+
+### ExchangeCodeAsync (SSO)
+
+Exchange a PKCE authorization code for tokens after the SAML SSO callback.
+
+```csharp
+var tokens = await ssoService.ExchangeCodeAsync(
+    new SqlOSPkceExchangeRequest(
+        Code: code,
+        ClientId: "my-app",
+        RedirectUri: "https://example.com/callback",
+        CodeVerifier: codeVerifier),
+    httpContext);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Code` | `string` | The authorization code. |
+| `request.ClientId` | `string` | Client application ID. |
+| `request.RedirectUri` | `string` | Must match the original redirect URI. |
+| `request.CodeVerifier` | `string` | The PKCE code verifier. |
+| `httpContext` | `HttpContext` | Current HTTP context. |
+
+**Returns**
+
+`Task<SqlOSTokenResponse>`
+
+---
+
+## SqlOSOidcAuthService
+
+OIDC (social login) authorization flow — Google, Microsoft, Apple, or custom providers.
+
+---
+
+### ListEnabledProvidersAsync
+
+List all enabled OIDC providers available for login.
+
+```csharp
+var providers = await oidcService.ListEnabledProvidersAsync();
+// [{ ConnectionId, ProviderType, DisplayName, ... }]
+```
+
+**Returns**
+
+`Task<List<SqlOSOidcProviderInfo>>`
+
+---
+
+### StartAuthorizationAsync (OIDC)
+
+Start an OIDC authorization flow. Returns the provider's authorization URL.
+
+```csharp
+var result = await oidcService.StartAuthorizationAsync(
+    new SqlOSStartOidcAuthorizationRequest(
+        ConnectionId: connectionId,
+        Email: request.Email,
+        ClientId: "my-app",
+        CallbackUri: "https://example.com/oidc/callback",
+        State: state,
+        Nonce: nonce,
+        CodeChallenge: codeChallenge,
+        CodeChallengeMethod: "S256"),
+    ipAddress: httpContext.Connection.RemoteIpAddress?.ToString());
+
+return Results.Redirect(result.AuthorizationUrl);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.ConnectionId` | `string` | The OIDC connection to use. |
+| `request.Email` | `string` | User's email. |
+| `request.ClientId` | `string` | Client application ID. |
+| `request.CallbackUri` | `string` | OAuth callback URI. |
+| `request.State` | `string` | CSRF state. |
+| `request.Nonce` | `string` | Token replay prevention nonce. |
+| `request.CodeChallenge` | `string` | PKCE code challenge. |
+| `request.CodeChallengeMethod` | `string` | `"S256"`. |
+| `ipAddress` | `string?` | Client IP for audit logging. |
+
+**Returns**
+
+`Task<SqlOSStartOidcAuthorizationResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AuthorizationUrl` | `string` | Provider URL to redirect to. |
+| `ConnectionId` | `string` | The OIDC connection used. |
+| `ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `Apple`, or `Custom`. |
+| `DisplayName` | `string` | Provider display name. |
+
+---
+
+### CompleteAuthorizationAsync
+
+Complete the OIDC callback. Exchanges the authorization code with the provider, resolves the user, and returns session info.
+
+```csharp
+var result = await oidcService.CompleteAuthorizationAsync(
+    new SqlOSCompleteOidcAuthorizationRequest(
+        ConnectionId: connectionId,
+        ClientId: "my-app",
+        CallbackUri: "https://example.com/oidc/callback",
+        Code: code,
+        CodeVerifier: codeVerifier,
+        Nonce: nonce,
+        UserPayloadJson: null),
+    ipAddress: httpContext.Connection.RemoteIpAddress?.ToString());
+
+// result.UserId, result.Email, result.OrganizationId
+// Now create a session:
+var tokens = await authService.CreateSessionTokensForUserAsync(
+    user, client, result.OrganizationId,
+    result.AuthenticationMethod, userAgent, ipAddress);
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.ConnectionId` | `string` | The OIDC connection. |
+| `request.ClientId` | `string` | Client application ID. |
+| `request.CallbackUri` | `string` | Must match the original callback URI. |
+| `request.Code` | `string` | The authorization code from the provider. |
+| `request.CodeVerifier` | `string` | PKCE code verifier. |
+| `request.Nonce` | `string` | Must match the original nonce. |
+
+**Returns**
+
+`Task<SqlOSCompleteOidcAuthorizationResult>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `UserId` | `string` | Resolved or created user ID. |
+| `Email` | `string` | User's email from the provider. |
+| `DisplayName` | `string` | User's display name from the provider. |
+| `OrganizationId` | `string?` | Matched organization (if any). |
+| `AuthenticationMethod` | `string` | e.g., `"oidc_google"`. |
+
+---
+
+## SqlOSSettingsService
+
+Manage runtime security settings.
+
+---
+
+### GetResolvedSecuritySettingsAsync
+
+Get the effective security settings (with defaults applied).
+
+```csharp
+var settings = await settingsService.GetResolvedSecuritySettingsAsync();
+// settings.RefreshTokenLifetime, settings.SessionIdleTimeout, etc.
+```
+
+**Returns**
+
+`Task<SqlOSResolvedSecuritySettings>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `RefreshTokenLifetime` | `TimeSpan` | How long refresh tokens are valid. |
+| `SessionIdleTimeout` | `TimeSpan` | Session expires after this idle period. |
+| `SessionAbsoluteLifetime` | `TimeSpan` | Maximum session lifetime regardless of activity. |
+
+---
+
+### UpdateSecuritySettingsAsync
+
+Update the security settings.
+
+```csharp
+await settingsService.UpdateSecuritySettingsAsync(
+    new SqlOSUpdateSecuritySettingsRequest(
+        RefreshTokenLifetimeMinutes: 1440,
+        SessionIdleTimeoutMinutes: 60,
+        SessionAbsoluteLifetimeMinutes: 10080));
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.RefreshTokenLifetimeMinutes` | `int` | Refresh token lifetime in minutes. |
+| `request.SessionIdleTimeoutMinutes` | `int` | Idle timeout in minutes. |
+| `request.SessionAbsoluteLifetimeMinutes` | `int` | Absolute lifetime in minutes. |
+
+**Returns**
+
+`Task`
+
+---
+
+## Key Contracts
+
+### SqlOSTokenResponse
+
+Returned by all successful authentication flows.
+
+```csharp
+public sealed record SqlOSTokenResponse(
+    string AccessToken,
+    string RefreshToken,
+    string SessionId,
+    string ClientId,
+    string? OrganizationId,
+    DateTime AccessTokenExpiresAt,
+    DateTime RefreshTokenExpiresAt);
+```
+
+### SqlOSLoginResult
+
+Returned by `LoginWithPasswordAsync` and `SignUpAsync`.
+
+```csharp
+public sealed record SqlOSLoginResult(
+    bool RequiresOrganizationSelection,
+    string? PendingAuthToken,
+    IReadOnlyList<SqlOSOrganizationOption> Organizations,
+    SqlOSTokenResponse? Tokens);
+```
+
+### SqlOSValidatedToken
+
+Returned by `ValidateAccessTokenAsync`.
+
+```csharp
+public sealed record SqlOSValidatedToken(
+    ClaimsPrincipal Principal,
+    string SessionId,
+    string? UserId,
+    string? OrganizationId,
+    string? ClientId);
+```
+
+### SqlOSOrganizationOption
+
+Used in multi-org selection flows.
+
+```csharp
+public sealed record SqlOSOrganizationOption(
+    string Id,
+    string Slug,
+    string Name,
+    string Role);
+```

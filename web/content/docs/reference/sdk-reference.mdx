@@ -1,0 +1,246 @@
+---
+title: "SDK Overview"
+description: "Quick-reference index of all SqlOS services, methods, contracts, and namespaces."
+order: 8
+section: reference
+---
+
+# SDK Overview
+
+Quick-reference index of every public service in the SqlOS library. For per-method documentation with parameters, return types, and code examples, see the detailed API reference pages:
+
+- **[FGA API Reference](/docs/guides/reference/fga-api)** — CheckAccessAsync, GetAuthorizationFilterAsync, CreateResource, PagedSpec, ISpecificationExecutor
+- **[AuthServer API Reference](/docs/guides/reference/authserver-api)** — Login, Signup, SSO, OIDC, token management, admin operations
+
+---
+
+## Services at a Glance
+
+| Service | Namespace | Key Methods | API Docs |
+|---------|-----------|-------------|----------|
+| `SqlOSAuthService` | `SqlOS.AuthServer.Services` | LoginWithPasswordAsync, RefreshAsync, LogoutAsync, ValidateAccessTokenAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqlosauthorizationservice) |
+| `SqlOSAdminService` | `SqlOS.AuthServer.Services` | CreateOrganizationAsync, CreateUserAsync, CreateMembershipAsync, CreateClientAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqlosadminservice) |
+| `SqlOSHomeRealmDiscoveryService` | `SqlOS.AuthServer.Services` | DiscoverAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqloshomerealiscovaeryservice) |
+| `SqlOSSsoAuthorizationService` | `SqlOS.AuthServer.Services` | StartAuthorizationAsync, ExchangeCodeAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqlosssoauthorizationservice) |
+| `SqlOSOidcAuthService` | `SqlOS.AuthServer.Services` | StartAuthorizationAsync, CompleteAuthorizationAsync, ListEnabledProvidersAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqlosoidcauthservice) |
+| `SqlOSSettingsService` | `SqlOS.AuthServer.Services` | GetResolvedSecuritySettingsAsync | [AuthServer API →](/docs/guides/reference/authserver-api#sqlossettingsservice) |
+| `ISqlOSFgaAuthService` | `SqlOS.Fga.Interfaces` | CheckAccessAsync, HasCapabilityAsync, GetAuthorizationFilterAsync, TraceResourceAccessAsync | [FGA API →](/docs/guides/reference/fga-api#isqlosfgaauthservice) |
+| `SqlOSFgaConvenienceExtensions` | `SqlOS.Fga.Extensions` | CreateResource, AuthorizedDetailAsync | [FGA API →](/docs/guides/reference/fga-api#sqlosfgaconvenienceextensions) |
+| `ISpecificationExecutor` | `SqlOS.Fga.Specifications` | ExecuteAsync, CountAsync | [FGA API →](/docs/guides/reference/fga-api#ispecificationexecutor) |
+
+---
+
+## AuthServer Services
+
+### SqlOSAuthService
+
+Core authentication service for login, session management, and token operations.
+
+```csharp
+// Password login
+Task<SqlOSLoginResult> LoginWithPasswordAsync(
+    SqlOSPasswordLoginRequest request, HttpContext httpContext, CancellationToken ct);
+
+// Signup
+Task<SqlOSLoginResult> SignUpAsync(
+    SqlOSSignupRequest request, HttpContext httpContext, CancellationToken ct);
+
+// Organization selection (multi-org)
+Task<SqlOSTokenResponse> SelectOrganizationAsync(
+    SqlOSSelectOrganizationRequest request, HttpContext httpContext, CancellationToken ct);
+
+// Code exchange (SSO/OIDC)
+Task<SqlOSTokenResponse> ExchangeCodeAsync(
+    SqlOSExchangeCodeRequest request, HttpContext httpContext, CancellationToken ct);
+
+// Refresh token
+Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken ct);
+
+// Logout
+Task LogoutAsync(string? refreshToken, string? sessionId, CancellationToken ct);
+Task LogoutAllAsync(string userId, CancellationToken ct);
+
+// Token validation
+Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken ct);
+
+// Session creation (for OIDC complete flows)
+Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
+    SqlOSUser user, SqlOSClientApplication client, string? organizationId,
+    string authenticationMethod, string? userAgent, string? ipAddress, CancellationToken ct);
+
+// Password reset
+Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken ct);
+Task ResetPasswordAsync(SqlOSResetPasswordRequest request, CancellationToken ct);
+
+// Email verification
+Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken ct);
+Task VerifyEmailAsync(SqlOSVerifyEmailRequest request, CancellationToken ct);
+```
+
+### SqlOSAdminService
+
+Administrative operations for organizations, users, memberships, clients, and connections.
+
+```csharp
+Task<SqlOSOrganization> CreateOrganizationAsync(SqlOSCreateOrganizationRequest request, CancellationToken ct);
+Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken ct);
+Task<SqlOSMembership> CreateMembershipAsync(string organizationId, SqlOSCreateMembershipRequest request, CancellationToken ct);
+Task<SqlOSClientApplication> CreateClientAsync(SqlOSCreateClientRequest request, CancellationToken ct);
+Task<SqlOSSsoConnectionDraft> CreateSsoConnectionDraftAsync(SqlOSCreateSsoConnectionDraftRequest request, CancellationToken ct);
+Task ImportSsoMetadataAsync(string connectionId, string metadataXml, CancellationToken ct);
+Task<List<SqlOSOrganizationOption>> GetUserOrganizationsAsync(string userId, CancellationToken ct);
+Task<bool> UserHasMembershipAsync(string userId, string organizationId, CancellationToken ct);
+
+// Static helpers
+static string NormalizeEmail(string email);
+```
+
+### SqlOSHomeRealmDiscoveryService
+
+```csharp
+Task<SqlOSHomeRealmDiscoveryResponse> DiscoverAsync(
+    SqlOSHomeRealmDiscoveryRequest request, CancellationToken ct);
+```
+
+### SqlOSSsoAuthorizationService
+
+```csharp
+Task<SqlOSSsoAuthorizationStartResult> StartAuthorizationAsync(
+    SqlOSSsoAuthorizationStartRequest request, CancellationToken ct);
+Task<SqlOSTokenResponse> ExchangeCodeAsync(
+    SqlOSPkceExchangeRequest request, HttpContext httpContext, CancellationToken ct);
+```
+
+### SqlOSOidcAuthService
+
+```csharp
+Task<SqlOSOidcAuthorizationStartResult> StartAuthorizationAsync(
+    SqlOSStartOidcAuthorizationRequest request, string? ipAddress, CancellationToken ct);
+Task<SqlOSOidcAuthorizationCompleteResult> CompleteAuthorizationAsync(
+    SqlOSCompleteOidcAuthorizationRequest request, string? ipAddress, CancellationToken ct);
+Task<List<SqlOSOidcProviderInfo>> ListEnabledProvidersAsync(CancellationToken ct);
+```
+
+### SqlOSCryptoService
+
+```csharp
+string GenerateOpaqueToken();
+string GenerateId(string prefix);
+string HashToken(string token);
+string HashPassword(string password);
+bool VerifyPassword(string hash, string password);
+string CreatePkceCodeChallenge(string codeVerifier);
+Task<string> CreateAccessTokenAsync(SqlOSUser user, SqlOSSession session,
+    SqlOSClientApplication client, string? organizationId, CancellationToken ct);
+Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken ct);
+Task<string> CreateTemporaryTokenAsync(string purpose, string? userId, string? clientApplicationId,
+    string? organizationId, object? payload, TimeSpan? lifetime, CancellationToken ct);
+Task<SqlOSTemporaryToken?> ConsumeTemporaryTokenAsync(string purpose, string token, CancellationToken ct);
+T? DeserializePayload<T>(SqlOSTemporaryToken token);
+```
+
+### SqlOSSettingsService
+
+```csharp
+Task<SqlOSResolvedSecuritySettings> GetResolvedSecuritySettingsAsync(CancellationToken ct);
+```
+
+---
+
+## FGA Services
+
+### ISqlOSFgaAuthService
+
+```csharp
+Task<SqlOSFgaAccessCheckResult> CheckAccessAsync(
+    string subjectId, string permissionKey, string resourceId);
+
+Task<bool> HasCapabilityAsync(string subjectId, string permissionKey);
+
+Task<SqlOSFgaResourceAccessTrace> TraceResourceAccessAsync(
+    string subjectId, string resourceId, string permissionKey);
+
+Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
+    string subjectId, string permissionKey) where T : IHasResourceId;
+```
+
+### SqlOSFgaConvenienceExtensions
+
+```csharp
+// Create a resource in the hierarchy
+static string CreateResource(
+    this ISqlOSFgaDbContext context,
+    string parentId, string name, string resourceTypeId, string? id = null);
+
+// Fetch + authorize + return HTTP result
+static Task<IResult> AuthorizedDetailAsync<TEntity, TDto>(
+    this ISqlOSFgaAuthService authService,
+    IQueryable<TEntity> query,
+    Expression<Func<TEntity, bool>> predicate,
+    string subjectId, string permissionKey,
+    Func<TEntity, TDto> selector) where TEntity : class, IHasResourceId;
+```
+
+### PagedSpec Builder
+
+```csharp
+PagedSpec.For<T>(Expression<Func<T, string>> idSelector)
+    .RequirePermission(string permissionKey)
+    .SortByString(string name, Expression<Func<T, string>> selector, bool isDefault = false)
+    .Search(string? search, params Expression<Func<T, string>>[] fields)
+    .Configure(Action<IQueryable<T>> configure)
+    .Build(int pageSize, string? cursor, string? sortBy, string? sortDir);
+```
+
+### ISpecificationExecutor
+
+```csharp
+Task<PagedResult<TDto>> ExecuteAsync<TEntity, TDto>(
+    IQueryable<TEntity> query,
+    PagedSpecification<TEntity> spec,
+    string subjectId,
+    Func<TEntity, TDto> selector) where TEntity : class, IHasResourceId;
+
+Task<int> CountAsync<TEntity>(
+    IQueryable<TEntity> query,
+    PagedSpecification<TEntity> spec,
+    string subjectId) where TEntity : class, IHasResourceId;
+```
+
+---
+
+## Key Contracts
+
+### AuthServer
+
+| Type | Fields |
+|------|--------|
+| `SqlOSLoginResult` | `RequiresOrganizationSelection`, `PendingAuthToken`, `Organizations`, `Tokens` |
+| `SqlOSTokenResponse` | `AccessToken`, `RefreshToken`, `SessionId`, `ClientId`, `OrganizationId`, `AccessTokenExpiresAt`, `RefreshTokenExpiresAt` |
+| `SqlOSValidatedToken` | `UserId`, `SessionId`, `ClientId`, `OrganizationId`, `Principal` |
+| `SqlOSHomeRealmDiscoveryResponse` | `Mode`, `Organizations`, `SsoConnectionId` |
+| `SqlOSResolvedSecuritySettings` | `RefreshTokenLifetime`, `SessionIdleTimeout`, `SessionAbsoluteLifetime` |
+
+### FGA
+
+| Type | Fields |
+|------|--------|
+| `SqlOSFgaAccessCheckResult` | `Allowed` |
+| `SqlOSFgaResourceAccessTrace` | Structured trace of the access decision |
+| `PagedResult<T>` | `Items`, `NextCursor`, `HasMore` |
+
+---
+
+## Namespaces
+
+| Namespace | Contents |
+|-----------|----------|
+| `SqlOS` | Root: options, bootstrap |
+| `SqlOS.AuthServer.Services` | Auth service classes |
+| `SqlOS.AuthServer.Contracts` | Request/response types |
+| `SqlOS.AuthServer.Models` | EF Core entities (User, Session, etc.) |
+| `SqlOS.AuthServer.Interfaces` | `ISqlOSAuthServerDbContext` |
+| `SqlOS.Fga.Interfaces` | `ISqlOSFgaAuthService`, `ISqlOSFgaDbContext`, `IHasResourceId` |
+| `SqlOS.Fga.Extensions` | Convenience extensions |
+| `SqlOS.Fga.Models` | FGA entities (Resource, Subject, Grant, etc.) |
+| `SqlOS.Fga.Specifications` | PagedSpec, ISpecificationExecutor |

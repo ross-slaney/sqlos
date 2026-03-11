@@ -1,0 +1,48 @@
+---
+title: "Creating Resources"
+description: "Add resources to the FGA hierarchy with CreateResource."
+order: 13
+section: fga
+---
+
+# Creating Resources
+
+**What this guide covers**: The `CreateResource` extension method for adding resources to the hierarchy.
+
+---
+
+`CreateResource` is a convenience extension on `ISqlOSFgaDbContext` that creates an `SqlOSFgaResource` and adds it to the change tracker. It returns the resource ID so you can assign it to your domain entity.
+
+## Method Signature
+
+```csharp
+public static string CreateResource(
+    this ISqlOSFgaDbContext context,
+    string parentId,
+    string name,
+    string resourceTypeId,
+    string? id = null);
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `parentId` | Parent resource ID in the hierarchy |
+| `name` | Display name for the resource |
+| `resourceTypeId` | Resource type (e.g., `chain`, `location`) |
+| `id` | Optional custom ID. If null, a GUID is generated. |
+
+## Code Example
+
+```csharp
+// Auto-generated ID
+var resourceId = context.CreateResource("retail_root", request.Name, "chain");
+chain.ResourceId = resourceId;
+
+// Custom ID
+var orgResourceId = context.CreateResource("root", org.Name, "organization",
+    id: $"org::{org.Id}");
+```
+
+## Important
+
+`CreateResource` adds the entity to the change tracker but does **not** call `SaveChangesAsync`. Save it along with your domain entity in a single transaction.

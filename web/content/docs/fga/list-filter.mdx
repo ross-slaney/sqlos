@@ -1,0 +1,61 @@
+---
+title: "List Filter"
+description: "Query-time authorization filtering with GetAuthorizationFilterAsync."
+order: 9
+section: fga
+---
+
+# List Filter
+
+**What this guide covers**: `GetAuthorizationFilterAsync` for filtering EF Core queries by authorization.
+
+---
+
+Use `GetAuthorizationFilterAsync` to produce an `Expression<Func<T, bool>>` that restricts a query to only the resources the subject can access. This is the primary way to authorize list endpoints.
+
+## Code Example
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+var chains = await dbContext.Chains
+    .Where(filter)
+    .OrderBy(c => c.Name)
+    .ToListAsync();
+```
+
+## Method Signature
+
+```csharp
+Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
+    string subjectId,
+    string permissionKey) where T : IHasResourceId;
+```
+
+## How It Works
+
+1. Find all resources the subject can access with the given permission (walking up the tree)
+2. Produce a SQL expression that joins the entity's `ResourceId` against the accessible resource set
+3. The expression translates to a SQL Server table-valued function call at query time
+
+## With PagedSpec
+
+The `PagedSpec` builder integrates authorization automatically:
+
+```csharp
+var spec = PagedSpec.For<Chain>(c => c.Id)
+    .RequirePermission(RetailPermissionKeys.ChainView)
+    .SortByString("name", c => c.Name, isDefault: true)
+    .Search(search, c => c.Name, c => c.Description)
+    .Build(pageSize, cursor, sortBy, sortDir);
+
+var result = await executor.ExecuteAsync(
+    context.Chains, spec, subjectId, c => new ChainDto { ... });
+```
+
+## When to Use
+
+- **List endpoints** — filter results by what the user can see
+- **Search** — combine with text search and sorting
+- Prefer this over `CheckAccessAsync` for multi-entity queries

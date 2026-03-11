@@ -1,0 +1,58 @@
+---
+title: "FGA Overview"
+description: "Hierarchical authorization for .NET apps with EF Core query-time filtering."
+order: 0
+section: fga
+---
+
+# FGA Overview
+
+**What this guide covers**: FGA scope, resource tree, grants, query-time filtering, point checks.
+
+---
+
+The FGA (Fine-Grained Authorization) module models resources as a hierarchy. Grants assign roles to subjects on resources, and permissions inherit down the tree. Authorization integrates directly into EF Core queries via a SQL Server table-valued function.
+
+## Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Resource** | A node in the hierarchy (e.g., org, project, document) |
+| **Subject** | Who is being authorized (user, agent, service account, group) |
+| **Role** | A named set of permissions (e.g., `viewer`, `editor`) |
+| **Permission** | A capability key (e.g., `PROJECT_VIEW`, `CHAIN_EDIT`) |
+| **Grant** | Links a subject + role + resource; inherits downward |
+
+## Registration
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseFGA();
+});
+```
+
+## Core Services
+
+| Service | Purpose |
+|---------|---------|
+| `ISqlOSFgaAuthService` | CheckAccess, HasCapability, GetAuthorizationFilter, TraceResourceAccess |
+| `SqlOSFgaConvenienceExtensions` | CreateResource, AuthorizedDetailAsync |
+| `ISpecificationExecutor` | Execute paged, authorized queries |
+| `PagedSpec` builder | Build sortable, searchable, authorized specs |
+
+## Query-Time Filtering
+
+```csharp
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+var chains = await dbContext.Chains
+    .Where(filter)
+    .OrderBy(c => c.Name)
+    .ToListAsync();
+```
+
+## Dashboard
+
+FGA admin UI at `/sqlos/admin/fga/` with pages for resources, grants, roles, permissions, subjects, and access tester.

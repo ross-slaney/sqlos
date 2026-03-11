@@ -1,0 +1,72 @@
+---
+title: "Schema YAML"
+description: "Import and export FGA schema definitions."
+order: 16
+section: fga
+---
+
+# Schema YAML
+
+**What this guide covers**: FGA schema structure, import/export via the dashboard.
+
+**Dashboard path**: Fine-Grained Auth → Schema (or via API)
+
+---
+
+The FGA schema defines resource types, roles, permissions, and their relationships. It can be exported and imported as structured data through the dashboard.
+
+## Schema Structure
+
+A typical FGA schema defines:
+
+### Resource Types
+
+```yaml
+resource_types:
+  - id: organization
+    display_name: Organization
+  - id: chain
+    display_name: Chain
+  - id: location
+    display_name: Location
+  - id: inventory
+    display_name: Inventory Item
+```
+
+### Permissions
+
+```yaml
+permissions:
+  - key: CHAIN_VIEW
+    resource_type: chain
+    display_name: View Chains
+  - key: CHAIN_EDIT
+    resource_type: chain
+    display_name: Edit Chains
+  - key: LOCATION_VIEW
+    resource_type: location
+    display_name: View Locations
+```
+
+### Roles
+
+```yaml
+roles:
+  - key: org_member
+    display_name: Organization Member
+    permissions: [CHAIN_VIEW, LOCATION_VIEW, INVENTORY_VIEW]
+  - key: org_admin
+    display_name: Organization Admin
+    permissions: [CHAIN_VIEW, CHAIN_EDIT, LOCATION_VIEW, LOCATION_EDIT, INVENTORY_VIEW, INVENTORY_EDIT]
+```
+
+## Dashboard
+
+The FGA dashboard provides schema management including:
+- View current resource types, roles, and permissions
+- Export the current schema
+- Import schema updates
+
+## Seeding
+
+The example app seeds the schema at startup. See `RetailFgaSeeder` in the example API for the programmatic approach to creating resource types, roles, and permissions.

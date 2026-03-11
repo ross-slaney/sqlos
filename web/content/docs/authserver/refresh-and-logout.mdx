@@ -1,0 +1,54 @@
+---
+title: "Refresh and Logout"
+description: "Rotate refresh tokens and revoke sessions."
+order: 5.1
+section: authserver
+---
+
+# Refresh and Logout
+
+**What this guide covers**: Refresh token rotation, organization switching on refresh, logout, session revocation.
+
+---
+
+## Refresh
+
+Refresh rotates the token: the current refresh token is consumed, a new one is issued, and the session idle timeout is extended.
+
+```csharp
+var tokens = await authService.RefreshAsync(
+    new SqlOSRefreshRequest(refreshToken, organizationId: null),
+    cancellationToken);
+
+// tokens.AccessToken       — new JWT
+// tokens.RefreshToken      — new opaque token (old one is consumed)
+// tokens.SessionId         — same session
+```
+
+### Organization Switching
+
+Pass a different `organizationId` during refresh to switch the token's org scope. The user must be a member of the target organization.
+
+### Replay Detection
+
+If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
+
+## Logout
+
+Logout revokes the session and all its refresh tokens.
+
+```csharp
+// By refresh token
+await authService.LogoutAsync(refreshToken: "...", sessionId: null, cancellationToken);
+
+// By session ID
+await authService.LogoutAsync(refreshToken: null, sessionId: "ses_...", cancellationToken);
+```
+
+### Logout All Sessions
+
+```csharp
+await authService.LogoutAllAsync(userId, cancellationToken);
+```
+
+Revokes every active session for the user.

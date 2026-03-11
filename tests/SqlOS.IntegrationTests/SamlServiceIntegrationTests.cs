@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.Text;
+using System.IO.Compression;
 using System.Xml;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -130,6 +131,54 @@ public sealed class SamlServiceIntegrationTests
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
     }
 
+    [TestMethod]
+    public async Task AuthorizationUrl_UsesRedirectBindingDeflateEncoding()
+    {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Redirect {Guid.NewGuid():N}", null));
+        var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            $"redir-client-{Guid.NewGuid():N}"[..20],
+            "Redirect Client",
+            "sqlos-tests",
+            new List<string> { "https://client.example.local/callback" }));
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSRedirectIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Redirect SSO",
+            "urn:redirect:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var startUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
+            connection.Id,
+            client.ClientId,
+            "https://client.example.local/callback"));
+
+        var loginUrl = await saml.BuildIdentityProviderRedirectAsync(
+            connection.Id,
+            QueryHelpers.ParseQuery(new Uri($"https://localhost{startUrl}").Query)["requestToken"].ToString());
+
+        var samlRequest = QueryHelpers.ParseQuery(new Uri(loginUrl).Query)["SAMLRequest"].ToString();
+        samlRequest.Should().NotBeNullOrWhiteSpace();
+
+        var xml = InflateSamlRequest(samlRequest!);
+        xml.Should().Contain("<samlp:AuthnRequest");
+        xml.Should().Contain("AssertionConsumerServiceURL=");
+        xml.Should().Contain(connection.SingleSignOnUrl);
+    }
+
     private static string BuildSignedSamlResponse(
         X509Certificate2 certificate,
         string issuer,
@@ -178,5 +227,14 @@ public sealed class SamlServiceIntegrationTests
         signedXml.ComputeSignature();
         responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
+    }
+
+    private static string InflateSamlRequest(string samlRequest)
+    {
+        var bytes = Convert.FromBase64String(samlRequest);
+        using var compressed = new MemoryStream(bytes);
+        using var inflater = new DeflateStream(compressed, CompressionMode.Decompress);
+        using var reader = new StreamReader(inflater, Encoding.UTF8);
+        return reader.ReadToEnd();
     }
 }

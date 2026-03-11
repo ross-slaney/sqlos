@@ -1,0 +1,61 @@
+---
+title: "Adding SSO to an Organization"
+description: "Configure SAML SSO with Microsoft Entra ID or other IdPs."
+order: 3
+section: authserver
+---
+
+# Adding SSO to an Organization
+
+**What this guide covers**: Create SSO draft, SP Entity ID, ACS URL, import Entra federation metadata.
+
+**Dashboard path**: Auth Server → SSO  
+**URL**: `http://localhost:5062/sqlos/admin/auth/sso`
+
+---
+
+SqlOS supports SAML organization SSO. Create a draft, share SP Entity ID and ACS URL with the IdP admin, then import the federation metadata XML.
+
+## SSO Page
+
+![SSO page](/docs/sso-page.png)
+
+## Create SSO Draft
+
+1. **Organization ID** (from Organizations page)
+2. **Display name** (e.g., "Acme Entra SSO")
+3. **Primary domain** (e.g., `customer.com`)
+4. **Auto provision users**: Create users from SAML assertions
+5. **Auto link by email**: Link SAML logins to existing users by email
+
+After creation, the dashboard shows:
+- **SP Entity ID** → IdP "Identifier (Entity ID)"
+- **ACS URL** → IdP "Reply URL (Assertion Consumer Service URL)"
+
+## Import Entra Metadata
+
+1. Paste **Connection ID** from the draft
+2. Paste **Federation Metadata XML** from Entra
+3. Click **Import metadata**
+
+Connection is then enabled.
+
+## Code Example
+
+```csharp
+var draft = await adminService.CreateSsoConnectionDraftAsync(new CreateSsoConnectionDraftRequest
+{
+    OrganizationId = org.Id,
+    DisplayName = "Acme Entra SSO",
+    PrimaryDomain = "acme.com",
+    AutoProvisionUsers = true,
+    AutoLinkByEmail = true
+});
+
+// draft.SpEntityId → configure in Entra as "Identifier (Entity ID)"
+// draft.AcsUrl     → configure in Entra as "Reply URL"
+```
+
+## Full Entra Walkthrough
+
+See `docs/ENTRA_SSO.md` in the SqlOS repository for step-by-step Entra configuration.

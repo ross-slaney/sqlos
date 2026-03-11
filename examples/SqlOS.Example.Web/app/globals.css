@@ -113,6 +113,30 @@ input {
   font: inherit;
 }
 
+select,
+textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(40, 49, 36, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+  font: inherit;
+}
+
+.separator {
+  margin: 18px 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(30, 36, 25, 0.58);
+}
+
+.stacked-actions {
+  display: grid;
+  gap: 10px;
+}
+
 .muted {
   color: rgba(30, 36, 25, 0.72);
 }

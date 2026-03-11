@@ -1,0 +1,168 @@
+---
+title: "API Reference"
+description: "Auth endpoints, dashboard admin APIs, and Swagger."
+order: 9
+section: reference
+---
+
+# API Reference
+
+**What this guide covers**: Example auth endpoints, dashboard admin APIs, AuthServer runtime endpoints, Swagger.
+
+**Swagger URL**: `http://localhost:5062/swagger`  
+**Base URL**: `http://localhost:5062` (example stack)
+
+---
+
+## Swagger UI
+
+![Swagger API](/docs/swagger-api.png)
+
+Open `http://localhost:5062/swagger` when the example stack is running.
+
+---
+
+## Example Auth Endpoints (`/api/v1/auth`)
+
+The example API wraps SqlOS services. **File**: `examples/SqlOS.Example.Api/Endpoints/ExampleAuthEndpoints.cs`
+
+| Method | Endpoint | Request | Description |
+|--------|----------|---------|-------------|
+| POST | `/discover` | `{ email }` | Home realm discovery. Returns `{ mode: "password" \| "sso", organization?, ... }` |
+| GET | `/oidc/providers` | - | List enabled OIDC providers for login UI |
+| POST | `/login` | `{ email, password, organizationId? }` | Password login. May return `requiresOrganizationSelection` + `organizations` |
+| POST | `/select-organization` | `{ pendingAuthToken, organizationId }` | Select org after multi-org discovery |
+| POST | `/sso/start` | `{ email }` | Start SAML SSO. Returns `{ authorizationUrl, organizationId, ... }` |
+| POST | `/sso/exchange` | `{ code, state }` | Complete SAML PKCE exchange. Uses cookies for verifier. |
+| POST | `/oidc/start` | `{ email, connectionId }` | Start OIDC auth. Returns `{ authorizationUrl, ... }` or SSO redirect info |
+| GET/POST | `/oidc/callback/{connectionId}` | `?code=&state=` or form post | Backend callback. Redirects to frontend with `handoff` or `error` |
+| POST | `/oidc/complete` | `{ handoff }` | Exchange handoff for tokens |
+| POST | `/refresh` | `{ refreshToken, organizationId? }` | Refresh access token |
+| POST | `/logout` | `{ refreshToken?, sessionId? }` | Logout, revoke session |
+| GET | `/session` | `Authorization: Bearer <token>` | Validate token, return user/session/claims |
+
+---
+
+## Dashboard Admin APIs (`/sqlos/admin/auth/api`)
+
+Used by the dashboard UI. Can be called programmatically.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/stats` | Auth stats (orgs, users, clients, etc.) |
+| GET | `/organizations` | List organizations |
+| POST | `/organizations` | Create org `{ name, slug?, primaryDomain? }` |
+| GET | `/users` | List users |
+| POST | `/users` | Create user `{ displayName, email, password? }` |
+| GET | `/memberships` | List memberships |
+| POST | `/memberships` | Create membership `{ organizationId, userId, role }` |
+| POST | `/organizations/{id}/memberships` | Create membership by org |
+| GET | `/clients` | List clients |
+| POST | `/clients` | Create client `{ clientId, name, audience?, redirectUris[] }` |
+| GET | `/oidc-connections` | List OIDC connections |
+| POST | `/oidc-connections` | Create OIDC connection |
+| PUT | `/oidc-connections/{id}` | Update connection |
+| POST | `/oidc-connections/{id}/enable` | Enable provider |
+| POST | `/oidc-connections/{id}/disable` | Disable provider |
+| GET | `/sso-connections` | List SSO connections |
+| POST | `/sso-connections/draft` | Create SSO draft |
+| POST | `/sso-connections/{id}/metadata` | Import federation metadata `{ metadataXml }` |
+| GET | `/settings/security` | Get security settings |
+| PUT | `/settings/security` | Update `{ refreshTokenLifetimeMinutes, sessionIdleTimeoutMinutes, sessionAbsoluteLifetimeMinutes }` |
+| GET | `/sessions` | List active sessions |
+| GET | `/audit-events` | Audit log |
+
+---
+
+## AuthServer Runtime Endpoints (`/sqlos/auth`)
+
+Library-owned. Mounted via `app.MapAuthServer("/sqlos/auth")`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/.well-known/jwks.json` | JWKS for token validation |
+| POST | `/password/login` | Direct password login |
+| POST | `/signup` | User signup |
+| POST | `/select-organization` | Select org |
+| POST | `/token/exchange` | Exchange code for tokens |
+| POST | `/token/refresh` | Refresh tokens |
+| POST | `/logout` | Logout |
+| POST | `/sso/authorization-url` | Get SAML authorization URL |
+| GET | `/saml/login/{connectionId}` | SAML login entry |
+| POST | `/saml/acs/{connectionId}` | SAML ACS callback |
+
+---
+
+## FGA Dashboard API (`/sqlos/admin/fga/api`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/resources` | List resources (tree) |
+| POST | `/resources` | Create resource `{ name, typeId, parentId? }` |
+| GET | `/grants` | List grants |
+| POST | `/grants` | Create grant `{ subjectId, roleId, resourceId }` |
+| DELETE | `/grants/{id}` | Remove grant |
+| GET | `/roles` | List roles |
+| GET | `/permissions` | List permissions |
+| GET | `/subjects` | List subjects |
+| POST | `/access-test` | Test access `{ subjectId, resourceId, permissionKey }` |
+
+---
+
+## Code Examples
+
+### Discover + Login Flow
+
+```csharp
+// 1. Discover login mode
+var discover = await httpClient.PostAsJsonAsync("/api/v1/auth/discover",
+    new { email = "user@acme.com" });
+var mode = await discover.Content.ReadFromJsonAsync<DiscoverResponse>();
+
+// 2. Password login
+if (mode.Mode == "password")
+{
+    var login = await httpClient.PostAsJsonAsync("/api/v1/auth/login",
+        new { email = "user@acme.com", password = "secret" });
+    var tokens = await login.Content.ReadFromJsonAsync<TokenResponse>();
+}
+
+// 3. Refresh
+var refresh = await httpClient.PostAsJsonAsync("/api/v1/auth/refresh",
+    new { refreshToken = tokens.RefreshToken });
+```
+
+### FGA Check Access
+
+```csharp
+var result = await httpClient.PostAsJsonAsync("/sqlos/admin/fga/api/access-test",
+    new { subjectId = "user-1", resourceId = "chain-1", permissionKey = "CHAIN_VIEW" });
+```
+
+---
+
+## Example App Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/me` | Current user (Bearer) |
+| GET | `/api/workspaces` | List workspaces (FGA-filtered) |
+| POST | `/api/workspaces` | Create workspace |
+| GET | `/api/chains` | List chains (retail example) |
+| GET | `/api/chains/{id}` | Get chain |
+| POST | `/api/chains` | Create chain |
+| GET | `/api/chains/{chainId}/locations` | List locations |
+| GET | `/api/locations/{id}` | Get location |
+| POST | `/api/locations/{locationId}/inventory` | Create inventory |
+| GET | `/api/inventory/{id}` | Get inventory |
+
+---
+
+## Key File Paths
+
+| Path | Purpose |
+|------|---------|
+| `examples/SqlOS.Example.Api/Endpoints/ExampleAuthEndpoints.cs` | Auth API |
+| `examples/SqlOS.Example.Web/lib/auth.ts` | Frontend auth |
+| `examples/SqlOS.Example.Web/app/login/page.tsx` | Login UI |
+| `examples/SqlOS.Example.AppHost/Program.cs` | Aspire host |

@@ -4,7 +4,7 @@
 
 It combines two modules in one library:
 - `Fga`: hierarchical resource authorization for EF Core and SQL Server
-- `AuthServer`: organizations, users, credentials, sessions, refresh tokens, and SAML SSO
+- `AuthServer`: organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML SSO
 
 The integration model stays Hangfire-style:
 - library-owned SQL schema
@@ -66,6 +66,13 @@ The example stack is now one Aspire-driven system:
 - ASP.NET API embedding `SqlOS`
 - Next.js web app
 
+The example demonstrates:
+- local password login
+- Google, Microsoft, Apple, and custom OIDC login
+- org SAML SSO with home realm discovery
+- refresh/logout and session inspection
+- FGA-protected application data
+
 Run it with:
 
 ```bash
@@ -117,5 +124,10 @@ dotnet test SqlOS.sln
 - [Configuration](docs/CONFIGURATION.md)
 - [Entra SSO Testing](docs/ENTRA_SSO.md)
 - [Example App](docs/EXAMPLE_APP.md)
+- [OIDC Auth](docs/OIDC_AUTH.md)
+- [Google OIDC](docs/GOOGLE_OIDC.md)
+- [Microsoft OIDC](docs/MICROSOFT_OIDC.md)
+- [Apple OIDC](docs/APPLE_OIDC.md)
+- [Custom OIDC](docs/CUSTOM_OIDC.md)
 - [Testing](docs/TESTING.md)
 - [Release](docs/RELEASE_VERSION.md)

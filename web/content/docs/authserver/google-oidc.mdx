@@ -1,0 +1,35 @@
+---
+title: "Google OIDC"
+description: "Configure Google OAuth for SqlOS AuthServer."
+order: 5.11
+section: authserver
+---
+
+# Google OIDC
+
+**Dashboard path**: Auth Server → OIDC
+
+## Setup
+
+1. Create a Google OAuth web application.
+2. Create the Google OIDC connection in SqlOS.
+3. Copy the connection ID from the OIDC connections list.
+4. Register this final callback URI in Google:
+
+```text
+http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+```
+
+5. Update the SqlOS allowed callback URI list to the same value.
+
+## SqlOS Fields
+
+- Provider: `Google`
+- Client ID
+- Client secret
+- Allowed callback URIs
+
+## Notes
+
+- Google requires a verified email for auto-linking.
+- Org SAML still wins when the entered email domain matches an enabled SSO org.

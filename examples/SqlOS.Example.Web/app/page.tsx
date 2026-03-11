@@ -16,7 +16,7 @@ export default async function HomePage() {
           <h1>SqlOS Example Web</h1>
           <p>
             This frontend talks only to the example backend. The backend embeds SqlOS and handles
-            local auth, SAML PKCE exchange, refresh, logout, and session inspection.
+            local auth, OIDC login, SAML PKCE exchange, refresh, logout, and session inspection.
           </p>
           <div className="actions">
             <Link className="button" href="/login">

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -33,6 +34,19 @@ public sealed class SqlOSCryptoServiceTests
         var second = await service.EnsureActiveSigningKeyAsync();
 
         second.Id.Should().Be(first.Id);
+    }
+
+    [TestMethod]
+    public void ProtectSecret_UnprotectSecret_RoundTrips()
+    {
+        using var context = CreateContext();
+        var provider = new EphemeralDataProtectionProvider();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()), provider);
+
+        var protectedSecret = service.ProtectSecret("super-secret-value");
+
+        protectedSecret.Should().NotBe("super-secret-value");
+        service.UnprotectSecret(protectedSecret).Should().Be("super-secret-value");
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()

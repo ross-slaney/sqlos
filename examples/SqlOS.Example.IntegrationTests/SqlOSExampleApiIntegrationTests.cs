@@ -159,6 +159,90 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task SsoDraft_ReturnsAcsUrlUnderAuthPath()
+    {
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Draft Org {Guid.NewGuid():N}"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSDraftIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+
+        var draftResponse = await AdminPostAsync("/sqlos/admin/auth/api/sso-connections/draft", new
+        {
+            organizationId,
+            displayName = "Draft SSO",
+            identityProviderEntityId = "urn:draft:idp",
+            singleSignOnUrl = "https://idp.example.local/sso",
+            x509CertificatePem = certificate.ExportCertificatePem(),
+            autoProvisionUsers = true,
+            autoLinkByEmail = false
+        });
+        draftResponse.EnsureSuccessStatusCode();
+        var draftJson = JsonDocument.Parse(await draftResponse.Content.ReadAsStringAsync());
+        draftJson.RootElement.GetProperty("assertionConsumerServiceUrl").GetString()
+            .Should().StartWith("https://localhost/sqlos/auth/saml/acs/");
+    }
+
+    [TestMethod]
+    public async Task LegacySamlAcsRoute_StillWorks()
+    {
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Legacy Saml Org {Guid.NewGuid():N}"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSLegacyIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+
+        var connectionResponse = await AdminPostAsync("/sqlos/admin/auth/api/sso-connections", new
+        {
+            organizationId,
+            displayName = "Legacy Example SSO",
+            identityProviderEntityId = "urn:legacy:idp",
+            singleSignOnUrl = "https://idp.example.local/sso",
+            x509CertificatePem = certificate.ExportCertificatePem(),
+            autoProvisionUsers = true,
+            autoLinkByEmail = false
+        });
+        connectionResponse.EnsureSuccessStatusCode();
+        var connectionJson = JsonDocument.Parse(await connectionResponse.Content.ReadAsStringAsync());
+        var connectionId = connectionJson.RootElement.GetProperty("id").GetString();
+
+        var authUrlResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
+        {
+            connectionId,
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/callback"
+        });
+        authUrlResponse.EnsureSuccessStatusCode();
+        var authUrlJson = JsonDocument.Parse(await authUrlResponse.Content.ReadAsStringAsync());
+        var authUrl = authUrlJson.RootElement.GetProperty("authorizationUrl").GetString()!;
+        var relayState = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
+
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:legacy:idp", "legacy-user@example.com", "Legacy", "User");
+        var acsResponse = await ExampleApiFixture.Client.PostAsync(
+            $"/sqlos/saml/acs/{connectionId}",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["SAMLResponse"] = samlResponse,
+                ["RelayState"] = relayState
+            }));
+
+        acsResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        acsResponse.Headers.Location!.ToString().Should().Contain("code=");
+    }
+
+    [TestMethod]
     public async Task DashboardStats_AreAvailableInDevelopment()
     {
         var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/stats");

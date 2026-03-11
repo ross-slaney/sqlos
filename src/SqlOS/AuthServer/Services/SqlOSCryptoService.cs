@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -19,14 +20,49 @@ public sealed class SqlOSCryptoService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly PasswordHasher<object> _passwordHasher = new();
+    private readonly IDataProtector? _secretProtector;
 
-    public SqlOSCryptoService(ISqlOSAuthServerDbContext context, IOptions<SqlOSAuthServerOptions> options)
+    public SqlOSCryptoService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        IDataProtectionProvider? dataProtectionProvider = null)
     {
         _context = context;
         _options = options.Value;
+        _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
     }
 
     public string HashPassword(string password) => _passwordHasher.HashPassword(new object(), password);
+
+    public string ProtectSecret(string secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return string.Empty;
+        }
+
+        if (_secretProtector == null)
+        {
+            return secret;
+        }
+
+        return $"dp:{_secretProtector.Protect(secret)}";
+    }
+
+    public string UnprotectSecret(string protectedSecret)
+    {
+        if (string.IsNullOrWhiteSpace(protectedSecret))
+        {
+            return string.Empty;
+        }
+
+        if (_secretProtector == null || !protectedSecret.StartsWith("dp:", StringComparison.Ordinal))
+        {
+            return protectedSecret;
+        }
+
+        return _secretProtector.Unprotect(protectedSecret[3..]);
+    }
 
     public bool VerifyPassword(string hashedPassword, string password)
     {
