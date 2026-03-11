@@ -17,7 +17,7 @@ public class SqlOSFgaDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly SqlOSFgaDashboardOptions _dashboardOptions;
-    private readonly ManifestEmbeddedFileProvider _fileProvider;
+    private readonly IFileProvider _fileProvider;
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -36,9 +36,7 @@ public class SqlOSFgaDashboardMiddleware
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _dashboardOptions = dashboardOptions;
-        _fileProvider = new ManifestEmbeddedFileProvider(
-            typeof(SqlOSFgaDashboardMiddleware).Assembly,
-            "Fga/Dashboard/wwwroot");
+        _fileProvider = CreateFileProvider(environment);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -91,6 +89,33 @@ public class SqlOSFgaDashboardMiddleware
 
         // Serve static files
         await ServeStaticFile(context, relativePath);
+    }
+
+    private static IFileProvider CreateFileProvider(IHostEnvironment environment)
+    {
+        var sourceRoot = TryFindDevelopmentAssetRoot(environment.ContentRootPath, Path.Combine("src", "SqlOS", "Fga", "Dashboard", "wwwroot"));
+        if (environment.IsDevelopment() && sourceRoot != null)
+        {
+            return new PhysicalFileProvider(sourceRoot);
+        }
+
+        return new ManifestEmbeddedFileProvider(
+            typeof(SqlOSFgaDashboardMiddleware).Assembly,
+            "Fga/Dashboard/wwwroot");
+    }
+
+    private static string? TryFindDevelopmentAssetRoot(string contentRootPath, string relativeAssetPath)
+    {
+        for (var current = new DirectoryInfo(contentRootPath); current != null; current = current.Parent)
+        {
+            var candidate = Path.Combine(current.FullName, relativeAssetPath);
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private async Task HandleApiRequest(HttpContext context, string endpoint)

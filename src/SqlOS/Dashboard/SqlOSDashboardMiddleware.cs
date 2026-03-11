@@ -12,7 +12,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly SqlOSDashboardOptions _options;
-    private readonly ManifestEmbeddedFileProvider _fileProvider;
+    private readonly IFileProvider _fileProvider;
 
     public SqlOSDashboardMiddleware(
         RequestDelegate next,
@@ -24,7 +24,7 @@ public sealed class SqlOSDashboardMiddleware
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _options = options;
-        _fileProvider = new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "Dashboard/wwwroot");
+        _fileProvider = CreateFileProvider(environment);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -147,5 +147,30 @@ public sealed class SqlOSDashboardMiddleware
         var html = await reader.ReadToEndAsync();
         html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
         await context.Response.WriteAsync(html);
+    }
+
+    private static IFileProvider CreateFileProvider(IHostEnvironment environment)
+    {
+        var sourceRoot = TryFindDevelopmentAssetRoot(environment.ContentRootPath, Path.Combine("src", "SqlOS", "Dashboard", "wwwroot"));
+        if (environment.IsDevelopment() && sourceRoot != null)
+        {
+            return new PhysicalFileProvider(sourceRoot);
+        }
+
+        return new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "Dashboard/wwwroot");
+    }
+
+    private static string? TryFindDevelopmentAssetRoot(string contentRootPath, string relativeAssetPath)
+    {
+        for (var current = new DirectoryInfo(contentRootPath); current != null; current = current.Parent)
+        {
+            var candidate = Path.Combine(current.FullName, relativeAssetPath);
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 }

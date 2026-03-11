@@ -11,7 +11,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly SqlOSAuthServerDashboardOptions _options;
-    private readonly ManifestEmbeddedFileProvider _fileProvider;
+    private readonly IFileProvider _fileProvider;
 
     public SqlOSDashboardMiddleware(
         RequestDelegate next,
@@ -23,7 +23,7 @@ public sealed class SqlOSDashboardMiddleware
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _options = options;
-        _fileProvider = new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "AuthServer/Dashboard/wwwroot");
+        _fileProvider = CreateFileProvider(environment);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -100,4 +100,29 @@ public sealed class SqlOSDashboardMiddleware
         ".json" => "application/json; charset=utf-8",
         _ => "application/octet-stream"
     };
+
+    private static IFileProvider CreateFileProvider(IHostEnvironment environment)
+    {
+        var sourceRoot = TryFindDevelopmentAssetRoot(environment.ContentRootPath, Path.Combine("src", "SqlOS", "AuthServer", "Dashboard", "wwwroot"));
+        if (environment.IsDevelopment() && sourceRoot != null)
+        {
+            return new PhysicalFileProvider(sourceRoot);
+        }
+
+        return new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "AuthServer/Dashboard/wwwroot");
+    }
+
+    private static string? TryFindDevelopmentAssetRoot(string contentRootPath, string relativeAssetPath)
+    {
+        for (var current = new DirectoryInfo(contentRootPath); current != null; current = current.Parent)
+        {
+            var candidate = Path.Combine(current.FullName, relativeAssetPath);
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 }

@@ -825,6 +825,7 @@
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`)
         ]);
+        const organizationSsoConnections = Array.isArray(ssoConnections?.data) ? ssoConnections.data : [];
         const latestOrganizationDraft = latestSsoDraft && latestSsoDraft.organizationId === organizationId ? latestSsoDraft : null;
 
         const summaryHtml = `
@@ -965,7 +966,7 @@
                         <h2>Organization SSO Connections</h2>
                         <div id="organization-sso-pagination-top">${renderPagination(ssoConnections.page, ssoConnections.totalPages, ssoConnections.totalCount)}</div>
                         ${renderList(
-                            ssoConnections.data,
+                            organizationSsoConnections,
                             item => `
                                 <div class="list-item-header">
                                     <strong>${esc(item.displayName)}</strong>
