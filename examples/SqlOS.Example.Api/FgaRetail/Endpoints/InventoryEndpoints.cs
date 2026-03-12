@@ -121,5 +121,63 @@ public static class InventoryEndpoints
                 UpdatedAt = item.UpdatedAt
             });
         }).WithName("CreateInventoryItem");
+
+        group.MapPut("/inventory/{id}", async (
+            string id,
+            UpdateInventoryItemRequest request,
+            ExampleAppDbContext context,
+            ISqlOSFgaAuthService authService,
+            HttpContext http) =>
+        {
+            var subjectId = http.GetSubjectId();
+
+            var item = await context.InventoryItems.Include(i => i.Location).FirstOrDefaultAsync(i => i.Id == id);
+            if (item is null) return Results.NotFound();
+
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, item.ResourceId);
+            if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+            item.Name = request.Name;
+            item.Description = request.Description;
+            item.Price = request.Price;
+            item.QuantityOnHand = request.QuantityOnHand;
+            item.UpdatedAt = DateTime.UtcNow;
+            await context.SaveChangesAsync();
+
+            return Results.Ok(new InventoryItemDetailDto
+            {
+                Id = item.Id,
+                ResourceId = item.ResourceId,
+                LocationId = item.LocationId,
+                LocationName = item.Location?.Name,
+                Sku = item.Sku,
+                Name = item.Name,
+                Description = item.Description,
+                Price = item.Price,
+                QuantityOnHand = item.QuantityOnHand,
+                CreatedAt = item.CreatedAt,
+                UpdatedAt = item.UpdatedAt
+            });
+        }).WithName("UpdateInventoryItem");
+
+        group.MapDelete("/inventory/{id}", async (
+            string id,
+            ExampleAppDbContext context,
+            ISqlOSFgaAuthService authService,
+            HttpContext http) =>
+        {
+            var subjectId = http.GetSubjectId();
+
+            var item = await context.InventoryItems.FirstOrDefaultAsync(i => i.Id == id);
+            if (item is null) return Results.NotFound();
+
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, item.ResourceId);
+            if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+            context.InventoryItems.Remove(item);
+            await context.SaveChangesAsync();
+
+            return Results.NoContent();
+        }).WithName("DeleteInventoryItem");
     }
 }

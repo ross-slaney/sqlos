@@ -111,5 +111,59 @@ public static class ChainEndpoints
                 UpdatedAt = chain.UpdatedAt
             });
         }).WithName("CreateChain");
+
+        group.MapPut("/{id}", async (
+            string id,
+            UpdateChainRequest request,
+            ExampleAppDbContext context,
+            ISqlOSFgaAuthService authService,
+            HttpContext http) =>
+        {
+            var subjectId = http.GetSubjectId();
+
+            var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == id);
+            if (chain is null) return Results.NotFound();
+
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.ChainEdit, chain.ResourceId);
+            if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+            chain.Name = request.Name;
+            chain.Description = request.Description;
+            chain.HeadquartersAddress = request.HeadquartersAddress;
+            chain.UpdatedAt = DateTime.UtcNow;
+            await context.SaveChangesAsync();
+
+            return Results.Ok(new ChainDetailDto
+            {
+                Id = chain.Id,
+                ResourceId = chain.ResourceId,
+                Name = chain.Name,
+                Description = chain.Description,
+                HeadquartersAddress = chain.HeadquartersAddress,
+                LocationCount = await context.Locations.CountAsync(l => l.ChainId == chain.Id),
+                CreatedAt = chain.CreatedAt,
+                UpdatedAt = chain.UpdatedAt
+            });
+        }).WithName("UpdateChain");
+
+        group.MapDelete("/{id}", async (
+            string id,
+            ExampleAppDbContext context,
+            ISqlOSFgaAuthService authService,
+            HttpContext http) =>
+        {
+            var subjectId = http.GetSubjectId();
+
+            var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == id);
+            if (chain is null) return Results.NotFound();
+
+            var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.ChainEdit, chain.ResourceId);
+            if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+            context.Chains.Remove(chain);
+            await context.SaveChangesAsync();
+
+            return Results.NoContent();
+        }).WithName("DeleteChain");
     }
 }

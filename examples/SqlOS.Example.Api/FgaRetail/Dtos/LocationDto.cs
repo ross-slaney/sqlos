@@ -39,3 +39,13 @@ public class CreateLocationRequest
     public string? State { get; set; }
     public string? ZipCode { get; set; }
 }
+
+public class UpdateLocationRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string? StoreNumber { get; set; }
+    public string? Address { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? ZipCode { get; set; }
+}

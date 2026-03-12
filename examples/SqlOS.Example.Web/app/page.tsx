@@ -11,7 +11,10 @@ export default function HomePage() {
             local auth, OIDC login, SAML PKCE exchange, refresh, logout, and session inspection.
           </p>
           <div className="actions">
-            <Link className="button" href="/login">
+            <Link className="button" href="/retail">
+              Open Retail Demo
+            </Link>
+            <Link className="button secondary" href="/login">
               Go to login
             </Link>
             <a className="button secondary" href="http://localhost:5062/sqlos/">
