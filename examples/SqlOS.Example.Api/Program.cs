@@ -10,6 +10,7 @@ using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Seeding;
 using SqlOS.Example.Api.Services;
+using SqlOS.Configuration;
 using SqlOS.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,6 +31,24 @@ builder.Services.AddDbContext<ExampleAppDbContext>(options =>
 builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
 {
     options.DashboardBasePath = "/sqlos";
+
+    if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
+    {
+        options.Dashboard.AuthMode = authMode;
+    }
+
+    var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"];
+    if (!string.IsNullOrWhiteSpace(dashboardPassword))
+    {
+        options.Dashboard.Password = dashboardPassword;
+    }
+
+    var sessionMinutes = builder.Configuration.GetValue<int?>("SqlOS:Dashboard:SessionLifetimeMinutes");
+    if (sessionMinutes is > 0)
+    {
+        options.Dashboard.SessionLifetime = TimeSpan.FromMinutes(sessionMinutes.Value);
+    }
+
     options.UseAuthServer(auth =>
     {
         auth.BasePath = "/sqlos/auth";

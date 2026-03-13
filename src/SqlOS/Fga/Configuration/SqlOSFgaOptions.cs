@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using SqlOS.Configuration;
 
 namespace SqlOS.Fga.Configuration;
 
@@ -24,14 +25,31 @@ public class SqlOSFgaOptions
 /// <summary>
 /// Options for the SqlOSFga dashboard.
 /// By default, the dashboard is only accessible in the Development environment.
-/// Set <see cref="AuthorizationCallback"/> to override this behavior.
+/// Set <see cref="AuthMode"/> to <see cref="SqlOSDashboardAuthMode.Password"/> to enable
+/// the built-in password login flow.
 /// </summary>
 public class SqlOSFgaDashboardOptions
 {
     /// <summary>
+    /// Controls how dashboard access is authenticated.
+    /// </summary>
+    public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
+
+    /// <summary>
+    /// Shared password used by the built-in dashboard login flow when <see cref="AuthMode"/>
+    /// is set to <see cref="SqlOSDashboardAuthMode.Password"/>.
+    /// </summary>
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// Session lifetime for the dashboard cookie issued after a successful password login.
+    /// </summary>
+    public TimeSpan SessionLifetime { get; set; } = SqlOSDashboardOptions.DefaultSessionLifetime;
+
+    /// <summary>
     /// Custom authorization callback for dashboard access.
-    /// Return true to allow access, false to deny.
-    /// When null (default), the dashboard is only accessible in the Development environment.
+    /// Return true to allow access, false to deny. In password mode this callback runs
+    /// after session validation so hosts can add additional checks.
     /// </summary>
     /// <example>
     /// // Allow in any environment:

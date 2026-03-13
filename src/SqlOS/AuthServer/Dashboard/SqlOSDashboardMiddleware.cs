@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Dashboard;
 
 namespace SqlOS.AuthServer.Dashboard;
 
@@ -11,18 +12,21 @@ public sealed class SqlOSDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly SqlOSAuthServerDashboardOptions _options;
+    private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
 
     public SqlOSDashboardMiddleware(
         RequestDelegate next,
         string pathPrefix,
         IHostEnvironment environment,
-        SqlOSAuthServerDashboardOptions options)
+        SqlOSAuthServerDashboardOptions options,
+        SqlOSDashboardSessionService sessionService)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _options = options;
+        _sessionService = sessionService;
         _fileProvider = CreateFileProvider(environment);
     }
 
@@ -35,24 +39,18 @@ public sealed class SqlOSDashboardMiddleware
             return;
         }
 
-        if (_options.AuthorizationCallback != null)
+        var relativePath = path[_pathPrefix.Length..].TrimStart('/');
+        var isApiRequest = relativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith(".well-known/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith("saml/", StringComparison.OrdinalIgnoreCase);
+
+        if (!await IsAuthorizedAsync(context))
         {
-            if (!await _options.AuthorizationCallback(context))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-        }
-        else if (!_isDevelopment)
-        {
-            context.Response.StatusCode = 404;
+            await HandleUnauthorizedRequestAsync(context, isApiRequest);
             return;
         }
 
-        var relativePath = path[_pathPrefix.Length..].TrimStart('/');
-        if (relativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith(".well-known/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("saml/", StringComparison.OrdinalIgnoreCase))
+        if (isApiRequest)
         {
             await _next(context);
             return;
@@ -82,6 +80,44 @@ public sealed class SqlOSDashboardMiddleware
         context.Response.ContentType = GetContentType(file.Name);
         await using var stream = file.CreateReadStream();
         await stream.CopyToAsync(context.Response.Body);
+    }
+
+    private async Task<bool> IsAuthorizedAsync(HttpContext context)
+    {
+        if (_sessionService.IsPasswordMode(_options.AuthMode) && !_sessionService.IsPasswordConfigured(_options.Password))
+        {
+            return false;
+        }
+
+        return await _sessionService.IsAuthorizedAsync(
+            context,
+            _isDevelopment,
+            _options.AuthMode,
+            _options.AuthorizationCallback);
+    }
+
+    private async Task HandleUnauthorizedRequestAsync(HttpContext context, bool isApiRequest)
+    {
+        if (_sessionService.IsPasswordMode(_options.AuthMode))
+        {
+            if (!_sessionService.IsPasswordConfigured(_options.Password))
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("SqlOS dashboard password mode is enabled but no password was configured.");
+                return;
+            }
+
+            if (isApiRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            context.Response.Redirect(BuildLoginRedirectPath(context), permanent: false);
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
     }
 
     private string GetDashboardShellPrefix()
@@ -124,5 +160,13 @@ public sealed class SqlOSDashboardMiddleware
         }
 
         return null;
+    }
+
+    private string BuildLoginRedirectPath(HttpContext context)
+    {
+        var shellPrefix = GetDashboardShellPrefix().TrimEnd('/');
+        var requestedPath = $"{context.Request.Path}{context.Request.QueryString}";
+        var encodedNext = Uri.EscapeDataString(requestedPath);
+        return $"{shellPrefix}/login?next={encodedNext}";
     }
 }

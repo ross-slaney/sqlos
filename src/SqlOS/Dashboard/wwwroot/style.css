@@ -106,6 +106,27 @@ nav a.active {
     border-left-color: var(--amber-500);
 }
 
+.sidebar-footer {
+    margin-top: auto;
+    padding: 16px;
+    border-top: 1px solid var(--zinc-800);
+}
+
+.sidebar-action {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--zinc-700);
+    border-radius: var(--radius);
+    background: var(--zinc-900);
+    color: #fff;
+    cursor: pointer;
+}
+
+.sidebar-action:hover {
+    border-color: var(--amber-400);
+    color: var(--amber-100);
+}
+
 .page-header {
     margin-bottom: 20px;
     padding: 20px 24px;
@@ -568,6 +589,55 @@ nav a.active {
     border-radius: var(--radius);
     color: var(--green-600);
     margin-bottom: 16px;
+}
+
+body.login-mode .layout {
+    grid-template-columns: 1fr;
+}
+
+body.login-mode .sidebar,
+body.login-mode .topbar,
+body.login-mode .page-header {
+    display: none;
+}
+
+body.login-mode main {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+}
+
+body.login-mode .content-area {
+    width: min(420px, 100%);
+}
+
+.login-card {
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.login-card h2 {
+    margin: 0 0 8px;
+    font-size: 24px;
+    color: var(--zinc-900);
+}
+
+.login-card p {
+    margin: 0 0 16px;
+    color: var(--zinc-600);
+}
+
+.login-form {
+    display: grid;
+    gap: 12px;
+}
+
+.login-help {
+    margin-top: 12px;
+    color: var(--zinc-500);
+    font-size: 13px;
 }
 
 @media (max-width: 960px) {

@@ -1,5 +1,6 @@
 (function () {
     const dashboardBasePath = normalizeBasePath(window.__SQL_OS_BASE_PATH__ || "/sqlos");
+    const dashboardAuthBasePath = `${dashboardBasePath}/dashboard-auth`;
     const authDashboardPath = `${dashboardBasePath}/admin/auth`;
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const authApiBasePath = `${authDashboardPath}/api`;
@@ -10,6 +11,7 @@
     const pageTitle = document.getElementById("page-title");
     const pageDescription = document.getElementById("page-description");
     const topbarTitle = document.getElementById("topbar-title");
+    const logoutButton = document.getElementById("dashboard-logout");
 
     let flashMessage = null;
     let latestSsoDraft = null;
@@ -35,7 +37,7 @@
             steps: [
                 "In Google Cloud Console, create or open an OAuth 2.0 Web client.",
                 "Add this callback URI: {callback}.",
-                "Copy Client ID + Client Secret from Google into SqlOS.",
+                "Copy Client ID + Client Secret from Google into SqlOS, then save the connection.",
                 "Keep discovery enabled so SqlOS reads discovery, scopes, and endpoints automatically."
             ],
             rows: [
@@ -57,7 +59,7 @@
             steps: [
                 "Create or open an App Registration in Entra ID.",
                 "Under Authentication, add this Web redirect URI: {callback}.",
-                "Generate a client secret and copy the client id/secret into SqlOS.",
+                "Generate a client secret and copy the client id/secret into SqlOS, then save the connection.",
                 "Set tenant to specific directory id if you want tenant locked sign-in."
             ],
             rows: [
@@ -79,7 +81,7 @@
                 "Create a Service ID in Apple Developer and enable Sign in with Apple.",
                 "Upload your .p8 private key and note Team ID and Key ID.",
                 "Add callback URL in Service ID settings: {callback} (must be HTTPS).",
-                "Set provider to Apple and paste Team ID, Key ID, and key PEM into SqlOS."
+                "Set provider to Apple and paste Team ID, Key ID, and key PEM into SqlOS, then save the connection."
             ],
             rows: [
                 { label: "Provider type", value: "Apple" },
@@ -99,8 +101,8 @@
             steps: [
                 "Enable discovery and set a valid metadata URL if the provider exposes one.",
                 "If discovery is not available, disable it and complete Issuer / endpoints manually.",
-                "Add callback URLs to include the SqlOS callback.",
-                "Update claim mapping only when the provider uses non-standard claim names."
+                "Add callback URLs to include the SqlOS callback: {callback}.",
+                "Update claim mapping only when the provider uses non-standard claim names, then save the connection."
             ],
             rows: [
                 { label: "Provider type", value: "Custom" },
@@ -161,6 +163,19 @@
         document.getElementById("sidebar")?.classList.remove("open");
     });
 
+    logoutButton?.addEventListener("click", async () => {
+        try {
+            await fetchJson(`${dashboardAuthBasePath}/logout`, {
+                method: "POST",
+                skipUnauthorizedRedirect: true
+            });
+        } catch {
+            // Ignore logout errors and force a clean login navigation.
+        }
+
+        window.location.href = `${dashboardBasePath}/login`;
+    });
+
     render();
 
     function normalizeBasePath(value) {
@@ -172,13 +187,19 @@
     }
 
     function fetchJson(url, options = {}) {
+        const { skipUnauthorizedRedirect, ...requestOptions } = options;
         return fetch(url, {
-            ...options,
+            ...requestOptions,
+            credentials: "same-origin",
             headers: {
                 "Content-Type": "application/json",
-                ...(options.headers || {})
+                ...(requestOptions.headers || {})
             }
         }).then(async response => {
+            if (response.status === 401 && !skipUnauthorizedRedirect) {
+                redirectToLogin();
+            }
+
             if (!response.ok) {
                 const text = await response.text();
                 const error = new Error(text || `${response.status}`);
@@ -188,6 +209,39 @@
 
             return response.status === 204 ? null : response.json();
         });
+    }
+
+    function redirectToLogin() {
+        const loginPath = `${dashboardBasePath}/login`;
+        if (window.location.pathname === loginPath) {
+            return;
+        }
+
+        const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+        window.location.href = `${loginPath}?next=${next}`;
+    }
+
+    function resolveNextPath() {
+        const params = new URLSearchParams(window.location.search);
+        const nextRaw = params.get("next");
+        if (!nextRaw) {
+            return `${dashboardBasePath}/`;
+        }
+
+        try {
+            const parsed = new URL(nextRaw, window.location.origin);
+            if (parsed.origin !== window.location.origin) {
+                return `${dashboardBasePath}/`;
+            }
+
+            if (!parsed.pathname.startsWith(dashboardBasePath || "/")) {
+                return `${dashboardBasePath}/`;
+            }
+
+            return `${parsed.pathname}${parsed.search}`;
+        } catch {
+            return `${dashboardBasePath}/`;
+        }
     }
 
     function esc(value) {
@@ -258,6 +312,10 @@
             : pathname;
         const trimmed = relativePath.replace(/^\/+|\/+$/g, "");
 
+        if (trimmed === "login") {
+            return { kind: "login", key: "", canonicalPath: `${dashboardBasePath}/login` };
+        }
+
         if (!trimmed) {
             return { kind: "home", key: "home", canonicalPath: `${dashboardBasePath}/` };
         }
@@ -321,6 +379,10 @@
             link.classList.toggle("active", link.dataset.route === routeKey);
         });
         document.getElementById("sidebar")?.classList.remove("open");
+    }
+
+    function setLoginMode(enabled) {
+        document.body.classList.toggle("login-mode", enabled);
     }
 
     function consumeFlashHtml() {
@@ -400,7 +462,7 @@
 
     function renderOidcProviderGuide(providerType, callbackTemplate) {
         const normalized = normalizeOidcProviderType(providerType);
-        const callbackUri = callbackTemplate || `${window.location.origin}${dashboardBasePath}/api/v1/auth/oidc/callback/{connectionId}`;
+        const callbackUri = callbackTemplate || `${window.location.origin}/api/v1/auth/oidc/callback`;
         const callback = esc(callbackUri);
         const template = oidcProviderGuideTemplates[normalized] || oidcProviderGuideTemplates.Custom;
         const renderedRows = (template.rows || []).map((row) => ({
@@ -426,6 +488,9 @@
                     ${renderMetadataRows(renderedRows)}
                     <div class="callout">
                         <strong>Social login integration:</strong> ${template.integration || "Enable the connection and point your app at SqlOS OIDC start endpoint for auth."}
+                    </div>
+                    <div class="callout">
+                        <strong>Callback URI:</strong> This route is stable for the environment and does not depend on a generated connection ID.
                     </div>
                 </div>
             </div>
@@ -572,9 +637,15 @@
             history.replaceState({}, "", route.canonicalPath);
         }
 
+        setLoginMode(route.kind === "login");
         updateActiveNav(route.key);
 
         try {
+            if (route.kind === "login") {
+                await renderLoginRoute();
+                return;
+            }
+
             if (route.kind === "home") {
                 await renderHome();
                 return;
@@ -589,6 +660,64 @@
         } catch (error) {
             content.innerHTML = `${consumeFlashHtml()}<div class="error-banner">${esc(error.message || String(error))}</div>`;
         }
+    }
+
+    async function renderLoginRoute() {
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <section class="login-card">
+                <h2>Dashboard login</h2>
+                <p>Enter the dashboard password to continue.</p>
+                <form id="dashboard-login-form" class="login-form">
+                    <input name="password" type="password" autocomplete="current-password" placeholder="Dashboard password" required>
+                    <button type="submit">Sign in</button>
+                </form>
+                <div id="dashboard-login-error" class="error-banner" style="display:none;"></div>
+                <div class="login-help">The password is configured by the host app and validated server-side.</div>
+            </section>
+        `;
+
+        try {
+            const session = await fetchJson(`${dashboardAuthBasePath}/session`, { skipUnauthorizedRedirect: true });
+            if (session?.authenticated) {
+                window.location.href = resolveNextPath();
+                return;
+            }
+        } catch {
+            // Ignore session probes and keep the login form available.
+        }
+
+        const form = document.getElementById("dashboard-login-form");
+        const errorElement = document.getElementById("dashboard-login-error");
+        form?.addEventListener("submit", async event => {
+            event.preventDefault();
+
+            const payload = new FormData(form);
+            const password = String(payload.get("password") || "");
+            if (!password.trim()) {
+                if (errorElement) {
+                    errorElement.textContent = "Password is required.";
+                    errorElement.style.display = "block";
+                }
+                return;
+            }
+
+            try {
+                await fetchJson(`${dashboardAuthBasePath}/login`, {
+                    method: "POST",
+                    body: JSON.stringify({ password }),
+                    skipUnauthorizedRedirect: true
+                });
+                window.location.href = resolveNextPath();
+            } catch (error) {
+                if (errorElement) {
+                    errorElement.textContent = error.status === 401
+                        ? "Invalid password."
+                        : (error.message || "Could not sign in.");
+                    errorElement.style.display = "block";
+                }
+            }
+        });
     }
 
     async function renderHome() {
@@ -1432,7 +1561,7 @@
 
     async function renderAuthOidc() {
         const config = authViews.oidc;
-        const callbackTemplate = `${window.location.origin}${dashboardBasePath}/api/v1/auth/oidc/callback/{connectionId}`;
+        const callbackTemplate = `${window.location.origin}/api/v1/auth/oidc/callback`;
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading OIDC connections...");
 
@@ -1444,7 +1573,7 @@
                 <div class="panel-grid">
                     <section class="panel">
                         <h2>Create OIDC Connection</h2>
-                        <p>Preset providers use discovery by default. Custom providers can use discovery or fully manual endpoints and claim mapping.</p>
+                        <p>Preset providers use discovery by default. The callback URI is stable for this environment, so you can register it with the provider before or after saving the connection.</p>
                         <form id="create-oidc-connection-form">
                             <select id="oidc-provider-type" name="providerType" required>
                                 <option value="Google">Google</option>
@@ -1472,7 +1601,7 @@
                             <input name="appleTeamId" placeholder="Apple team ID">
                             <input name="appleKeyId" placeholder="Apple key ID">
                             <textarea name="applePrivateKeyPem" placeholder="Apple private key PEM (.p8)"></textarea>
-                            <textarea name="allowedCallbackUris" placeholder="One callback URI per line" required></textarea>
+                            <textarea name="allowedCallbackUris" placeholder="One callback URI per line" required>${esc(callbackTemplate)}</textarea>
                             <textarea name="scopes" placeholder="Optional scopes, one per line"></textarea>
                             <textarea name="claimMapping" placeholder='Claim mapping JSON, for example {\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}'></textarea>
                             <button type="submit">Create OIDC connection</button>

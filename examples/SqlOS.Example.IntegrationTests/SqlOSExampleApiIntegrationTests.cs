@@ -269,6 +269,62 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task DashboardLogoutEndpoint_ReturnsNoContent_WhenPasswordModeDisabled()
+    {
+        var response = await ExampleApiFixture.Client.PostAsync("/sqlos/dashboard-auth/logout", null);
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+    }
+
+    [TestMethod]
+    public async Task DashboardPasswordMode_RequiresLoginAndProtectsAdminApis()
+    {
+        const string dashboardPassword = "SqlOSDashboard!123";
+
+        await using var passwordFactory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Dashboard:AuthMode", "Password");
+            builder.UseSetting("SqlOS:Dashboard:Password", dashboardPassword);
+        });
+
+        using var client = passwordFactory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var dashboardResponse = await client.GetAsync("/sqlos/");
+        dashboardResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        dashboardResponse.Headers.Location!.ToString().Should().Contain("/sqlos/login");
+
+        var deepLinkResponse = await client.GetAsync("/sqlos/admin/auth/clients");
+        deepLinkResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        deepLinkResponse.Headers.Location!.ToString().Should().Contain("/sqlos/login");
+
+        var authStatsUnauthorized = await client.GetAsync("/sqlos/admin/auth/api/stats");
+        authStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+
+        var fgaStatsUnauthorized = await client.GetAsync("/sqlos/admin/fga/api/stats");
+        fgaStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+
+        var invalidLoginResponse = await client.PostAsJsonAsync("/sqlos/dashboard-auth/login", new { password = "wrong-password" });
+        invalidLoginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+
+        var loginResponse = await client.PostAsJsonAsync("/sqlos/dashboard-auth/login", new { password = dashboardPassword });
+        loginResponse.EnsureSuccessStatusCode();
+
+        var authStatsResponse = await client.GetAsync("/sqlos/admin/auth/api/stats");
+        authStatsResponse.EnsureSuccessStatusCode();
+
+        var fgaStatsResponse = await client.GetAsync("/sqlos/admin/fga/api/stats");
+        fgaStatsResponse.EnsureSuccessStatusCode();
+
+        var logoutResponse = await client.PostAsync("/sqlos/dashboard-auth/logout", null);
+        logoutResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+
+        var authStatsAfterLogout = await client.GetAsync("/sqlos/admin/auth/api/stats");
+        authStatsAfterLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
     public async Task Organization_CanBeUpdatedThroughAdminApi()
     {
         var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new

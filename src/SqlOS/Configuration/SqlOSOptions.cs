@@ -4,6 +4,12 @@ using SqlOS.Fga.Configuration;
 
 namespace SqlOS.Configuration;
 
+public enum SqlOSDashboardAuthMode
+{
+    DevelopmentOnly = 0,
+    Password = 1
+}
+
 public sealed class SqlOSOptions
 {
     public SqlOSOptions()
@@ -37,5 +43,10 @@ public sealed class SqlOSOptions
 
 public sealed class SqlOSDashboardOptions
 {
+    public static readonly TimeSpan DefaultSessionLifetime = TimeSpan.FromHours(8);
+
+    public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
+    public string? Password { get; set; }
+    public TimeSpan SessionLifetime { get; set; } = DefaultSessionLifetime;
     public Func<HttpContext, Task<bool>>? AuthorizationCallback { get; set; }
 }

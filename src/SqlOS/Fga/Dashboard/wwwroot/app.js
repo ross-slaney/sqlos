@@ -4,14 +4,48 @@
         document.body.classList.add('embed-mode');
     }
 
+    const dashboardBasePath = window.location.pathname.split('/admin/fga')[0] || '/sqlos';
     const basePath = window.location.pathname.replace(/\/$/, '');
-    const api = (endpoint) => fetch(`${basePath}/api/${endpoint}`).then(r => r.json());
-    const apiPost = (endpoint, body) => fetch(`${basePath}/api/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-    const apiDelete = (endpoint) => fetch(`${basePath}/api/${endpoint}`, { method: 'DELETE' });
+    function redirectToLogin() {
+        const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+        window.top.location.href = `${dashboardBasePath}/login?next=${next}`;
+    }
+    const api = async (endpoint) => {
+        const response = await fetch(`${basePath}/api/${endpoint}`, { credentials: 'same-origin' });
+        if (response.status === 401) {
+            redirectToLogin();
+            throw new Error('Unauthorized');
+        }
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `${response.status}`);
+        }
+        return response.status === 204 ? null : response.json();
+    };
+    const apiPost = async (endpoint, body) => {
+        const response = await fetch(`${basePath}/api/${endpoint}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (response.status === 401) {
+            redirectToLogin();
+            throw new Error('Unauthorized');
+        }
+        return response;
+    };
+    const apiDelete = async (endpoint) => {
+        const response = await fetch(`${basePath}/api/${endpoint}`, {
+            method: 'DELETE',
+            credentials: 'same-origin'
+        });
+        if (response.status === 401) {
+            redirectToLogin();
+            throw new Error('Unauthorized');
+        }
+        return response;
+    };
     const $ = (sel) => document.querySelector(sel);
     const content = $('#content');
 

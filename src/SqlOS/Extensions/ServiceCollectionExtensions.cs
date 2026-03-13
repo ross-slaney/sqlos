@@ -5,6 +5,7 @@ using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
+using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
@@ -28,11 +29,43 @@ public static class ServiceCollectionExtensions
             options.Fga.Dashboard.AuthorizationCallback ??= options.Dashboard.AuthorizationCallback;
         }
 
+        if (options.Dashboard.AuthMode != SqlOSDashboardAuthMode.DevelopmentOnly
+            && options.AuthServer.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly)
+        {
+            options.AuthServer.Dashboard.AuthMode = options.Dashboard.AuthMode;
+        }
+
+        if (options.Dashboard.AuthMode != SqlOSDashboardAuthMode.DevelopmentOnly
+            && options.Fga.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly)
+        {
+            options.Fga.Dashboard.AuthMode = options.Dashboard.AuthMode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Dashboard.Password))
+        {
+            options.AuthServer.Dashboard.Password ??= options.Dashboard.Password;
+            options.Fga.Dashboard.Password ??= options.Dashboard.Password;
+        }
+
+        if (options.Dashboard.SessionLifetime != SqlOSDashboardOptions.DefaultSessionLifetime)
+        {
+            if (options.AuthServer.Dashboard.SessionLifetime == SqlOSDashboardOptions.DefaultSessionLifetime)
+            {
+                options.AuthServer.Dashboard.SessionLifetime = options.Dashboard.SessionLifetime;
+            }
+
+            if (options.Fga.Dashboard.SessionLifetime == SqlOSDashboardOptions.DefaultSessionLifetime)
+            {
+                options.Fga.Dashboard.SessionLifetime = options.Dashboard.SessionLifetime;
+            }
+        }
+
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));
         services.AddSingleton(Options.Create(options.Fga));
         services.AddDataProtection();
         services.AddHttpClient();
+        services.AddSingleton<SqlOSDashboardSessionService>();
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());

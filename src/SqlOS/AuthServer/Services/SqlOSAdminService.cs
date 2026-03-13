@@ -228,7 +228,8 @@ public sealed class SqlOSAdminService
             throw new InvalidOperationException($"An OIDC connection for provider '{request.ProviderType}' already exists.");
         }
 
-        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris);
+        var connectionId = _cryptoService.GenerateId("oidc");
+        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris, connectionId);
         if (callbacks.Count == 0)
         {
             throw new InvalidOperationException("At least one callback URI is required.");
@@ -253,7 +254,7 @@ public sealed class SqlOSAdminService
 
         var connection = new SqlOSOidcConnection
         {
-            Id = _cryptoService.GenerateId("oidc"),
+            Id = connectionId,
             ProviderType = request.ProviderType,
             DisplayName = request.DisplayName,
             ClientId = request.ClientId.Trim(),
@@ -292,7 +293,7 @@ public sealed class SqlOSAdminService
             .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("OIDC connection not found.");
 
-        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris);
+        var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris, connectionId);
         if (callbacks.Count == 0)
         {
             throw new InvalidOperationException("At least one callback URI is required.");
@@ -951,11 +952,11 @@ public sealed class SqlOSAdminService
         return $"{_options.Issuer.TrimEnd('/')}/saml/acs/{connectionId}";
     }
 
-    public static List<string> NormalizeCallbackUris(IEnumerable<string>? values)
+    public static List<string> NormalizeCallbackUris(IEnumerable<string>? values, string? connectionId = null)
         => values?
             .Select(value => value?.Trim())
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!)
+            .Select(value => ReplaceConnectionIdPlaceholder(value!, connectionId))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToList()
@@ -1056,6 +1057,11 @@ public sealed class SqlOSAdminService
 
     private static string NormalizePrivateKey(string value)
         => value.Trim().Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    private static string ReplaceConnectionIdPlaceholder(string value, string? connectionId)
+        => string.IsNullOrWhiteSpace(connectionId)
+            ? value
+            : value.Replace("{connectionId}", connectionId, StringComparison.OrdinalIgnoreCase);
 
     private static void ValidateOidcSecretRequirements(SqlOSOidcConnection connection)
     {

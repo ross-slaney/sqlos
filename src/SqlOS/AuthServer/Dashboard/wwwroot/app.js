@@ -1,6 +1,7 @@
 const statsElement = document.getElementById("stats");
 const setupResultElement = document.getElementById("sso-setup-result");
-const adminApiBasePath = "/sqlos/admin/auth/api";
+const dashboardBasePath = window.location.pathname.split("/admin/auth")[0] || "/sqlos";
+const adminApiBasePath = `${dashboardBasePath}/admin/auth/api`;
 const embedMode = new URLSearchParams(window.location.search).get("embed") === "1";
 const sectionMap = {
   overview: "section-overview",
@@ -19,13 +20,21 @@ if (embedMode) {
 }
 
 async function fetchJson(url, options = {}) {
+  const { skipUnauthorizedRedirect, ...requestOptions } = options;
   const response = await fetch(url, {
-    ...options,
+    ...requestOptions,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {})
+      ...(requestOptions.headers || {})
     }
   });
+
+  if (response.status === 401 && !skipUnauthorizedRedirect) {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    window.top.location.href = `${dashboardBasePath}/login?next=${next}`;
+    throw new Error("Unauthorized");
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -112,9 +121,11 @@ async function refresh() {
 }
 
 function renderDashboardUnavailable(err) {
-  const message = err.status === 404
-    ? "Dashboard data is unavailable outside development unless a dashboard authorization callback is configured."
-    : err.message;
+  const message = err.status === 401
+    ? "Your dashboard session expired. Sign in again to continue."
+    : (err.status === 404
+      ? "Dashboard data is unavailable outside development unless dashboard access is enabled."
+      : err.message);
 
   statsElement.innerHTML = `
     <h2>Dashboard unavailable</h2>

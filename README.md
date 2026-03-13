@@ -44,6 +44,27 @@ app.MapAuthServer("/sqlos/auth");
 app.UseSqlOSDashboard("/sqlos");
 ```
 
+### Dashboard Password Mode (Optional)
+
+To require a password for dashboard access in production, configure it in your host app
+and pass it through `AddSqlOS(...)`:
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+    options.Dashboard.Password = builder.Configuration["SqlOS:Dashboard:Password"]
+        ?? throw new InvalidOperationException("SqlOS dashboard password is not configured.");
+});
+```
+
+Environment-variable equivalent:
+
+```bash
+SqlOS__Dashboard__AuthMode=Password
+SqlOS__Dashboard__Password=<strong-password>
+```
+
 ## Repo Layout
 
 ```text

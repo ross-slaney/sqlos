@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -17,6 +18,7 @@ public class SqlOSFgaDashboardMiddleware
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
     private readonly SqlOSFgaDashboardOptions _dashboardOptions;
+    private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
@@ -30,12 +32,14 @@ public class SqlOSFgaDashboardMiddleware
         RequestDelegate next,
         string pathPrefix,
         IHostEnvironment environment,
-        SqlOSFgaDashboardOptions dashboardOptions)
+        SqlOSFgaDashboardOptions dashboardOptions,
+        SqlOSDashboardSessionService sessionService)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _dashboardOptions = dashboardOptions;
+        _sessionService = sessionService;
         _fileProvider = CreateFileProvider(environment);
     }
 
@@ -49,22 +53,15 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
-        // Authorization: use custom callback if provided, otherwise only allow in Development
-        if (_dashboardOptions.AuthorizationCallback != null)
+        var relativePath = path[_pathPrefix.Length..].TrimStart('/');
+        var isApiRequest = relativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase);
+
+        if (!await IsAuthorizedAsync(context))
         {
-            if (!await _dashboardOptions.AuthorizationCallback(context))
-            {
-                context.Response.StatusCode = 404;
-                return;
-            }
-        }
-        else if (!_isDevelopment)
-        {
-            context.Response.StatusCode = 404;
+            await HandleUnauthorizedRequestAsync(context, isApiRequest);
             return;
         }
 
-        var relativePath = path[_pathPrefix.Length..].TrimStart('/');
         var embedMode = string.Equals(context.Request.Query["embed"], "1", StringComparison.Ordinal);
 
         if (string.IsNullOrWhiteSpace(relativePath) && !embedMode)
@@ -81,7 +78,7 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         // API endpoints
-        if (relativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase))
+        if (isApiRequest)
         {
             await HandleApiRequest(context, relativePath[4..]);
             return;
@@ -89,6 +86,45 @@ public class SqlOSFgaDashboardMiddleware
 
         // Serve static files
         await ServeStaticFile(context, relativePath);
+    }
+
+    private async Task<bool> IsAuthorizedAsync(HttpContext context)
+    {
+        if (_sessionService.IsPasswordMode(_dashboardOptions.AuthMode)
+            && !_sessionService.IsPasswordConfigured(_dashboardOptions.Password))
+        {
+            return false;
+        }
+
+        return await _sessionService.IsAuthorizedAsync(
+            context,
+            _isDevelopment,
+            _dashboardOptions.AuthMode,
+            _dashboardOptions.AuthorizationCallback);
+    }
+
+    private async Task HandleUnauthorizedRequestAsync(HttpContext context, bool isApiRequest)
+    {
+        if (_sessionService.IsPasswordMode(_dashboardOptions.AuthMode))
+        {
+            if (!_sessionService.IsPasswordConfigured(_dashboardOptions.Password))
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("SqlOS dashboard password mode is enabled but no password was configured.");
+                return;
+            }
+
+            if (isApiRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            context.Response.Redirect(BuildLoginRedirectPath(context), permanent: false);
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
     }
 
     private static IFileProvider CreateFileProvider(IHostEnvironment environment)
@@ -1031,6 +1067,14 @@ public class SqlOSFgaDashboardMiddleware
         return _pathPrefix.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
             ? _pathPrefix[..^suffix.Length] + "/"
             : $"{_pathPrefix}/";
+    }
+
+    private string BuildLoginRedirectPath(HttpContext context)
+    {
+        var shellPrefix = GetDashboardShellPrefix().TrimEnd('/');
+        var requestedPath = $"{context.Request.Path}{context.Request.QueryString}";
+        var encodedNext = Uri.EscapeDataString(requestedPath);
+        return $"{shellPrefix}/login?next={encodedNext}";
     }
 
     private static string GetContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

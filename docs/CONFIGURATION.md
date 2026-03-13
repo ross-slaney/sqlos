@@ -20,6 +20,31 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
+### Optional: Dashboard Password Login
+
+Use this when you want a standalone dashboard login without integrating host-app auth.
+Set the password from configuration (appsettings, user secrets, env vars), then pass it
+through `AddSqlOS(...)`:
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+    options.Dashboard.Password = builder.Configuration["SqlOS:Dashboard:Password"]
+        ?? throw new InvalidOperationException("SqlOS dashboard password is not configured.");
+});
+```
+
+Optional session lifetime override:
+
+```csharp
+var sessionMinutes = builder.Configuration.GetValue<int?>("SqlOS:Dashboard:SessionLifetimeMinutes");
+if (sessionMinutes is > 0)
+{
+    options.Dashboard.SessionLifetime = TimeSpan.FromMinutes(sessionMinutes.Value);
+}
+```
+
 ## EF Model Registration
 
 ```csharp

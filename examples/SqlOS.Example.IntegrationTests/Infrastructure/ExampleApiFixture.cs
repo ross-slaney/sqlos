@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.Testing;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,17 +35,7 @@ public static class ExampleApiFixture
         var databaseName = $"SqlOSExample_{Guid.NewGuid():N}"[..30];
         _connectionString = baseConnectionString.Replace("Database=sqlos-test", $"Database={databaseName}");
 
-        _factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.UseSetting("environment", "Development");
-                builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
-                builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos");
-                builder.ConfigureServices(services =>
-                {
-                    services.AddSingleton<IHttpClientFactory, FakeOidcProviderHttpClientFactory>();
-                });
-            });
+        _factory = BuildFactory();
 
         Client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -55,6 +46,30 @@ public static class ExampleApiFixture
         response.EnsureSuccessStatusCode();
         context.WriteLine($"SqlOS example fixture initialized with DB {databaseName}");
     }
+
+    public static WebApplicationFactory<Program> CreateFactory(Action<IWebHostBuilder>? configureBuilder = null)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            throw new InvalidOperationException("ExampleApiFixture has not been initialized.");
+        }
+
+        return BuildFactory(configureBuilder);
+    }
+
+    private static WebApplicationFactory<Program> BuildFactory(Action<IWebHostBuilder>? configureBuilder = null)
+        => new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("environment", "Development");
+                builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
+                builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos");
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton<IHttpClientFactory, FakeOidcProviderHttpClientFactory>();
+                });
+                configureBuilder?.Invoke(builder);
+            });
 
     [AssemblyCleanup]
     public static async Task CleanupAsync()

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using SqlOS.Configuration;
 
 namespace SqlOS.AuthServer.Configuration;
 
@@ -21,5 +22,8 @@ public class SqlOSAuthServerOptions
 
 public class SqlOSAuthServerDashboardOptions
 {
+    public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
+    public string? Password { get; set; }
+    public TimeSpan SessionLifetime { get; set; } = SqlOSDashboardOptions.DefaultSessionLifetime;
     public Func<HttpContext, Task<bool>>? AuthorizationCallback { get; set; }
 }

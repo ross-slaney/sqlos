@@ -9,6 +9,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Configuration;
+using SqlOS.Dashboard;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -559,6 +561,22 @@ public static class EndpointRouteBuilderExtensions
 
     private static async Task<bool> IsAdminAuthorizedAsync(HttpContext context, SqlOSAuthServerOptions options, IHostEnvironment environment)
     {
+        if (options.Dashboard.AuthMode == SqlOSDashboardAuthMode.Password)
+        {
+            var sessionService = context.RequestServices.GetService<SqlOSDashboardSessionService>();
+            if (sessionService == null || !sessionService.HasActiveSession(context))
+            {
+                return false;
+            }
+
+            if (options.Dashboard.AuthorizationCallback != null)
+            {
+                return await options.Dashboard.AuthorizationCallback(context);
+            }
+
+            return true;
+        }
+
         if (options.Dashboard.AuthorizationCallback != null)
         {
             return await options.Dashboard.AuthorizationCallback(context);
