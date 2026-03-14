@@ -1,6 +1,7 @@
 (function () {
     const dashboardBasePath = normalizeBasePath(window.__SQL_OS_BASE_PATH__ || "/sqlos");
     const dashboardAuthBasePath = `${dashboardBasePath}/dashboard-auth`;
+    const authServerBasePath = `${dashboardBasePath}/auth`;
     const authDashboardPath = `${dashboardBasePath}/admin/auth`;
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const authApiBasePath = `${authDashboardPath}/api`;
@@ -25,6 +26,7 @@
         clients: { title: "Clients", description: "Register clients, audiences, and redirect URIs." },
         oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
+        authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
         audit: { title: "Audit Events", description: "Review recent auth and admin activity." }
     };
@@ -764,6 +766,7 @@
                         ${quickLink("auth-users", "Users")}
                         ${quickLink("auth-oidc", "OIDC")}
                         ${quickLink("auth-security", "Security")}
+                        ${quickLink("auth-authpage", "Auth Page")}
                     </div>
                 </section>
                 <section class="card">
@@ -822,6 +825,11 @@
 
         if (view === "security") {
             await renderAuthSecurity();
+            return;
+        }
+
+        if (view === "authpage") {
+            await renderAuthPage();
             return;
         }
 
@@ -1877,6 +1885,108 @@
                 })
             });
             setFlash("success", "Security settings saved.");
+        });
+    }
+
+    async function renderAuthPage() {
+        const config = authViews.authpage;
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading Auth Page settings...");
+
+        const [settings, metadata] = await Promise.all([
+            fetchJson(`${authApiBasePath}/settings/auth-page`),
+            fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`)
+        ]);
+
+        const enabledCredentialTypes = Array.isArray(settings.enabledCredentialTypes)
+            ? settings.enabledCredentialTypes.join(", ")
+            : "";
+        const loginUrl = `${authServerBasePath}/login`;
+        const signupUrl = `${authServerBasePath}/signup`;
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <div class="panel-stack">
+                <div class="panel-grid">
+                    <section class="panel">
+                        <h2>Auth Page Settings</h2>
+                        <p>These values control the hosted login and signup experience. The page is served directly from the SqlOS auth server, so changes show up without app-specific frontend work.</p>
+                        <form id="auth-page-settings-form">
+                            <input name="pageTitle" placeholder="Page title" value="${esc(settings.pageTitle || "")}" required>
+                            <input name="pageSubtitle" placeholder="Subtitle" value="${esc(settings.pageSubtitle || "")}" required>
+                            <div class="panel-grid">
+                                <input name="primaryColor" placeholder="Primary color (#2563eb)" value="${esc(settings.primaryColor || "")}" required>
+                                <input name="accentColor" placeholder="Accent color (#0f172a)" value="${esc(settings.accentColor || "")}" required>
+                            </div>
+                            <div class="panel-grid">
+                                <input name="backgroundColor" placeholder="Background color (#f8fafc)" value="${esc(settings.backgroundColor || "")}" required>
+                                <select name="layout">
+                                    <option value="split" ${settings.layout === "split" ? "selected" : ""}>Split</option>
+                                    <option value="stacked" ${settings.layout === "stacked" ? "selected" : ""}>Stacked</option>
+                                </select>
+                            </div>
+                            <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
+                            <input name="enabledCredentialTypes" placeholder="Enabled credential types" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <label>Logo upload<input id="auth-page-logo-file" type="file" accept="image/*"></label>
+                            <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL">${esc(settings.logoBase64 || "")}</textarea>
+                            <button type="submit">Save Auth Page</button>
+                        </form>
+                    </section>
+                    <section class="panel">
+                        <h2>Hosted Endpoints</h2>
+                        <p>These are the direct URLs admins and application teams can deep link to when they want to send users straight into the hosted auth experience.</p>
+                        ${renderMetadataRows([
+                            { label: "Login URL", html: `<a class="inline-link" href="${esc(loginUrl)}" target="_blank" rel="noreferrer">${esc(loginUrl)}</a>` },
+                            { label: "Signup URL", html: `<a class="inline-link" href="${esc(signupUrl)}" target="_blank" rel="noreferrer">${esc(signupUrl)}</a>` },
+                            { label: "Issuer", value: metadata.issuer },
+                            { label: "Authorization endpoint", value: metadata.authorizationEndpoint },
+                            { label: "Token endpoint", value: metadata.tokenEndpoint },
+                            { label: "JWKS URI", value: metadata.jwksUri },
+                            { label: "PKCE methods", value: (metadata.codeChallengeMethodsSupported || []).join(", ") },
+                            { label: "Grant types", value: (metadata.grantTypesSupported || []).join(", ") }
+                        ])}
+                        <div class="callout">
+                            <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, and layout. Password is the only first-party credential type enabled in v1, but OIDC and SAML providers still appear below it when configured.
+                        </div>
+                    </section>
+                </div>
+            </div>
+        `;
+
+        bindForm("auth-page-settings-form", async form => {
+            await fetchJson(`${authApiBasePath}/settings/auth-page`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    logoBase64: form.get("logoBase64") || null,
+                    pageTitle: form.get("pageTitle"),
+                    pageSubtitle: form.get("pageSubtitle"),
+                    primaryColor: form.get("primaryColor"),
+                    accentColor: form.get("accentColor"),
+                    backgroundColor: form.get("backgroundColor"),
+                    layout: form.get("layout"),
+                    enablePasswordSignup: form.get("enablePasswordSignup") === "on",
+                    enabledCredentialTypes: String(form.get("enabledCredentialTypes") || "password")
+                        .split(/[,\s]+/)
+                        .map(value => value.trim())
+                        .filter(Boolean)
+                })
+            });
+            setFlash("success", "Auth Page settings saved.");
+        });
+
+        const fileInput = document.getElementById("auth-page-logo-file");
+        const form = document.getElementById("auth-page-settings-form");
+        fileInput?.addEventListener("change", () => {
+            const file = fileInput.files?.[0];
+            if (!file || !form) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                form.elements.logoBase64.value = String(reader.result || "");
+            };
+            reader.readAsDataURL(file);
         });
     }
 
