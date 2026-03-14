@@ -65,7 +65,7 @@ Example:
 
 1. Create the custom OIDC connection in the dashboard.
 2. Update the callback URI after the connection ID is available.
-3. Open `http://localhost:3001/login`.
+3. Open `http://localhost:3010/login`.
 4. Enter an email and click the custom provider button.
 5. Complete the provider flow and confirm you land on `/app`.
 

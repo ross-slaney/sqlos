@@ -99,7 +99,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
 ```
 
-5. Open `http://localhost:3001/login`.
+5. Open `http://localhost:3010/login`.
 6. Enter an email, then click the provider button.
 
 For provider-specific setup, use:

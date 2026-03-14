@@ -3,10 +3,12 @@
 `SqlOS` is a single embedded runtime for application auth and fine-grained authorization in .NET.
 
 It combines two modules in one library:
+
 - `Fga`: hierarchical resource authorization for EF Core and SQL Server
 - `AuthServer`: organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML SSO
 
 The integration model stays Hangfire-style:
+
 - library-owned SQL schema
 - embedded versioned SQL scripts
 - startup bootstrap
@@ -83,11 +85,13 @@ examples/SqlOS.Example.IntegrationTests
 ## Shared Example
 
 The example stack is now one Aspire-driven system:
+
 - SQL Server
 - ASP.NET API embedding `SqlOS`
 - Next.js web app
 
 The example demonstrates:
+
 - local password login
 - Google, Microsoft, Apple, and custom OIDC login
 - org SAML SSO with home realm discovery
@@ -101,10 +105,11 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
 Then use:
+
 - shared dashboard shell: `http://localhost:5062/sqlos/`
 - auth admin dashboard: `http://localhost:5062/sqlos/admin/auth/`
 - FGA dashboard: `http://localhost:5062/sqlos/admin/fga/`
-- example web app: `http://localhost:3001/`
+- example web app: `http://localhost:3010/`
 
 ## Run Tests
 

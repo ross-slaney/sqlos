@@ -17,6 +17,33 @@ type OidcProvider = {
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5062";
+const authServerUrl = `${apiUrl}/sqlos/auth`;
+const exampleClientId = process.env.NEXT_PUBLIC_SQL_OS_CLIENT_ID ?? "example-web";
+const authFlowStorageKey = "sqlos_example_auth_flow";
+const oidcStateStorageKey = "sqlos_example_oidc_state";
+const oidcVerifierStorageKey = "sqlos_example_oidc_verifier";
+const oidcRedirectUriStorageKey = "sqlos_example_oidc_redirect_uri";
+const oidcClientIdStorageKey = "sqlos_example_oidc_client_id";
+
+function encodeBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((value) => {
+    binary += String.fromCharCode(value);
+  });
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function createOpaqueToken(size = 32) {
+  const bytes = new Uint8Array(size);
+  crypto.getRandomValues(bytes);
+  return encodeBase64Url(bytes);
+}
+
+async function createCodeChallenge(verifier: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return encodeBase64Url(new Uint8Array(digest));
+}
 
 export function LoginPanel() {
   const router = useRouter();
@@ -36,7 +63,7 @@ export function LoginPanel() {
 
     async function loadProviders() {
       try {
-        const response = await fetch(`${apiUrl}/api/v1/auth/oidc/providers`);
+        const response = await fetch(`${authServerUrl}/oidc/providers`);
         const data = (await response.json()) as OidcProvider[];
         if (!response.ok) {
           throw new Error("Failed to load OIDC providers.");
@@ -93,6 +120,7 @@ export function LoginPanel() {
           throw new Error(startData.message || "Failed to start SSO.");
         }
 
+        sessionStorage.setItem(authFlowStorageKey, "sso");
         window.location.href = startData.authorizationUrl;
         return;
       }
@@ -138,13 +166,20 @@ export function LoginPanel() {
     setMessage(null);
 
     try {
-      const response = await fetch(`${apiUrl}/api/v1/auth/oidc/start`, {
+      const state = createOpaqueToken();
+      const codeVerifier = createOpaqueToken(48);
+      const redirectUri = `${window.location.origin}/auth/callback`;
+      const response = await fetch(`${authServerUrl}/oidc/authorization-url`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
-          connectionId: provider.connectionId
+          connectionId: provider.connectionId,
+          clientId: exampleClientId,
+          redirectUri,
+          state,
+          codeChallenge: await createCodeChallenge(codeVerifier),
+          codeChallengeMethod: "S256",
+          email: email.trim() || null
         })
       });
 
@@ -153,12 +188,12 @@ export function LoginPanel() {
         throw new Error(data.message || "Failed to start OIDC sign-in.");
       }
 
-      if (data.mode === "sso") {
-        setMessage(`Using SSO for ${data.organizationName ?? data.primaryDomain ?? email}. Redirecting now...`);
-      } else {
-        setMessage(`Redirecting to ${provider.displayName}...`);
-      }
-
+      sessionStorage.setItem(authFlowStorageKey, "oidc");
+      sessionStorage.setItem(oidcStateStorageKey, state);
+      sessionStorage.setItem(oidcVerifierStorageKey, codeVerifier);
+      sessionStorage.setItem(oidcRedirectUriStorageKey, redirectUri);
+      sessionStorage.setItem(oidcClientIdStorageKey, exampleClientId);
+      setMessage(`Redirecting to ${provider.displayName}...`);
       window.location.href = data.authorizationUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start OIDC sign-in.");
@@ -181,7 +216,7 @@ export function LoginPanel() {
           <button
             key={provider.connectionId}
             className="secondary"
-            disabled={!canSubmitEmail || loading}
+            disabled={loading}
             type="button"
             onClick={() => void handleOidcLogin(provider)}
           >

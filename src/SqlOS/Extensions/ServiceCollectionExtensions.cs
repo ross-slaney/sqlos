@@ -78,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSAuthService>();
         services.AddScoped<SqlOSHomeRealmDiscoveryService>();
         services.AddScoped<SqlOSOidcAuthService>();
+        services.AddScoped<SqlOSOidcBrowserAuthService>();
         services.AddScoped<SqlOSSamlService>();
         services.AddScoped<SqlOSSsoAuthorizationService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();

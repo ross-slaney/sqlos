@@ -32,7 +32,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 - auth admin: `http://localhost:5062/sqlos/admin/auth/`
 - FGA admin: `http://localhost:5062/sqlos/admin/fga/`
 - API swagger: `http://localhost:5062/swagger`
-- web app: `http://localhost:3001/`
+- web app: `http://localhost:3010/`
 
 ## Validation Flow
 

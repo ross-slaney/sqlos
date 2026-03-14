@@ -23,7 +23,7 @@
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Clients", description: "Register clients, audiences, and redirect URIs." },
-        oidc: { title: "OIDC", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for social login." },
+        oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
         audit: { title: "Audit Events", description: "Review recent auth and admin activity." }
@@ -45,11 +45,11 @@
                 { label: "Discovery", value: "On (recommended)" },
                 { label: "Discovery URL", value: "https://accounts.google.com/.well-known/openid-configuration" },
                 { label: "User info", value: "Automatic from discovery" },
-                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" },
                 { label: "Suggested scopes", value: "openid, profile, email" },
                 { label: "Claim mapping", value: "Default mapping is usually enough" }
             ],
-            integration: "After enabling, your app should call <span class=\"inline-code\">GET /api/v1/auth/oidc/providers</span> and then start login with <span class=\"inline-code\">POST /api/v1/auth/oidc/start</span>."
+            integration: "After enabling, your app should call <span class=\"inline-code\">GET /sqlos/auth/oidc/providers</span>, then request an authorization URL with <span class=\"inline-code\">POST /sqlos/auth/oidc/authorization-url</span> and exchange the callback code with <span class=\"inline-code\">POST /sqlos/auth/oidc/exchange</span>."
         },
         Microsoft: {
             heading: "Microsoft Entra Setup",
@@ -67,10 +67,10 @@
                 { label: "Discovery", value: "On (recommended)" },
                 { label: "Discovery URL", value: "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration" },
                 { label: "Tenant", value: "Common or specific tenant ID" },
-                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" },
                 { label: "Scopes", value: "openid, profile, email" }
             ],
-            integration: "Use Microsoft tenant-scoped login by filling the Tenant field, then enable the connection and launch social login via SqlOS endpoints."
+            integration: "Use the authserver-owned callback URI in Entra, then let your app start login through the SqlOS social login endpoints."
         },
         Apple: {
             heading: "Apple Setup",
@@ -89,9 +89,9 @@
                 { label: "Discovery URL", value: "https://appleid.apple.com/.well-known/openid-configuration" },
                 { label: "Required fields", value: "Team ID, Key ID, Apple private key (.p8)" },
                 { label: "Callback requirement", value: "Public HTTPS callback URL required" },
-                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" }
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" }
             ],
-            integration: "Test Apple social login by enabling the connection and using SqlOS-issued auth start URL from your app login button."
+            integration: "Apple redirects back to SqlOS, then SqlOS redirects back to your app callback with the final code."
         },
         Custom: {
             heading: "Custom OIDC Setup",
@@ -107,11 +107,11 @@
             rows: [
                 { label: "Provider type", value: "Custom" },
                 { label: "Discovery", value: "On if supported, otherwise Manual" },
-                { label: "Allowed callback URIs", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" },
                 { label: "Sample claim mapping", value: "{\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}" },
                 { label: "Best practice", value: "Prefer discovery and keep user info enabled unless the provider blocks it." }
             ],
-            integration: "For each environment, verify callback URL and allowed origin settings before enabling and enable the provider only after one successful callback test."
+            integration: "Register the fixed SqlOS callback URI with the provider, then let your app use the SqlOS social login endpoints to start and complete the flow."
         }
     };
 
@@ -1561,7 +1561,7 @@
 
     async function renderAuthOidc() {
         const config = authViews.oidc;
-        const callbackTemplate = `${window.location.origin}/api/v1/auth/oidc/callback`;
+        const callbackTemplate = `${window.location.origin}${dashboardBasePath}/auth/oidc/callback`;
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading OIDC connections...");
 
@@ -1572,8 +1572,8 @@
             <div class="panel-stack">
                 <div class="panel-grid">
                     <section class="panel">
-                        <h2>Create OIDC Connection</h2>
-                        <p>Preset providers use discovery by default. The callback URI is stable for this environment, so you can register it with the provider before or after saving the connection.</p>
+                        <h2>Configure Social Provider</h2>
+                        <p>SqlOS owns the provider callback for social login. Register this exact callback URI with Google, Microsoft, Apple, or your custom OIDC provider, then save the provider configuration here.</p>
                         <form id="create-oidc-connection-form">
                             <select id="oidc-provider-type" name="providerType" required>
                                 <option value="Google">Google</option>
@@ -1601,7 +1601,7 @@
                             <input name="appleTeamId" placeholder="Apple team ID">
                             <input name="appleKeyId" placeholder="Apple key ID">
                             <textarea name="applePrivateKeyPem" placeholder="Apple private key PEM (.p8)"></textarea>
-                            <textarea name="allowedCallbackUris" placeholder="One callback URI per line" required>${esc(callbackTemplate)}</textarea>
+                            <textarea name="allowedCallbackUris" required readonly>${esc(callbackTemplate)}</textarea>
                             <textarea name="scopes" placeholder="Optional scopes, one per line"></textarea>
                             <textarea name="claimMapping" placeholder='Claim mapping JSON, for example {\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}'></textarea>
                             <button type="submit">Create OIDC connection</button>
@@ -1614,7 +1614,7 @@
                     </section>
                 </div>
                 <section class="panel">
-                    <h2>OIDC Connections</h2>
+                    <h2>Configured Providers</h2>
                     ${renderList(
                         oidcConnections,
                         item => `
@@ -1636,11 +1636,8 @@
                                 { label: "Apple team ID", value: item.appleTeamId },
                                 { label: "Apple key ID", value: item.appleKeyId },
                                 {
-                                    label: "Callback URIs",
-                                    value: parseJsonArray(item.allowedCallbackUris).length > 0 ? "" : "none",
-                                    html: parseJsonArray(item.allowedCallbackUris).length > 0
-                                        ? parseJsonArray(item.allowedCallbackUris).map(uri => `<div class="inline-code">${esc(uri)}</div>`).join("")
-                                        : "none"
+                                    label: "Provider callback URI",
+                                    html: `<div class="inline-code">${esc(callbackTemplate)}</div>`
                                 },
                                 {
                                     label: "Scopes",
@@ -1676,7 +1673,7 @@
                                 <input name="appleTeamId" value="${esc(item.appleTeamId || "")}" placeholder="Apple team ID">
                                 <input name="appleKeyId" value="${esc(item.appleKeyId || "")}" placeholder="Apple key ID">
                                 <textarea name="applePrivateKeyPem" placeholder="Leave blank to keep the current Apple private key"></textarea>
-                                <textarea name="allowedCallbackUris" required>${esc(parseJsonArray(item.allowedCallbackUris).join("\n"))}</textarea>
+                                <textarea name="allowedCallbackUris" required readonly>${esc(callbackTemplate)}</textarea>
                                 <textarea name="scopes">${esc(parseJsonArray(item.scopes).join("\n"))}</textarea>
                                 <textarea name="claimMapping">${esc(JSON.stringify(parseJsonObject(item.claimMapping), null, 2))}</textarea>
                                 <div class="actions">

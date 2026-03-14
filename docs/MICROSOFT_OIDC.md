@@ -49,7 +49,7 @@ Scopes can be left empty to use the default set:
 
 ## Test
 
-1. Open `http://localhost:3001/login`
+1. Open `http://localhost:3010/login`
 2. Enter the email you plan to use.
 3. Click **Continue with Microsoft**.
 4. Complete the Microsoft sign-in flow.

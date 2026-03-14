@@ -27,8 +27,31 @@ type TokenResponse = {
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5062";
 const pendingRefreshes = new Map<string, Promise<JWT>>();
 
+function normalizeOrganizationId(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return String(value);
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const lowered = normalized.toLowerCase();
+  if (lowered === "null" || lowered === "undefined") {
+    return null;
+  }
+
+  return normalized;
+}
+
 async function refreshAccessToken(token: JWT): Promise<JWT> {
   const currentRefreshToken = typeof token.refreshToken === "string" ? token.refreshToken : "";
+  const organizationId = normalizeOrganizationId(token.organizationId);
   if (!currentRefreshToken) {
     console.warn("[Auth] Refresh requested without a refresh token.");
     return {
@@ -51,7 +74,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
     try {
       console.info("[Auth] Refreshing access token.", {
         sessionId: token.sessionId ?? null,
-        organizationId: token.organizationId ?? null
+        organizationId
       });
 
       const response = await fetch(`${apiUrl}/api/v1/auth/refresh`, {
@@ -59,7 +82,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           refreshToken: currentRefreshToken,
-          organizationId: token.organizationId ?? null
+          organizationId
         })
       });
 
@@ -90,7 +113,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
         sessionId: data.sessionId,
-        organizationId: data.organizationId ?? refreshedDecoded.org_id ?? null,
+        organizationId: normalizeOrganizationId(data.organizationId ?? refreshedDecoded.org_id ?? null),
         exp: refreshedDecoded.exp,
         error: undefined
       };
@@ -144,7 +167,7 @@ export const authOptions: AuthOptions = {
             name: credentials.displayName,
             accessToken: credentials.accessToken,
             refreshToken: credentials.refreshToken,
-            organizationId: credentials.organizationId || decoded.org_id || null,
+            organizationId: normalizeOrganizationId(credentials.organizationId ?? decoded.org_id ?? null),
             sessionId: credentials.sessionId || "",
             exp: decoded.exp
           } as User;
@@ -181,7 +204,7 @@ export const authOptions: AuthOptions = {
           name: typed.user.displayName,
           accessToken: typed.accessToken,
           refreshToken: typed.refreshToken,
-          organizationId: typed.organizationId ?? decoded.org_id ?? null,
+          organizationId: normalizeOrganizationId(typed.organizationId ?? decoded.org_id ?? null),
           sessionId: typed.sessionId,
           exp: decoded.exp
         } as User;
@@ -201,7 +224,7 @@ export const authOptions: AuthOptions = {
         token.name = user.name;
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
-        token.organizationId = user.organizationId;
+        token.organizationId = normalizeOrganizationId(user.organizationId);
         token.sessionId = user.sessionId;
         token.exp = user.exp;
       }
@@ -229,7 +252,7 @@ export const authOptions: AuthOptions = {
         name: token.name
       } as User;
       session.accessToken = token.accessToken as string;
-      session.organizationId = token.organizationId as string | null;
+      session.organizationId = normalizeOrganizationId(token.organizationId);
       session.sessionId = token.sessionId as string | null;
       session.error = token.error as string | undefined;
       return session;

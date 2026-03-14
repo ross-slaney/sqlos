@@ -3,6 +3,7 @@
 This guide covers the manual end-to-end test flow for a customer organization that uses Microsoft Entra ID as its SAML identity provider.
 
 It assumes you are running the shared example stack through the Aspire AppHost and want to validate:
+
 - org-level home realm discovery by email domain
 - SAML redirect to the customer's Entra tenant
 - callback back into the example app
@@ -23,16 +24,17 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 - Open:
   - dashboard: `http://localhost:5062/sqlos/`
-  - example web app: `http://localhost:3001/`
+  - example web app: `http://localhost:3010/`
 
 - The example backend seeds the `example-web` client with this callback URL:
-  - `http://localhost:3001/auth/callback`
+  - `http://localhost:3010/auth/callback`
 
 ## What SqlOS Expects
 
 For the intended setup flow, the SqlOS admin creates an SSO draft first, then imports the Entra federation metadata XML.
 
 SqlOS stores and validates:
+
 - org primary domain
 - IdP entity ID
 - IdP SSO URL
@@ -40,11 +42,13 @@ SqlOS stores and validates:
 - redirect URI against the configured client
 
 Current auth defaults for SAML drafts:
+
 - email attribute: `email`
 - first name attribute: `first_name`
 - last name attribute: `last_name`
 
 If those names do not match the claims coming from Entra, either:
+
 - configure Entra to emit matching claim names, or
 - adjust the connection later if you extend the dashboard/API for custom attribute names
 
@@ -59,10 +63,12 @@ In the dashboard:
 3. Open the `SSO` section and create an SSO draft for that organization.
 
 Recommended draft settings:
+
 - `Auto provision users`: enabled
 - `Auto link by email`: disabled for the first test unless you intentionally want linking behavior
 
 After draft creation, the dashboard shows:
+
 - `SP Entity ID`
 - `ACS URL`
 - `Org primary domain`
@@ -84,6 +90,7 @@ In Microsoft Entra admin center, the customer admin should:
 7. Download or copy the `Federation Metadata XML`.
 
 The one artifact you want back from the Entra admin is:
+
 - `Federation Metadata XML`
 
 That is what SqlOS imports.
@@ -98,6 +105,7 @@ Back in the SqlOS dashboard:
 4. Submit the form.
 
 After import:
+
 - the SSO connection should be enabled
 - the organization should still have the intended primary domain
 
@@ -107,7 +115,7 @@ At this point the org is ready for SSO testing.
 
 Go to the example web app:
 
-- `http://localhost:3001/login`
+- `http://localhost:3010/login`
 
 Enter an email at the customer's domain, for example:
 
@@ -122,7 +130,7 @@ Expected behavior:
 5. The user signs in with Entra.
 6. Entra posts the SAML response to the SqlOS ACS endpoint.
 7. SqlOS validates the SAML response and redirects back to:
-   - `http://localhost:3001/auth/callback`
+   - `http://localhost:3010/auth/callback`
 8. The example frontend completes the exchange through the example backend.
 9. The example app lands on `/app` with a valid session.
 
@@ -152,20 +160,24 @@ In the dashboard:
 ## Common Failure Cases
 
 If the login does not redirect to Entra:
+
 - confirm the org `Primary domain` exactly matches the email domain
 - confirm the SSO connection is enabled
 
 If Entra redirects but the ACS step fails:
+
 - confirm the imported metadata XML matches the current Entra app configuration
 - confirm the `Identifier (Entity ID)` and `Reply URL` in Entra match the values shown by SqlOS
 
 If the user reaches Entra but SqlOS cannot resolve a user:
+
 - make sure the SAML assertion includes a usable email
 - for easiest testing, use auto-provisioning
 
 If callback exchange fails:
-- confirm the example app is still running on `http://localhost:3001`
-- confirm the example backend seeded client still allows `http://localhost:3001/auth/callback`
+
+- confirm the example app is still running on `http://localhost:3010`
+- confirm the example backend seeded client still allows `http://localhost:3010/auth/callback`
 
 ## Recommended First Test
 

@@ -9,7 +9,7 @@ export default function AuthCallbackPage() {
       <div className="stack">
         <section className="hero">
           <h1>Auth callback</h1>
-          <Suspense fallback={<p>Completing SSO sign-in...</p>}>
+          <Suspense fallback={<p>Completing sign-in...</p>}>
             <SsoCallbackPanel />
           </Suspense>
         </section>

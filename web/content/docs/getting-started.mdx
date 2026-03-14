@@ -16,13 +16,13 @@ SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into 
 
 ## Quick Reference
 
-| Item | Value |
-|------|-------|
-| Package | `SqlOS` |
-| NuGet | `dotnet add package SqlOS` |
+| Item                 | Value                                             |
+| -------------------- | ------------------------------------------------- |
+| Package              | `SqlOS`                                           |
+| NuGet                | `dotnet add package SqlOS`                        |
 | DbContext interfaces | `ISqlOSAuthServerDbContext`, `ISqlOSFgaDbContext` |
-| Bootstrap | `await app.UseSqlOSAsync()` |
-| Dashboard base | `/sqlos` |
+| Bootstrap            | `await app.UseSqlOSAsync()`                       |
+| Dashboard base       | `/sqlos`                                          |
 
 ## Overview
 
@@ -84,12 +84,12 @@ app.UseSqlOSDashboard("/sqlos");
 
 **Default routes**:
 
-| Path | Purpose |
-|------|---------|
-| `/sqlos` | Dashboard shell |
-| `/sqlos/admin/auth` | Auth admin UI |
-| `/sqlos/admin/fga` | FGA admin UI |
-| `/sqlos/auth/*` | Auth runtime endpoints |
+| Path                | Purpose                |
+| ------------------- | ---------------------- |
+| `/sqlos`            | Dashboard shell        |
+| `/sqlos/admin/auth` | Auth admin UI          |
+| `/sqlos/admin/fga`  | FGA admin UI           |
+| `/sqlos/auth/*`     | Auth runtime endpoints |
 
 ## Example stack
 
@@ -105,13 +105,13 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 **URLs**:
 
-| URL | Purpose |
-|-----|---------|
-| `http://localhost:5062/sqlos/` | Dashboard |
-| `http://localhost:5062/sqlos/admin/auth/` | Auth admin |
-| `http://localhost:5062/sqlos/admin/fga/` | FGA admin |
-| `http://localhost:5062/swagger` | Swagger UI |
-| `http://localhost:3001/` | Example web app |
+| URL                                       | Purpose         |
+| ----------------------------------------- | --------------- |
+| `http://localhost:5062/sqlos/`            | Dashboard       |
+| `http://localhost:5062/sqlos/admin/auth/` | Auth admin      |
+| `http://localhost:5062/sqlos/admin/fga/`  | FGA admin       |
+| `http://localhost:5062/swagger`           | Swagger UI      |
+| `http://localhost:3010/`                  | Example web app |
 
 ## AuthServer module
 

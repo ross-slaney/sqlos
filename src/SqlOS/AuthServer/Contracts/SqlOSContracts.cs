@@ -157,6 +157,27 @@ public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string Cl
 
 public sealed record SqlOSCreateWorkspaceRequest(string Name);
 
+public sealed record SqlOSOidcProviderSummary(
+    string ConnectionId,
+    string ProviderType,
+    string DisplayName,
+    bool IsEnabled);
+
+public sealed record SqlOSOidcAuthorizationUrlRequest(
+    string ConnectionId,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string CodeChallenge,
+    string CodeChallengeMethod,
+    string? Email);
+
+public sealed record SqlOSOidcAuthorizationUrlResult(
+    string AuthorizationUrl,
+    string ConnectionId,
+    string ProviderType,
+    string DisplayName);
+
 public sealed record SqlOSHomeRealmDiscoveryRequest(string Email);
 
 public sealed record SqlOSHomeRealmDiscoveryResult(

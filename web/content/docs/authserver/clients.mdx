@@ -18,12 +18,12 @@ A client represents an application that authenticates users through SqlOS. Each 
 
 ## Fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| **Client ID** | Yes | Unique identifier (e.g., `example-web`) |
-| **Name** | Yes | Display name |
-| **Audience** | No | Token audience claim |
-| **Redirect URIs** | No | Allowed callback URIs for OAuth flows |
+| Field             | Required | Description                             |
+| ----------------- | -------- | --------------------------------------- |
+| **Client ID**     | Yes      | Unique identifier (e.g., `example-web`) |
+| **Name**          | Yes      | Display name                            |
+| **Audience**      | No       | Token audience claim                    |
+| **Redirect URIs** | No       | Allowed callback URIs for OAuth flows   |
 
 ## Default Client
 
@@ -37,6 +37,6 @@ var client = await adminService.CreateClientAsync(new CreateClientRequest
     ClientId = "my-web-app",
     Name = "My Web Application",
     Audience = "my-web-app",
-    RedirectUris = new[] { "http://localhost:3001/callback" }
+    RedirectUris = new[] { "http://localhost:3010/callback" }
 });
 ```

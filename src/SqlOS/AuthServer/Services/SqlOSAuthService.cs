@@ -120,6 +120,33 @@ public sealed class SqlOSAuthService
         return new SqlOSLoginResult(false, null, organizations, directTokens);
     }
 
+    public async Task<SqlOSLoginResult> CompleteExternalLoginAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+
+        if (organizations.Count > 1)
+        {
+            var pendingAuthToken = await _cryptoService.CreateTemporaryTokenAsync(
+                "pending_auth",
+                user.Id,
+                client.Id,
+                null,
+                new PendingAuthPayload(client.ClientId, authenticationMethod),
+                cancellationToken: cancellationToken);
+
+            return new SqlOSLoginResult(true, pendingAuthToken, organizations, null);
+        }
+
+        var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
+        var tokens = await CreateSessionAndTokensAsync(user, client, organizationId, authenticationMethod, httpContext, cancellationToken);
+        return new SqlOSLoginResult(false, null, organizations, tokens);
+    }
+
     public async Task<SqlOSTokenResponse> SelectOrganizationAsync(SqlOSSelectOrganizationRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
     {
         var token = await _cryptoService.ConsumeTemporaryTokenAsync("pending_auth", request.PendingAuthToken, cancellationToken)

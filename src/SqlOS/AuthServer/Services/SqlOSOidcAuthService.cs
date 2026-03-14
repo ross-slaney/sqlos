@@ -38,7 +38,7 @@ public sealed class SqlOSOidcAuthService
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<object>> ListEnabledProvidersAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SqlOSOidcProviderSummary>> ListEnabledProvidersAsync(CancellationToken cancellationToken = default)
     {
         var connections = await _context.Set<SqlOSOidcConnection>()
             .Where(x => x.IsEnabled)
@@ -47,12 +47,11 @@ public sealed class SqlOSOidcAuthService
 
         return connections
             .Select(x => new
-            {
-                connectionId = x.Id,
-                providerType = x.ProviderType.ToString(),
-                x.DisplayName
-            })
-            .Cast<object>()
+            SqlOSOidcProviderSummary(
+                x.Id,
+                x.ProviderType.ToString(),
+                x.DisplayName,
+                x.IsEnabled))
             .ToList();
     }
 
@@ -61,9 +60,7 @@ public sealed class SqlOSOidcAuthService
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
-        await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
         var connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
-        ValidateCallbackUri(connection, request.CallbackUri);
 
         var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
         var authorizationParameters = new Dictionary<string, string?>
@@ -117,9 +114,7 @@ public sealed class SqlOSOidcAuthService
 
         try
         {
-            await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
             connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
-            ValidateCallbackUri(connection, request.CallbackUri);
 
             var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
             var tokenPayload = await ExchangeCodeAsync(connection, resolved, request, cancellationToken);
@@ -131,12 +126,6 @@ public sealed class SqlOSOidcAuthService
             var providerUser = MapProviderUser(connection, resolved, idTokenPrincipal, userInfoClaims, callbackClaims);
             var user = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, cancellationToken);
             var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-
-            if (organizations.Count > 1)
-            {
-                throw new InvalidOperationException("OIDC login currently supports users with zero or one active organization membership.");
-            }
-
             var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
             var authMethod = connection.ProviderType switch
             {
@@ -268,6 +257,7 @@ public sealed class SqlOSOidcAuthService
         {
             ValidateIssuer = true,
             ValidIssuer = resolved.Issuer,
+            IssuerValidator = (issuer, _, _) => ValidateResolvedIssuer(issuer, resolved.Issuer),
             ValidateAudience = true,
             ValidAudience = connection.ClientId,
             ValidateLifetime = true,
@@ -582,6 +572,46 @@ public sealed class SqlOSOidcAuthService
         {
             throw new InvalidOperationException("The callback URI is not allowed for this OIDC connection.");
         }
+    }
+
+    private static string ValidateResolvedIssuer(string actualIssuer, string expectedIssuer)
+    {
+        if (string.Equals(actualIssuer, expectedIssuer, StringComparison.Ordinal))
+        {
+            return actualIssuer;
+        }
+
+        foreach (var marker in new[] { "{tenantid}", "{tenant-id}" })
+        {
+            var markerIndex = expectedIssuer.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+            {
+                continue;
+            }
+
+            var prefix = expectedIssuer[..markerIndex];
+            var suffix = expectedIssuer[(markerIndex + marker.Length)..];
+            if (!actualIssuer.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                !actualIssuer.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var tenantSegmentLength = actualIssuer.Length - prefix.Length - suffix.Length;
+            if (tenantSegmentLength <= 0)
+            {
+                continue;
+            }
+
+            var tenantSegment = actualIssuer.Substring(prefix.Length, tenantSegmentLength);
+            if (!tenantSegment.Contains('/'))
+            {
+                return actualIssuer;
+            }
+        }
+
+        throw new SecurityTokenInvalidIssuerException(
+            $"OIDC issuer validation failed. Expected '{expectedIssuer}' and received '{actualIssuer}'.");
     }
 
     private static SqlOSOidcClaimMapping DeserializeClaimMapping(string json)
