@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
@@ -30,10 +31,403 @@ public static class EndpointRouteBuilderExtensions
         var adminRoot = endpoints.MapGroup(adminPrefix);
         var adminApi = adminRoot.MapGroup("/api");
 
+        auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
+            Results.Ok(await authorizationServerService.GetMetadataAsync(context, cancellationToken)));
+
         auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, CancellationToken cancellationToken) =>
         {
             var keys = await cryptoService.GetValidationSigningKeysAsync(cancellationToken);
             return Results.Ok(cryptoService.GetJwksDocument(keys));
+        });
+
+        auth.MapGet("/authorize", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                if (string.Equals(context.Request.Query["prompt"], "login", StringComparison.Ordinal))
+                {
+                    authPageSessionService.SignOut(context);
+                }
+
+                var authorizationRequest = await authorizationServerService.CreateAuthorizationRequestAsync(
+                    new SqlOSAuthorizeRequestInput(
+                        context.Request.Query["response_type"].ToString(),
+                        context.Request.Query["client_id"].ToString(),
+                        context.Request.Query["redirect_uri"].ToString(),
+                        context.Request.Query["state"].ToString(),
+                        context.Request.Query["scope"].ToString(),
+                        context.Request.Query["code_challenge"].ToString(),
+                        context.Request.Query["code_challenge_method"].ToString(),
+                        context.Request.Query["resource"].ToString(),
+                        context.Request.Query["login_hint"].ToString(),
+                        context.Request.Query["prompt"].ToString(),
+                        context.Request.Query["nonce"].ToString()),
+                    cancellationToken);
+                var requestedView = string.Equals(context.Request.Query["view"], "signup", StringComparison.OrdinalIgnoreCase)
+                    ? "signup"
+                    : "login";
+
+                var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+                if (existingSession != null && !string.Equals(context.Request.Query["prompt"], "login", StringComparison.Ordinal))
+                {
+                    var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                        authorizationRequest,
+                        existingSession.User,
+                        existingSession.OrganizationId,
+                        existingSession.AuthenticationMethod,
+                        context,
+                        cancellationToken);
+                    return Results.Redirect(redirectUrl);
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    requestedView,
+                    authorizationRequest.Id,
+                    authorizationRequest.LoginHintEmail,
+                    null,
+                    null,
+                    null,
+                    authorizationServerService,
+                    cancellationToken);
+
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    context.Request.Query["login_hint"].ToString(),
+                    ex.Message,
+                    null,
+                    null,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/login", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            CancellationToken cancellationToken) =>
+        {
+            var page = await BuildAuthPageViewModelAsync(
+                "login",
+                context.Request.Query["request"].ToString(),
+                context.Request.Query["email"].ToString(),
+                null,
+                null,
+                null,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/identify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+
+            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+            var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
+            if (authorizationRequest != null)
+            {
+                authorizationRequest.LoginHintEmail = email;
+                if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
+                {
+                    authorizationRequest.OrganizationId = discovery.OrganizationId;
+                    authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
+                {
+                    authorizationRequest.ConnectionId = discovery.ConnectionId;
+                    authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
+                }
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            if (authorizationRequest != null
+                && string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(discovery.ConnectionId))
+            {
+                return Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "password",
+                requestId,
+                email,
+                null,
+                null,
+                null,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/password", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var password = form["password"].ToString();
+
+            try
+            {
+                var authentication = await authorizationServerService.AuthenticatePasswordAsync(email, password, cancellationToken);
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                if (authorizationRequest == null)
+                {
+                    await authPageSessionService.SignInAsync(context, authentication.User, authentication.Organizations.FirstOrDefault()?.Id, authentication.AuthenticationMethod, cancellationToken);
+                    return Results.Redirect($"{authPrefix}/login?status=signed-in");
+                }
+
+                if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId))
+                {
+                    if (authentication.Organizations.All(x => x.Id != authorizationRequest.OrganizationId))
+                    {
+                        throw new InvalidOperationException("The selected organization is not available to this user.");
+                    }
+
+                    return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                        authorizationRequest,
+                        authentication.User,
+                        authorizationRequest.OrganizationId,
+                        authentication.AuthenticationMethod,
+                        context,
+                        cancellationToken));
+                }
+
+                if (authentication.Organizations.Count > 1)
+                {
+                    var pendingToken = await authorizationServerService.CreatePendingOrganizationSelectionAsync(
+                        authentication.User,
+                        authorizationRequest,
+                        authentication.AuthenticationMethod,
+                        cancellationToken);
+                    var organizationPage = await BuildAuthPageViewModelAsync(
+                        "organization",
+                        requestId,
+                        email,
+                        null,
+                        null,
+                        pendingToken,
+                        authorizationServerService,
+                        cancellationToken,
+                        authentication.Organizations);
+                    return Html(organizationPage);
+                }
+
+                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    authentication.User,
+                    authentication.Organizations.FirstOrDefault()?.Id,
+                    authentication.AuthenticationMethod,
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "password",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/login/select-organization", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var pendingToken = form["pendingToken"].ToString();
+            var organizationId = form["organizationId"].ToString();
+            var redirectUrl = await authorizationServerService.CompletePendingOrganizationSelectionAsync(
+                pendingToken,
+                organizationId,
+                context,
+                cancellationToken);
+            return Results.Redirect(redirectUrl);
+        });
+
+        auth.MapGet("/login/oidc/{connectionId}", async (
+            string connectionId,
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSOidcBrowserAuthService oidcBrowserAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var requestId = context.Request.Query["request"].ToString();
+            var email = context.Request.Query["email"].ToString();
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    email,
+                    "OIDC sign-in requires an active authorization request.",
+                    null,
+                    null,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+
+            var result = await oidcBrowserAuthService.CreateAuthorizationUrlForAuthRequestAsync(requestId, connectionId, email, context, cancellationToken);
+            return Results.Redirect(result.AuthorizationUrl);
+        });
+
+        auth.MapGet("/signup", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            CancellationToken cancellationToken) =>
+        {
+            var page = await BuildAuthPageViewModelAsync(
+                "signup",
+                context.Request.Query["request"].ToString(),
+                context.Request.Query["email"].ToString(),
+                null,
+                null,
+                null,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/signup/submit", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var displayName = form["displayName"].ToString();
+            var email = form["email"].ToString();
+            var password = form["password"].ToString();
+            var organizationName = form["organizationName"].ToString();
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var signup = await authorizationServerService.SignUpAsync(
+                    displayName,
+                    email,
+                    password,
+                    organizationName,
+                    authorizationRequest?.OrganizationId,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    await authPageSessionService.SignInAsync(context, signup.User, signup.Organizations.FirstOrDefault()?.Id, signup.AuthenticationMethod, cancellationToken);
+                    return Results.Redirect($"{authPrefix}/login?status=signed-up");
+                }
+
+                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    signup.User,
+                    authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    signup.AuthenticationMethod,
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "signup",
+                    requestId,
+                    email,
+                    ex.Message,
+                    displayName,
+                    null,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/logged-out", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            authPageSessionService.SignOut(context);
+            var page = await BuildAuthPageViewModelAsync(
+                "logged-out",
+                null,
+                null,
+                null,
+                null,
+                null,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/token", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+
+            try
+            {
+                var result = await authorizationServerService.ExchangeAuthorizationCodeAsync(
+                    new SqlOSTokenRequest(
+                        form["grant_type"].ToString(),
+                        form["code"].ToString(),
+                        form["redirect_uri"].ToString(),
+                        form["client_id"].ToString(),
+                        form["code_verifier"].ToString(),
+                        form["refresh_token"].ToString()),
+                    context,
+                    cancellationToken);
+
+                return Results.Ok(new
+                {
+                    access_token = result.Tokens.AccessToken,
+                    refresh_token = result.Tokens.RefreshToken,
+                    token_type = "Bearer",
+                    expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
+                    scope = result.Scope ?? string.Empty
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid_grant",
+                    error_description = ex.Message
+                });
+            }
         });
 
         auth.MapPost("/signup", async (SqlOSSignupRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
@@ -550,6 +944,26 @@ public static class EndpointRouteBuilderExtensions
             return Results.Ok(await settingsService.UpdateSecuritySettingsAsync(request, cancellationToken));
         });
 
+        api.MapGet("/settings/auth-page", async (HttpContext context, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.GetAuthPageSettingsAsync(cancellationToken));
+        });
+
+        api.MapPut("/settings/auth-page", async (HttpContext context, SqlOSUpdateAuthPageSettingsRequest request, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.UpdateAuthPageSettingsAsync(request, cancellationToken));
+        });
+
         api.MapGet("/sessions", async (HttpContext context, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -595,6 +1009,46 @@ public static class EndpointRouteBuilderExtensions
         }
 
         return environment.IsDevelopment();
+    }
+
+    private static IResult Html(SqlOSAuthPageViewModel model, int statusCode = StatusCodes.Status200OK)
+        => Results.Content(SqlOSAuthPageRenderer.RenderPage(model), contentType: "text/html", statusCode: statusCode);
+
+    private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(
+        string mode,
+        string? authorizationRequestId,
+        string? email,
+        string? error,
+        string? displayName,
+        string? pendingToken,
+        SqlOSAuthorizationServerService authorizationServerService,
+        CancellationToken cancellationToken,
+        IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null)
+    {
+        var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
+        var providerBasePath = authorizationRequestId == null
+            ? null
+            : $"login/oidc/{{0}}?request={Uri.EscapeDataString(authorizationRequestId)}&email={Uri.EscapeDataString(email ?? string.Empty)}";
+        var providers = providerBasePath == null
+            ? Array.Empty<SqlOSAuthPageProviderLink>()
+            : (await authorizationServerService.ListEnabledOidcProvidersAsync(cancellationToken))
+                .Select(provider => new SqlOSAuthPageProviderLink(
+                    provider.ConnectionId,
+                    provider.DisplayName,
+                    string.Format(providerBasePath, provider.ConnectionId)))
+                .ToArray();
+
+        return new SqlOSAuthPageViewModel(
+            mode,
+            settings,
+            authorizationRequestId,
+            email,
+            displayName,
+            error,
+            null,
+            pendingToken,
+            organizationSelection ?? Array.Empty<SqlOSOrganizationOption>(),
+            providers);
     }
 
     private sealed record LogoutRequest(string? RefreshToken, string? SessionId);

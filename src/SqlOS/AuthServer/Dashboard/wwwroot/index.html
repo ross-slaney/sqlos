@@ -46,16 +46,22 @@
         </section>
         <section id="section-clients" class="panel">
             <h2>Create Client</h2>
+            <p class="panel-copy">Clients are preregistered public PKCE apps in v1. Add redirect URIs for browser apps and list the scopes you want them to request.</p>
             <form id="create-client-form">
                 <input name="clientId" placeholder="Client ID" required>
                 <input name="name" placeholder="Name" required>
+                <input name="description" placeholder="Description (optional)">
                 <input name="audience" placeholder="Audience" value="sqlos">
+                <input name="allowedScopes" placeholder="Scopes (space or comma separated)">
+                <label><input type="checkbox" name="requirePkce" checked> Require PKCE</label>
+                <label><input type="checkbox" name="isFirstParty"> First-party client</label>
                 <textarea name="redirectUris" placeholder="One redirect URI per line"></textarea>
                 <button type="submit">Create</button>
             </form>
         </section>
         <section id="section-security" class="panel">
             <h2>Security Settings</h2>
+            <p class="panel-copy">These values determine refresh-token rotation and how long hosted AuthPage sessions can stay alive.</p>
             <form id="security-settings-form">
                 <input name="refreshTokenLifetimeMinutes" type="number" min="1" placeholder="Refresh token lifetime (minutes)" required>
                 <input name="sessionIdleTimeoutMinutes" type="number" min="1" placeholder="Session idle timeout (minutes)" required>
@@ -63,8 +69,41 @@
                 <button type="submit">Save settings</button>
             </form>
         </section>
+        <section id="section-authpage" class="panel">
+            <h2>Auth Page</h2>
+            <p class="panel-copy">Brand the hosted authorization page, upload a logo as a base64 data URL, and control whether password signup is available next to OIDC or SAML.</p>
+            <form id="auth-page-settings-form">
+                <input name="pageTitle" placeholder="Page title" required>
+                <input name="pageSubtitle" placeholder="Subtitle" required>
+                <div class="grid two-up">
+                    <input name="primaryColor" placeholder="Primary color (#2563eb)" required>
+                    <input name="accentColor" placeholder="Accent color (#0f172a)" required>
+                </div>
+                <div class="grid two-up">
+                    <input name="backgroundColor" placeholder="Background color (#f8fafc)" required>
+                    <select name="layout">
+                        <option value="split">Split</option>
+                        <option value="stacked">Stacked</option>
+                    </select>
+                </div>
+                <label><input type="checkbox" name="enablePasswordSignup"> Allow password signup</label>
+                <input name="enabledCredentialTypes" placeholder="Enabled credential types" value="password" required>
+                <label class="file-label">
+                    <span>Logo upload</span>
+                    <input id="auth-page-logo-file" type="file" accept="image/*">
+                </label>
+                <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL"></textarea>
+                <button type="submit">Save Auth Page</button>
+            </form>
+        </section>
+        <section id="section-authserver" class="panel">
+            <h2>Authorization Server</h2>
+            <p class="panel-copy">These are the standards-facing endpoints your browser apps, embedded widgets, and MCP clients use for PKCE code flow and token exchange.</p>
+            <div id="auth-server-metadata" class="callout"></div>
+        </section>
         <section id="section-sso" class="panel">
             <h2>Create SSO Draft</h2>
+            <p class="panel-copy">Home realm discovery uses organization primary domains to route matching users to these SAML connections from the AuthPage.</p>
             <form id="create-sso-draft-form">
                 <input name="organizationId" placeholder="Organization ID" required>
                 <input name="displayName" placeholder="Display name" required>

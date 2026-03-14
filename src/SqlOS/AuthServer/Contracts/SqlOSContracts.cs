@@ -96,7 +96,16 @@ public sealed record SqlOSCreateMembershipRequest(string UserId, string Role);
 
 public sealed record SqlOSCreateUserRequest(string DisplayName, string Email, string? Password);
 
-public sealed record SqlOSCreateClientRequest(string ClientId, string Name, string Audience, List<string> RedirectUris);
+public sealed record SqlOSCreateClientRequest(
+    string ClientId,
+    string Name,
+    string Audience,
+    List<string> RedirectUris,
+    string? Description = null,
+    List<string>? AllowedScopes = null,
+    bool RequirePkce = true,
+    bool IsFirstParty = false,
+    string ClientType = "public_pkce");
 
 public sealed record SqlOSCreateSsoConnectionRequest(
     string OrganizationId,
@@ -261,3 +270,37 @@ public sealed record SqlOSUpdateSecuritySettingsRequest(
     int RefreshTokenLifetimeMinutes,
     int SessionIdleTimeoutMinutes,
     int SessionAbsoluteLifetimeMinutes);
+
+public sealed record SqlOSAuthPageSettingsDto(
+    string? LogoBase64,
+    string PrimaryColor,
+    string AccentColor,
+    string BackgroundColor,
+    string Layout,
+    string PageTitle,
+    string PageSubtitle,
+    bool EnablePasswordSignup,
+    string[] EnabledCredentialTypes,
+    DateTime UpdatedAt);
+
+public sealed record SqlOSUpdateAuthPageSettingsRequest(
+    string? LogoBase64,
+    string PrimaryColor,
+    string AccentColor,
+    string BackgroundColor,
+    string Layout,
+    string PageTitle,
+    string PageSubtitle,
+    bool EnablePasswordSignup,
+    string[] EnabledCredentialTypes);
+
+public sealed record SqlOSAuthorizationServerMetadataDto(
+    string Issuer,
+    string AuthorizationEndpoint,
+    string TokenEndpoint,
+    string JwksUri,
+    string[] ResponseTypesSupported,
+    string[] GrantTypesSupported,
+    string[] CodeChallengeMethodsSupported,
+    string[] ScopesSupported,
+    string[] TokenEndpointAuthMethodsSupported);

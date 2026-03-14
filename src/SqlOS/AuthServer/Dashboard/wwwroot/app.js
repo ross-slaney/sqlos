@@ -2,6 +2,7 @@ const statsElement = document.getElementById("stats");
 const setupResultElement = document.getElementById("sso-setup-result");
 const dashboardBasePath = window.location.pathname.split("/admin/auth")[0] || "/sqlos";
 const adminApiBasePath = `${dashboardBasePath}/admin/auth/api`;
+const authServerBasePath = `${dashboardBasePath}/auth`;
 const embedMode = new URLSearchParams(window.location.search).get("embed") === "1";
 const sectionMap = {
   overview: "section-overview",
@@ -11,6 +12,8 @@ const sectionMap = {
   clients: "section-clients",
   sso: "section-sso",
   security: "section-security",
+  authpage: "section-authpage",
+  authserver: "section-authserver",
   sessions: "section-sessions",
   audit: "section-audit"
 };
@@ -74,8 +77,33 @@ function renderSecuritySettings(settings) {
   form.elements.sessionAbsoluteLifetimeMinutes.value = settings.sessionAbsoluteLifetimeMinutes;
 }
 
+function renderAuthPageSettings(settings) {
+  const form = document.getElementById("auth-page-settings-form");
+  form.elements.pageTitle.value = settings.pageTitle;
+  form.elements.pageSubtitle.value = settings.pageSubtitle;
+  form.elements.primaryColor.value = settings.primaryColor;
+  form.elements.accentColor.value = settings.accentColor;
+  form.elements.backgroundColor.value = settings.backgroundColor;
+  form.elements.layout.value = settings.layout;
+  form.elements.enablePasswordSignup.checked = settings.enablePasswordSignup;
+  form.elements.enabledCredentialTypes.value = (settings.enabledCredentialTypes || []).join(", ");
+  form.elements.logoBase64.value = settings.logoBase64 || "";
+}
+
+function renderAuthorizationServerMetadata(metadata) {
+  const element = document.getElementById("auth-server-metadata");
+  element.innerHTML = `
+    <strong>Issuer</strong><br>${metadata.issuer}<br><br>
+    <strong>Authorization endpoint</strong><br>${metadata.authorizationEndpoint}<br><br>
+    <strong>Token endpoint</strong><br>${metadata.tokenEndpoint}<br><br>
+    <strong>JWKS URI</strong><br>${metadata.jwksUri}<br><br>
+    <strong>Grant types</strong><br>${metadata.grantTypesSupported.join(", ")}<br><br>
+    <strong>PKCE methods</strong><br>${metadata.codeChallengeMethodsSupported.join(", ")}
+  `;
+}
+
 async function refresh() {
-  const [stats, organizations, users, memberships, clients, ssoConnections, sessions, auditEvents, securitySettings] = await Promise.all([
+  const [stats, organizations, users, memberships, clients, ssoConnections, sessions, auditEvents, securitySettings, authPageSettings, authServerMetadata] = await Promise.all([
     fetchJson(`${adminApiBasePath}/stats`),
     fetchJson(`${adminApiBasePath}/organizations`),
     fetchJson(`${adminApiBasePath}/users`),
@@ -84,7 +112,9 @@ async function refresh() {
     fetchJson(`${adminApiBasePath}/sso-connections`),
     fetchJson(`${adminApiBasePath}/sessions`),
     fetchJson(`${adminApiBasePath}/audit-events`),
-    fetchJson(`${adminApiBasePath}/settings/security`)
+    fetchJson(`${adminApiBasePath}/settings/security`),
+    fetchJson(`${adminApiBasePath}/settings/auth-page`),
+    fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`)
   ]);
 
   statsElement.innerHTML = `
@@ -98,6 +128,8 @@ async function refresh() {
   `;
 
   renderSecuritySettings(securitySettings);
+  renderAuthPageSettings(authPageSettings);
+  renderAuthorizationServerMetadata(authServerMetadata);
 
   renderList("organizations", organizations, item => `
     <strong>${item.name}</strong><br>
@@ -108,7 +140,15 @@ async function refresh() {
 
   renderList("users", users, item => `<strong>${item.displayName}</strong><br>${item.defaultEmail || ""}<br>${item.id}`);
   renderList("memberships", memberships, item => `<strong>${item.organization}</strong><br>${item.user} (${item.userEmail || "no email"})<br>${item.role}`);
-  renderList("clients", clients, item => `<strong>${item.clientId}</strong><br>${item.audience}<br>${item.redirectUris}`);
+  renderList("clients", clients, item => `
+    <strong>${item.clientId}</strong><br>
+    ${item.name}<br>
+    ${item.description || "No description"}<br>
+    Audience: ${item.audience} | Type: ${item.clientType}<br>
+    PKCE: ${item.requirePkce ? "required" : "optional"} | First-party: ${item.isFirstParty ? "yes" : "no"}<br>
+    Scopes: ${item.allowedScopes}<br>
+    Redirect URIs: ${item.redirectUris}
+  `);
   renderList("sso-connections", ssoConnections, item => `
     <strong>${item.displayName}</strong><br>
     ${item.organization} (${item.primaryDomain || "no domain"})<br>
@@ -197,7 +237,14 @@ document.getElementById("create-client-form").addEventListener("submit", async (
     body: JSON.stringify({
       clientId: form.get("clientId"),
       name: form.get("name"),
+      description: form.get("description") || null,
       audience: form.get("audience") || "sqlos",
+      allowedScopes: String(form.get("allowedScopes") || "")
+        .split(/[\n,\s]+/)
+        .map(value => value.trim())
+        .filter(Boolean),
+      requirePkce: form.get("requirePkce") === "on",
+      isFirstParty: form.get("isFirstParty") === "on",
       redirectUris: String(form.get("redirectUris") || "")
         .split("\n")
         .map(value => value.trim())
@@ -220,6 +267,44 @@ document.getElementById("security-settings-form").addEventListener("submit", asy
     })
   });
   await refresh();
+});
+
+document.getElementById("auth-page-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  await fetchJson(`${adminApiBasePath}/settings/auth-page`, {
+    method: "PUT",
+    body: JSON.stringify({
+      logoBase64: form.get("logoBase64") || null,
+      pageTitle: form.get("pageTitle"),
+      pageSubtitle: form.get("pageSubtitle"),
+      primaryColor: form.get("primaryColor"),
+      accentColor: form.get("accentColor"),
+      backgroundColor: form.get("backgroundColor"),
+      layout: form.get("layout"),
+      enablePasswordSignup: form.get("enablePasswordSignup") === "on",
+      enabledCredentialTypes: String(form.get("enabledCredentialTypes") || "password")
+        .split(/[,\s]+/)
+        .map(value => value.trim())
+        .filter(Boolean)
+    })
+  });
+  await refresh();
+});
+
+document.getElementById("auth-page-logo-file").addEventListener("change", async (event) => {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  const form = document.getElementById("auth-page-settings-form");
+  const reader = new FileReader();
+  reader.onload = () => {
+    form.elements.logoBase64.value = String(reader.result || "");
+  };
+  reader.readAsDataURL(file);
 });
 
 document.getElementById("create-sso-draft-form").addEventListener("submit", async (event) => {

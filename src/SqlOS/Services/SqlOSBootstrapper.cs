@@ -50,6 +50,7 @@ public sealed class SqlOSBootstrapper
             await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
             await _adminService.EnsureDefaultClientAsync(cancellationToken);
             await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
+            await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
             await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
             await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         }

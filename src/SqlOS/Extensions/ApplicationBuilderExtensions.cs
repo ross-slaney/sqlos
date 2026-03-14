@@ -12,11 +12,28 @@ namespace SqlOS.Extensions;
 
 public static class ApplicationBuilderExtensions
 {
+    public static async Task UseSqlOSAuthServerAsync(this IApplicationBuilder app)
+    {
+        using var scope = app.ApplicationServices.CreateScope();
+        var bootstrapper = scope.ServiceProvider.GetRequiredService<SqlOSAuthServerBootstrapper>();
+        await bootstrapper.InitializeAsync();
+    }
+
     public static async Task UseSqlOSAsync(this IApplicationBuilder app)
     {
         using var scope = app.ApplicationServices.CreateScope();
         var bootstrapper = scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>();
         await bootstrapper.InitializeAsync();
+    }
+
+    public static IApplicationBuilder UseSqlOSAuthServerDashboard(this IApplicationBuilder app, string? pathPrefix = null)
+    {
+        var authOptions = app.ApplicationServices.GetRequiredService<IOptions<SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions>>().Value;
+        var environment = app.ApplicationServices.GetRequiredService<IHostEnvironment>();
+        var prefix = (pathPrefix ?? "/sqlos/admin/auth").TrimEnd('/');
+
+        app.UseMiddleware<AuthServerDashboardMiddleware>(prefix, environment, authOptions.Dashboard);
+        return app;
     }
 
     public static IApplicationBuilder UseSqlOSDashboard(this IApplicationBuilder app, string? pathPrefix = null)

@@ -135,6 +135,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.ClientId).HasMaxLength(120);
             entity.Property(x => x.Audience).HasMaxLength(200);
             entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.ClientType).HasMaxLength(40);
         });
 
         modelBuilder.Entity<SqlOSSession>(entity =>
@@ -194,6 +196,18 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasKey(x => x.Id);
         });
 
+        modelBuilder.Entity<SqlOSAuthPageSettings>(entity =>
+        {
+            entity.ToTable("SqlOSAuthPageSettings", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PrimaryColor).HasMaxLength(32);
+            entity.Property(x => x.AccentColor).HasMaxLength(32);
+            entity.Property(x => x.BackgroundColor).HasMaxLength(32);
+            entity.Property(x => x.Layout).HasMaxLength(32);
+            entity.Property(x => x.PageTitle).HasMaxLength(200);
+            entity.Property(x => x.PageSubtitle).HasMaxLength(500);
+        });
+
         modelBuilder.Entity<SqlOSAuthorizationRequest>(entity =>
         {
             entity.ToTable("SqlOSAuthorizationRequests", schema, t => t.ExcludeFromMigrations());
@@ -201,8 +215,13 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.LoginHintEmail).HasMaxLength(320);
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
             entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.Scope).HasMaxLength(1000);
+            entity.Property(x => x.Resource).HasMaxLength(2048);
+            entity.Property(x => x.Nonce).HasMaxLength(256);
+            entity.Property(x => x.Prompt).HasMaxLength(256);
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);
+            entity.Property(x => x.ResolvedAuthMethod).HasMaxLength(50);
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
@@ -224,6 +243,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => x.CodeHash).IsUnique();
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
             entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.Scope).HasMaxLength(1000);
+            entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.CodeHash).HasMaxLength(128);
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);

@@ -15,6 +15,59 @@ namespace SqlOS.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddSqlOSAuthServer<TContext>(
+        this IServiceCollection services,
+        Action<SqlOSAuthServerOptions>? configure = null,
+        Action<SqlOSDashboardOptions>? configureDashboard = null)
+        where TContext : DbContext, ISqlOSAuthServerDbContext
+    {
+        var options = new SqlOSOptions();
+        options.DisableFGA();
+        configureDashboard?.Invoke(options.Dashboard);
+        if (options.Dashboard.AuthMode != SqlOSDashboardAuthMode.DevelopmentOnly
+            && options.AuthServer.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly)
+        {
+            options.AuthServer.Dashboard.AuthMode = options.Dashboard.AuthMode;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Dashboard.Password))
+        {
+            options.AuthServer.Dashboard.Password ??= options.Dashboard.Password;
+        }
+
+        if (options.Dashboard.SessionLifetime != SqlOSDashboardOptions.DefaultSessionLifetime
+            && options.AuthServer.Dashboard.SessionLifetime == SqlOSDashboardOptions.DefaultSessionLifetime)
+        {
+            options.AuthServer.Dashboard.SessionLifetime = options.Dashboard.SessionLifetime;
+        }
+
+        configure?.Invoke(options.AuthServer);
+
+        services.AddSingleton(Options.Create(options));
+        services.AddSingleton(Options.Create(options.AuthServer));
+        services.AddDataProtection();
+        services.AddHttpClient();
+        services.AddSingleton<SqlOSDashboardSessionService>();
+
+        services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
+
+        services.AddScoped<SqlOSSchemaInitializer>();
+        services.AddScoped<SqlOSAuthServerBootstrapper>();
+        services.AddScoped<SqlOSCryptoService>();
+        services.AddScoped<SqlOSSettingsService>();
+        services.AddScoped<SqlOSAdminService>();
+        services.AddScoped<SqlOSAuthService>();
+        services.AddScoped<SqlOSAuthPageSessionService>();
+        services.AddScoped<SqlOSAuthorizationServerService>();
+        services.AddScoped<SqlOSHomeRealmDiscoveryService>();
+        services.AddScoped<SqlOSOidcAuthService>();
+        services.AddScoped<SqlOSOidcBrowserAuthService>();
+        services.AddScoped<SqlOSSamlService>();
+        services.AddScoped<SqlOSSsoAuthorizationService>();
+
+        return services;
+    }
+
     public static IServiceCollection AddSqlOS<TContext>(
         this IServiceCollection services,
         Action<SqlOSOptions>? configure = null)
@@ -76,6 +129,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSSettingsService>();
         services.AddScoped<SqlOSAdminService>();
         services.AddScoped<SqlOSAuthService>();
+        services.AddScoped<SqlOSAuthPageSessionService>();
+        services.AddScoped<SqlOSAuthorizationServerService>();
         services.AddScoped<SqlOSHomeRealmDiscoveryService>();
         services.AddScoped<SqlOSOidcAuthService>();
         services.AddScoped<SqlOSOidcBrowserAuthService>();

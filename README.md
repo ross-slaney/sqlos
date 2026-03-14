@@ -5,7 +5,17 @@
 It combines two modules in one library:
 
 - `Fga`: hierarchical resource authorization for EF Core and SQL Server
-- `AuthServer`: organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML SSO
+- `AuthServer`: organizations, users, credentials, sessions, refresh tokens, OIDC providers, SAML SSO, and a branded hosted AuthPage
+
+AuthServer v1 now exposes a standards-facing OAuth browser surface:
+
+- `/authorize`
+- `/token`
+- `/.well-known/oauth-authorization-server`
+- `/.well-known/jwks.json`
+- hosted `/login`, `/signup`, and `/logged-out`
+
+The intended shape is "WorkOS/AuthKit-style UX, but app-owned and database-owned."
 
 The integration model stays Hangfire-style:
 
@@ -44,6 +54,23 @@ var app = builder.Build();
 await app.UseSqlOSAsync();
 app.MapAuthServer("/sqlos/auth");
 app.UseSqlOSDashboard("/sqlos");
+```
+
+### AuthServer-Only Integration
+
+If an app already has an existing authorization layer and only wants the hosted auth server + AuthPage, use the auth-server-only registration path:
+
+```csharp
+builder.Services.AddSqlOSAuthServer<AppDbContext>(auth =>
+{
+    auth.BasePath = "/sqlos/auth";
+    auth.PublicOrigin = "https://api.example.com";
+    auth.Issuer = "https://api.example.com/sqlos/auth";
+});
+
+await app.UseSqlOSAuthServerAsync();
+app.MapAuthServer("/sqlos/auth");
+app.UseSqlOSAuthServerDashboard("/sqlos/admin/auth");
 ```
 
 ### Dashboard Password Mode (Optional)
@@ -147,6 +174,7 @@ dotnet test SqlOS.sln
 
 ## Docs
 
+- [Auth Page](docs/AUTH_PAGE.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Entra SSO Testing](docs/ENTRA_SSO.md)
 - [Example App](docs/EXAMPLE_APP.md)

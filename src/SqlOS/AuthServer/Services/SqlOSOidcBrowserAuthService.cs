@@ -15,6 +15,7 @@ public sealed class SqlOSOidcBrowserAuthService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSAuthService _authService;
+    private readonly SqlOSAuthorizationServerService _authorizationServerService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSOidcAuthService _oidcAuthService;
     private readonly SqlOSAuthServerOptions _options;
@@ -23,6 +24,7 @@ public sealed class SqlOSOidcBrowserAuthService
         ISqlOSAuthServerDbContext context,
         SqlOSAdminService adminService,
         SqlOSAuthService authService,
+        SqlOSAuthorizationServerService authorizationServerService,
         SqlOSCryptoService cryptoService,
         SqlOSOidcAuthService oidcAuthService,
         IOptions<SqlOSAuthServerOptions> options)
@@ -30,6 +32,7 @@ public sealed class SqlOSOidcBrowserAuthService
         _context = context;
         _adminService = adminService;
         _authService = authService;
+        _authorizationServerService = authorizationServerService;
         _cryptoService = cryptoService;
         _oidcAuthService = oidcAuthService;
         _options = options.Value;
@@ -93,6 +96,54 @@ public sealed class SqlOSOidcBrowserAuthService
             providerResult.DisplayName);
     }
 
+    public async Task<SqlOSOidcAuthorizationUrlResult> CreateAuthorizationUrlForAuthRequestAsync(
+        string authorizationRequestId,
+        string connectionId,
+        string? email,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        var callbackUri = GetProviderCallbackUri(httpContext);
+        var providerNonce = _cryptoService.GenerateOpaqueToken();
+        var providerCodeVerifier = _cryptoService.GenerateOpaqueToken();
+        var providerState = await _cryptoService.CreateTemporaryTokenAsync(
+            "oidc_authorization_request",
+            null,
+            client.Id,
+            authorizationRequest.OrganizationId,
+            new OidcAuthorizationRequestPayload(
+                authorizationRequest.Id,
+                connectionId,
+                providerNonce,
+                providerCodeVerifier,
+                callbackUri,
+                email),
+            _options.TemporaryTokenLifetime,
+            cancellationToken);
+
+        var providerResult = await _oidcAuthService.StartAuthorizationAsync(
+            new SqlOSStartOidcAuthorizationRequest(
+                connectionId,
+                email ?? authorizationRequest.LoginHintEmail ?? string.Empty,
+                client.ClientId,
+                callbackUri,
+                providerState,
+                providerNonce,
+                _cryptoService.CreatePkceCodeChallenge(providerCodeVerifier),
+                "S256"),
+            httpContext.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
+        return new SqlOSOidcAuthorizationUrlResult(
+            providerResult.AuthorizationUrl,
+            providerResult.ConnectionId,
+            providerResult.ProviderType.ToString(),
+            providerResult.DisplayName);
+    }
+
     public async Task<IResult> HandleCallbackAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
         var callbackInput = await ReadCallbackInputAsync(httpContext, cancellationToken);
@@ -102,6 +153,15 @@ public sealed class SqlOSOidcBrowserAuthService
         }
 
         var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync("oidc_browser_request", callbackInput.State, cancellationToken);
+        if (requestToken == null)
+        {
+            var authorizationRequestToken = await _cryptoService.ConsumeTemporaryTokenAsync("oidc_authorization_request", callbackInput.State, cancellationToken);
+            if (authorizationRequestToken != null)
+            {
+                return await HandleAuthorizationRequestCallbackAsync(httpContext, callbackInput, authorizationRequestToken, cancellationToken);
+            }
+        }
+
         if (requestToken == null)
         {
             return RenderCallbackError("The OIDC browser login request is invalid or expired.");
@@ -178,6 +238,78 @@ public sealed class SqlOSOidcBrowserAuthService
                 new Dictionary<string, string?>
                 {
                     ["state"] = payload.State,
+                    ["error"] = ex.Message
+                }));
+        }
+    }
+
+    private async Task<IResult> HandleAuthorizationRequestCallbackAsync(
+        HttpContext httpContext,
+        OidcCallbackInput callbackInput,
+        SqlOSTemporaryToken authorizationRequestToken,
+        CancellationToken cancellationToken)
+    {
+        var payload = _cryptoService.DeserializePayload<OidcAuthorizationRequestPayload>(authorizationRequestToken);
+        if (payload == null)
+        {
+            return RenderCallbackError("The OIDC authorization request payload is invalid.");
+        }
+
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(callbackInput.Error))
+        {
+            return Results.Redirect(BuildAppRedirectUri(
+                authorizationRequest.RedirectUri,
+                new Dictionary<string, string?>
+                {
+                    ["state"] = authorizationRequest.State,
+                    ["error"] = callbackInput.ErrorDescription ?? callbackInput.Error
+                }));
+        }
+
+        if (string.IsNullOrWhiteSpace(callbackInput.Code))
+        {
+            return Results.Redirect(BuildAppRedirectUri(
+                authorizationRequest.RedirectUri,
+                new Dictionary<string, string?>
+                {
+                    ["state"] = authorizationRequest.State,
+                    ["error"] = "The OIDC callback was missing the provider code."
+                }));
+        }
+
+        try
+        {
+            var result = await _oidcAuthService.CompleteAuthorizationAsync(
+                new SqlOSCompleteOidcAuthorizationRequest(
+                    payload.ConnectionId,
+                    authorizationRequest.ClientApplication?.ClientId ?? string.Empty,
+                    payload.CallbackUri,
+                    callbackInput.Code,
+                    payload.ProviderCodeVerifier,
+                    payload.ProviderNonce,
+                    callbackInput.UserPayload),
+                httpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken);
+
+            var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
+            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                user,
+                result.OrganizationId ?? authorizationRequest.OrganizationId,
+                result.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            return Results.Redirect(redirectUrl);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Redirect(BuildAppRedirectUri(
+                authorizationRequest.RedirectUri,
+                new Dictionary<string, string?>
+                {
+                    ["state"] = authorizationRequest.State,
                     ["error"] = ex.Message
                 }));
         }
@@ -276,6 +408,14 @@ public sealed class SqlOSOidcBrowserAuthService
         string ProviderNonce,
         string ProviderCodeVerifier,
         string CallbackUri);
+
+    private sealed record OidcAuthorizationRequestPayload(
+        string AuthorizationRequestId,
+        string ConnectionId,
+        string ProviderNonce,
+        string ProviderCodeVerifier,
+        string CallbackUri,
+        string? Email);
 
     private sealed record OidcBrowserCodePayload(
         string ClientId,

@@ -4,6 +4,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using System.Text.Json;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -33,6 +34,22 @@ public sealed class SqlOSSettingsService
             SessionIdleTimeoutMinutes = (int)_options.SessionIdleTimeout.TotalMinutes,
             SessionAbsoluteLifetimeMinutes = (int)_options.SessionAbsoluteLifetime.TotalMinutes,
             UpdatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task EnsureDefaultAuthPageSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await _context.Set<SqlOSAuthPageSettings>().FirstOrDefaultAsync(x => x.Id == "default", cancellationToken);
+        if (existing != null)
+        {
+            return;
+        }
+
+        _context.Set<SqlOSAuthPageSettings>().Add(new SqlOSAuthPageSettings
+        {
+            Id = "default",
+            UpdatedAt = DateTime.UtcNow,
         });
         await _context.SaveChangesAsync(cancellationToken);
     }
@@ -77,6 +94,72 @@ public sealed class SqlOSSettingsService
             settings.SessionIdleTimeoutMinutes,
             settings.SessionAbsoluteLifetimeMinutes,
             settings.UpdatedAt);
+    }
+
+    public async Task<SqlOSAuthPageSettingsDto> GetAuthPageSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        return new SqlOSAuthPageSettingsDto(
+            settings.LogoBase64,
+            settings.PrimaryColor,
+            settings.AccentColor,
+            settings.BackgroundColor,
+            settings.Layout,
+            settings.PageTitle,
+            settings.PageSubtitle,
+            settings.EnablePasswordSignup,
+            DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
+            settings.UpdatedAt);
+    }
+
+    public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.PrimaryColor) ||
+            string.IsNullOrWhiteSpace(request.AccentColor) ||
+            string.IsNullOrWhiteSpace(request.BackgroundColor))
+        {
+            throw new InvalidOperationException("Auth page colors are required.");
+        }
+
+        if (!string.Equals(request.Layout, "split", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.Layout, "stacked", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Auth page layout must be either 'split' or 'stacked'.");
+        }
+
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        settings.LogoBase64 = string.IsNullOrWhiteSpace(request.LogoBase64) ? null : request.LogoBase64;
+        settings.PrimaryColor = request.PrimaryColor.Trim();
+        settings.AccentColor = request.AccentColor.Trim();
+        settings.BackgroundColor = request.BackgroundColor.Trim();
+        settings.Layout = request.Layout.Trim().ToLowerInvariant();
+        settings.PageTitle = request.PageTitle.Trim();
+        settings.PageSubtitle = request.PageSubtitle.Trim();
+        settings.EnablePasswordSignup = request.EnablePasswordSignup;
+        settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(
+            (request.EnabledCredentialTypes ?? Array.Empty<string>())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+        settings.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await GetAuthPageSettingsAsync(cancellationToken);
+    }
+
+    private static string[] DeserializeCredentialTypes(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json) ?? ["password"];
+        }
+        catch
+        {
+            return ["password"];
+        }
     }
 }
 

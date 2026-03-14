@@ -122,9 +122,10 @@ public sealed class SqlOSSamlService
         var user = await ResolveUserAsync(connection, principal, email, cancellationToken)
             ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
 
-        if (!await _adminService.UserHasMembershipAsync(user.Id, authorizationRequest.OrganizationId, cancellationToken))
+        var organizationId = authorizationRequest.OrganizationId ?? connection.OrganizationId;
+        if (!await _adminService.UserHasMembershipAsync(user.Id, organizationId, cancellationToken))
         {
-            await _adminService.CreateMembershipAsync(authorizationRequest.OrganizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
+            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
         }
 
         var rawCode = _cryptoService.GenerateOpaqueToken();
@@ -134,9 +135,11 @@ public sealed class SqlOSSamlService
             AuthorizationRequestId = authorizationRequest.Id,
             UserId = user.Id,
             ClientApplicationId = authorizationRequest.ClientApplicationId,
-            OrganizationId = authorizationRequest.OrganizationId,
+            OrganizationId = organizationId,
             RedirectUri = authorizationRequest.RedirectUri,
             State = authorizationRequest.State,
+            Scope = authorizationRequest.Scope,
+            Resource = authorizationRequest.Resource,
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
@@ -146,8 +149,11 @@ public sealed class SqlOSSamlService
         });
 
         authorizationRequest.CompletedAt = DateTime.UtcNow;
+        authorizationRequest.ResolvedAuthMethod = "saml";
+        authorizationRequest.ResolvedOrganizationId = organizationId;
+        authorizationRequest.ResolvedConnectionId = connection.Id;
         await _context.SaveChangesAsync(cancellationToken);
-        await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: authorizationRequest.OrganizationId, cancellationToken: cancellationToken);
+        await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: organizationId, cancellationToken: cancellationToken);
         var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
     }

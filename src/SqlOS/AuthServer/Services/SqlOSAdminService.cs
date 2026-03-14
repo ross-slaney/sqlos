@@ -69,6 +69,9 @@ public sealed class SqlOSAdminService
             ClientId = "default",
             Name = "Default Client",
             Audience = _options.DefaultAudience,
+            ClientType = "public_pkce",
+            RequirePkce = true,
+            AllowedScopesJson = "[]",
             RedirectUrisJson = "[]",
             CreatedAt = DateTime.UtcNow,
             IsActive = true
@@ -210,7 +213,16 @@ public sealed class SqlOSAdminService
             Id = _cryptoService.GenerateId("cli"),
             ClientId = request.ClientId,
             Name = request.Name,
+            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
             Audience = request.Audience,
+            ClientType = string.IsNullOrWhiteSpace(request.ClientType) ? "public_pkce" : request.ClientType.Trim(),
+            RequirePkce = request.RequirePkce,
+            AllowedScopesJson = JsonSerializer.Serialize((request.AllowedScopes ?? new List<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList()),
+            IsFirstParty = request.IsFirstParty,
             RedirectUrisJson = JsonSerializer.Serialize(request.RedirectUris),
             CreatedAt = DateTime.UtcNow,
             IsActive = true
@@ -655,7 +667,12 @@ public sealed class SqlOSAdminService
                 x.Id,
                 x.ClientId,
                 x.Name,
+                x.Description,
                 x.Audience,
+                x.ClientType,
+                x.RequirePkce,
+                AllowedScopes = x.AllowedScopesJson,
+                x.IsFirstParty,
                 RedirectUris = x.RedirectUrisJson,
                 x.IsActive
             })

@@ -179,7 +179,12 @@ public sealed class SqlOSClientApplication
     public string Id { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
     public string Audience { get; set; } = "sqlos";
+    public string ClientType { get; set; } = "public_pkce";
+    public bool RequirePkce { get; set; } = true;
+    public string AllowedScopesJson { get; set; } = "[]";
+    public bool IsFirstParty { get; set; }
     public string RedirectUrisJson { get; set; } = "[]";
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
@@ -234,17 +239,39 @@ public sealed class SqlOSSettings
     public DateTime UpdatedAt { get; set; }
 }
 
+public sealed class SqlOSAuthPageSettings
+{
+    public string Id { get; set; } = "default";
+    public string? LogoBase64 { get; set; }
+    public string PrimaryColor { get; set; } = "#2563eb";
+    public string AccentColor { get; set; } = "#0f172a";
+    public string BackgroundColor { get; set; } = "#f8fafc";
+    public string Layout { get; set; } = "split";
+    public string PageTitle { get; set; } = "Sign in";
+    public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
+    public bool EnablePasswordSignup { get; set; } = true;
+    public string EnabledCredentialTypesJson { get; set; } = "[\"password\"]";
+    public DateTime UpdatedAt { get; set; }
+}
+
 public sealed class SqlOSAuthorizationRequest
 {
     public string Id { get; set; } = string.Empty;
     public string ClientApplicationId { get; set; } = string.Empty;
-    public string OrganizationId { get; set; } = string.Empty;
-    public string ConnectionId { get; set; } = string.Empty;
-    public string LoginHintEmail { get; set; } = string.Empty;
+    public string? OrganizationId { get; set; }
+    public string? ConnectionId { get; set; }
+    public string? LoginHintEmail { get; set; }
     public string RedirectUri { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string? Resource { get; set; }
+    public string? Nonce { get; set; }
+    public string? Prompt { get; set; }
     public string CodeChallenge { get; set; } = string.Empty;
     public string CodeChallengeMethod { get; set; } = "S256";
+    public string? ResolvedAuthMethod { get; set; }
+    public string? ResolvedOrganizationId { get; set; }
+    public string? ResolvedConnectionId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime? CompletedAt { get; set; }
@@ -261,9 +288,11 @@ public sealed class SqlOSAuthorizationCode
     public string AuthorizationRequestId { get; set; } = string.Empty;
     public string UserId { get; set; } = string.Empty;
     public string ClientApplicationId { get; set; } = string.Empty;
-    public string OrganizationId { get; set; } = string.Empty;
+    public string? OrganizationId { get; set; }
     public string RedirectUri { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string? Resource { get; set; }
     public string CodeHash { get; set; } = string.Empty;
     public string CodeChallenge { get; set; } = string.Empty;
     public string CodeChallengeMethod { get; set; } = "S256";

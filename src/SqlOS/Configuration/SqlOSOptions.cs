@@ -39,6 +39,18 @@ public sealed class SqlOSOptions
         configure?.Invoke(AuthServer);
         return this;
     }
+
+    public SqlOSOptions DisableFGA()
+    {
+        EnableFga = false;
+        return this;
+    }
+
+    public SqlOSOptions DisableAuthServer()
+    {
+        EnableAuthServer = false;
+        return this;
+    }
 }
 
 public sealed class SqlOSDashboardOptions

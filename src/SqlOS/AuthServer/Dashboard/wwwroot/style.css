@@ -80,6 +80,12 @@ main {
   color: var(--zinc-900);
 }
 
+.panel-copy {
+  margin: 0 0 14px;
+  color: var(--zinc-600);
+  max-width: 72ch;
+}
+
 form {
   display: grid;
   gap: 10px;
@@ -113,6 +119,21 @@ textarea {
   resize: vertical;
 }
 
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--zinc-300);
+  background: #fff;
+  color: var(--zinc-900);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--amber-400);
+  box-shadow: 0 0 0 2px var(--amber-100);
+}
+
 button {
   padding: 10px 14px;
   border: none;
@@ -132,6 +153,15 @@ label {
   gap: 8px;
   align-items: center;
   color: var(--zinc-700);
+}
+
+.file-label {
+  align-items: start;
+  flex-direction: column;
+}
+
+.two-up {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .list-item {

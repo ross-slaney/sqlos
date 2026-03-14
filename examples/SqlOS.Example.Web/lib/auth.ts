@@ -5,9 +5,12 @@ import { jwtDecode } from "jwt-decode";
 
 interface DecodedToken {
   exp: number;
+  iss?: string;
   sub?: string;
   email?: string;
+  name?: string;
   org_id?: string;
+  sid?: string;
 }
 
 type BackendUser = {
@@ -72,19 +75,34 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
   const refreshPromise = (async () => {
     try {
+      const decoded = typeof token.accessToken === "string"
+        ? jwtDecode<DecodedToken>(token.accessToken)
+        : null;
+      const usesHostedSqlOS = decoded?.iss?.includes("/sqlos/auth") ?? false;
+
       console.info("[Auth] Refreshing access token.", {
         sessionId: token.sessionId ?? null,
-        organizationId
+        organizationId,
+        usesHostedSqlOS
       });
 
-      const response = await fetch(`${apiUrl}/api/v1/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refreshToken: currentRefreshToken,
-          organizationId
-        })
-      });
+      const response = usesHostedSqlOS
+        ? await fetch(`${apiUrl}/sqlos/auth/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: currentRefreshToken
+            })
+          })
+        : await fetch(`${apiUrl}/api/v1/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              refreshToken: currentRefreshToken,
+              organizationId
+            })
+          });
 
       const data = await response.json();
       if (!response.ok) {
@@ -102,7 +120,13 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         };
       }
 
-      const refreshedDecoded = jwtDecode<DecodedToken>(data.accessToken);
+      const nextAccessToken = data.accessToken ?? data.access_token;
+      const nextRefreshToken = data.refreshToken ?? data.refresh_token;
+      if (!nextAccessToken || !nextRefreshToken) {
+        throw new Error("Refresh response did not include new tokens.");
+      }
+
+      const refreshedDecoded = jwtDecode<DecodedToken>(nextAccessToken);
       console.info("[Auth] Refresh succeeded.", {
         sessionId: data.sessionId ?? token.sessionId ?? null,
         accessTokenExpiresAt: new Date(refreshedDecoded.exp * 1000).toISOString()
@@ -110,10 +134,10 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
       return {
         ...token,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
-        sessionId: data.sessionId,
-        organizationId: normalizeOrganizationId(data.organizationId ?? refreshedDecoded.org_id ?? null),
+        accessToken: nextAccessToken,
+        refreshToken: nextRefreshToken,
+        sessionId: data.sessionId ?? refreshedDecoded.sid ?? token.sessionId ?? null,
+        organizationId: normalizeOrganizationId(data.organizationId ?? refreshedDecoded.org_id ?? token.organizationId ?? null),
         exp: refreshedDecoded.exp,
         error: undefined
       };
@@ -164,11 +188,11 @@ export const authOptions: AuthOptions = {
           return {
             id: credentials.userId,
             email: credentials.email,
-            name: credentials.displayName,
+            name: credentials.displayName || decoded.name || decoded.email || decoded.sub,
             accessToken: credentials.accessToken,
             refreshToken: credentials.refreshToken,
             organizationId: normalizeOrganizationId(credentials.organizationId ?? decoded.org_id ?? null),
-            sessionId: credentials.sessionId || "",
+            sessionId: credentials.sessionId || decoded.sid || "",
             exp: decoded.exp
           } as User;
         }

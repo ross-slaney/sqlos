@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SsoCallbackPanel } from "@/components/sso-callback-panel";
+import { SqlOSAuthCallbackPanel } from "@/components/sqlos-auth-callback-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -8,9 +8,9 @@ export default function AuthCallbackPage() {
     <main className="shell">
       <div className="stack">
         <section className="hero">
-          <h1>Auth callback</h1>
+          <h1>Hosted SqlOS callback</h1>
           <Suspense fallback={<p>Completing sign-in...</p>}>
-            <SsoCallbackPanel />
+            <SqlOSAuthCallbackPanel />
           </Suspense>
         </section>
       </div>
