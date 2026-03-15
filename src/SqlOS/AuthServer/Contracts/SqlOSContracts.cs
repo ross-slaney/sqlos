@@ -252,7 +252,8 @@ public sealed record SqlOSCompleteOidcAuthorizationResult(
     string Email,
     string DisplayName,
     string? OrganizationId,
-    string AuthenticationMethod);
+    string AuthenticationMethod,
+    int OrganizationCount);
 
 public sealed record SqlOSPkceExchangeRequest(
     string Code,

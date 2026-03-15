@@ -210,6 +210,11 @@ public static class ExampleAuthEndpoints
                         httpContext.Connection.RemoteIpAddress?.ToString(),
                         cancellationToken);
 
+                    if (result.OrganizationCount > 1)
+                    {
+                        throw new InvalidOperationException("This application requires zero or one active organization membership for OIDC login.");
+                    }
+
                     var handoff = await cryptoService.CreateTemporaryTokenAsync(
                         "oidc_handoff",
                         result.UserId,

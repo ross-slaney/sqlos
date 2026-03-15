@@ -157,7 +157,8 @@ public sealed class SqlOSOidcAuthService
                 user.DefaultEmail ?? providerUser.Email,
                 user.DisplayName,
                 organizationId,
-                authMethod);
+                authMethod,
+                organizations.Count);
         }
         catch (Exception ex)
         {
