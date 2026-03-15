@@ -54,6 +54,8 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
     {
         auth.BasePath = "/sqlos/auth";
         auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
+        auth.DefaultSigningKeyRotationIntervalDays = 90;
+        auth.DefaultSigningKeyGraceWindowDays = 7;
         auth.SeedAuthPage(page =>
         {
             page.PageTitle = "Sign in";
@@ -157,6 +159,27 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("example-frontend");
 app.UseExampleBearerTokenMiddleware();
+// --- External API: validating SqlOS JWTs via JWKS endpoint ---
+// Use this pattern when your API is a SEPARATE process from the SqlOS host
+// and needs to validate tokens issued by SqlOS. Key rotation is handled
+// automatically — ASP.NET's JwtBearer handler re-fetches the JWKS endpoint
+// when it encounters an unknown kid, so new signing keys are picked up seamlessly.
+//
+// builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+//     .AddJwtBearer(options =>
+//     {
+//         options.Authority = "https://your-sqlos-host/sqlos/auth";
+//         options.MetadataAddress = "https://your-sqlos-host/sqlos/auth/.well-known/oauth-authorization-server";
+//         options.TokenValidationParameters = new TokenValidationParameters
+//         {
+//             ValidateIssuer = true,
+//             ValidIssuer = "https://your-sqlos-host/sqlos/auth",
+//             ValidateAudience = true,
+//             ValidAudience = "sqlos",
+//             ValidateLifetime = true,
+//         };
+//         options.RefreshInterval = TimeSpan.FromHours(1); // optional: more frequent background JWKS refresh
+//     });
 app.UseSqlOSDashboard("/sqlos");
 
 app.MapAuthServer("/sqlos/auth");

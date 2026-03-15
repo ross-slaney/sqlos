@@ -33,6 +33,9 @@ public sealed class SqlOSSettingsService
             RefreshTokenLifetimeMinutes = (int)_options.RefreshTokenLifetime.TotalMinutes,
             SessionIdleTimeoutMinutes = (int)_options.SessionIdleTimeout.TotalMinutes,
             SessionAbsoluteLifetimeMinutes = (int)_options.SessionAbsoluteLifetime.TotalMinutes,
+            SigningKeyRotationIntervalDays = _options.DefaultSigningKeyRotationIntervalDays,
+            SigningKeyGraceWindowDays = _options.DefaultSigningKeyGraceWindowDays,
+            SigningKeyRetiredCleanupDays = _options.DefaultSigningKeyRetiredCleanupDays,
             UpdatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync(cancellationToken);
@@ -102,7 +105,20 @@ public sealed class SqlOSSettingsService
             settings.RefreshTokenLifetimeMinutes,
             settings.SessionIdleTimeoutMinutes,
             settings.SessionAbsoluteLifetimeMinutes,
+            settings.SigningKeyRotationIntervalDays,
+            settings.SigningKeyGraceWindowDays,
+            settings.SigningKeyRetiredCleanupDays,
             settings.UpdatedAt);
+    }
+
+    public async Task<SqlOSKeyRotationSettings> GetKeyRotationSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        return new SqlOSKeyRotationSettings(
+            TimeSpan.FromDays(settings.SigningKeyRotationIntervalDays),
+            TimeSpan.FromDays(settings.SigningKeyGraceWindowDays),
+            TimeSpan.FromDays(settings.SigningKeyRetiredCleanupDays));
     }
 
     public async Task<SqlOSResolvedSecuritySettings> GetResolvedSecuritySettingsAsync(CancellationToken cancellationToken = default)
@@ -121,11 +137,24 @@ public sealed class SqlOSSettingsService
             throw new InvalidOperationException("Security settings must be positive minute values.");
         }
 
+        if (request.SigningKeyRotationIntervalDays <= 0 || request.SigningKeyGraceWindowDays <= 0 || request.SigningKeyRetiredCleanupDays <= 0)
+        {
+            throw new InvalidOperationException("Signing key rotation settings must be positive day values.");
+        }
+
+        if (request.SigningKeyGraceWindowDays >= request.SigningKeyRotationIntervalDays)
+        {
+            throw new InvalidOperationException("Grace window must be shorter than the rotation interval.");
+        }
+
         await EnsureDefaultSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
         settings.RefreshTokenLifetimeMinutes = request.RefreshTokenLifetimeMinutes;
         settings.SessionIdleTimeoutMinutes = request.SessionIdleTimeoutMinutes;
         settings.SessionAbsoluteLifetimeMinutes = request.SessionAbsoluteLifetimeMinutes;
+        settings.SigningKeyRotationIntervalDays = request.SigningKeyRotationIntervalDays;
+        settings.SigningKeyGraceWindowDays = request.SigningKeyGraceWindowDays;
+        settings.SigningKeyRetiredCleanupDays = request.SigningKeyRetiredCleanupDays;
         settings.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -133,6 +162,9 @@ public sealed class SqlOSSettingsService
             settings.RefreshTokenLifetimeMinutes,
             settings.SessionIdleTimeoutMinutes,
             settings.SessionAbsoluteLifetimeMinutes,
+            settings.SigningKeyRotationIntervalDays,
+            settings.SigningKeyGraceWindowDays,
+            settings.SigningKeyRetiredCleanupDays,
             settings.UpdatedAt);
     }
 
@@ -228,3 +260,8 @@ public sealed record SqlOSResolvedSecuritySettings(
     TimeSpan RefreshTokenLifetime,
     TimeSpan SessionIdleTimeout,
     TimeSpan SessionAbsoluteLifetime);
+
+public sealed record SqlOSKeyRotationSettings(
+    TimeSpan RotationInterval,
+    TimeSpan GraceWindow,
+    TimeSpan RetiredCleanupWindow);

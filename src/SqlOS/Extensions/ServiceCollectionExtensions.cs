@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSOidcBrowserAuthService>();
         services.AddScoped<SqlOSSamlService>();
         services.AddScoped<SqlOSSsoAuthorizationService>();
+        services.AddHostedService<SqlOSSigningKeyRotationService>();
 
         return services;
     }
@@ -142,6 +143,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSFgaSeedService>();
         services.AddScoped<SqlOSFgaFunctionInitializer>();
         services.AddScoped<SqlOSFgaSchemaInitializer>();
+        services.AddHostedService<SqlOSSigningKeyRotationService>();
 
         return services;
     }

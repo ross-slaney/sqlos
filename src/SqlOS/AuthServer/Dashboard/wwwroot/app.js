@@ -75,6 +75,26 @@ function renderSecuritySettings(settings) {
   form.elements.refreshTokenLifetimeMinutes.value = settings.refreshTokenLifetimeMinutes;
   form.elements.sessionIdleTimeoutMinutes.value = settings.sessionIdleTimeoutMinutes;
   form.elements.sessionAbsoluteLifetimeMinutes.value = settings.sessionAbsoluteLifetimeMinutes;
+  const rotationForm = document.getElementById("key-rotation-settings-form");
+  rotationForm.elements.signingKeyRotationIntervalDays.value = settings.signingKeyRotationIntervalDays;
+  rotationForm.elements.signingKeyGraceWindowDays.value = settings.signingKeyGraceWindowDays;
+  rotationForm.elements.signingKeyRetiredCleanupDays.value = settings.signingKeyRetiredCleanupDays;
+}
+
+function renderSigningKeys(data) {
+  const info = document.getElementById("signing-keys-info");
+  info.innerHTML = `
+    <strong>Rotation interval:</strong> ${data.rotationIntervalDays} days &nbsp;|&nbsp;
+    <strong>Grace window:</strong> ${data.graceWindowDays} days &nbsp;|&nbsp;
+    <strong>Next rotation due:</strong> ${data.nextRotationDue ? new Date(data.nextRotationDue).toLocaleString() : "N/A"}
+  `;
+
+  const list = document.getElementById("signing-keys-list");
+  list.innerHTML = data.keys.map(k => `<div class="list-item">
+    <strong>${k.kid}</strong> (${k.algorithm})<br>
+    Status: ${k.isActive ? "Active" : "Retired"} &nbsp;|&nbsp; Age: ${k.ageDays} days<br>
+    Activated: ${new Date(k.activatedAt).toLocaleString()}${k.retiredAt ? `<br>Retired: ${new Date(k.retiredAt).toLocaleString()}` : ""}
+  </div>`).join("");
 }
 
 function renderAuthPageSettings(settings) {
@@ -103,7 +123,7 @@ function renderAuthorizationServerMetadata(metadata) {
 }
 
 async function refresh() {
-  const [stats, organizations, users, memberships, clients, ssoConnections, sessions, auditEvents, securitySettings, authPageSettings, authServerMetadata] = await Promise.all([
+  const [stats, organizations, users, memberships, clients, ssoConnections, sessions, auditEvents, securitySettings, authPageSettings, authServerMetadata, signingKeys] = await Promise.all([
     fetchJson(`${adminApiBasePath}/stats`),
     fetchJson(`${adminApiBasePath}/organizations`),
     fetchJson(`${adminApiBasePath}/users`),
@@ -114,7 +134,8 @@ async function refresh() {
     fetchJson(`${adminApiBasePath}/audit-events`),
     fetchJson(`${adminApiBasePath}/settings/security`),
     fetchJson(`${adminApiBasePath}/settings/auth-page`),
-    fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`)
+    fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`),
+    fetchJson(`${adminApiBasePath}/signing-keys`)
   ]);
 
   statsElement.innerHTML = `
@@ -128,6 +149,7 @@ async function refresh() {
   `;
 
   renderSecuritySettings(securitySettings);
+  renderSigningKeys(signingKeys);
   renderAuthPageSettings(authPageSettings);
   renderAuthorizationServerMetadata(authServerMetadata);
 
@@ -258,14 +280,42 @@ document.getElementById("create-client-form").addEventListener("submit", async (
 document.getElementById("security-settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
+  const rotationForm = document.getElementById("key-rotation-settings-form");
   await fetchJson(`${adminApiBasePath}/settings/security`, {
     method: "PUT",
     body: JSON.stringify({
       refreshTokenLifetimeMinutes: Number(form.get("refreshTokenLifetimeMinutes")),
       sessionIdleTimeoutMinutes: Number(form.get("sessionIdleTimeoutMinutes")),
-      sessionAbsoluteLifetimeMinutes: Number(form.get("sessionAbsoluteLifetimeMinutes"))
+      sessionAbsoluteLifetimeMinutes: Number(form.get("sessionAbsoluteLifetimeMinutes")),
+      signingKeyRotationIntervalDays: Number(rotationForm.elements.signingKeyRotationIntervalDays.value),
+      signingKeyGraceWindowDays: Number(rotationForm.elements.signingKeyGraceWindowDays.value),
+      signingKeyRetiredCleanupDays: Number(rotationForm.elements.signingKeyRetiredCleanupDays.value)
     })
   });
+  await refresh();
+});
+
+document.getElementById("key-rotation-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const securitySettings = await fetchJson(`${adminApiBasePath}/settings/security`);
+  const rotationForm = event.target;
+  await fetchJson(`${adminApiBasePath}/settings/security`, {
+    method: "PUT",
+    body: JSON.stringify({
+      refreshTokenLifetimeMinutes: securitySettings.refreshTokenLifetimeMinutes,
+      sessionIdleTimeoutMinutes: securitySettings.sessionIdleTimeoutMinutes,
+      sessionAbsoluteLifetimeMinutes: securitySettings.sessionAbsoluteLifetimeMinutes,
+      signingKeyRotationIntervalDays: Number(rotationForm.elements.signingKeyRotationIntervalDays.value),
+      signingKeyGraceWindowDays: Number(rotationForm.elements.signingKeyGraceWindowDays.value),
+      signingKeyRetiredCleanupDays: Number(rotationForm.elements.signingKeyRetiredCleanupDays.value)
+    })
+  });
+  await refresh();
+});
+
+document.getElementById("rotate-key-btn").addEventListener("click", async () => {
+  if (!confirm("Are you sure you want to rotate the signing key? Existing tokens will remain valid during the grace window.")) return;
+  await fetchJson(`${adminApiBasePath}/signing-keys/rotate`, { method: "POST" });
   await refresh();
 });
 

@@ -34,9 +34,10 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
             Results.Ok(await authorizationServerService.GetMetadataAsync(context, cancellationToken)));
 
-        auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, CancellationToken cancellationToken) =>
+        auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, SqlOSSettingsService settingsService, CancellationToken cancellationToken) =>
         {
-            var keys = await cryptoService.GetValidationSigningKeysAsync(cancellationToken);
+            var rotationSettings = await settingsService.GetKeyRotationSettingsAsync(cancellationToken);
+            var keys = await cryptoService.GetValidationSigningKeysAsync(rotationSettings.GraceWindow, cancellationToken);
             return Results.Ok(cryptoService.GetJwksDocument(keys));
         });
 
@@ -976,6 +977,61 @@ public static class EndpointRouteBuilderExtensions
             }
 
             return Results.Ok(await settingsService.UpdateSecuritySettingsAsync(request, cancellationToken));
+        });
+
+        api.MapGet("/signing-keys", async (HttpContext context, SqlOSCryptoService cryptoService, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var keys = await cryptoService.ListSigningKeysAsync(cancellationToken);
+            var rotationSettings = await settingsService.GetKeyRotationSettingsAsync(cancellationToken);
+            var activeKey = keys.FirstOrDefault(k => k.IsActive);
+
+            return Results.Ok(new
+            {
+                keys = keys.Select(k => new
+                {
+                    k.Id,
+                    k.Kid,
+                    k.Algorithm,
+                    k.IsActive,
+                    k.ActivatedAt,
+                    k.RetiredAt,
+                    ageDays = Math.Round((DateTime.UtcNow - k.ActivatedAt).TotalDays, 1)
+                }),
+                rotationIntervalDays = rotationSettings.RotationInterval.TotalDays,
+                graceWindowDays = rotationSettings.GraceWindow.TotalDays,
+                nextRotationDue = activeKey != null
+                    ? activeKey.ActivatedAt.Add(rotationSettings.RotationInterval)
+                    : (DateTime?)null
+            });
+        });
+
+        api.MapPost("/signing-keys/rotate", async (HttpContext context, SqlOSCryptoService cryptoService, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var newKey = await cryptoService.RotateSigningKeyAsync(cancellationToken);
+            await adminService.RecordAuditAsync(
+                "signing_key_rotated_manual",
+                "admin",
+                "dashboard",
+                data: new { newKeyId = newKey.Id, newKid = newKey.Kid },
+                cancellationToken: cancellationToken);
+
+            return Results.Ok(new
+            {
+                newKey.Id,
+                newKey.Kid,
+                newKey.Algorithm,
+                newKey.ActivatedAt
+            });
         });
 
         api.MapGet("/settings/auth-page", async (HttpContext context, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

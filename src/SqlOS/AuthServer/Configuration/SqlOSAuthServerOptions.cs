@@ -18,6 +18,9 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
+    public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
+    public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
+    public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSAuthServerDashboardOptions Dashboard { get; set; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];

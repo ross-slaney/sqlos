@@ -68,6 +68,17 @@
                 <input name="sessionAbsoluteLifetimeMinutes" type="number" min="1" placeholder="Session absolute lifetime (minutes)" required>
                 <button type="submit">Save settings</button>
             </form>
+            <h3>Signing Key Rotation</h3>
+            <p class="panel-copy">Control how often the JWT signing key rotates. Retired keys remain valid during the grace window so in-flight tokens can still be verified.</p>
+            <form id="key-rotation-settings-form">
+                <input name="signingKeyRotationIntervalDays" type="number" min="1" placeholder="Rotation interval (days)" required>
+                <input name="signingKeyGraceWindowDays" type="number" min="1" placeholder="Grace window (days)" required>
+                <input name="signingKeyRetiredCleanupDays" type="number" min="1" placeholder="Retired key cleanup (days)" required>
+                <button type="submit">Save key rotation settings</button>
+            </form>
+            <div id="signing-keys-info" class="callout"></div>
+            <button id="rotate-key-btn" type="button">Rotate key now</button>
+            <div id="signing-keys-list"></div>
         </section>
         <section id="section-authpage" class="panel">
             <h2>Auth Page</h2>

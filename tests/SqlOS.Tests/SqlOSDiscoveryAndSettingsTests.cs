@@ -59,10 +59,13 @@ public sealed class SqlOSDiscoveryAndSettingsTests
         defaults.SessionIdleTimeoutMinutes.Should().Be((int)TimeSpan.FromDays(2).TotalMinutes);
         defaults.SessionAbsoluteLifetimeMinutes.Should().Be((int)TimeSpan.FromDays(30).TotalMinutes);
 
-        var updated = await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(1440, 60, 2880));
+        var updated = await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(1440, 60, 2880, 90, 7, 30));
         updated.RefreshTokenLifetimeMinutes.Should().Be(1440);
         updated.SessionIdleTimeoutMinutes.Should().Be(60);
         updated.SessionAbsoluteLifetimeMinutes.Should().Be(2880);
+        updated.SigningKeyRotationIntervalDays.Should().Be(90);
+        updated.SigningKeyGraceWindowDays.Should().Be(7);
+        updated.SigningKeyRetiredCleanupDays.Should().Be(30);
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()

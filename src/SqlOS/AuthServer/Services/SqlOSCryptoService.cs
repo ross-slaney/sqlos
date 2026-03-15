@@ -180,9 +180,66 @@ public sealed class SqlOSCryptoService
         return activeKey;
     }
 
-    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(CancellationToken cancellationToken = default)
+    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(TimeSpan? graceWindow = null, CancellationToken cancellationToken = default)
+    {
+        var cutoff = DateTime.UtcNow.Add(-(graceWindow ?? TimeSpan.FromDays(7)));
+        return await _context.Set<SqlOSSigningKey>()
+            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        var activeKey = await _context.Set<SqlOSSigningKey>()
+            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
+        if (activeKey != null)
+        {
+            activeKey.IsActive = false;
+            activeKey.RetiredAt = now;
+        }
+
+        using var rsa = RSA.Create(2048);
+        var newKey = new SqlOSSigningKey
+        {
+            Id = GenerateId("key"),
+            Kid = GenerateOpaqueToken(16),
+            PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
+            PrivateKeyPem = rsa.ExportPkcs8PrivateKeyPem(),
+            ActivatedAt = now,
+            IsActive = true
+        };
+        _context.Set<SqlOSSigningKey>().Add(newKey);
+        await _context.SaveChangesAsync(cancellationToken);
+        return newKey;
+    }
+
+    public async Task<bool> ShouldRotateSigningKeyAsync(TimeSpan rotationInterval, CancellationToken cancellationToken = default)
+    {
+        var activeKey = await _context.Set<SqlOSSigningKey>()
+            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
+        if (activeKey == null)
+            return true;
+        return DateTime.UtcNow - activeKey.ActivatedAt >= rotationInterval;
+    }
+
+    public async Task<int> CleanupRetiredSigningKeysAsync(TimeSpan retiredCleanupWindow, CancellationToken cancellationToken = default)
+    {
+        var cutoff = DateTime.UtcNow.Add(-retiredCleanupWindow);
+        var expired = await _context.Set<SqlOSSigningKey>()
+            .Where(x => !x.IsActive && x.RetiredAt != null && x.RetiredAt < cutoff)
+            .ToListAsync(cancellationToken);
+        if (expired.Count == 0)
+            return 0;
+        _context.Set<SqlOSSigningKey>().RemoveRange(expired);
+        await _context.SaveChangesAsync(cancellationToken);
+        return expired.Count;
+    }
+
+    public async Task<List<SqlOSSigningKey>> ListSigningKeysAsync(CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSSigningKey>()
-            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= DateTime.UtcNow.AddDays(-7))
+            .OrderByDescending(x => x.ActivatedAt)
             .ToListAsync(cancellationToken);
 
     public async Task<string> CreateAccessTokenAsync(
@@ -229,7 +286,7 @@ public sealed class SqlOSCryptoService
 
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken cancellationToken = default)
     {
-        var keys = await GetValidationSigningKeysAsync(cancellationToken);
+        var keys = await GetValidationSigningKeysAsync(cancellationToken: cancellationToken);
         if (keys.Count == 0)
         {
             return null;

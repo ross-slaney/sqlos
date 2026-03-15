@@ -236,6 +236,9 @@ public sealed class SqlOSSettings
     public int RefreshTokenLifetimeMinutes { get; set; }
     public int SessionIdleTimeoutMinutes { get; set; }
     public int SessionAbsoluteLifetimeMinutes { get; set; }
+    public int SigningKeyRotationIntervalDays { get; set; } = 90;
+    public int SigningKeyGraceWindowDays { get; set; } = 7;
+    public int SigningKeyRetiredCleanupDays { get; set; } = 30;
     public DateTime UpdatedAt { get; set; }
 }
 
