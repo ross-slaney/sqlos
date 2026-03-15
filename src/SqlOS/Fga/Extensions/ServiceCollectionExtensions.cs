@@ -23,9 +23,41 @@ public static class ServiceCollectionExtensions
             o.RootResourceName = options.RootResourceName;
             o.InitializeFunctions = options.InitializeFunctions;
             o.SeedCoreData = options.SeedCoreData;
-            o.SchemaYamlPath = options.SchemaYamlPath;
             o.DashboardPathPrefix = options.DashboardPathPrefix;
             o.TableNames = options.TableNames;
+            if (options.StartupSeedData != null)
+            {
+                o.Seed(builder =>
+                {
+                    foreach (var resourceType in options.StartupSeedData.ResourceTypes ?? [])
+                    {
+                        builder.ResourceType(resourceType.Id, resourceType.Name, resourceType.Description);
+                    }
+
+                    foreach (var permission in options.StartupSeedData.Permissions ?? [])
+                    {
+                        builder.Permission(
+                            permission.Id,
+                            permission.Key,
+                            permission.Name,
+                            permission.ResourceTypeId ?? throw new InvalidOperationException($"Seeded permission '{permission.Key}' is missing a resource type."),
+                            permission.Description);
+                    }
+
+                    foreach (var role in options.StartupSeedData.Roles ?? [])
+                    {
+                        builder.Role(role.Id, role.Key, role.Name, role.Description, role.IsVirtual);
+                    }
+
+                    foreach (var (roleKey, permissionKeys) in options.StartupSeedData.RolePermissions ?? [])
+                    {
+                        foreach (var permissionKey in permissionKeys)
+                        {
+                            builder.RolePermission(roleKey, permissionKey);
+                        }
+                    }
+                });
+            }
         });
 
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());

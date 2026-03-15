@@ -30,9 +30,10 @@ public sealed class SqlOSAuthServerBootstrapper
         _logger.LogInformation("Initializing SqlOS AuthServer...");
         await _schemaInitializer.EnsureSchemaAsync(cancellationToken);
         await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
-        await _adminService.EnsureDefaultClientAsync(cancellationToken);
         await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
         await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
+        await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
         await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         _logger.LogInformation("SqlOS AuthServer initialization complete.");

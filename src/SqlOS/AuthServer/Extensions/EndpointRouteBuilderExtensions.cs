@@ -50,7 +50,7 @@ public static class EndpointRouteBuilderExtensions
             {
                 if (string.Equals(context.Request.Query["prompt"], "login", StringComparison.Ordinal))
                 {
-                    authPageSessionService.SignOut(context);
+                    await authPageSessionService.SignOutAsync(context, cancellationToken);
                 }
 
                 var authorizationRequest = await authorizationServerService.CreateAuthorizationRequestAsync(
@@ -91,6 +91,7 @@ public static class EndpointRouteBuilderExtensions
                     null,
                     null,
                     null,
+                    authPrefix,
                     authorizationServerService,
                     cancellationToken);
 
@@ -105,6 +106,7 @@ public static class EndpointRouteBuilderExtensions
                     ex.Message,
                     null,
                     null,
+                    authPrefix,
                     authorizationServerService,
                     cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
@@ -123,6 +125,7 @@ public static class EndpointRouteBuilderExtensions
                 null,
                 null,
                 null,
+                authPrefix,
                 authorizationServerService,
                 cancellationToken);
             return Html(page);
@@ -174,6 +177,7 @@ public static class EndpointRouteBuilderExtensions
                 null,
                 null,
                 null,
+                authPrefix,
                 authorizationServerService,
                 cancellationToken);
             return Html(page);
@@ -230,6 +234,7 @@ public static class EndpointRouteBuilderExtensions
                         null,
                         null,
                         pendingToken,
+                        authPrefix,
                         authorizationServerService,
                         cancellationToken,
                         authentication.Organizations);
@@ -253,6 +258,7 @@ public static class EndpointRouteBuilderExtensions
                     ex.Message,
                     null,
                     null,
+                    authPrefix,
                     authorizationServerService,
                     cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
@@ -293,6 +299,7 @@ public static class EndpointRouteBuilderExtensions
                     "OIDC sign-in requires an active authorization request.",
                     null,
                     null,
+                    authPrefix,
                     authorizationServerService,
                     cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
@@ -314,6 +321,7 @@ public static class EndpointRouteBuilderExtensions
                 null,
                 null,
                 null,
+                authPrefix,
                 authorizationServerService,
                 cancellationToken);
             return Html(page);
@@ -366,6 +374,7 @@ public static class EndpointRouteBuilderExtensions
                     ex.Message,
                     displayName,
                     null,
+                    authPrefix,
                     authorizationServerService,
                     cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
@@ -378,7 +387,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthPageSessionService authPageSessionService,
             CancellationToken cancellationToken) =>
         {
-            authPageSessionService.SignOut(context);
+            await authPageSessionService.SignOutAsync(context, cancellationToken);
             var page = await BuildAuthPageViewModelAsync(
                 "logged-out",
                 null,
@@ -386,9 +395,34 @@ public static class EndpointRouteBuilderExtensions
                 null,
                 null,
                 null,
+                authPrefix,
                 authorizationServerService,
                 cancellationToken);
             return Html(page);
+        });
+
+        auth.MapGet("/logout", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            await authPageSessionService.SignOutAsync(context, cancellationToken);
+
+            var requestedReturnUrl = context.Request.Query["returnTo"].ToString();
+            if (string.IsNullOrWhiteSpace(requestedReturnUrl))
+            {
+                requestedReturnUrl = context.Request.Query["post_logout_redirect_uri"].ToString();
+            }
+
+            var redirectTarget = await authorizationServerService.ResolvePostLogoutRedirectAsync(
+                context,
+                requestedReturnUrl,
+                cancellationToken);
+
+            return redirectTarget == null
+                ? Results.Redirect($"{authPrefix}/logged-out")
+                : Results.Redirect(redirectTarget);
         });
 
         auth.MapPost("/token", async (
@@ -1021,6 +1055,7 @@ public static class EndpointRouteBuilderExtensions
         string? error,
         string? displayName,
         string? pendingToken,
+        string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
         CancellationToken cancellationToken,
         IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null)
@@ -1028,7 +1063,7 @@ public static class EndpointRouteBuilderExtensions
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
         var providerBasePath = authorizationRequestId == null
             ? null
-            : $"login/oidc/{{0}}?request={Uri.EscapeDataString(authorizationRequestId)}&email={Uri.EscapeDataString(email ?? string.Empty)}";
+            : $"{authPrefix}/login/oidc/{{0}}?request={Uri.EscapeDataString(authorizationRequestId)}&email={Uri.EscapeDataString(email ?? string.Empty)}";
         var providers = providerBasePath == null
             ? Array.Empty<SqlOSAuthPageProviderLink>()
             : (await authorizationServerService.ListEnabledOidcProvidersAsync(cancellationToken))
@@ -1041,6 +1076,7 @@ public static class EndpointRouteBuilderExtensions
         return new SqlOSAuthPageViewModel(
             mode,
             settings,
+            authPrefix,
             authorizationRequestId,
             email,
             displayName,

@@ -10,12 +10,25 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
     options.UseFGA(fga =>
     {
         fga.DashboardPathPrefix = "/sqlos/admin/fga";
+        fga.Seed(seed =>
+        {
+            seed.ResourceType("workspace", "Workspace");
+            seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
+            seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
+            seed.RolePermission("workspace_admin", "workspace.view");
+        });
     });
 
     options.UseAuthServer(auth =>
     {
         auth.BasePath = "/sqlos/auth";
         auth.Issuer = "https://localhost/sqlos/auth";
+        auth.SeedAuthPage(page =>
+        {
+            page.PageTitle = "Sign in";
+            page.PageSubtitle = "Secure your app-owned AI and MCP experience.";
+        });
+        auth.SeedBrowserClient("web", "Main Web App", "https://app.example.com/auth/callback");
     });
 });
 ```
@@ -73,6 +86,7 @@ That means:
 - consumer EF migrations do not own `SqlOS` tables
 - `UseSqlOSAsync()` applies pending library schema changes at startup
 - both `Fga` and `AuthServer` use the same library-managed bootstrap model
+- startup seeds are reapplied on boot for the records they manage
 
 ## Dashboard Paths
 

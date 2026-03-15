@@ -293,7 +293,7 @@ public sealed class OidcAuthIntegrationTests
             return existing;
         }
 
-        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", []));
+        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"]));
     }
 
     private static async Task ResetOidcStateAsync()

@@ -39,6 +39,7 @@ public static class AspireFixture
         var databaseName = $"SqlOSTest_{Guid.NewGuid():N}"[..30];
         SqlConnectionString = baseConnectionString.Replace("Database=sqlos-test", $"Database={databaseName}");
         Options = new SqlOSAuthServerOptions { Issuer = "https://tests/sqlos/auth", BasePath = "/sqlos/auth" };
+        Options.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         FgaOptions = new SqlOSFgaOptions();
 
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
@@ -75,7 +76,7 @@ public static class AspireFixture
         var crypto = new SqlOSCryptoService(SharedContext, Microsoft.Extensions.Options.Options.Create(Options));
         var admin = new SqlOSAdminService(SharedContext, Microsoft.Extensions.Options.Options.Create(Options), crypto);
         await crypto.EnsureActiveSigningKeyAsync();
-        await admin.EnsureDefaultClientAsync();
+        await admin.UpsertSeededClientsAsync();
 
         context.WriteLine($"SqlOS integration DB initialized: {databaseName}");
     }

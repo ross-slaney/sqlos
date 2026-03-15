@@ -17,14 +17,16 @@ public sealed class SqlOSAuthServiceTests
     public async Task LoginWithMultipleOrganizations_ReturnsPendingAuthToken()
     {
         using var context = CreateContext();
-        var options = Options.Create(new SqlOSAuthServerOptions());
+        var authOptions = new SqlOSAuthServerOptions();
+        authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+        var options = Options.Create(authOptions);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options);
         var auth = new SqlOSAuthService(context, options, admin, crypto, settings);
 
         await crypto.EnsureActiveSigningKeyAsync();
-        await admin.EnsureDefaultClientAsync();
+        await admin.UpsertSeededClientsAsync();
 
         var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
         var org1 = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Org One", null));
@@ -32,7 +34,7 @@ public sealed class SqlOSAuthServiceTests
         await admin.CreateMembershipAsync(org1.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
         await admin.CreateMembershipAsync(org2.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
 
-        var result = await auth.LoginWithPasswordAsync(new SqlOSPasswordLoginRequest("alice@example.com", "P@ssword123!", "default", null), new DefaultHttpContext());
+        var result = await auth.LoginWithPasswordAsync(new SqlOSPasswordLoginRequest("alice@example.com", "P@ssword123!", "test-client", null), new DefaultHttpContext());
 
         result.RequiresOrganizationSelection.Should().BeTrue();
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();

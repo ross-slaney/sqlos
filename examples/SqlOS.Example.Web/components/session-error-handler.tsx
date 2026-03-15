@@ -1,20 +1,17 @@
 "use client";
 
-import { signOut, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useEffect } from "react";
+import { signOutWithSqlOS } from "@/lib/sqlos-signout";
 
 export function SessionErrorHandler() {
   const { data: session } = useSession();
-  const router = useRouter();
 
   useEffect(() => {
     if (session?.error === "RefreshAccessTokenError") {
-      void signOut({ redirect: false }).then(() => {
-        router.push("/login");
-      });
+      void signOutWithSqlOS("/login");
     }
-  }, [router, session]);
+  }, [session]);
 
   return null;
 }

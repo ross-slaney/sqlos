@@ -42,14 +42,14 @@ public static class SqlOSAuthPageRenderer
             ? string.Empty
             : $"<div class=\"callout info\">{Html(model.Info)}</div>";
         var signupLink = model.Settings.EnablePasswordSignup
-            ? $"<a class=\"secondary-link\" href=\"signup{BuildRequestQuery(model.AuthorizationRequestId)}\">Create an account</a>"
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Create an account</a>"
             : string.Empty;
-        var loginLink = $"<a class=\"secondary-link\" href=\"login{BuildRequestQuery(model.AuthorizationRequestId)}\">Back to sign in</a>";
+        var loginLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Back to sign in</a>";
 
         var content = model.Mode switch
         {
             "signup" => $$"""
-                <form method="post" action="signup/submit">
+                <form method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
                   {{requestIdInput}}
                   <input type="hidden" name="mode" value="{{encodedNextMode}}" />
                   <label>Display name<input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" required /></label>
@@ -61,7 +61,7 @@ public static class SqlOSAuthPageRenderer
                 <div class="footer-links">{{loginLink}}</div>
                 """,
             "password" => $$"""
-                <form method="post" action="login/password">
+                <form method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
                   {{requestIdInput}}
                   <label>Email<input name="email" type="email" value="{{emailValue}}" required /></label>
                   <label>Password<input name="password" type="password" required /></label>
@@ -72,17 +72,17 @@ public static class SqlOSAuthPageRenderer
                 <div class="footer-links">{{signupLink}}</div>
                 """,
             "organization" => $$"""
-                <form method="post" action="login/select-organization" class="org-picker">
+                <form method="post" action="{{Html(AuthPath(model, "/login/select-organization"))}}" class="org-picker">
                   <input type="hidden" name="pendingToken" value="{{Html(model.PendingToken ?? string.Empty)}}" />
                   {{organizationOptions}}
                 </form>
                 """,
             "logged-out" => $$"""
                 <div class="callout info">You are signed out.</div>
-                <div class="footer-links"><a class="secondary-link" href="login">Sign in again</a></div>
+                <div class="footer-links"><a class="secondary-link" href="{{Html(AuthPath(model, "/login"))}}">Sign in again</a></div>
                 """,
             _ => $$"""
-                <form method="post" action="login/identify">
+                <form method="post" action="{{Html(AuthPath(model, "/login/identify"))}}">
                   {{requestIdInput}}
                   <label>Email<input name="email" type="email" value="{{emailValue}}" required /></label>
                   <button type="submit">Continue</button>
@@ -160,6 +160,13 @@ public static class SqlOSAuthPageRenderer
     private static string BuildRequestQuery(string? requestId)
         => string.IsNullOrWhiteSpace(requestId) ? string.Empty : $"?request={Uri.EscapeDataString(requestId)}";
 
+    private static string AuthPath(SqlOSAuthPageViewModel model, string path, string? requestId = null)
+    {
+        var basePath = model.BasePath.TrimEnd('/');
+        var normalizedPath = path.StartsWith('/') ? path : $"/{path}";
+        return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId)}";
+    }
+
     private static string Html(string value) => WebUtility.HtmlEncode(value);
 
     private static string Css(string? value, string fallback)
@@ -169,6 +176,7 @@ public static class SqlOSAuthPageRenderer
 public sealed record SqlOSAuthPageViewModel(
     string Mode,
     SqlOSAuthPageSettingsDto Settings,
+    string BasePath,
     string? AuthorizationRequestId,
     string? Email,
     string? DisplayName,

@@ -30,10 +30,10 @@ public static class ApplicationBuilderExtensions
             await seeder.SeedCoreAsync();
         }
 
-        if (!string.IsNullOrEmpty(options.SchemaYamlPath) && File.Exists(options.SchemaYamlPath))
+        if (options.StartupSeedData != null)
         {
             var seeder = scope.ServiceProvider.GetRequiredService<SqlOSFgaSeedService>();
-            await seeder.SeedFromYamlFileAsync(options.SchemaYamlPath);
+            await seeder.SeedAuthorizationDataAsync(options.StartupSeedData);
         }
     }
 

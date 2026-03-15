@@ -27,7 +27,7 @@ public sealed class SqlOSDashboardMiddleware
         _isDevelopment = environment.IsDevelopment();
         _options = options;
         _sessionService = sessionService;
-        _fileProvider = CreateFileProvider(environment);
+        _fileProvider = CreateFileProvider();
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -137,30 +137,8 @@ public sealed class SqlOSDashboardMiddleware
         _ => "application/octet-stream"
     };
 
-    private static IFileProvider CreateFileProvider(IHostEnvironment environment)
-    {
-        var sourceRoot = TryFindDevelopmentAssetRoot(environment.ContentRootPath, Path.Combine("src", "SqlOS", "AuthServer", "Dashboard", "wwwroot"));
-        if (environment.IsDevelopment() && sourceRoot != null)
-        {
-            return new PhysicalFileProvider(sourceRoot);
-        }
-
-        return new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "AuthServer/Dashboard/wwwroot");
-    }
-
-    private static string? TryFindDevelopmentAssetRoot(string contentRootPath, string relativeAssetPath)
-    {
-        for (var current = new DirectoryInfo(contentRootPath); current != null; current = current.Parent)
-        {
-            var candidate = Path.Combine(current.FullName, relativeAssetPath);
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
+    private static IFileProvider CreateFileProvider()
+        => new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "AuthServer/Dashboard/wwwroot");
 
     private string BuildLoginRedirectPath(HttpContext context)
     {

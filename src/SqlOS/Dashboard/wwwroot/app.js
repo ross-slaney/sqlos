@@ -1517,17 +1517,20 @@
             <div class="panel-grid">
                 <section class="panel">
                     <h2>Create Client</h2>
-                    <p>Register a client ID and its allowed redirect URIs.</p>
+                    <p>Register a client ID and its allowed redirect URIs. Browser PKCE clients must include at least one redirect URI.</p>
                     <form id="create-client-form">
                         <input name="clientId" placeholder="Client ID" required>
                         <input name="name" placeholder="Name" required>
                         <input name="audience" placeholder="Audience" value="sqlos">
-                        <textarea name="redirectUris" placeholder="One redirect URI per line"></textarea>
+                        <textarea name="redirectUris" placeholder="One redirect URI per line" required></textarea>
                         <button type="submit">Create client</button>
                     </form>
                 </section>
                 <section class="panel">
                     <h2>Clients</h2>
+                    <div class="callout">
+                        <strong>Startup seed guidance:</strong> Clients marked as startup managed are defined in application code and will be restored on restart. Dashboard-created clients remain editable.
+                    </div>
                     ${renderList(
                         clients,
                         item => `
@@ -1535,6 +1538,7 @@
                             ${renderMetadataRows([
                                 { label: "Client ID", value: item.clientId },
                                 { label: "Audience", value: item.audience },
+                                { label: "Startup managed", value: item.managedByStartupSeed ? "Yes" : "No" },
                                 {
                                     label: "Redirect URIs",
                                     value: parseJsonArray(item.redirectUris).length > 0 ? "" : "none",
@@ -1901,8 +1905,8 @@
         const enabledCredentialTypes = Array.isArray(settings.enabledCredentialTypes)
             ? settings.enabledCredentialTypes.join(", ")
             : "";
-        const loginUrl = `${authServerBasePath}/login`;
-        const signupUrl = `${authServerBasePath}/signup`;
+        const loginUrl = new URL(`${authServerBasePath}/login`, window.location.origin).toString();
+        const signupUrl = new URL(`${authServerBasePath}/signup`, window.location.origin).toString();
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -1911,6 +1915,7 @@
                     <section class="panel">
                         <h2>Auth Page Settings</h2>
                         <p>These values control the hosted login and signup experience. The page is served directly from the SqlOS auth server, so changes show up without app-specific frontend work.</p>
+                        ${settings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These values are seeded from application startup and will be reapplied on restart.</div>` : ""}
                         <form id="auth-page-settings-form">
                             <input name="pageTitle" placeholder="Page title" value="${esc(settings.pageTitle || "")}" required>
                             <input name="pageSubtitle" placeholder="Subtitle" value="${esc(settings.pageSubtitle || "")}" required>

@@ -22,7 +22,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/google"]));
         var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing User", "link@example.com", null));
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Google,
@@ -65,7 +65,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/microsoft"]));
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Microsoft,
             "Microsoft",
@@ -106,7 +106,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/apple"]));
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Apple,
             "Apple",
@@ -149,7 +149,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/custom"]));
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Custom,
             "Acme OIDC",
@@ -198,7 +198,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/google"]));
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Google,
             "Google",
@@ -239,7 +239,7 @@ public sealed class SqlOSOidcAuthServiceTests
         using var context = CreateContext();
         var (admin, oidc) = CreateServices(context);
 
-        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", []));
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/google"]));
         var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Multi Org", "multi@example.com", null));
         var firstOrg = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("First", null));
         var secondOrg = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Second", null));
@@ -266,7 +266,7 @@ public sealed class SqlOSOidcAuthServiceTests
             null,
             null));
 
-        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
             connection.Id,
             "example-web",
             "https://app.example.local/callback/google",
@@ -275,8 +275,8 @@ public sealed class SqlOSOidcAuthServiceTests
             "nonce-multi",
             null));
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*zero or one active organization membership*");
+        result.Email.Should().Be("multi@example.com");
+        result.OrganizationId.Should().BeNull();
     }
 
     private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(TestSqlOSInMemoryDbContext context)

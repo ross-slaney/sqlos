@@ -48,9 +48,10 @@ public sealed class SqlOSBootstrapper
         {
             await _authSchemaInitializer.EnsureSchemaAsync(cancellationToken);
             await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
-            await _adminService.EnsureDefaultClientAsync(cancellationToken);
             await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
             await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+            await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
+            await _adminService.UpsertSeededClientsAsync(cancellationToken);
             await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
             await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         }
@@ -69,9 +70,9 @@ public sealed class SqlOSBootstrapper
                 await _fgaSeedService.SeedCoreAsync(cancellationToken);
             }
 
-            if (!string.IsNullOrWhiteSpace(_options.Fga.SchemaYamlPath) && File.Exists(_options.Fga.SchemaYamlPath))
+            if (_options.Fga.StartupSeedData != null)
             {
-                await _fgaSeedService.SeedFromYamlFileAsync(_options.Fga.SchemaYamlPath, cancellationToken);
+                await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
             }
         }
 

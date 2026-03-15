@@ -24,7 +24,7 @@ public sealed class AuthServiceIntegrationTests
             $"alice-{Guid.NewGuid():N}@example.com",
             "P@ssword123!",
             "Acme Corp",
-            "default",
+            "test-client",
             null), http);
 
         signup.Tokens.Should().NotBeNull();
@@ -54,7 +54,7 @@ public sealed class AuthServiceIntegrationTests
         await admin.CreateMembershipAsync(org1.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
         await admin.CreateMembershipAsync(org2.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
 
-        var result = await auth.LoginWithPasswordAsync(new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "default", null), new DefaultHttpContext());
+        var result = await auth.LoginWithPasswordAsync(new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null), new DefaultHttpContext());
         result.RequiresOrganizationSelection.Should().BeTrue();
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();
         result.Organizations.Should().HaveCount(2);

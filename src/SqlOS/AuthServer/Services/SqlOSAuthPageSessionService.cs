@@ -80,8 +80,14 @@ public sealed class SqlOSAuthPageSessionService
         });
     }
 
-    public void SignOut(HttpContext httpContext)
+    public async Task SignOutAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
+        var rawToken = httpContext.Request.Cookies[CookieName];
+        if (!string.IsNullOrWhiteSpace(rawToken))
+        {
+            await _cryptoService.ConsumeTemporaryTokenAsync("auth_page_session", rawToken, cancellationToken);
+        }
+
         httpContext.Response.Cookies.Delete(CookieName, new CookieOptions
         {
             HttpOnly = true,

@@ -385,6 +385,52 @@ public sealed class SqlOSAuthorizationServerService
     public async Task<SqlOSAuthPageSettingsDto> GetAuthPageSettingsAsync(CancellationToken cancellationToken = default)
         => await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
 
+    public async Task<string?> ResolvePostLogoutRedirectAsync(HttpContext httpContext, string? requestedUrl, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(requestedUrl))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(requestedUrl, UriKind.Relative, out var relativeUri) && !relativeUri.IsAbsoluteUri)
+        {
+            var relativeValue = requestedUrl.Trim();
+            return relativeValue.StartsWith("/", StringComparison.Ordinal) ? relativeValue : $"/{relativeValue}";
+        }
+
+        if (!Uri.TryCreate(requestedUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            return null;
+        }
+
+        if (!string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var allowedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            GetPublicOrigin(httpContext)
+        };
+
+        var configuredClientRedirectUris = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .Select(x => x.RedirectUrisJson)
+            .ToListAsync(cancellationToken);
+
+        foreach (var redirectUri in configuredClientRedirectUris.SelectMany(ParseJsonArray))
+        {
+            if (Uri.TryCreate(redirectUri, UriKind.Absolute, out var parsedRedirectUri))
+            {
+                allowedOrigins.Add(parsedRedirectUri.GetLeftPart(UriPartial.Authority));
+            }
+        }
+
+        var requestedOrigin = absoluteUri.GetLeftPart(UriPartial.Authority);
+        return allowedOrigins.Contains(requestedOrigin) ? absoluteUri.ToString() : null;
+    }
+
     public string GetPublicOrigin(HttpContext httpContext)
     {
         if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))

@@ -54,6 +54,46 @@ public sealed class SqlOSSettingsService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task UpsertSeededAuthPageSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.AuthPageSeed == null)
+        {
+            return;
+        }
+
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        if (!string.Equals(_options.AuthPageSeed.Layout, "split", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(_options.AuthPageSeed.Layout, "stacked", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Auth page layout must be either 'split' or 'stacked'.");
+        }
+
+        var enabledCredentialTypes = (_options.AuthPageSeed.EnabledCredentialTypes ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (enabledCredentialTypes.Length == 0)
+        {
+            enabledCredentialTypes = ["password"];
+        }
+
+        settings.LogoBase64 = string.IsNullOrWhiteSpace(_options.AuthPageSeed.LogoBase64) ? null : _options.AuthPageSeed.LogoBase64.Trim();
+        settings.PrimaryColor = RequireColor(_options.AuthPageSeed.PrimaryColor, nameof(_options.AuthPageSeed.PrimaryColor));
+        settings.AccentColor = RequireColor(_options.AuthPageSeed.AccentColor, nameof(_options.AuthPageSeed.AccentColor));
+        settings.BackgroundColor = RequireColor(_options.AuthPageSeed.BackgroundColor, nameof(_options.AuthPageSeed.BackgroundColor));
+        settings.Layout = _options.AuthPageSeed.Layout.Trim().ToLowerInvariant();
+        settings.PageTitle = RequireText(_options.AuthPageSeed.PageTitle, nameof(_options.AuthPageSeed.PageTitle));
+        settings.PageSubtitle = RequireText(_options.AuthPageSeed.PageSubtitle, nameof(_options.AuthPageSeed.PageSubtitle));
+        settings.EnablePasswordSignup = _options.AuthPageSeed.EnablePasswordSignup;
+        settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(enabledCredentialTypes);
+        settings.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<SqlOSSecuritySettingsDto> GetSecuritySettingsAsync(CancellationToken cancellationToken = default)
     {
         await EnsureDefaultSettingsAsync(cancellationToken);
@@ -110,7 +150,8 @@ public sealed class SqlOSSettingsService
             settings.PageSubtitle,
             settings.EnablePasswordSignup,
             DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
-            settings.UpdatedAt);
+            settings.UpdatedAt,
+            _options.AuthPageSeed != null);
     }
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
@@ -160,6 +201,26 @@ public sealed class SqlOSSettingsService
         {
             return ["password"];
         }
+    }
+
+    private static string RequireColor(string value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"{name} is required for SqlOS auth page seeding.");
+        }
+
+        return value.Trim();
+    }
+
+    private static string RequireText(string value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"{name} is required for SqlOS auth page seeding.");
+        }
+
+        return value.Trim();
     }
 }
 

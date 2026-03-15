@@ -28,10 +28,18 @@ public static class ApplicationBuilderExtensions
 
     public static IApplicationBuilder UseSqlOSAuthServerDashboard(this IApplicationBuilder app, string? pathPrefix = null)
     {
+        var options = app.ApplicationServices.GetRequiredService<IOptions<SqlOSOptions>>().Value;
         var authOptions = app.ApplicationServices.GetRequiredService<IOptions<SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions>>().Value;
         var environment = app.ApplicationServices.GetRequiredService<IHostEnvironment>();
         var prefix = (pathPrefix ?? "/sqlos/admin/auth").TrimEnd('/');
 
+        // Root dashboard at /sqlos serves the shell and login page; sub-dashboards redirect there when unauthorized
+        var rootPrefix = prefix.Contains("/admin/auth", StringComparison.OrdinalIgnoreCase)
+            ? prefix[..prefix.IndexOf("/admin/auth", StringComparison.OrdinalIgnoreCase)].TrimEnd('/')
+            : "/sqlos";
+        if (string.IsNullOrEmpty(rootPrefix)) rootPrefix = "/sqlos";
+
+        app.UseMiddleware<RootDashboardMiddleware>(rootPrefix, environment, options.Dashboard);
         app.UseMiddleware<AuthServerDashboardMiddleware>(prefix, environment, authOptions.Dashboard);
         return app;
     }

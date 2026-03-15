@@ -19,6 +19,43 @@ public class SqlOSAuthServerOptions
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
     public SqlOSAuthServerDashboardOptions Dashboard { get; set; } = new();
+    public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
+    public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
+
+    public SqlOSAuthServerOptions SeedAuthPage(Action<SqlOSAuthPageSeedOptions> configure)
+    {
+        var seed = AuthPageSeed ?? new SqlOSAuthPageSeedOptions();
+        configure(seed);
+        AuthPageSeed = seed;
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedClient(Action<SqlOSClientSeedOptions> configure)
+    {
+        var seed = new SqlOSClientSeedOptions();
+        configure(seed);
+        ClientSeeds.Add(seed);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedBrowserClient(string clientId, string name, params string[] redirectUris)
+    {
+        SeedClient(client =>
+        {
+            client.ClientId = clientId;
+            client.Name = name;
+            client.RedirectUris = redirectUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+        return this;
+    }
 }
 
 public class SqlOSAuthServerDashboardOptions

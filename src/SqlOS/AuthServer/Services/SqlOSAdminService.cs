@@ -54,31 +54,51 @@ public sealed class SqlOSAdminService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<SqlOSClientApplication> EnsureDefaultClientAsync(CancellationToken cancellationToken = default)
+    public async Task UpsertSeededClientsAsync(CancellationToken cancellationToken = default)
     {
-        var existing = await _context.Set<SqlOSClientApplication>()
-            .FirstOrDefaultAsync(x => x.ClientId == "default", cancellationToken);
-        if (existing != null)
+        if (_options.ClientSeeds.Count == 0)
         {
-            return existing;
+            return;
         }
 
-        var client = new SqlOSClientApplication
+        foreach (var seed in _options.ClientSeeds)
         {
-            Id = _cryptoService.GenerateId("cli"),
-            ClientId = "default",
-            Name = "Default Client",
-            Audience = _options.DefaultAudience,
-            ClientType = "public_pkce",
-            RequirePkce = true,
-            AllowedScopesJson = "[]",
-            RedirectUrisJson = "[]",
-            CreatedAt = DateTime.UtcNow,
-            IsActive = true
-        };
-        _context.Set<SqlOSClientApplication>().Add(client);
+            var normalized = NormalizeSeededClient(seed);
+            var existing = await _context.Set<SqlOSClientApplication>()
+                .FirstOrDefaultAsync(x => x.ClientId == normalized.ClientId, cancellationToken);
+
+            if (existing == null)
+            {
+                _context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+                {
+                    Id = _cryptoService.GenerateId("cli"),
+                    ClientId = normalized.ClientId,
+                    Name = normalized.Name,
+                    Description = normalized.Description,
+                    Audience = normalized.Audience,
+                    ClientType = normalized.ClientType,
+                    RequirePkce = normalized.RequirePkce,
+                    AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
+                    RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
+                    CreatedAt = DateTime.UtcNow,
+                    IsFirstParty = normalized.IsFirstParty,
+                    IsActive = normalized.IsActive
+                });
+                continue;
+            }
+
+            existing.Name = normalized.Name;
+            existing.Description = normalized.Description;
+            existing.Audience = normalized.Audience;
+            existing.ClientType = normalized.ClientType;
+            existing.RequirePkce = normalized.RequirePkce;
+            existing.AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes);
+            existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
+            existing.IsFirstParty = normalized.IsFirstParty;
+            existing.IsActive = normalized.IsActive;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
-        return client;
     }
 
     public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
@@ -203,27 +223,25 @@ public sealed class SqlOSAdminService
 
     public async Task<SqlOSClientApplication> CreateClientAsync(SqlOSCreateClientRequest request, CancellationToken cancellationToken = default)
     {
-        if (await _context.Set<SqlOSClientApplication>().AnyAsync(x => x.ClientId == request.ClientId, cancellationToken))
+        var normalized = NormalizeClientRequest(request);
+
+        if (await _context.Set<SqlOSClientApplication>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken))
         {
-            throw new InvalidOperationException($"Client '{request.ClientId}' already exists.");
+            throw new InvalidOperationException($"Client '{normalized.ClientId}' already exists.");
         }
 
         var client = new SqlOSClientApplication
         {
             Id = _cryptoService.GenerateId("cli"),
-            ClientId = request.ClientId,
-            Name = request.Name,
-            Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
-            Audience = request.Audience,
-            ClientType = string.IsNullOrWhiteSpace(request.ClientType) ? "public_pkce" : request.ClientType.Trim(),
-            RequirePkce = request.RequirePkce,
-            AllowedScopesJson = JsonSerializer.Serialize((request.AllowedScopes ?? new List<string>())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x.Trim())
-                .Distinct(StringComparer.Ordinal)
-                .ToList()),
-            IsFirstParty = request.IsFirstParty,
-            RedirectUrisJson = JsonSerializer.Serialize(request.RedirectUris),
+            ClientId = normalized.ClientId,
+            Name = normalized.Name,
+            Description = normalized.Description,
+            Audience = normalized.Audience,
+            ClientType = normalized.ClientType,
+            RequirePkce = normalized.RequirePkce,
+            AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
+            IsFirstParty = normalized.IsFirstParty,
+            RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
             CreatedAt = DateTime.UtcNow,
             IsActive = true
         };
@@ -458,15 +476,13 @@ public sealed class SqlOSAdminService
 
     public async Task<SqlOSClientApplication> RequireClientAsync(string? clientId, string? redirectUri, CancellationToken cancellationToken = default)
     {
-        SqlOSClientApplication? client;
         if (string.IsNullOrWhiteSpace(clientId))
         {
-            client = await _context.Set<SqlOSClientApplication>().FirstOrDefaultAsync(x => x.ClientId == "default", cancellationToken);
+            throw new InvalidOperationException("Client application is required.");
         }
-        else
-        {
-            client = await _context.Set<SqlOSClientApplication>().FirstOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
-        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
 
         if (client == null || !client.IsActive)
         {
@@ -475,8 +491,8 @@ public sealed class SqlOSAdminService
 
         if (!string.IsNullOrWhiteSpace(redirectUri))
         {
-            var redirectUris = JsonSerializer.Deserialize<List<string>>(client.RedirectUrisJson) ?? new List<string>();
-            if (redirectUris.Count > 0 && !redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+            var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
+            if (!redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Redirect URI is not allowed for this client.");
             }
@@ -660,8 +676,17 @@ public sealed class SqlOSAdminService
     }
 
     public async Task<List<object>> ListClientsAsync(CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSClientApplication>()
+    {
+        var managedClientIds = _options.ClientSeeds
+            .Select(static seed => seed.ClientId)
+            .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var clients = await _context.Set<SqlOSClientApplication>()
             .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        return clients
             .Select(x => new
             {
                 x.Id,
@@ -674,10 +699,12 @@ public sealed class SqlOSAdminService
                 AllowedScopes = x.AllowedScopesJson,
                 x.IsFirstParty,
                 RedirectUris = x.RedirectUrisJson,
-                x.IsActive
+                x.IsActive,
+                ManagedByStartupSeed = managedClientIds.Contains(x.ClientId)
             })
             .Cast<object>()
-            .ToListAsync(cancellationToken);
+            .ToList();
+    }
 
     public async Task<List<object>> ListOidcConnectionsAsync(CancellationToken cancellationToken = default)
     {
@@ -1227,6 +1254,104 @@ public sealed class SqlOSAdminService
             null);
     }
 
+    private NormalizedClientDefinition NormalizeSeededClient(SqlOSClientSeedOptions seed)
+        => NormalizeClientDefinition(
+            seed.ClientId,
+            seed.Name,
+            seed.Audience,
+            seed.RedirectUris,
+            seed.Description,
+            seed.AllowedScopes,
+            seed.RequirePkce,
+            seed.IsFirstParty,
+            seed.ClientType,
+            seed.IsActive);
+
+    private NormalizedClientDefinition NormalizeClientRequest(SqlOSCreateClientRequest request)
+        => NormalizeClientDefinition(
+            request.ClientId,
+            request.Name,
+            request.Audience,
+            request.RedirectUris,
+            request.Description,
+            request.AllowedScopes,
+            request.RequirePkce,
+            request.IsFirstParty,
+            request.ClientType,
+            true);
+
+    private NormalizedClientDefinition NormalizeClientDefinition(
+        string clientId,
+        string name,
+        string? audience,
+        IEnumerable<string>? redirectUris,
+        string? description,
+        IEnumerable<string>? allowedScopes,
+        bool requirePkce,
+        bool isFirstParty,
+        string? clientType,
+        bool isActive)
+    {
+        var normalizedClientId = RequireText(clientId, nameof(clientId));
+        var normalizedName = RequireText(name, nameof(name));
+        var normalizedAudience = string.IsNullOrWhiteSpace(audience)
+            ? _options.DefaultAudience
+            : audience.Trim();
+        var normalizedClientType = string.IsNullOrWhiteSpace(clientType)
+            ? "public_pkce"
+            : clientType.Trim();
+        var normalizedRedirectUris = (redirectUris ?? [])
+            .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+            .Select(static uri => uri.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedRedirectUris.Count == 0)
+        {
+            throw new InvalidOperationException($"Client '{normalizedClientId}' must define at least one redirect URI.");
+        }
+
+        var normalizedAllowedScopes = (allowedScopes ?? [])
+            .Where(static scope => !string.IsNullOrWhiteSpace(scope))
+            .Select(static scope => scope.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return new NormalizedClientDefinition(
+            normalizedClientId,
+            normalizedName,
+            normalizedAudience,
+            normalizedRedirectUris,
+            string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            normalizedAllowedScopes,
+            normalizedClientType,
+            requirePkce,
+            isFirstParty,
+            isActive);
+    }
+
+    private static string RequireText(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"{name} is required.");
+        }
+
+        return value.Trim();
+    }
+
+    private static List<string> DeserializeJsonList(string? json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json ?? "[]") ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,
         string SingleSignOnUrl,
@@ -1247,4 +1372,16 @@ public sealed class SqlOSAdminService
         bool UseUserInfo,
         string? AppleTeamId,
         string? AppleKeyId);
+
+    private sealed record NormalizedClientDefinition(
+        string ClientId,
+        string Name,
+        string Audience,
+        List<string> RedirectUris,
+        string? Description,
+        List<string> AllowedScopes,
+        string ClientType,
+        bool RequirePkce,
+        bool IsFirstParty,
+        bool IsActive);
 }

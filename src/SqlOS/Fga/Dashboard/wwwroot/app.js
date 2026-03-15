@@ -108,49 +108,6 @@
         return map[typeId] || 'users';
     }
 
-    // Export Schema button
-    $('#export-schema-btn')?.addEventListener('click', async () => {
-        try {
-            const res = await fetch(`${basePath}/api/schema/export`);
-            if (!res.ok) throw new Error('Export failed');
-            const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'sqlzibar-schema.yaml';
-            a.click();
-            URL.revokeObjectURL(a.href);
-        } catch (err) {
-            alert('Failed to export schema: ' + (err.message || 'Unknown error'));
-        }
-    });
-
-    // Import Schema button
-    $('#import-schema-btn')?.addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.yaml,.yml';
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            try {
-                const yaml = await file.text();
-                const res = await fetch(`${basePath}/api/schema/import`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-yaml' },
-                    body: yaml
-                });
-                const result = await res.json();
-                if (!res.ok) throw new Error(result.error || 'Import failed');
-                alert('Schema imported successfully!');
-                loadStats();
-                handleRoute();
-            } catch (err) {
-                alert('Failed to import schema: ' + (err.message || 'Unknown error'));
-            }
-        };
-        input.click();
-    });
-
     // Load stats
     async function loadStats() {
         const stats = await api('stats');
@@ -200,6 +157,10 @@
         return `<div class="search-box"><input type="text" placeholder="${placeholder}" id="${id}"></div>`;
     }
 
+    function renderSeedNotice() {
+        return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, roles, and permissions defined in startup code are reapplied on boot. Custom roles and permissions created later are preserved.</div>`;
+    }
+
     // --- Resource Tree (lazy-loading) ---
 
     let treeNodes = new Map();
@@ -245,7 +206,7 @@
     }
 
     function renderResourceTree() {
-        content.innerHTML = `<div class="card"><h3 style="margin-bottom:1rem">Resource Hierarchy</h3><div id="tree"></div></div>`;
+        content.innerHTML = `${renderSeedNotice()}<div class="card"><h3 style="margin-bottom:1rem">Resource Hierarchy</h3><div id="tree"></div></div>`;
         $('#tree').innerHTML = treeRootIds.map(id => renderTreeNode(id)).join('');
         bindTreeEvents();
     }
@@ -813,7 +774,7 @@
         const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
         const result = await api(`grants?${params}`);
 
-        content.innerHTML = `<div class="card">
+        content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('grants-search', 'Search grants...')}</div>
                 <button class="btn-primary btn-sm" id="add-grant-btn">Add Grant</button>
@@ -865,7 +826,7 @@
         const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
         const result = await api(`roles?${params}`);
 
-        content.innerHTML = `<div class="card">
+        content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('roles-search', 'Search roles...')}</div>
                 <button class="btn-primary btn-sm" id="create-role-btn">Create Role</button>
@@ -1080,7 +1041,7 @@
             api('resource-types?pageSize=100')
         ]);
 
-        content.innerHTML = `<div class="card">
+        content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('perm-search', 'Search permissions...')}</div>
                 <button class="btn-primary btn-sm" id="create-perm-btn">Create Permission</button>

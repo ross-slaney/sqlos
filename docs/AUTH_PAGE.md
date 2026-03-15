@@ -35,6 +35,12 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
         auth.BasePath = "/sqlos/auth";
         auth.PublicOrigin = "https://app.example.com";
         auth.Issuer = "https://app.example.com/sqlos/auth";
+        auth.SeedAuthPage(page =>
+        {
+            page.PageTitle = "Sign in";
+            page.PageSubtitle = "Use the hosted SqlOS auth page for your first-party browser app.";
+        });
+        auth.SeedBrowserClient("web", "Main Web App", "https://app.example.com/auth/callback");
     });
 
     options.UseFGA();
@@ -85,6 +91,8 @@ The auth dashboard now includes:
 - `Auth Page`: title, subtitle, colors, layout, signup toggle, base64 logo upload
 - `Authorization Server`: standards-facing metadata and URL references
 - `Providers`: OIDC and SAML connection management
+
+Startup-seeded clients and auth-page settings are marked in the dashboard. They remain editable for inspection, but startup code reapplies them on restart.
 
 ## Notes
 

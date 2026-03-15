@@ -8,7 +8,6 @@ using SqlOS.Example.Api.Endpoints;
 using SqlOS.Example.Api.FgaRetail.Endpoints;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.Middleware;
-using SqlOS.Example.Api.Seeding;
 using SqlOS.Example.Api.Services;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
@@ -31,6 +30,8 @@ builder.Services.AddDbContext<ExampleAppDbContext>(options =>
 builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
 {
     options.DashboardBasePath = "/sqlos";
+    var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
+    var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? "http://localhost:3000/auth/callback";
 
     if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
     {
@@ -53,14 +54,61 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
     {
         auth.BasePath = "/sqlos/auth";
         auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
+        auth.SeedAuthPage(page =>
+        {
+            page.PageTitle = "Sign in";
+            page.PageSubtitle = "Use the hosted SqlOS auth page to sign in to the example application.";
+            page.PrimaryColor = "#2563eb";
+            page.AccentColor = "#0f172a";
+            page.BackgroundColor = "#f8fafc";
+            page.Layout = "split";
+            page.EnablePasswordSignup = true;
+            page.EnabledCredentialTypes = ["password"];
+        });
+        auth.SeedBrowserClient(
+            exampleClientId,
+            "Example Web Client",
+            exampleCallbackUrl,
+            "https://client.example.local/callback");
     });
     options.UseFGA(fga =>
     {
         fga.DashboardPathPrefix = "/sqlos/admin/fga";
+        fga.Seed(seed =>
+        {
+            seed.ResourceType(
+                ExampleFgaService.OrganizationResourceTypeId,
+                "Organization",
+                "Organization root for example workspace access.");
+            seed.ResourceType(
+                ExampleFgaService.WorkspaceResourceTypeId,
+                "Workspace",
+                "Workspace resources in the example application.");
+            seed.Permission(
+                "perm_workspace_view",
+                ExampleFgaService.WorkspaceViewPermission,
+                "View workspaces",
+                ExampleFgaService.WorkspaceResourceTypeId);
+            seed.Permission(
+                "perm_workspace_manage",
+                ExampleFgaService.WorkspaceManagePermission,
+                "Manage workspaces",
+                ExampleFgaService.WorkspaceResourceTypeId);
+            seed.Role(
+                "role_org_member",
+                ExampleFgaService.OrgMemberRole,
+                "Organization Member");
+            seed.Role(
+                "role_org_admin",
+                ExampleFgaService.OrgAdminRole,
+                "Organization Admin");
+            seed.RolePermission(ExampleFgaService.OrgMemberRole, ExampleFgaService.WorkspaceViewPermission);
+            seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceViewPermission);
+            seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceManagePermission);
+        });
     });
 });
 
-builder.Services.AddScoped<ExampleSeedService>();
 builder.Services.AddScoped<ExampleFgaService>();
 builder.Services.AddScoped<RetailSeedService>();
 builder.Services.AddCors(options =>
@@ -102,7 +150,6 @@ await app.UseSqlOSAsync();
 
 using (var scope = app.Services.CreateScope())
 {
-    await scope.ServiceProvider.GetRequiredService<ExampleSeedService>().SeedAsync();
     await scope.ServiceProvider.GetRequiredService<RetailSeedService>().SeedAsync();
 }
 

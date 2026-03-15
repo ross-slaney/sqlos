@@ -281,7 +281,8 @@ public sealed record SqlOSAuthPageSettingsDto(
     string PageSubtitle,
     bool EnablePasswordSignup,
     string[] EnabledCredentialTypes,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    bool ManagedByStartupSeed);
 
 public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string? LogoBase64,

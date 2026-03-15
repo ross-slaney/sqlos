@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SqlOS.Configuration;
+using SqlOS.Fga.Services;
 
 namespace SqlOS.Fga.Configuration;
 
@@ -13,13 +14,20 @@ public class SqlOSFgaOptions
     public string RootResourceName { get; set; } = "Root";
     public bool InitializeFunctions { get; set; } = true;
     public bool SeedCoreData { get; set; } = true;
-    /// <summary>
-    /// Optional path to a YAML schema file. If set, schema (resource types, permissions, roles) will be seeded from this file on startup.
-    /// </summary>
-    public string? SchemaYamlPath { get; set; }
     public string DashboardPathPrefix { get; set; } = "/sqlos/admin/fga";
     public SqlOSFgaDashboardOptions Dashboard { get; set; } = new();
     public SqlOSFgaTableNames TableNames { get; set; } = new();
+    public SqlOSFgaSeedData? StartupSeedData { get; private set; }
+
+    public SqlOSFgaOptions Seed(Action<SqlOSFgaSeedBuilder> configure)
+    {
+        var builder = StartupSeedData == null
+            ? new SqlOSFgaSeedBuilder()
+            : new SqlOSFgaSeedBuilder(StartupSeedData);
+        configure(builder);
+        StartupSeedData = builder.Build();
+        return this;
+    }
 }
 
 /// <summary>

@@ -63,7 +63,7 @@ public static class ExampleApiFixture
             {
                 builder.UseSetting("environment", "Development");
                 builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
-                builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos");
+                builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos/auth");
                 builder.ConfigureServices(services =>
                 {
                     services.AddSingleton<IHttpClientFactory, FakeOidcProviderHttpClientFactory>();

@@ -40,7 +40,7 @@ public class SqlOSFgaDashboardMiddleware
         _isDevelopment = environment.IsDevelopment();
         _dashboardOptions = dashboardOptions;
         _sessionService = sessionService;
-        _fileProvider = CreateFileProvider(environment);
+        _fileProvider = CreateFileProvider();
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -127,32 +127,8 @@ public class SqlOSFgaDashboardMiddleware
         context.Response.StatusCode = StatusCodes.Status404NotFound;
     }
 
-    private static IFileProvider CreateFileProvider(IHostEnvironment environment)
-    {
-        var sourceRoot = TryFindDevelopmentAssetRoot(environment.ContentRootPath, Path.Combine("src", "SqlOS", "Fga", "Dashboard", "wwwroot"));
-        if (environment.IsDevelopment() && sourceRoot != null)
-        {
-            return new PhysicalFileProvider(sourceRoot);
-        }
-
-        return new ManifestEmbeddedFileProvider(
-            typeof(SqlOSFgaDashboardMiddleware).Assembly,
-            "Fga/Dashboard/wwwroot");
-    }
-
-    private static string? TryFindDevelopmentAssetRoot(string contentRootPath, string relativeAssetPath)
-    {
-        for (var current = new DirectoryInfo(contentRootPath); current != null; current = current.Parent)
-        {
-            var candidate = Path.Combine(current.FullName, relativeAssetPath);
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
+    private static IFileProvider CreateFileProvider()
+        => new ManifestEmbeddedFileProvider(typeof(SqlOSFgaDashboardMiddleware).Assembly, "Fga/Dashboard/wwwroot");
 
     private async Task HandleApiRequest(HttpContext context, string endpoint)
     {
@@ -262,24 +238,6 @@ public class SqlOSFgaDashboardMiddleware
         if (endpoint.Equals("permissions", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
         {
             await HandleCreatePermission(context, dbContext);
-            return;
-        }
-
-        // Handle GET schema/export
-        if (endpoint.Equals("schema/export", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "GET")
-        {
-            var seedService = scope.ServiceProvider.GetRequiredService<SqlOSFgaSeedService>();
-            var yaml = seedService.ExportToYaml();
-            context.Response.ContentType = "application/x-yaml";
-            context.Response.Headers.ContentDisposition = "attachment; filename=\"sqlzibar-schema.yaml\"";
-            await context.Response.WriteAsync(yaml);
-            return;
-        }
-
-        // Handle POST schema/import
-        if (endpoint.Equals("schema/import", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
-        {
-            await HandleSchemaImport(context, scope);
             return;
         }
 
@@ -1380,33 +1338,6 @@ public class SqlOSFgaDashboardMiddleware
 
         context.Response.StatusCode = 201;
         await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
-    }
-
-    private static async Task HandleSchemaImport(HttpContext context, IServiceScope scope)
-    {
-        try
-        {
-            using var reader = new StreamReader(context.Request.Body);
-            var yaml = await reader.ReadToEndAsync();
-
-            if (string.IsNullOrWhiteSpace(yaml))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = "Request body is empty" }, JsonOptions));
-                return;
-            }
-
-            var seedService = scope.ServiceProvider.GetRequiredService<SqlOSFgaSeedService>();
-            await seedService.SeedFromYamlAsync(yaml);
-
-            context.Response.StatusCode = 200;
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { success = true, message = "Schema imported successfully" }, JsonOptions));
-        }
-        catch (Exception ex)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
-        }
     }
 
     private record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);
