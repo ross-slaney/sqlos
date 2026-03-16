@@ -2,38 +2,35 @@ import Link from "next/link";
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 border-b border-stone-200 bg-white/95 backdrop-blur-sm">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-600 text-xs font-bold text-white">
-            SO
-          </div>
-          <span className="text-lg font-bold text-stone-950">SqlOS</span>
+    <header className="sticky top-0 z-50 border-b border-stone-200/80 bg-[var(--background)]/90 backdrop-blur-md">
+      <nav className="mx-auto flex max-w-4xl items-center justify-between px-6 h-14">
+        <Link href="/" className="text-[16px] font-bold tracking-[-0.02em] text-stone-950">
+          SqlOS
         </Link>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-1">
           <Link
             href="/docs"
-            className="text-sm font-medium text-stone-600 transition-colors hover:text-stone-950"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-stone-500 transition-colors hover:text-stone-950"
           >
             Docs
           </Link>
           <Link
             href="/docs/guides/reference/api-reference"
-            className="text-sm font-medium text-stone-600 transition-colors hover:text-stone-950"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-stone-500 transition-colors hover:text-stone-950"
           >
-            API reference
-          </Link>
-          <Link
-            href="/docs/guides/getting-started"
-            className="text-sm font-medium text-stone-600 transition-colors hover:text-stone-950"
-          >
-            Quick start
+            API
           </Link>
           <Link
             href="/blog"
-            className="text-sm font-medium text-stone-600 transition-colors hover:text-stone-950"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-stone-500 transition-colors hover:text-stone-950"
           >
             Blog
+          </Link>
+          <Link
+            href="/docs/guides/getting-started"
+            className="ml-2 rounded-md bg-stone-950 px-3.5 py-1.5 text-[13px] font-semibold text-white transition hover:bg-stone-800"
+          >
+            Get started
           </Link>
         </div>
       </nav>

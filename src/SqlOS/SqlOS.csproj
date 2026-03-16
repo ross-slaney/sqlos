@@ -1,13 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>SqlOS</PackageId>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <Authors>YourName</Authors>
     <Description>Embedded auth server and fine-grained authorization runtime for .NET + SQL Server + EF Core.</Description>
     <PackageTags>authentication;authorization;fga;saml;jwt;sessions;efcore;sqlserver</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/YourUsername/sqlos</RepositoryUrl>
+    <RepositoryUrl>https://github.com/ross-slaney/sqlos</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 

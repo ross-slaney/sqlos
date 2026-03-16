@@ -2,23 +2,13 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: #f4efe6;
-  --foreground: #11181d;
-  --surface: rgba(255, 255, 255, 0.82);
-  --surface-strong: rgba(255, 255, 255, 0.94);
-  --surface-dark: #08131b;
-  --muted: #5f6b73;
-  --line: rgba(15, 23, 42, 0.08);
-  --accent: #0f766e;
-  --accent-strong: #1767d8;
-  --accent-warm: #cf8d4d;
+  --background: #fafaf9;
+  --foreground: #1c1917;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-accent: var(--accent);
-  --color-accent-strong: var(--accent-strong);
   --font-sans: var(--font-sans-ui);
   --font-mono: var(--font-mono-ui);
 }
@@ -29,92 +19,15 @@ html {
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 28%),
-    radial-gradient(circle at top right, rgba(29, 117, 255, 0.06), rgba(29, 117, 255, 0) 24%),
-    linear-gradient(180deg, #f7f1e7 0%, #f4efe6 52%, #f1ece2 100%);
   color: var(--foreground);
-  font-family: var(--font-sans-ui), sans-serif;
+  font-family: var(--font-sans-ui), system-ui, sans-serif;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: rgba(23, 103, 216, 0.18);
-  color: var(--foreground);
+  background: rgba(28, 25, 23, 0.1);
 }
 
-.premium-hero {
-  background:
-    linear-gradient(180deg, rgba(4, 11, 18, 0.98) 0%, rgba(6, 18, 27, 0.96) 58%, rgba(11, 22, 31, 0.92) 100%),
-    radial-gradient(circle at top left, rgba(55, 192, 255, 0.18), rgba(55, 192, 255, 0) 30%),
-    radial-gradient(circle at 80% 14%, rgba(255, 175, 92, 0.16), rgba(255, 175, 92, 0) 28%);
-}
-
-.premium-noise::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.18;
-  background-image:
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12) 0 1px, transparent 1px),
-    radial-gradient(circle at 80% 30%, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px),
-    radial-gradient(circle at 60% 80%, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px);
-  background-size: 26px 26px, 34px 34px, 42px 42px;
-  mix-blend-mode: screen;
-}
-
-.glass-panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 32px 80px rgba(2, 10, 17, 0.28);
-  backdrop-filter: blur(20px);
-}
-
-.paper-panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(12px);
-}
-
-.code-window pre::-webkit-scrollbar {
-  height: 5px;
-}
-
-.code-window pre::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.code-window pre::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-}
-
-.float-slow {
-  animation: float-slow 11s ease-in-out infinite;
-}
-
-.float-medium {
-  animation: float-medium 13s ease-in-out infinite;
-}
-
-@keyframes float-slow {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-@keyframes float-medium {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-14px);
-  }
+pre code {
+  font-family: var(--font-mono-ui), ui-monospace, monospace;
 }
