@@ -28,6 +28,7 @@ public static class ExampleAuthEndpoints
     public static void MapExampleAuthEndpoints(this WebApplication app)
     {
         var auth = app.MapGroup("/api/v1/auth");
+        auth.ExcludeFromDescription();
 
         auth.MapPost("/discover", (SqlOSHomeRealmDiscoveryRequest request, SqlOSHomeRealmDiscoveryService discoveryService, CancellationToken cancellationToken) =>
             TryAsync(async () => Results.Ok(await discoveryService.DiscoverAsync(request, cancellationToken))));

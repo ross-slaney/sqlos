@@ -15,7 +15,10 @@ public static class ExampleDemoEndpoints
 {
     public static void MapDemoEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/demo/users", async (ExampleAppDbContext db, CancellationToken cancellationToken) =>
+        var demo = app.MapGroup("/api/demo");
+        demo.ExcludeFromDescription();
+
+        demo.MapGet("/users", async (ExampleAppDbContext db, CancellationToken cancellationToken) =>
         {
             var org = await db.Set<SqlOSOrganization>()
                 .AsNoTracking()
@@ -152,7 +155,10 @@ public static class ExampleDemoEndpoints
             return Results.Ok(subjects);
         });
 
-        app.MapPost("/api/v1/auth/demo/switch", async (
+        var authDemo = app.MapGroup("/api/v1/auth/demo");
+        authDemo.ExcludeFromDescription();
+
+        authDemo.MapPost("/switch", async (
             DemoSwitchRequest request,
             SqlOSAuthService authService,
             ExampleFgaService fgaService,

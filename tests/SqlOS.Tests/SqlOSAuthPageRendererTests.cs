@@ -14,14 +14,22 @@ public sealed class SqlOSAuthPageRendererTests
         var model = CreateModel(
             mode: "login",
             requestId: "req_login",
-            email: "alice@example.com");
+            email: "alice@example.com",
+            providers: new[]
+            {
+                new SqlOSAuthPageProviderLink(
+                    "oidc_contoso",
+                    "Contoso",
+                    "/sqlos/auth/login/oidc/oidc_contoso?request=req_login&email=alice%40example.com")
+            });
 
         var html = SqlOSAuthPageRenderer.RenderPage(model);
 
         html.Should().Contain("action=\"/sqlos/auth/login/identify\"");
         html.Should().Contain("href=\"/sqlos/auth/signup?request=req_login\"");
-        html.Should().Contain("class=\"side-panel side-card\"");
+        html.Should().Contain("class=\"auth-shell split\"");
         html.Should().Contain("data-flow-kind=\"hrd\"");
+        html.Should().Contain("href=\"/sqlos/auth/login/oidc/oidc_contoso?request=req_login&amp;email=alice%40example.com\"");
     }
 
     [TestMethod]
@@ -93,13 +101,12 @@ public sealed class SqlOSAuthPageRendererTests
 
         html.Should().Contain("--primary: #112233");
         html.Should().Contain("--accent: #445566");
-        html.Should().Contain("--background: #778899");
+        html.Should().Contain("--page-bg: #778899");
         html.Should().Contain("Sign in to Example");
         html.Should().Contain("Use your work email to access the Example workspace.");
         html.Should().Contain("src=\"data:image/png;base64,AAAA\"");
         html.Should().Contain("class=\"auth-shell stacked\"");
-        html.Should().NotContain("<aside class=\"side-panel\">");
-        html.Should().NotContain("Create an account");
+        html.Should().NotContain("Get started");
     }
 
     [TestMethod]
@@ -129,8 +136,8 @@ public sealed class SqlOSAuthPageRendererTests
             email: "alice@example.com",
             settings: settings));
 
-        loginHtml.Should().NotContain("Create an account");
-        passwordHtml.Should().NotContain("Create an account");
+        loginHtml.Should().NotContain("Get started");
+        passwordHtml.Should().NotContain("Get started");
     }
 
     private static SqlOSAuthPageViewModel CreateModel(

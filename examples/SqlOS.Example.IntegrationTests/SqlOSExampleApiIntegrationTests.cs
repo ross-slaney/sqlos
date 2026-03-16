@@ -16,6 +16,32 @@ namespace SqlOS.Example.IntegrationTests;
 public sealed class SqlOSExampleApiIntegrationTests
 {
     [TestMethod]
+    public async Task Swagger_DoesNotInclude_SqlOSLibraryOrExampleHelperEndpoints()
+    {
+        var response = await ExampleApiFixture.Client.GetAsync("/swagger/v1/swagger.json");
+
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths")
+            .EnumerateObject()
+            .Select(path => path.Name)
+            .ToArray();
+
+        paths.Should().Contain("/api/chains");
+        paths.Should().Contain("/api/locations/{id}");
+        paths.Should().OnlyContain(path =>
+            !path.StartsWith("/sqlos/auth", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("/sqlos/admin/auth/api", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("/sqlos/saml", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("/api/v1/auth", StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith("/api/demo", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(path, "/api/hello", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(path, "/api/me", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(path, "/api/workspaces", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public async Task Signup_CanCreateAndListWorkspaces()
     {
         var email = $"user-{Guid.NewGuid():N}@example.com";

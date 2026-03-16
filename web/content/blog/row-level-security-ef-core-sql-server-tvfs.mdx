@@ -1,345 +1,252 @@
 ---
-title: "Row-Level Security with EF Core and SQL Server TVFs"
-description: "Implement database-level authorization filtering using Table-Valued Functions for maximum security and performance."
-date: "2026-03-05"
+title: "Row-Level Security with EF Core, SQL Server, and Table-Valued Functions"
+description: "How to implement database-level row-level security in .NET using SQL Server TVFs composed into EF Core LINQ queries — no post-load filtering, no external service calls."
+date: "2026-03-15"
 author: "SqlOS Team"
-tags: ["EF Core", "SQL Server", "Security", "Performance"]
+tags: ["Row-Level Security", "EF Core", "SQL Server", "TVF", "FGA", "RBAC", "Authorization"]
 ---
 
-Application-level authorization checks are essential, but they're not enough. If a bug bypasses your permission check, or a developer forgets to add one, unauthorized data can leak. The solution? Enforce authorization at the database level using row-level security (RLS).
+You need certain users to see certain rows. That's the whole problem.
 
-In this guide, we'll implement RLS using SQL Server Table-Valued Functions (TVFs) integrated with Entity Framework Core. This approach gives you defense in depth: even if application code fails, the database won't return unauthorized rows.
+The typical solution is application-level filtering — `.Where(x => x.TenantId == currentTenant)` — scattered across every query in your codebase. It works until someone forgets the filter, adds a new endpoint without it, or builds a report that bypasses the service layer entirely. At that point, unauthorized data leaks.
 
-## Why Database-Level Security?
+Database-level row-level security solves this by pushing authorization into the query itself. The database won't return rows the caller can't see, regardless of how the query was constructed.
 
-Consider this common pattern:
+This guide covers how to implement RLS in .NET using SQL Server Table-Valued Functions (TVFs) composed directly into EF Core LINQ queries — the approach used by SqlOS FGA.
+
+## The Problem with Application-Level Filtering
+
+Consider a standard multi-tenant query:
 
 ```csharp
-// Application-level filtering
-var documents = await dbContext.Documents
-    .Where(d => d.ProjectId == userProjectId)
+var documents = await db.Documents
+    .Where(d => d.TenantId == currentTenantId)
     .ToListAsync();
 ```
 
-Problems with this approach:
+This has four problems:
 
-1. **Easy to forget**: Every query needs the filter
-2. **Easy to bypass**: A bug or oversight exposes data
-3. **Hard to audit**: Security logic scattered across codebase
-4. **Complex joins**: Filtering through multiple relationships is error-prone
+1. **Easy to forget.** Every query needs the filter. Miss one and you have a data leak.
+2. **Easy to bypass.** Raw SQL, background jobs, reporting queries — anything outside your service layer skips the check.
+3. **Flat.** `TenantId` works for single-level multi-tenancy. But what about org → team → project → document? You'd need nested joins and subqueries for every query.
+4. **Scattered.** Authorization logic lives in dozens of places instead of one.
 
-Database-level RLS solves all of these by making unauthorized rows invisible to queries.
+SQL Server has a built-in RLS feature using security policies and predicate functions. It works, but it's tightly coupled to database users/roles and doesn't integrate cleanly with application-level identity (JWTs, claims, etc.).
 
-## Table-Valued Functions: The Foundation
+## A Better Approach: TVFs as Authorization Predicates
 
-A Table-Valued Function (TVF) is a SQL Server function that returns a table. We'll use TVFs to return the set of resource IDs a subject can access:
+A Table-Valued Function (TVF) is a SQL function that returns a table. When it's an *inline* TVF, SQL Server's optimizer doesn't treat it as a black box — it folds the function body directly into the calling query's execution plan.
+
+This means you can write an authorization check as a TVF and use it as a `WHERE EXISTS` predicate. The database handles authorization, filtering, sorting, and pagination in a single query. No post-load filtering, no N+1 permission checks, no external service calls.
+
+Here's the core idea:
 
 ```sql
-CREATE FUNCTION dbo.GetAccessibleResources(
-    @SubjectId NVARCHAR(100),
-    @PermissionKey NVARCHAR(100)
+CREATE FUNCTION fn_IsResourceAccessible(
+    @ResourceId NVARCHAR(128),
+    @SubjectIds NVARCHAR(MAX),
+    @PermissionId NVARCHAR(128)
 )
 RETURNS TABLE
 AS
-RETURN (
-    SELECT DISTINCT r.Id AS ResourceId
-    FROM Resources r
-    INNER JOIN Grants g ON g.ResourceId = r.Id 
-        OR g.ResourceId IN (
-            SELECT ancestor.Id 
-            FROM Resources ancestor
-            WHERE r.Path LIKE ancestor.Path + '%'
-        )
-    INNER JOIN RolePermissions rp ON rp.RoleId = g.RoleId
-    INNER JOIN Permissions p ON p.Id = rp.PermissionId
-    WHERE g.SubjectId = @SubjectId
-        AND p.Key = @PermissionKey
-        AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
-        AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
-);
+RETURN
+(
+    WITH ancestors AS (
+        -- Walk up the resource tree from the target to the root
+        SELECT Id, ParentId, 0 AS Depth
+        FROM Resources WHERE Id = @ResourceId
+
+        UNION ALL
+
+        SELECT r.Id, r.ParentId, a.Depth + 1
+        FROM Resources r
+        INNER JOIN ancestors a ON r.Id = a.ParentId
+        WHERE a.Depth < 10
+    )
+    SELECT TOP 1 a.Id
+    FROM ancestors a
+    INNER JOIN Grants g ON a.Id = g.ResourceId
+    INNER JOIN RolePermissions rp ON g.RoleId = rp.RoleId
+    WHERE g.SubjectId IN (
+        SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@SubjectIds, ',')
+    )
+    AND rp.PermissionId = @PermissionId
+    AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
+    AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
+)
 ```
 
-This function:
-1. Takes a subject ID and permission key
-2. Finds all grants for that subject
-3. Includes inherited permissions (via the Path column)
-4. Returns all accessible resource IDs
+What this does for each row:
 
-## Integrating with EF Core
+1. **Walks up** the resource tree from the target resource to the root (recursive CTE, bounded at depth 10)
+2. **Joins** against grants at each ancestor node
+3. **Checks** if any grant matches the caller's principals and the required permission
+4. **Returns** a row if access exists (`TOP 1` — one match is enough)
 
-### Step 1: Register the TVF
+Because it's an inline TVF, the SQL Server optimizer composes this directly into your query plan. Authorization becomes part of the index seek, not a separate operation.
 
-First, tell EF Core about the TVF. The key insight is using `FromExpression` to map a C# method to the SQL function:
+## Mapping It to EF Core
+
+The TVF needs to be callable from LINQ. In EF Core, you register it as a database function on your `DbContext`:
 
 ```csharp
-public class AppDbContext : DbContext, ISqlOSDbContext
+public class AppDbContext : DbContext
 {
-    public DbSet<Document> Documents => Set<Document>();
-    
-    public IQueryable<SqlOSAccessibleResource> IsResourceAccessible(
-        string resourceId, string subjectIds, string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
-    
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.ApplySqlOSModel(GetType());
-    }
+    [DbFunction("fn_IsResourceAccessible", Schema = "sqlos")]
+    public IQueryable<AccessibleResource> IsResourceAccessible(
+        string resourceId,
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() => IsResourceAccessible(
+            resourceId, subjectIds, permissionId));
 }
 ```
 
-### Step 2: Use CROSS APPLY in Queries
-
-The TVF is designed to be used with `CROSS APPLY` (or `JOIN` in LINQ). This allows the database to filter rows as part of the query plan:
+Then you build an authorization filter as an `Expression<Func<T, bool>>` that calls the TVF:
 
 ```csharp
-var documents = await dbContext.Documents
-    .Join(
-        dbContext.IsResourceAccessible(null!, subjectIds, permissionId),
-        doc => doc.ResourceId,
-        acc => acc.ResourceId,
-        (doc, acc) => doc)
+var filter = await fga.BuildFilterAsync<Document>(
+    subjectId: currentUserId,
+    permissionKey: "documents.read");
+
+var results = await db.Documents
+    .Where(d => d.ProjectId == projectId)   // your business filter
+    .Where(filter)                           // ← authorization
+    .OrderBy(d => d.CreatedAt)
+    .Take(20)
     .ToListAsync();
 ```
 
-The generated SQL uses CROSS APPLY for efficient filtering:
+EF Core translates this to a single SQL statement. The TVF call becomes a `WHERE EXISTS (...)` subquery that the optimizer inlines. One database round-trip. No post-load filtering.
 
-```sql
-SELECT d.*
-FROM Documents d
-CROSS APPLY dbo.fn_IsResourceAccessible(d.ResourceId, @p0, @p1) acc
+## Why a Resource Tree, Not a Flat Tenant ID
+
+The flat `TenantId` approach breaks down as your product grows. Real applications have nested structure:
+
+```
+Organization
+  └─ Team
+      └─ Project
+          └─ Document
 ```
 
-### Step 3: Use the Specification Executor
+With a flat model, a team lead who should see all documents in their team's projects needs explicit grants on every project, or you need complex join logic in every query.
 
-For real applications, SqlOS provides a higher-level API that handles pagination, sorting, and authorization in one call:
+With a resource tree, you grant a role at the team level and it inherits downward:
 
 ```csharp
-var spec = PagedSpec.For<Document>(d => d.Id)
-    .RequirePermission("DOCUMENT_VIEW")
-    .SortByString("name", d => d.Name, isDefault: true)
-    .Search(search, d => d.Name, d => d.Description)
-    .Build(pageSize, cursor, sortBy, sortDir);
+// Grant "viewer" role to user at the team level
+await fga.GrantRoleAsync(new GrantRequest(
+    subjectId: userId,
+    roleKey: "viewer",
+    resourceId: "team::engineering"));
 
-var result = await executor.ExecuteAsync(
-    context.Documents, spec, subjectId,
-    d => new { d.Id, d.Name, d.CreatedAt });
+// This grant now covers:
+// - team::engineering
+// - project::alpha (child)
+// - project::beta (child)
+// - doc::1, doc::2, ... (grandchildren)
 ```
 
-This generates optimized SQL with the TVF join, pagination, and sorting all in one query.
+The TVF handles the inheritance automatically — it walks up from each document's resource to the root, and the team-level grant matches at the ancestor node.
 
-## Handling Hierarchical Resources
+## Performance Characteristics
 
-The real power comes from hierarchical filtering. When a user has access to a parent resource, they automatically get access to all children.
+The TVF approach has predictable, bounded cost:
 
-### Materialized Paths
+**Per-row cost:** O(D) where D is the tree depth. Each row triggers a recursive CTE that walks at most D ancestor hops. With proper indexes, each hop is an index seek.
 
-Store the full ancestry path in each resource:
+**Per-page cost:** O(k · D) where k is the page size. Under cursor pagination, the database evaluates rows sequentially until it finds k authorized ones.
 
-```sql
--- Resources table
-Id          | Name           | ParentId    | Path
-------------|----------------|-------------|------------------
-org_1       | Acme Corp      | NULL        | /org_1/
-team_eng    | Engineering    | org_1       | /org_1/team_eng/
-proj_api    | API Project    | team_eng    | /org_1/team_eng/proj_api/
-doc_123     | Design Doc     | proj_api    | /org_1/team_eng/proj_api/doc_123/
-```
+**The critical property: cost is independent of total row count.** Whether your table has 10K or 1.5M rows, the per-page latency is the same — because cursor pagination only examines rows forward from the cursor, and the TVF only examines ancestors of each candidate row.
 
-### Path-Based Filtering
+Benchmarked results from the [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf):
 
-The TVF uses LIKE queries on paths for efficient ancestor matching:
+| Metric | D = 5 (1.2M resources) | D = 10 (1.5M resources) |
+|---|---|---|
+| List page (k=20) | 3.47ms | 5.69ms |
+| Point check | 0.86–1.31ms | 0.89–1.46ms |
+| Cursor vs offset (100K) | 3.30ms vs 2,310ms | — |
 
-```sql
--- Find all ancestors of a resource
-SELECT Id FROM Resources 
-WHERE @ResourcePath LIKE Path + '%'
+A notable finding: **narrower grants are faster.** A store-level grant (2.28ms) matches at the first ancestor hop, while a chain-level grant (3.12ms) requires 3–4 hops. Least-privilege is not just more secure — it's measurably faster.
 
--- Find all descendants of a resource
-SELECT Id FROM Resources
-WHERE Path LIKE @ResourcePath + '%'
-```
+## Grants, Not Roles, Carry the Scope
 
-With a proper index on the Path column, these queries are fast even with millions of rows.
+A common mistake in RBAC systems is encoding scope into role names: `TeamA_Editor`, `ProjectAlpha_Viewer`, `Document42_Commenter`. This leads to role explosion.
 
-## Performance Optimization
-
-### Index Strategy
-
-Create these indexes for optimal TVF performance:
-
-```sql
--- Fast grant lookups
-CREATE INDEX IX_Grants_Subject_Resource 
-ON Grants(SubjectId, ResourceId) 
-INCLUDE (RoleId, EffectiveFrom, EffectiveTo);
-
--- Fast path queries
-CREATE INDEX IX_Resources_Path 
-ON Resources(Path) 
-INCLUDE (Id, ParentId);
-
--- Fast permission lookups
-CREATE INDEX IX_RolePermissions_Role 
-ON RolePermissions(RoleId) 
-INCLUDE (PermissionId);
-```
-
-### Query Plan Analysis
-
-Always check the execution plan for TVF queries:
-
-```sql
-SET STATISTICS IO ON;
-SET STATISTICS TIME ON;
-
-SELECT d.*
-FROM Documents d
-WHERE d.ResourceId IN (
-    SELECT ResourceId 
-    FROM dbo.GetAccessibleResources('user_123', 'documents:read')
-);
-```
-
-Look for:
-- Index seeks (good) vs. scans (bad)
-- Estimated vs. actual row counts
-- Hash matches vs. nested loops
-
-### Caching Considerations
-
-TVF results can be cached at multiple levels:
-
-1. **SQL Server query cache**: Parameterized queries reuse plans
-2. **Application cache**: Cache permission results for hot paths
-3. **Materialized views**: For read-heavy workloads, consider indexed views
+With the TVF approach, roles stay generic and reusable:
 
 ```csharp
-// Application-level caching
-var cacheKey = $"accessible:{subjectId}:{permissionKey}";
-var accessibleIds = await cache.GetOrCreateAsync(cacheKey, async entry =>
+// Define roles once
+seed.Role("viewer", "Viewer");
+seed.Role("editor", "Editor");
+seed.Role("admin", "Admin");
+
+// Scope is determined by WHERE the grant is placed
+await fga.GrantRoleAsync("viewer", userId, "org::acme");      // sees everything
+await fga.GrantRoleAsync("editor", userId, "team::eng");       // edits eng subtree
+await fga.GrantRoleAsync("viewer", userId, "doc::42");         // sees one document
+```
+
+Same three roles. Different scope depending on where in the tree the grant lives. No role explosion.
+
+## Mutations Use the Same Model
+
+The TVF handles reads. For writes, you use point checks against the same resource tree:
+
+```csharp
+var access = await fga.CheckAccessAsync(
+    subjectId: userId,
+    permissionKey: "documents.edit",
+    resourceId: document.ResourceId);
+
+if (!access.Allowed)
+    return Results.Forbid();
+```
+
+Reads and writes use the same grants, the same roles, the same resource tree. One authorization model for your entire application.
+
+## When to Use This Approach
+
+**Use TVF-based RLS when:**
+- You need row-level visibility filtering in EF Core
+- Your authorization model has hierarchical structure (orgs, teams, projects, etc.)
+- You want authorization enforced at the database level, not just the application level
+- You need predictable query performance that doesn't degrade with dataset size
+- You want the same model for human users, service accounts, and autonomous agents
+
+**Consider alternatives when:**
+- Your access model is truly flat (single tenant ID per row, no hierarchy)
+- You need arbitrary attribute-based policies (IP ranges, time-of-day, device type)
+- Your resources form a DAG rather than a tree (multiple parents per node)
+
+## Getting Started
+
+SqlOS implements this pattern as a library. Install it, register the services, and the TVF is created automatically:
+
+```bash
+dotnet add package SqlOS
+```
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
 {
-    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-    return await dbContext.GetAccessibleResources(subjectId, permissionKey)
-        .Select(a => a.ResourceId)
-        .ToListAsync();
+    options.UseFGA(fga => fga.Seed(seed =>
+    {
+        seed.ResourceType("document", "Document");
+        seed.Permission("documents.read", "Read documents", "document");
+        seed.Permission("documents.edit", "Edit documents", "document");
+        seed.Role("viewer", "Viewer");
+        seed.Role("editor", "Editor");
+        seed.RolePermission("viewer", "documents.read");
+        seed.RolePermission("editor", "documents.read");
+        seed.RolePermission("editor", "documents.edit");
+    }));
 });
+
+await app.UseSqlOSAsync(); // Creates schema, registers TVF
 ```
 
-## Advanced Patterns
+The [getting started guide](/docs/guides/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.
 
-### Multi-Permission Queries
-
-Sometimes you need to check multiple permissions:
-
-```csharp
-public static IQueryable<T> WhereSubjectHasAnyPermission<T>(
-    this IQueryable<T> query,
-    AppDbContext context,
-    string subjectId,
-    params string[] permissionKeys) where T : IHasResourceId
-{
-    var accessibleIds = permissionKeys
-        .SelectMany(pk => context.GetAccessibleResources(subjectId, pk))
-        .Select(a => a.ResourceId)
-        .Distinct();
-        
-    return query.Where(e => accessibleIds.Contains(e.ResourceId));
-}
-```
-
-### Temporal Permissions
-
-Handle time-bound access with effective dates:
-
-```sql
--- In the TVF
-WHERE (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
-  AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
-```
-
-This enables:
-- Scheduled access grants (starts next Monday)
-- Temporary access (expires in 24 hours)
-- Access revocation without deleting grants
-
-### Group Membership
-
-Expand subject IDs to include group memberships:
-
-```sql
-CREATE FUNCTION dbo.GetEffectiveSubjectIds(@SubjectId NVARCHAR(100))
-RETURNS TABLE
-AS
-RETURN (
-    SELECT @SubjectId AS SubjectId
-    UNION
-    SELECT gm.GroupSubjectId
-    FROM GroupMemberships gm
-    WHERE gm.MemberSubjectId = @SubjectId
-);
-```
-
-Then use it in the main TVF:
-
-```sql
-WHERE g.SubjectId IN (SELECT SubjectId FROM dbo.GetEffectiveSubjectIds(@SubjectId))
-```
-
-## Security Considerations
-
-### SQL Injection Prevention
-
-Always use parameterized queries. EF Core handles this automatically when using DbFunctions:
-
-```csharp
-// Safe: EF Core parameterizes the values
-var results = context.GetAccessibleResources(subjectId, permissionKey);
-
-// Dangerous: Never do this
-var sql = $"SELECT * FROM dbo.GetAccessibleResources('{subjectId}', '{permissionKey}')";
-```
-
-### Defense in Depth
-
-TVF-based RLS is one layer. Combine with:
-
-1. **Application checks**: Validate before expensive operations
-2. **API authorization**: Protect endpoints with policies
-3. **Audit logging**: Track all access attempts
-4. **Encryption**: Protect sensitive data at rest
-
-### Testing
-
-Test your TVFs thoroughly:
-
-```csharp
-[Fact]
-public async Task User_CannotAccess_UnauthorizedResources()
-{
-    // Arrange
-    var unauthorizedDocId = "doc_other_team";
-    
-    // Act
-    var accessible = await dbContext.GetAccessibleResources(
-        "user_alice", 
-        "documents:read"
-    ).ToListAsync();
-    
-    // Assert
-    Assert.DoesNotContain(accessible, a => a.ResourceId == unauthorizedDocId);
-}
-```
-
-## Conclusion
-
-Row-level security with TVFs provides a robust foundation for authorization:
-
-- **Defense in depth**: Database enforces security even if application fails
-- **Performance**: Filtering happens at the data source
-- **Consistency**: One place for authorization logic
-- **Auditability**: Clear, testable security rules
-
-Combined with hierarchical RBAC, you get a complete authorization system that's both powerful and secure. The database becomes your last line of defense, ensuring that unauthorized data never leaves the server.
-
-Start with simple TVFs, measure performance, and optimize as needed. The investment in database-level security pays dividends in reduced vulnerabilities and simplified application code.
+Row-level security isn't a feature you bolt on. It's a property of how your authorization model composes with your data queries. When authorization lives in the database as a TVF, every query is automatically secure — not because every developer remembered to add the filter, but because the filter is the query.

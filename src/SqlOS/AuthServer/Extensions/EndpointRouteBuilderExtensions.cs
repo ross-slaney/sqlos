@@ -28,7 +28,11 @@ public static class EndpointRouteBuilderExtensions
             : null;
 
         var auth = endpoints.MapGroup(authPrefix);
+        auth.ExcludeFromDescription();
+
         var adminRoot = endpoints.MapGroup(adminPrefix);
+        adminRoot.ExcludeFromDescription();
+
         var adminApi = adminRoot.MapGroup("/api");
 
         auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
@@ -546,7 +550,8 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);
         if (!string.IsNullOrWhiteSpace(legacySamlPrefix))
         {
-            endpoints.MapPost($"{legacySamlPrefix}/saml/acs/{{connectionId}}", HandleSamlAcsAsync);
+            endpoints.MapPost($"{legacySamlPrefix}/saml/acs/{{connectionId}}", HandleSamlAcsAsync)
+                .ExcludeFromDescription();
         }
 
         adminApi.MapGet("/stats", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

@@ -3,8 +3,11 @@ import Link from "next/link";
 export default function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-stone-200/80 bg-[var(--background)]/90 backdrop-blur-md">
-      <nav className="mx-auto flex max-w-4xl items-center justify-between px-6 h-14">
-        <Link href="/" className="text-[16px] font-bold tracking-[-0.02em] text-stone-950">
+      <nav className="mx-auto flex h-14 max-w-5xl items-center justify-between">
+        <Link
+          href="/"
+          className="text-[16px] font-bold tracking-[-0.02em] text-stone-950"
+        >
           SqlOS
         </Link>
         <div className="flex items-center gap-1">

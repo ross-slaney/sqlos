@@ -4,7 +4,7 @@ import { getPaginatedPosts } from "@/lib/blog";
 export const metadata = {
   title: "Blog - SqlOS",
   description:
-    "Notes on embedded auth, hierarchical authorization, EF Core, and SQL-backed application security.",
+    "Notes on auth, hierarchical authorization, EF Core, and SQL-backed application security.",
 };
 
 const PAGE_SIZE = 5;
@@ -16,10 +16,12 @@ interface BlogPageProps {
 export default async function BlogPage({ searchParams }: BlogPageProps) {
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
-  const { posts, total, page: currentPage, totalPages } = getPaginatedPosts(
-    page,
-    PAGE_SIZE
-  );
+  const {
+    posts,
+    total,
+    page: currentPage,
+    totalPages,
+  } = getPaginatedPosts(page, PAGE_SIZE);
 
   const prevPage = currentPage > 1 ? currentPage - 1 : null;
   const nextPage = currentPage < totalPages ? currentPage + 1 : null;
@@ -28,8 +30,8 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
     <div className="mx-auto max-w-4xl px-6 py-16">
       <h1 className="text-4xl font-bold text-zinc-900 dark:text-white">Blog</h1>
       <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
-        Notes on embedded auth, hierarchical authorization, EF Core, and
-        practical .NET application security.
+        Notes on auth, hierarchical authorization, EF Core, and practical .NET
+        application security.
       </p>
 
       {/* Pagination controls - always at top, always visible */}

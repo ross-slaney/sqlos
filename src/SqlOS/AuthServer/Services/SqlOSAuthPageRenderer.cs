@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using SqlOS.AuthServer.Contracts;
 
@@ -16,6 +17,21 @@ public static class SqlOSAuthPageRenderer
         var subtitleMarkup = string.IsNullOrWhiteSpace(subtitle)
             ? string.Empty
             : $"<p class=\"brand-subtitle\">{Html(subtitle)}</p>";
+        var primaryColor = Css(model.Settings.PrimaryColor, "#4f46e5");
+        var accentColor = Css(model.Settings.AccentColor, "#111827");
+        var backgroundColor = Css(model.Settings.BackgroundColor, "#f8fafc");
+        var isDarkTheme = IsDarkColor(backgroundColor);
+        var textColor = isDarkTheme ? "#f8fafc" : accentColor;
+        var mutedColor = isDarkTheme ? "rgba(248,250,252,0.72)" : "#6b7280";
+        var shellColor = isDarkTheme ? "rgba(9,10,12,0.96)" : "rgba(255,255,255,0.96)";
+        var panelColor = isDarkTheme ? "#16181d" : "#ffffff";
+        var borderColor = isDarkTheme ? "rgba(255,255,255,0.14)" : "#d9dde6";
+        var borderStrongColor = isDarkTheme ? "rgba(255,255,255,0.20)" : "#cfd5df";
+        var inputBackground = isDarkTheme ? "#101217" : "#ffffff";
+        var buttonTextColor = GetContrastingTextColor(primaryColor);
+        var shadowColor = isDarkTheme
+            ? "0 28px 90px rgba(0,0,0,0.36)"
+            : "0 28px 90px rgba(15,23,42,0.10)";
         var logoMarkup = string.IsNullOrWhiteSpace(model.Settings.LogoBase64)
             ? "<div class=\"logo-fallback\">SqlOS</div>"
             : $"<img class=\"logo\" src=\"{Html(model.Settings.LogoBase64)}\" alt=\"Logo\" />";
@@ -25,18 +41,18 @@ public static class SqlOSAuthPageRenderer
         var emailValue = Html(model.Email ?? string.Empty);
         var encodedMode = Html(normalizedMode);
         var signupLink = model.Settings.EnablePasswordSignup
-            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Create an account</a>"
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Get started</a>"
             : string.Empty;
-        var loginLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Back to sign in</a>";
+        var loginLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Sign in</a>";
         var signInAgainLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login"))}\">Sign in again</a>";
         var errorMarkup = BuildCallout("error", model.Error);
         var infoMarkup = BuildCallout("info", model.Info);
-        var secondaryPanel = RenderSecondaryPanel(model, normalizedMode, subtitle, isStackedLayout);
 
         var content = normalizedMode switch
         {
             "signup" => $$"""
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}" data-overlay-title="Creating your account" data-overlay-copy="Setting up your profile and credentials.">
+                {{RenderPanelIntro("Create account", "Use email and password to set up your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
                   {{requestIdInput}}
                   <input type="hidden" name="mode" value="{{encodedMode}}" />
                   <label class="field">
@@ -44,39 +60,42 @@ public static class SqlOSAuthPageRenderer
                     <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
                   </label>
                   <label class="field">
-                    <span>Email address</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="name@company.com" autocomplete="email" required />
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
                   </label>
                   <label class="field">
                     <span>Password</span>
-                    <input name="password" type="password" placeholder="Create a secure password" autocomplete="new-password" required />
+                    <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required />
                   </label>
                   <label class="field">
                     <span>Organization name</span>
-                    <input name="organizationName" placeholder="Optional for a new workspace" autocomplete="organization" />
+                    <input name="organizationName" placeholder="Optional" autocomplete="organization" />
                   </label>
                   {{RenderPrimaryAction("Create account", "Creating account")}}
                 </form>
-                {{RenderFooterLinks(loginLink)}}
+                {{RenderProvidersSection(model)}}
+                {{RenderFooterPrompt("Already have an account?", loginLink)}}
                 """,
             "password" => $$"""
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}" data-overlay-title="Signing you in" data-overlay-copy="Verifying your credentials.">
+                {{RenderPanelIntro("Password", "Continue with your email and password.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
                   {{requestIdInput}}
                   <label class="field">
-                    <span>Email address</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="name@company.com" autocomplete="email" required />
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
                   </label>
                   <label class="field">
                     <span>Password</span>
-                    <input name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required />
+                    <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required />
                   </label>
                   {{RenderPrimaryAction("Continue", "Signing in")}}
                 </form>
                 {{RenderProvidersSection(model)}}
-                {{RenderFooterLinks(signupLink)}}
+                {{RenderFooterPrompt("Don't have an account?", signupLink)}}
                 """,
             "organization" => $$"""
-                <form class="auth-form organization-form" method="post" action="{{Html(AuthPath(model, "/login/select-organization"))}}" data-overlay-title="Opening your workspace" data-overlay-copy="Finishing sign-in for the selected organization.">
+                {{RenderPanelIntro("Organization", "Choose the workspace you want to continue into.")}}
+                <form class="auth-form organization-form" method="post" action="{{Html(AuthPath(model, "/login/select-organization"))}}">
                   <input type="hidden" name="pendingToken" value="{{Html(model.PendingToken ?? string.Empty)}}" />
                   <div class="organization-list">{{RenderOrganizationOptions(model.OrganizationSelection)}}</div>
                 </form>
@@ -93,20 +112,20 @@ public static class SqlOSAuthPageRenderer
                 {{RenderFooterLinks(signInAgainLink)}}
                 """,
             _ => $$"""
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/identify"))}}" data-flow-kind="hrd" data-overlay-title="Checking your workspace" data-overlay-copy="Looking up the best sign-in method for your domain.">
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/identify"))}}" data-flow-kind="hrd">
                   {{requestIdInput}}
                   <label class="field">
-                    <span>Work email</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="name@company.com" autocomplete="email" required />
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
                   </label>
-                  {{RenderPrimaryAction("Continue", "Checking workspace")}}
+                  {{RenderPrimaryAction("Continue", "Checking email")}}
                   <div class="flow-status" hidden>
                     <span class="loader loader-sm" aria-hidden="true"></span>
-                    <span>Looking up your workspace and sign-in method...</span>
+                    <span>Checking your sign-in method...</span>
                   </div>
                 </form>
-                <p class="helper-copy">Home realm discovery checks whether your domain should continue with password or SSO.</p>
-                {{RenderFooterLinks(signupLink)}}
+                {{RenderProvidersSection(model)}}
+                {{RenderFooterPrompt("Don't have an account?", signupLink)}}
                 """
         };
 
@@ -119,16 +138,18 @@ public static class SqlOSAuthPageRenderer
           <title>{{Html(title)}}</title>
           <style>
             :root {
-              --primary: {{Css(model.Settings.PrimaryColor, "#2563eb")}};
-              --accent: {{Css(model.Settings.AccentColor, "#111827")}};
-              --background: {{Css(model.Settings.BackgroundColor, "#f8fafc")}};
-              --text: color-mix(in srgb, var(--accent) 90%, #111827);
-              --muted: color-mix(in srgb, var(--accent) 46%, #6b7280);
-              --border: color-mix(in srgb, var(--accent) 14%, #e5e7eb);
-              --border-strong: color-mix(in srgb, var(--accent) 20%, #d1d5db);
-              --ring: color-mix(in srgb, var(--primary) 24%, white);
-              --card: rgba(255, 255, 255, 0.92);
-              --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+              --page-bg: {{backgroundColor}};
+              --primary: {{primaryColor}};
+              --accent: {{accentColor}};
+              --text: {{textColor}};
+              --muted: {{mutedColor}};
+              --shell: {{shellColor}};
+              --panel: {{panelColor}};
+              --border: {{borderColor}};
+              --border-strong: {{borderStrongColor}};
+              --input-bg: {{inputBackground}};
+              --button-text: {{buttonTextColor}};
+              --shadow: {{shadowColor}};
             }
             * { box-sizing: border-box; }
             html, body { min-height: 100%; }
@@ -137,8 +158,8 @@ public static class SqlOSAuthPageRenderer
               font-family: Inter, "Segoe UI", system-ui, sans-serif;
               color: var(--text);
               background:
-                radial-gradient(circle at top, color-mix(in srgb, var(--primary) 10%, white) 0%, transparent 34%),
-                linear-gradient(180deg, color-mix(in srgb, var(--background) 94%, white) 0%, var(--background) 100%);
+                radial-gradient(circle at top, color-mix(in srgb, var(--primary) 10%, transparent) 0%, transparent 38%),
+                linear-gradient(180deg, color-mix(in srgb, var(--page-bg) 92%, white) 0%, var(--page-bg) 100%);
             }
             body::before {
               content: "";
@@ -148,72 +169,50 @@ public static class SqlOSAuthPageRenderer
               background:
                 linear-gradient(color-mix(in srgb, var(--accent) 3%, transparent) 1px, transparent 1px),
                 linear-gradient(90deg, color-mix(in srgb, var(--accent) 3%, transparent) 1px, transparent 1px);
-              background-size: 36px 36px;
-              opacity: 0.26;
+              background-size: 40px 40px;
+              opacity: 0.2;
             }
             h1, h2, p, strong, small, span { margin: 0; }
             input, button { font: inherit; }
             [hidden] { display: none !important; }
             .page-shell {
-              position: relative;
               min-height: 100vh;
               padding: 28px 16px;
               display: grid;
               place-items: center;
-              overflow: hidden;
-            }
-            .page-glow {
-              position: absolute;
-              top: 10%;
-              left: 50%;
-              width: min(560px, 88vw);
-              height: 320px;
-              transform: translateX(-50%);
-              border-radius: 999px;
-              background: color-mix(in srgb, var(--primary) 18%, white);
-              filter: blur(56px);
-              opacity: 0.42;
-              pointer-events: none;
             }
             .auth-shell {
-              position: relative;
-              width: min(960px, 100%);
-              display: grid;
-              gap: 24px;
-              align-items: center;
-              justify-content: center;
+              width: min(calc(100vw - 32px), {{(isStackedLayout ? "760px" : "840px")}});
             }
-            .auth-shell.split { grid-template-columns: minmax(0, 440px) minmax(0, 340px); }
-            .auth-shell.stacked { max-width: 440px; }
-            .auth-card,
-            .side-card {
-              background: var(--card);
+            .auth-shell.split {
+              max-width: 840px;
+            }
+            .auth-shell.stacked {
+              max-width: 760px;
+            }
+            .auth-frame {
+              background: var(--shell);
               border: 1px solid var(--border);
-              border-radius: 24px;
+              border-radius: 32px;
               box-shadow: var(--shadow);
-              backdrop-filter: blur(10px);
+              padding: clamp(24px, 4vw, 40px);
             }
-            .auth-card {
+            .brand-header {
               display: grid;
-              gap: 20px;
-              padding: 24px;
-              animation: fade-up 0.34s ease-out both;
-            }
-            .brand-row {
-              display: flex;
-              align-items: center;
+              justify-items: center;
               gap: 14px;
+              text-align: center;
+              margin-bottom: 20px;
             }
             .logo-shell {
-              width: 52px;
-              height: 52px;
-              border-radius: 16px;
-              border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
-              background: color-mix(in srgb, var(--primary) 8%, white);
+              width: 84px;
+              height: 84px;
+              border-radius: 20px;
+              border: 1px solid var(--border);
+              background: color-mix(in srgb, var(--panel) 88%, var(--page-bg));
               display: grid;
               place-items: center;
               overflow: hidden;
-              flex: none;
             }
             .logo,
             .logo-fallback {
@@ -224,93 +223,95 @@ public static class SqlOSAuthPageRenderer
             .logo-fallback {
               display: grid;
               place-items: center;
-              background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 92%, black), color-mix(in srgb, var(--accent) 78%, var(--primary)));
+              background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 92%, black), color-mix(in srgb, var(--primary) 68%, var(--accent)));
               color: white;
-              font-size: 12px;
+              font-size: 20px;
               font-weight: 700;
-              letter-spacing: 0.04em;
-            }
-            .brand-copy {
-              display: grid;
-              gap: 4px;
-              min-width: 0;
-            }
-            h1 {
-              font-size: 28px;
-              line-height: 1.1;
               letter-spacing: -0.04em;
             }
-            .brand-subtitle {
-              color: var(--muted);
-              line-height: 1.5;
-              font-size: 14px;
+            h1 {
+              max-width: 14ch;
+              font-size: clamp(30px, 5vw, 44px);
+              line-height: 1.08;
+              letter-spacing: -0.05em;
+              font-weight: 700;
             }
-            .view-card {
+            .brand-subtitle {
+              max-width: 34rem;
+              color: var(--muted);
+              font-size: 14px;
+              line-height: 1.6;
+            }
+            .messages {
               display: grid;
-              gap: 18px;
-              padding: 20px;
+              gap: 10px;
+              margin: 0 auto 14px;
+              width: min(100%, 560px);
+            }
+            .form-panel {
+              width: min(100%, 620px);
+              margin: 0 auto;
+              padding: clamp(18px, 3vw, 28px);
               border-radius: 20px;
               border: 1px solid var(--border);
-              background: rgba(255, 255, 255, 0.8);
+              background: var(--panel);
             }
-            .view-copy {
+            .panel-intro {
               display: grid;
-              gap: 8px;
+              gap: 4px;
+              margin-bottom: 14px;
             }
-            .view-label {
-              display: inline-flex;
-              align-items: center;
-              width: fit-content;
-              min-height: 26px;
-              padding: 0 10px;
-              border-radius: 999px;
-              border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
-              background: color-mix(in srgb, var(--primary) 10%, white);
-              color: color-mix(in srgb, var(--primary) 56%, var(--accent));
+            .panel-kicker {
+              color: var(--muted);
               font-size: 11px;
               font-weight: 700;
               letter-spacing: 0.08em;
               text-transform: uppercase;
             }
-            .view-copy h2 {
-              font-size: 22px;
-              line-height: 1.15;
-              letter-spacing: -0.04em;
+            .panel-intro h2 {
+              font-size: 18px;
+              line-height: 1.2;
+              letter-spacing: -0.03em;
+              font-weight: 600;
             }
-            .view-copy p {
+            .panel-intro p {
               color: var(--muted);
+              font-size: 13px;
               line-height: 1.55;
-              font-size: 14px;
             }
             .auth-form,
-            .organization-list {
+            .organization-list,
+            .providers,
+            .panel-stack {
               display: grid;
               gap: 14px;
             }
             .field {
               display: grid;
-              gap: 8px;
+              gap: 6px;
             }
             .field span {
-              color: var(--text);
-              font-size: 13px;
-              font-weight: 600;
+              font-size: 14px;
+              font-weight: 500;
             }
             input {
               width: 100%;
-              height: 48px;
+              height: 44px;
               padding: 0 14px;
-              border-radius: 12px;
-              border: 1px solid var(--border);
-              background: white;
+              border-radius: 8px;
+              border: 1px solid var(--border-strong);
+              background: var(--input-bg);
               color: var(--text);
-              transition: border-color 0.18s ease, box-shadow 0.18s ease;
+              font-size: 14px;
+              transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
             }
-            input::placeholder { color: color-mix(in srgb, var(--accent) 24%, #94a3b8); }
+            input::placeholder {
+              color: color-mix(in srgb, var(--muted) 86%, transparent);
+            }
             input:focus {
               outline: none;
-              border-color: color-mix(in srgb, var(--primary) 42%, white);
-              box-shadow: 0 0 0 4px var(--ring);
+              border-color: color-mix(in srgb, var(--primary) 32%, white);
+              box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
             }
             .primary-action,
             .provider-link,
@@ -318,55 +319,62 @@ public static class SqlOSAuthPageRenderer
             .secondary-link {
               transition:
                 transform 0.18s ease,
-                border-color 0.18s ease,
                 box-shadow 0.18s ease,
+                border-color 0.18s ease,
                 background 0.18s ease,
                 color 0.18s ease;
             }
             .primary-action {
-              appearance: none;
               width: 100%;
-              height: 46px;
+              min-height: 44px;
               border: none;
-              border-radius: 12px;
-              background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 96%, black), color-mix(in srgb, var(--accent) 82%, var(--primary)));
-              color: white;
+              border-radius: 8px;
+              background: var(--primary);
+              color: var(--button-text);
               display: inline-flex;
               align-items: center;
               justify-content: center;
-              gap: 10px;
+              gap: 8px;
               font-size: 14px;
-              font-weight: 600;
+              font-weight: 500;
               cursor: pointer;
-              box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
             }
             .primary-action:hover,
             .provider-link:hover,
             .organization-option:hover {
               transform: translateY(-1px);
-              box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
             }
             .primary-action:focus-visible,
             .provider-link:focus-visible,
             .organization-option:focus-visible,
             .secondary-link:focus-visible {
-              outline: 3px solid var(--ring);
+              outline: 3px solid color-mix(in srgb, var(--primary) 22%, transparent);
               outline-offset: 3px;
             }
-            .button-spinner {
+            .button-loader,
+            .provider-loader,
+            .organization-loader {
               opacity: 0;
             }
-            .primary-action[data-loading="true"] .button-spinner,
-            .organization-option[data-loading="true"] .organization-spinner {
+            .primary-action[data-loading="true"] .button-loader,
+            .provider-link[data-loading="true"] .provider-loader,
+            .organization-option[data-loading="true"] .organization-loader {
               opacity: 1;
+            }
+            .primary-action[data-loading="true"],
+            .provider-link[data-loading="true"],
+            .organization-option[data-loading="true"] {
+              pointer-events: none;
             }
             .section-divider {
               display: flex;
               align-items: center;
-              gap: 12px;
+              gap: 14px;
               color: var(--muted);
-              font-size: 13px;
+              font-size: 12px;
+              font-weight: 500;
               line-height: 1;
+              margin: 6px 0 2px;
             }
             .section-divider::before,
             .section-divider::after {
@@ -375,115 +383,98 @@ public static class SqlOSAuthPageRenderer
               height: 1px;
               background: var(--border);
             }
-            .providers {
-              display: grid;
-              gap: 10px;
-            }
             .provider-link,
             .organization-option {
               width: 100%;
-              min-height: 48px;
-              padding: 12px 14px;
-              border-radius: 12px;
-              border: 1px solid var(--border);
-              background: white;
+              min-height: 44px;
+              padding: 0 14px;
+              border-radius: 8px;
+              border: 1px solid var(--border-strong);
+              background: var(--panel);
               color: var(--text);
               display: flex;
               align-items: center;
-              justify-content: space-between;
-              gap: 12px;
+              justify-content: center;
+              gap: 10px;
               text-decoration: none;
-              box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
             }
-            .provider-main,
-            .organization-main {
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              min-width: 0;
+            .provider-link[data-loading="true"] .provider-badge,
+            .provider-link[data-loading="true"] .provider-label,
+            .organization-option[data-loading="true"] .organization-copy {
+              opacity: 0.55;
             }
-            .provider-icon {
-              width: 28px;
-              height: 28px;
-              border-radius: 8px;
-              border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
-              background: color-mix(in srgb, var(--primary) 10%, white);
-              color: color-mix(in srgb, var(--primary) 58%, var(--accent));
+            .provider-badge,
+            .provider-loader,
+            .organization-loader {
+              flex: none;
+            }
+            .provider-logo {
+              width: 22px;
+              height: 22px;
+              display: block;
+            }
+            .provider-generic {
+              width: 22px;
+              height: 22px;
+              border-radius: 6px;
+              border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+              background: color-mix(in srgb, var(--primary) 12%, var(--panel));
               display: grid;
               place-items: center;
-              font-size: 11px;
+              font-size: 10px;
               font-weight: 700;
               letter-spacing: 0.04em;
-              flex: none;
+              color: color-mix(in srgb, var(--primary) 64%, var(--text));
             }
-            .provider-label,
-            .organization-main strong {
+            .provider-label {
               font-size: 14px;
-              font-weight: 600;
+              font-weight: 500;
               line-height: 1.35;
             }
-            .provider-arrow,
-            .organization-arrow {
-              width: 9px;
-              height: 9px;
-              border-top: 1.5px solid color-mix(in srgb, var(--accent) 34%, #6b7280);
-              border-right: 1.5px solid color-mix(in srgb, var(--accent) 34%, #6b7280);
-              transform: rotate(45deg);
-              flex: none;
+            .footer-prompt,
+            .footer-links {
+              margin-top: 8px;
+              color: var(--muted);
+              font-size: 14px;
+              line-height: 1.6;
+              text-align: center;
+            }
+            .secondary-link {
+              color: color-mix(in srgb, var(--primary) 80%, var(--text));
+              font-weight: 600;
+              text-decoration: none;
+            }
+            .organization-list {
+              gap: 12px;
             }
             .organization-option {
-              appearance: none;
-              cursor: pointer;
+              justify-content: space-between;
               text-align: left;
-            }
-            .organization-main {
-              flex: 1;
-              min-width: 0;
+              cursor: pointer;
             }
             .organization-copy {
               display: grid;
-              gap: 3px;
+              gap: 4px;
+              min-width: 0;
+            }
+            .organization-copy strong {
+              font-size: 14px;
+              line-height: 1.35;
+              font-weight: 500;
             }
             .organization-copy small {
               color: var(--muted);
               font-size: 12px;
-              line-height: 1.4;
-            }
-            .organization-meta {
-              display: inline-flex;
-              align-items: center;
-              gap: 12px;
-              flex: none;
-            }
-            .organization-role {
-              display: inline-flex;
-              align-items: center;
-              min-height: 24px;
-              padding: 0 8px;
-              border-radius: 999px;
-              border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
-              background: color-mix(in srgb, var(--primary) 10%, white);
-              color: color-mix(in srgb, var(--primary) 56%, var(--accent));
-              font-size: 11px;
-              font-weight: 700;
-              letter-spacing: 0.05em;
-              text-transform: uppercase;
-            }
-            .organization-spinner {
-              opacity: 0;
-              color: color-mix(in srgb, var(--primary) 56%, var(--accent));
-            }
-            .helper-copy {
-              color: var(--muted);
-              font-size: 13px;
-              line-height: 1.55;
+              line-height: 1.45;
             }
             .flow-status {
               display: flex;
               align-items: center;
+              justify-content: center;
               gap: 8px;
               color: var(--muted);
-              font-size: 13px;
+              font-size: 12px;
+              line-height: 1.45;
               opacity: 0;
               transform: translateY(-4px);
               transition: opacity 0.18s ease, transform 0.18s ease;
@@ -497,23 +488,18 @@ public static class SqlOSAuthPageRenderer
               border-radius: 999px;
               border: 2px solid currentColor;
               border-right-color: transparent;
-              animation: spin 0.7s linear infinite;
-              flex: none;
+              animation: spin 0.72s linear infinite;
             }
             .loader-sm {
               width: 14px;
               height: 14px;
-            }
-            .loader-lg {
-              width: 20px;
-              height: 20px;
             }
             .callout {
               display: flex;
               align-items: flex-start;
               gap: 10px;
               padding: 12px 14px;
-              border-radius: 14px;
+              border-radius: 10px;
               border: 1px solid var(--border);
               font-size: 13px;
               line-height: 1.55;
@@ -544,40 +530,26 @@ public static class SqlOSAuthPageRenderer
             .callout.info .callout-icon {
               background: rgba(37, 99, 235, 0.12);
             }
-            .footer-links {
-              display: flex;
-              align-items: center;
-              flex-wrap: wrap;
-              gap: 12px;
-              min-height: 20px;
-            }
-            .secondary-link {
-              color: color-mix(in srgb, var(--primary) 62%, var(--accent));
-              font-size: 13px;
-              font-weight: 600;
-              text-decoration: none;
-            }
             .state-card {
               display: flex;
               align-items: center;
               gap: 12px;
-              padding: 14px;
-              border-radius: 14px;
+              padding: 16px;
+              border-radius: 12px;
               border: 1px solid var(--border);
-              background: white;
+              background: var(--panel);
             }
             .state-icon {
-              width: 34px;
-              height: 34px;
-              border-radius: 10px;
-              border: 1px solid color-mix(in srgb, var(--primary) 16%, white);
-              background: color-mix(in srgb, var(--primary) 10%, white);
-              color: color-mix(in srgb, var(--primary) 56%, var(--accent));
+              width: 36px;
+              height: 36px;
+              border-radius: 12px;
+              border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border));
+              background: color-mix(in srgb, var(--primary) 12%, var(--panel));
               display: grid;
               place-items: center;
               font-size: 11px;
               font-weight: 700;
-              letter-spacing: 0.08em;
+              color: color-mix(in srgb, var(--primary) 80%, var(--text));
               flex: none;
             }
             .state-copy {
@@ -585,133 +557,37 @@ public static class SqlOSAuthPageRenderer
               gap: 4px;
             }
             .state-copy strong {
-              font-size: 14px;
-              font-weight: 600;
+              font-size: 15px;
             }
             .state-copy p {
               color: var(--muted);
               font-size: 13px;
               line-height: 1.55;
             }
-            .side-card {
-              display: grid;
-              gap: 16px;
-              padding: 22px;
-              animation: fade-up 0.34s ease-out 0.06s both;
-            }
-            .side-eyebrow {
-              display: inline-flex;
-              align-items: center;
-              width: fit-content;
-              min-height: 24px;
-              padding: 0 10px;
-              border-radius: 999px;
-              border: 1px solid var(--border);
-              background: white;
-              color: var(--muted);
-              font-size: 11px;
-              font-weight: 700;
-              letter-spacing: 0.08em;
-              text-transform: uppercase;
-            }
-            .side-copy {
-              display: grid;
-              gap: 8px;
-            }
-            .side-copy h2 {
-              font-size: 24px;
-              line-height: 1.12;
-              letter-spacing: -0.04em;
-            }
-            .side-copy p {
-              color: var(--muted);
-              font-size: 14px;
-              line-height: 1.6;
-            }
-            .side-list {
-              display: grid;
-              gap: 10px;
-            }
-            .side-row {
-              padding: 14px;
-              border-radius: 14px;
-              border: 1px solid var(--border);
-              background: white;
-              display: grid;
-              gap: 4px;
-            }
-            .side-row strong {
-              font-size: 13px;
-              font-weight: 600;
-            }
-            .side-row span {
-              color: var(--muted);
-              font-size: 13px;
-              line-height: 1.55;
-            }
-            .loading-overlay {
-              position: fixed;
-              inset: 0;
-              z-index: 20;
-              display: grid;
-              place-items: center;
-              padding: 16px;
-              background: rgba(15, 23, 42, 0.14);
-              backdrop-filter: blur(4px);
-              opacity: 0;
-              transition: opacity 0.18s ease;
-            }
-            .loading-overlay[data-visible="true"] {
-              opacity: 1;
-            }
-            .loading-card {
-              width: min(320px, 100%);
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              padding: 16px;
-              border-radius: 16px;
-              border: 1px solid var(--border);
-              background: rgba(255, 255, 255, 0.96);
-              box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
-            }
-            .loading-copy {
-              display: grid;
-              gap: 4px;
-            }
-            .loading-copy strong {
-              font-size: 14px;
-              font-weight: 600;
-            }
-            .loading-copy p {
-              color: var(--muted);
-              font-size: 13px;
-              line-height: 1.5;
-            }
             @keyframes spin {
               from { transform: rotate(0deg); }
               to { transform: rotate(360deg); }
             }
-            @keyframes fade-up {
-              from {
-                opacity: 0;
-                transform: translateY(12px);
-              }
-              to {
-                opacity: 1;
-                transform: translateY(0);
-              }
-            }
-            @media (max-width: 920px) {
-              .auth-shell.split { grid-template-columns: 1fr; max-width: 440px; }
-              .side-card { display: none; }
-            }
             @media (max-width: 640px) {
-              .page-shell { padding: 20px 12px; }
-              .auth-card { padding: 18px; }
-              .view-card { padding: 16px; }
-              h1 { font-size: 24px; }
-              .view-copy h2 { font-size: 20px; }
+              .page-shell {
+                padding: 18px 10px;
+              }
+              .auth-frame {
+                padding: 20px 14px;
+                border-radius: 24px;
+              }
+              .logo-shell {
+                width: 72px;
+                height: 72px;
+                border-radius: 18px;
+              }
+              .form-panel {
+                padding: 16px 14px;
+                border-radius: 16px;
+              }
+              h1 {
+                font-size: 26px;
+              }
             }
             @media (prefers-reduced-motion: reduce) {
               *,
@@ -726,30 +602,24 @@ public static class SqlOSAuthPageRenderer
         </head>
         <body>
           <div class="page-shell">
-            <div class="page-glow"></div>
             <main class="auth-shell {{(isStackedLayout ? "stacked" : "split")}}">
-              <section class="auth-card">
-                <div class="brand-row">
+              <section class="auth-frame">
+                <div class="brand-header">
                   <div class="logo-shell">{{logoMarkup}}</div>
-                  <div class="brand-copy">
-                    <h1>{{Html(title)}}</h1>
-                    {{subtitleMarkup}}
-                  </div>
+                  <h1>{{Html(title)}}</h1>
+                  {{subtitleMarkup}}
                 </div>
-                {{errorMarkup}}
-                {{infoMarkup}}
-                <section class="view-card">
-                  <div class="view-copy">
-                    <span class="view-label">{{Html(GetModeLabel(normalizedMode))}}</span>
-                    <h2>{{Html(GetStepTitle(normalizedMode))}}</h2>
-                    <p>{{Html(GetStepDescription(model, normalizedMode))}}</p>
+                <div class="messages">
+                  {{errorMarkup}}
+                  {{infoMarkup}}
+                </div>
+                <section class="form-panel">
+                  <div class="panel-stack">
+                    {{content}}
                   </div>
-                  {{content}}
                 </section>
               </section>
-              {{secondaryPanel}}
             </main>
-            {{RenderLoadingOverlay()}}
           </div>
           <script>{{RenderClientScript()}}</script>
         </body>
@@ -760,9 +630,17 @@ public static class SqlOSAuthPageRenderer
     private static string RenderPrimaryAction(string label, string loadingLabel)
         => $$"""
             <button class="primary-action" type="submit" data-loading-label="{{Html(loadingLabel)}}">
-              <span class="loader loader-sm button-spinner" aria-hidden="true"></span>
               <span class="button-label">{{Html(label)}}</span>
+              <span class="loader loader-sm button-loader" aria-hidden="true"></span>
             </button>
+            """;
+
+    private static string RenderPanelIntro(string kicker, string copy)
+        => $$"""
+            <div class="panel-intro">
+              <span class="panel-kicker">{{Html(kicker)}}</span>
+              <p>{{Html(copy)}}</p>
+            </div>
             """;
 
     private static string RenderProvidersSection(SqlOSAuthPageViewModel model)
@@ -774,7 +652,7 @@ public static class SqlOSAuthPageRenderer
 
         var providersMarkup = string.Join("", model.Providers.Select(RenderProviderLink));
         return $$"""
-            <div class="section-divider">Or continue with</div>
+            <div class="section-divider">OR</div>
             <div class="providers">{{providersMarkup}}</div>
             """;
     }
@@ -783,12 +661,10 @@ public static class SqlOSAuthPageRenderer
     {
         var providerName = Html(provider.DisplayName);
         return $$"""
-            <a class="provider-link js-loading-link" href="{{Html(provider.Url)}}" data-loading-title="Redirecting to {{providerName}}" data-loading-copy="Handing off to {{providerName}} for authentication.">
-              <span class="provider-main">
-                <span class="provider-icon">{{Html(GetMonogram(provider.DisplayName))}}</span>
-                <span class="provider-label">Continue with {{providerName}}</span>
-              </span>
-              <span class="provider-arrow" aria-hidden="true"></span>
+            <a class="provider-link js-loading-link" href="{{Html(provider.Url)}}" data-loading-label="Connecting to {{providerName}}">
+              <span class="provider-badge">{{RenderProviderBadge(provider.DisplayName)}}</span>
+              <span class="provider-label">Continue with {{providerName}}</span>
+              <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
             </a>
             """;
     }
@@ -797,29 +673,31 @@ public static class SqlOSAuthPageRenderer
     {
         if (organizations.Count == 0)
         {
-            return "<p class=\"helper-copy\">No organizations were available for this sign-in attempt. Return to sign in and try again.</p>";
+            return "<p class=\"footer-links\">No organizations were available for this sign-in attempt.</p>";
         }
 
         return string.Join("", organizations.Select(option =>
         {
-            var subtitle = string.IsNullOrWhiteSpace(option.Slug) ? "Workspace access" : option.Slug;
+            var detail = string.IsNullOrWhiteSpace(option.Slug)
+                ? option.Role
+                : $"{option.Slug} · {option.Role}";
+
             return $$"""
                 <button class="organization-option" type="submit" name="organizationId" value="{{Html(option.Id)}}" data-loading-label="Opening workspace">
-                  <span class="organization-main">
-                    <span class="organization-copy">
-                      <strong>{{Html(option.Name)}}</strong>
-                      <small>{{Html(subtitle)}}</small>
-                    </span>
+                  <span class="organization-copy">
+                    <strong>{{Html(option.Name)}}</strong>
+                    <small>{{Html(detail)}}</small>
                   </span>
-                  <span class="organization-meta">
-                    <span class="loader loader-sm organization-spinner" aria-hidden="true"></span>
-                    <span class="organization-role">{{Html(option.Role)}}</span>
-                    <span class="organization-arrow" aria-hidden="true"></span>
-                  </span>
+                  <span class="loader loader-sm organization-loader" aria-hidden="true"></span>
                 </button>
                 """;
         }));
     }
+
+    private static string RenderFooterPrompt(string prompt, string linkMarkup)
+        => string.IsNullOrWhiteSpace(linkMarkup)
+            ? string.Empty
+            : $"<p class=\"footer-prompt\">{Html(prompt)} {linkMarkup}</p>";
 
     private static string RenderFooterLinks(params string[] links)
     {
@@ -848,86 +726,40 @@ public static class SqlOSAuthPageRenderer
             """;
     }
 
-    private static string RenderSecondaryPanel(SqlOSAuthPageViewModel model, string normalizedMode, string subtitle, bool isStackedLayout)
+    private static string RenderProviderBadge(string displayName)
     {
-        if (isStackedLayout)
+        if (displayName.Contains("google", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Empty;
+            return """
+                <svg class="provider-logo" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.22 1.26-.93 2.32-1.95 3.03l3.15 2.44c1.84-1.69 2.9-4.18 2.9-7.15 0-.66-.06-1.3-.18-1.92H12z" />
+                  <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.61-2.44l-3.15-2.44c-.87.59-1.99.94-3.46.94-2.66 0-4.92-1.79-5.73-4.19l-3.25 2.5C4.66 19.78 8.06 22 12 22z" />
+                  <path fill="#FBBC05" d="M6.27 13.87c-.21-.59-.33-1.23-.33-1.87s.12-1.28.33-1.87l-3.25-2.5C2.37 8.93 2 10.43 2 12s.37 3.07 1.02 4.37l3.25-2.5z" />
+                  <path fill="#4285F4" d="M12 5.94c1.47 0 2.79.51 3.83 1.5l2.87-2.87C16.95 2.94 14.69 2 12 2 8.06 2 4.66 4.22 3.02 7.63l3.25 2.5c.81-2.4 3.07-4.19 5.73-4.19z" />
+                </svg>
+                """;
         }
 
-        var panelCopy = string.IsNullOrWhiteSpace(subtitle)
-            ? GetStepDescription(model, normalizedMode)
-            : subtitle;
-        var providersSummary = model.Providers.Count == 0
-            ? "Keep password-first sign-in simple while still routing configured domains to SSO."
-            : $"{CountLabel(model.Providers.Count, "connected provider")} can appear alongside password without changing the flow.";
-        var signupSummary = model.Settings.EnablePasswordSignup
-            ? "Password signup is enabled, so new users can move through the same hosted surface."
-            : "Direct password signup is hidden, which keeps onboarding invitation-led or admin-managed.";
+        if (displayName.Contains("microsoft", StringComparison.OrdinalIgnoreCase))
+        {
+            return """
+                <svg class="provider-logo" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="2" y="2" width="9" height="9" fill="#F25022" />
+                  <rect x="13" y="2" width="9" height="9" fill="#7FBA00" />
+                  <rect x="2" y="13" width="9" height="9" fill="#00A4EF" />
+                  <rect x="13" y="13" width="9" height="9" fill="#FFB900" />
+                </svg>
+                """;
+        }
 
-        return $$"""
-            <aside class="side-panel side-card">
-              <span class="side-eyebrow">Hosted Auth</span>
-              <div class="side-copy">
-                <h2>{{Html(GetPanelTitle(normalizedMode))}}</h2>
-                <p>{{Html(panelCopy)}}</p>
-              </div>
-              <div class="side-list">
-                <div class="side-row">
-                  <strong>Home realm discovery</strong>
-                  <span>Work domains can route to SSO before the password step, with lightweight loading feedback while that happens.</span>
-                </div>
-                <div class="side-row">
-                  <strong>Identity options</strong>
-                  <span>{{Html(providersSummary)}}</span>
-                </div>
-                <div class="side-row">
-                  <strong>Signup behavior</strong>
-                  <span>{{Html(signupSummary)}}</span>
-                </div>
-              </div>
-            </aside>
-            """;
+        var monogram = GetMonogram(displayName);
+        return $"<span class=\"provider-generic\">{Html(monogram)}</span>";
     }
-
-    private static string RenderLoadingOverlay()
-        => """
-            <div class="loading-overlay" id="auth-loading-overlay" hidden aria-hidden="true">
-              <div class="loading-card">
-                <span class="loader loader-lg" aria-hidden="true"></span>
-                <div class="loading-copy">
-                  <strong id="auth-loading-title">Working...</strong>
-                  <p id="auth-loading-copy">Securing your sign-in.</p>
-                </div>
-              </div>
-            </div>
-            """;
 
     private static string RenderClientScript()
         => """
             (() => {
-              const overlay = document.getElementById("auth-loading-overlay");
-              const overlayTitle = document.getElementById("auth-loading-title");
-              const overlayCopy = document.getElementById("auth-loading-copy");
-              let overlayTimer = 0;
               let activeSubmitter = null;
-
-              if (!overlay || !overlayTitle || !overlayCopy) {
-                return;
-              }
-
-              const showOverlay = (title, copy, delay) => {
-                window.clearTimeout(overlayTimer);
-                overlayTimer = window.setTimeout(() => {
-                  overlayTitle.textContent = title || "Working...";
-                  overlayCopy.textContent = copy || "Securing your sign-in.";
-                  overlay.hidden = false;
-                  overlay.setAttribute("aria-hidden", "false");
-                  window.requestAnimationFrame(() => {
-                    overlay.dataset.visible = "true";
-                  });
-                }, delay || 0);
-              };
 
               document.addEventListener("click", event => {
                 const submitter = event.target.closest('button[type="submit"]');
@@ -936,7 +768,7 @@ public static class SqlOSAuthPageRenderer
                   return;
                 }
 
-                const loadingLink = event.target.closest("a.js-loading-link");
+                const loadingLink = event.target.closest(".js-loading-link");
                 if (!loadingLink) {
                   return;
                 }
@@ -947,11 +779,7 @@ public static class SqlOSAuthPageRenderer
                 }
 
                 loadingLink.dataset.loading = "true";
-                showOverlay(
-                  loadingLink.dataset.loadingTitle || "Redirecting",
-                  loadingLink.dataset.loadingCopy || "Handing off to your identity provider.",
-                  40
-                );
+                loadingLink.setAttribute("aria-disabled", "true");
               });
 
               document.querySelectorAll(".auth-form").forEach(form => {
@@ -961,12 +789,16 @@ public static class SqlOSAuthPageRenderer
                     return;
                   }
 
-                  const submitter = event.submitter || activeSubmitter || form.querySelector('button[type="submit"]');
                   form.dataset.loading = "true";
+                  const submitter = event.submitter || activeSubmitter || form.querySelector('button[type="submit"]');
 
                   if (submitter) {
                     submitter.dataset.loading = "true";
-                    submitter.setAttribute("aria-disabled", "true");
+
+                    if (submitter instanceof HTMLButtonElement) {
+                      submitter.disabled = true;
+                    }
+
                     const label = submitter.querySelector(".button-label");
                     if (label && submitter.dataset.loadingLabel) {
                       label.textContent = submitter.dataset.loadingLabel;
@@ -980,59 +812,10 @@ public static class SqlOSAuthPageRenderer
                       flowStatus.dataset.visible = "true";
                     });
                   }
-
-                  const delay = form.dataset.flowKind === "hrd" ? 220 : 120;
-                  showOverlay(
-                    form.dataset.overlayTitle || "Working...",
-                    form.dataset.overlayCopy || "Securing your sign-in.",
-                    delay
-                  );
                 });
               });
             })();
             """;
-
-    private static string GetModeLabel(string normalizedMode)
-        => normalizedMode switch
-        {
-            "signup" => "Create account",
-            "password" => "Password",
-            "organization" => "Workspace",
-            "logged-out" => "Signed out",
-            _ => "Continue"
-        };
-
-    private static string GetStepTitle(string normalizedMode)
-        => normalizedMode switch
-        {
-            "signup" => "Create your account",
-            "password" => "Enter your password",
-            "organization" => "Choose an organization",
-            "logged-out" => "Session ended",
-            _ => "Sign in with your work email"
-        };
-
-    private static string GetStepDescription(SqlOSAuthPageViewModel model, string normalizedMode)
-        => normalizedMode switch
-        {
-            "signup" => "Set your profile and password to get started. Add an organization name if you are creating a new workspace.",
-            "password" when model.Providers.Count > 0 => "Use your password to continue, or choose another connected identity provider below.",
-            "password" => "Use the password attached to your work email to continue securely.",
-            "organization" when model.OrganizationSelection.Count == 0 => "We could not find an organization for this sign-in attempt. Return to sign in and try again.",
-            "organization" => $"We found {CountLabel(model.OrganizationSelection.Count, "workspace")} linked to this account. Choose where you want to continue.",
-            "logged-out" => "You have been signed out of the current session.",
-            _ => "Start with your email and we will determine whether you should continue with password or SSO."
-        };
-
-    private static string GetPanelTitle(string normalizedMode)
-        => normalizedMode switch
-        {
-            "signup" => "Simple account creation, same hosted surface",
-            "password" => "A quieter password step with room for social sign-in",
-            "organization" => "Workspace selection stays in the same flow",
-            "logged-out" => "The end of the session should feel as polished as the start",
-            _ => "Closer to an AuthKit-style sign-in surface"
-        };
 
     private static string GetMonogram(string value)
     {
@@ -1056,9 +839,6 @@ public static class SqlOSAuthPageRenderer
         return string.Concat(parts.Take(2).Select(part => char.ToUpperInvariant(part[0])));
     }
 
-    private static string CountLabel(int count, string singular)
-        => count == 1 ? $"1 {singular}" : $"{count} {singular}s";
-
     private static string NormalizeMode(string? mode)
         => string.IsNullOrWhiteSpace(mode)
             ? "login"
@@ -1074,10 +854,63 @@ public static class SqlOSAuthPageRenderer
         return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId)}";
     }
 
-    private static string Html(string value) => WebUtility.HtmlEncode(value);
-
     private static string Css(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    private static string Html(string value) => WebUtility.HtmlEncode(value);
+
+    private static bool IsDarkColor(string? value)
+        => TryParseHexColor(value, out var red, out var green, out var blue) &&
+           RelativeLuminance(red, green, blue) < 0.42;
+
+    private static string GetContrastingTextColor(string value)
+        => TryParseHexColor(value, out var red, out var green, out var blue) &&
+           RelativeLuminance(red, green, blue) > 0.52
+            ? "#111827"
+            : "#ffffff";
+
+    private static bool TryParseHexColor(string? value, out int red, out int green, out int blue)
+    {
+        red = 0;
+        green = 0;
+        blue = 0;
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var color = value.Trim();
+        if (color.StartsWith('#'))
+        {
+            color = color[1..];
+        }
+
+        if (color.Length == 3)
+        {
+            color = string.Concat(color.Select(character => new string(character, 2)));
+        }
+
+        if (color.Length != 6)
+        {
+            return false;
+        }
+
+        return int.TryParse(color.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out red) &&
+               int.TryParse(color.AsSpan(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out green) &&
+               int.TryParse(color.AsSpan(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out blue);
+    }
+
+    private static double RelativeLuminance(int red, int green, int blue)
+    {
+        static double Channel(double value)
+            => value <= 0.03928 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+
+        var r = Channel(red / 255d);
+        var g = Channel(green / 255d);
+        var b = Channel(blue / 255d);
+        return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+    }
 }
 
 public sealed record SqlOSAuthPageViewModel(

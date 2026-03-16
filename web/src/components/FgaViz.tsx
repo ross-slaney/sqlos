@@ -48,11 +48,31 @@ const typeColors: Record<string, string> = {
   store: "#059669",
 };
 
-const typeIcons: Record<string, string> = {
-  organization: "O",
-  workspace: "W",
-  chain: "C",
-  store: "S",
+const typeIcons: Record<string, React.ReactNode> = {
+  organization: (
+    // Building / office
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+    </svg>
+  ),
+  workspace: (
+    // Grid / layout
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+    </svg>
+  ),
+  chain: (
+    // Link / chain
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+    </svg>
+  ),
+  store: (
+    // Storefront
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
+    </svg>
+  ),
 };
 
 interface Grant {
@@ -264,42 +284,45 @@ export default function FgaViz() {
   const activeGrant = activeGrantIndex >= 0 ? grantSequence[activeGrantIndex] : null;
 
   return (
-    <div>
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_8px_40px_rgba(0,0,0,0.06)]">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50 px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <div className="flex h-5 w-5 items-center justify-center rounded bg-stone-900 text-[8px] font-bold text-white">
-              FGA
-            </div>
-            <span className="text-[12px] font-semibold text-stone-700">
-              Resource Hierarchy
+    <div className="relative h-[520px] overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_8px_40px_rgba(0,0,0,0.06)]">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50 px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-5 w-5 items-center justify-center rounded bg-stone-900 text-[8px] font-bold text-white">
+            FGA
+          </div>
+          <span className="text-[12px] font-semibold text-stone-700">
+            Resource Hierarchy
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[10px] text-stone-400">Live</span>
+        </div>
+      </div>
+
+      {/* Tree */}
+      <div className="p-4 pb-16">
+        <TreeNodeComponent
+          node={resourceTree}
+          activeGrant={activeGrant}
+          expandedNodes={expandedNodes}
+        />
+      </div>
+
+      {/* Legend — pinned to bottom */}
+      <div className="absolute bottom-0 left-0 right-0 flex flex-wrap gap-4 border-t border-stone-100 bg-white px-4 py-3">
+        {Object.entries(typeColors).map(([type, color]) => (
+          <div key={type} className="flex items-center gap-1.5">
+            <span
+              className="flex h-4 w-4 items-center justify-center rounded text-white"
+              style={{ backgroundColor: color }}
+            >
+              <span className="scale-[0.7]">{typeIcons[type]}</span>
             </span>
+            <span className="text-[10px] text-stone-400 capitalize">{type}</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] text-stone-400">Live</span>
-          </div>
-        </div>
-
-        {/* Tree */}
-        <div className="p-4">
-          <TreeNodeComponent
-            node={resourceTree}
-            activeGrant={activeGrant}
-            expandedNodes={expandedNodes}
-          />
-
-          {/* Legend */}
-          <div className="mt-4 flex flex-wrap gap-3 border-t border-stone-100 pt-4">
-            {Object.entries(typeColors).map(([type, color]) => (
-              <div key={type} className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
-                <span className="text-[10px] text-stone-400 capitalize">{type}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        ))}
       </div>
     </div>
   );

@@ -13,7 +13,10 @@ public static class ExampleEndpoints
 {
     public static void MapExampleEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/hello", (HttpContext context) =>
+        var example = app.MapGroup("/api");
+        example.ExcludeFromDescription();
+
+        example.MapGet("/hello", (HttpContext context) =>
         {
             var subjectId = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
             if (string.IsNullOrWhiteSpace(subjectId))
@@ -31,7 +34,7 @@ public static class ExampleEndpoints
             });
         });
 
-        app.MapGet("/api/me", (HttpContext context) =>
+        example.MapGet("/me", (HttpContext context) =>
         {
             var claims = context.User.Claims.Select(x => new { x.Type, x.Value });
             return Results.Ok(new
@@ -43,7 +46,7 @@ public static class ExampleEndpoints
             });
         });
 
-        app.MapGet("/api/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        example.MapGet("/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;
             var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
@@ -68,7 +71,7 @@ public static class ExampleEndpoints
             return Results.Ok(results);
         });
 
-        app.MapPost("/api/workspaces", async (SqlOSCreateWorkspaceRequest request, ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        example.MapPost("/workspaces", async (SqlOSCreateWorkspaceRequest request, ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;
             var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;

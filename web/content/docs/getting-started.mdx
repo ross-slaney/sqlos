@@ -4,31 +4,16 @@ description: "Wire SqlOS into your .NET app: install, configure, and run the exa
 order: 0
 ---
 
-# Getting Started
-
 **What this guide covers**: Install, service registration, DbContext setup, startup bootstrap, example stack URLs, AuthServer and Fga module overview.
-
-**Key files**: `examples/SqlOS.Example.Api/Program.cs`, `examples/SqlOS.Example.AppHost/Program.cs`
 
 ---
 
 SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into your ASP.NET + EF Core app with a single package and minimal configuration.
 
-## Quick Reference
-
-| Item                 | Value                                             |
-| -------------------- | ------------------------------------------------- |
-| Package              | `SqlOS`                                           |
-| NuGet                | `dotnet add package SqlOS`                        |
-| DbContext interfaces | `ISqlOSAuthServerDbContext`, `ISqlOSFgaDbContext` |
-| Bootstrap            | `await app.UseSqlOSAsync()`                       |
-| Dashboard base       | `/sqlos`                                          |
-
 ## Overview
 
 - **AuthServer**: Organizations, users, credentials, sessions, refresh tokens, OIDC providers, SAML organization SSO
-- **Fga**: Hierarchical resources, grants, roles, permission keys, query-time filtering
-- **Shared**: Startup bootstrap, dashboard shell, SQL-backed tests
+- **Fga**: Hierarchical resources, grants, roles, permission keys, access checks , query-time filtering
 
 ## Install
 
@@ -36,7 +21,7 @@ SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into 
 dotnet add package SqlOS
 ```
 
-## Runtime shape
+## Setup
 
 ```csharp
 builder.Services.AddSqlOS<AppDbContext>(options =>
@@ -46,7 +31,7 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-## DbContext setup
+### DbContext Setup
 
 Your context implements both interfaces and registers both module models:
 
