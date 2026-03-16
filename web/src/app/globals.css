@@ -31,3 +31,37 @@ body {
 pre code {
   font-family: var(--font-mono-ui), ui-monospace, monospace;
 }
+
+/* Landing page animations */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px) translateY(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%);
+  }
+}
+
+.animate-fadeSlideIn {
+  animation: fadeSlideIn 0.35s ease-out forwards;
+}
+
+@keyframes grantSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 200px;
+  }
+}
+
+@keyframes grantFadeIn {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}

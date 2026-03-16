@@ -20,6 +20,8 @@ public sealed class SqlOSAuthPageRendererTests
 
         html.Should().Contain("action=\"/sqlos/auth/login/identify\"");
         html.Should().Contain("href=\"/sqlos/auth/signup?request=req_login\"");
+        html.Should().Contain("class=\"side-panel side-card\"");
+        html.Should().Contain("data-flow-kind=\"hrd\"");
     }
 
     [TestMethod]
@@ -67,6 +69,70 @@ public sealed class SqlOSAuthPageRendererTests
         loggedOutHtml.Should().Contain("href=\"/sqlos/auth/login\"");
     }
 
+    [TestMethod]
+    public void RenderPage_StackedLayout_UsesConfiguredBrandingWithoutSecondaryPanel()
+    {
+        var settings = new SqlOSAuthPageSettingsDto(
+            LogoBase64: "data:image/png;base64,AAAA",
+            PrimaryColor: "#112233",
+            AccentColor: "#445566",
+            BackgroundColor: "#778899",
+            Layout: "stacked",
+            PageTitle: "Sign in to Example",
+            PageSubtitle: "Use your work email to access the Example workspace.",
+            EnablePasswordSignup: false,
+            EnabledCredentialTypes: ["password"],
+            UpdatedAt: DateTime.UtcNow,
+            ManagedByStartupSeed: false);
+
+        var html = SqlOSAuthPageRenderer.RenderPage(CreateModel(
+            mode: "login",
+            requestId: "req_branding",
+            email: "alice@example.com",
+            settings: settings));
+
+        html.Should().Contain("--primary: #112233");
+        html.Should().Contain("--accent: #445566");
+        html.Should().Contain("--background: #778899");
+        html.Should().Contain("Sign in to Example");
+        html.Should().Contain("Use your work email to access the Example workspace.");
+        html.Should().Contain("src=\"data:image/png;base64,AAAA\"");
+        html.Should().Contain("class=\"auth-shell stacked\"");
+        html.Should().NotContain("<aside class=\"side-panel\">");
+        html.Should().NotContain("Create an account");
+    }
+
+    [TestMethod]
+    public void RenderPage_WhenPasswordSignupDisabled_DoesNotRenderSignupLinks()
+    {
+        var settings = new SqlOSAuthPageSettingsDto(
+            LogoBase64: null,
+            PrimaryColor: "#0D9488",
+            AccentColor: "#1A1A1A",
+            BackgroundColor: "#FAFAF8",
+            Layout: "split",
+            PageTitle: "Sign in",
+            PageSubtitle: "Test auth page",
+            EnablePasswordSignup: false,
+            EnabledCredentialTypes: ["password"],
+            UpdatedAt: DateTime.UtcNow,
+            ManagedByStartupSeed: false);
+
+        var loginHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(
+            mode: "login",
+            requestId: "req_no_signup",
+            email: "alice@example.com",
+            settings: settings));
+        var passwordHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(
+            mode: "password",
+            requestId: "req_no_signup_password",
+            email: "alice@example.com",
+            settings: settings));
+
+        loginHtml.Should().NotContain("Create an account");
+        passwordHtml.Should().NotContain("Create an account");
+    }
+
     private static SqlOSAuthPageViewModel CreateModel(
         string mode,
         string? requestId = null,
@@ -74,11 +140,12 @@ public sealed class SqlOSAuthPageRendererTests
         string? displayName = null,
         string? pendingToken = null,
         IReadOnlyList<SqlOSOrganizationOption>? organizations = null,
-        IReadOnlyList<SqlOSAuthPageProviderLink>? providers = null)
+        IReadOnlyList<SqlOSAuthPageProviderLink>? providers = null,
+        SqlOSAuthPageSettingsDto? settings = null)
     {
         return new SqlOSAuthPageViewModel(
             mode,
-            new SqlOSAuthPageSettingsDto(
+            settings ?? new SqlOSAuthPageSettingsDto(
                 LogoBase64: null,
                 PrimaryColor: "#0D9488",
                 AccentColor: "#1A1A1A",
