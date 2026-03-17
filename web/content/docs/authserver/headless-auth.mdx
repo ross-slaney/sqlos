@@ -65,9 +65,9 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
 
 ## Example project setup
 
-The SqlOS example API at `examples/SqlOS.Example.Api` includes a complete headless auth reference you can run locally.
+The SqlOS example includes a complete headless auth reference with a real Next.js frontend you can run locally.
 
-### Switch to headless mode
+### Backend — `examples/SqlOS.Example.Api`
 
 Set `SqlOS:AuthMode` to `Headless` in `appsettings.json`:
 
@@ -86,27 +86,35 @@ Or use an environment variable:
 SqlOS__AuthMode=Headless dotnet run --project examples/SqlOS.Example.Api
 ```
 
-When `AuthMode` is `Hosted` (the default), the example uses the built-in SqlOS auth page. When set to `Headless`, it calls `UseHeadlessAuthPage` and routes users to your custom UI.
+When `AuthMode` is `Hosted` (the default), the example uses the built-in SqlOS auth page. When set to `Headless`, it calls `UseHeadlessAuthPage` and routes users to the Next.js frontend.
 
-### What the example configures
-
-**`BuildUiUrl`** — constructs a redirect URL with the full auth context as query parameters:
+**`BuildUiUrl`** — constructs a redirect URL pointing to the frontend with the full auth context as query parameters:
 
 ```text
 http://localhost:3000/auth/authorize?request={id}&view=login&email=...
 ```
 
-The example also ships a self-contained stub UI at `/auth/authorize` so you can test the full flow without a separate frontend. In production, point `HeadlessFrontendUrl` to your own app.
-
 **`OnHeadlessSignupAsync`** — demonstrates extracting custom signup fields (`firstName`, `lastName`, `companyName`) and logging them. Replace this with your own provisioning logic (creating app-specific records, granting roles, etc.).
+
+### Frontend — `examples/SqlOS.Example.Web`
+
+The Next.js frontend ships a headless authorize page at `/auth/authorize` that renders its own login and signup forms. Key files:
+
+- **`app/auth/authorize/page.tsx`** — the page route that SqlOS redirects to
+- **`components/sqlos-headless-auth-panel.tsx`** — the client component with login, signup, identify, and provider forms that call the headless API via `fetch()`
+- **`lib/sqlos-headless.ts`** — typed API client for all six headless endpoints
+
+When no `request` query param is present, the page shows buttons to initiate a PKCE authorize flow. SqlOS then redirects back with the authorization request ID, and the forms take over.
 
 ### Try it
 
-1. Start the example in headless mode
-2. Navigate to `/sqlos/auth/authorize?response_type=code&client_id=example-web&redirect_uri=http://localhost:3000/auth/callback&code_challenge=test&code_challenge_method=S256&state=test`
-3. SqlOS redirects to the stub UI at `/auth/authorize?request=...&view=login`
-4. Use the form to sign up or log in — the stub calls the headless API endpoints under the hood
-5. On success, SqlOS redirects back to the `redirect_uri` with an authorization code
+1. Start the API in headless mode: `SqlOS__AuthMode=Headless dotnet run --project examples/SqlOS.Example.Api`
+2. Start the frontend: `cd examples/SqlOS.Example.Web && npm run dev`
+3. Visit `http://localhost:3000` and click **Headless sign in**
+4. The frontend initiates a PKCE flow to `/sqlos/auth/authorize`
+5. SqlOS redirects to `/auth/authorize?request=...&view=login` — your app-owned UI
+6. Sign up or log in using the form — it calls the headless API endpoints directly
+7. On success, SqlOS issues an authorization code and the frontend exchanges it for tokens via NextAuth
 
 For a production-grade reference with language routing, custom provisioning, and multiple OAuth clients, see the [EasyCOI API source](https://github.com/anthropics/easycoi).
 

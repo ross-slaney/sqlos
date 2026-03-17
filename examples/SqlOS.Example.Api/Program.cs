@@ -229,7 +229,6 @@ app.UseExampleBearerTokenMiddleware();
 app.UseSqlOSDashboard("/sqlos");
 
 app.MapAuthServer("/sqlos/auth");
-app.MapExampleHeadlessUiEndpoints();
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
 app.MapDemoEndpoints();
