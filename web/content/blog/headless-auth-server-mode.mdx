@@ -1,0 +1,130 @@
+---
+title: "Headless Auth Server Mode: Keep OAuth, Own the UI"
+description: "Hosted auth pages are a great default until product teams want app-native layout, experiments, and conversion tuning. Headless Auth in SqlOS keeps the authorization server protocol in SqlOS while your app owns the UI."
+date: "2026-03-16"
+author: "SqlOS Team"
+tags: ["OAuth", "AuthServer", "SqlOS", "Headless UI"]
+---
+
+Hosted auth pages solve a real problem. They give teams a working login and signup experience quickly, and they keep the OAuth protocol surface in one place.
+
+But if you are building a serious product, you usually hit the same wall:
+
+- the login page does not feel like the rest of your app
+- the signup flow cannot use your real layout system
+- experiments and A/B tests start fighting the hosted page
+- product teams want to optimize conversion without reimplementing OAuth
+
+That tension is exactly why we built **Headless Auth Server Mode** in SqlOS.
+
+## The problem with most auth products
+
+Most auth products force one of two tradeoffs:
+
+1. **Use the hosted page**
+   - protocol stays correct
+   - brand fit is limited
+   - experimentation is constrained
+
+2. **Bring your own UI**
+   - the app gets visual control
+   - the team starts rebuilding redirect validation, PKCE, authorization state, and callback handling
+
+That second path is where the weird custom bridge code starts showing up.
+
+The browser sees a nice app-native login screen, but under the hood the app is stitching OAuth together after the fact instead of actually running a real authorization-server flow.
+
+## What we wanted instead
+
+We wanted a third option:
+
+- SqlOS still owns `/authorize`
+- SqlOS still owns `/token`
+- SqlOS still validates PKCE, redirect URIs, and client registrations
+- SqlOS still runs OIDC and SAML callbacks
+- SqlOS still issues the final authorization code and tokens
+- **your app owns the UI**
+
+That is headless mode.
+
+## The mental model
+
+Headless mode is not "replace SqlOS auth with your own auth."
+
+It is:
+
+- **SqlOS owns the protocol**
+- **your app owns the presentation**
+
+So the authorize popup can be fully app-native while the authorization-server behavior remains centralized and standards-compliant.
+
+## What changes for the app team
+
+With headless mode, your app renders the pages people care about:
+
+- login
+- signup
+- password step
+- organization selection
+- provider buttons
+
+That means you can:
+
+- use your real design system
+- run experiments
+- keep the popup visually aligned with your product
+- capture product-specific signup fields
+
+What you do **not** rebuild:
+
+- authorization request creation
+- PKCE validation
+- redirect URI validation
+- code issuance
+- token exchange
+- session and refresh-token handling
+
+## Why this matters for OAuth-powered MCP
+
+For modern MCP clients like Emcy, the OAuth popup is not a side detail. It is part of the product experience.
+
+If the popup looks like a foreign hosted page, the product feels bolted together.
+
+With headless mode:
+
+- Emcy still hits your authorization endpoint
+- SqlOS still runs the OAuth flow
+- the popup shows your product's own authorize shell
+
+That means you get the standards-facing OAuth surface an MCP client expects without settling for a generic hosted login screen.
+
+## The EasyCOI example
+
+EasyCOI had exactly this problem.
+
+Its old login and signup pages were product-quality, highly branded, and designed for conversion. But they lived outside the real authorization-server flow, which pushed the system toward a custom bridge pattern.
+
+Headless mode fixes that shape:
+
+- SqlOS owns the authorization request lifecycle
+- EasyCOI owns the UI shell
+- the popup shows the EasyCOI experience
+- the bridge is no longer needed
+
+That is the pattern we think more teams actually want.
+
+## Why we think this is the right product boundary
+
+Hosted auth should remain the default. Most teams want a fast path and SqlOS still provides that.
+
+But for teams that care deeply about product UX, the right boundary is not:
+
+- hosted auth page vs fully custom auth server
+
+It is:
+
+- hosted auth page vs **headless authorization server**
+
+That is a much cleaner separation of concerns.
+
+If you want to see the configuration and endpoint surface, read the [Headless Auth](/docs/authserver/headless-auth) guide.

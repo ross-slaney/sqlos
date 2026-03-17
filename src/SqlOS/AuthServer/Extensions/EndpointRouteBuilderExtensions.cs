@@ -20,6 +20,8 @@ public static class EndpointRouteBuilderExtensions
     public static IEndpointRouteBuilder MapAuthServer(this IEndpointRouteBuilder endpoints, string? pathPrefix = null)
     {
         var authPrefix = (pathPrefix ?? "/sqlos/auth").TrimEnd('/');
+        var authOptions = endpoints.ServiceProvider.GetService<IOptions<SqlOSAuthServerOptions>>()?.Value ?? new SqlOSAuthServerOptions();
+        var resolvedHeadlessPath = authOptions.Headless.ResolveApiBasePath(authPrefix);
         var adminPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
             ? $"{authPrefix[..^5]}/admin/auth"
             : $"{authPrefix}/admin";
@@ -48,6 +50,7 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/authorize", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
             SqlOSAuthPageSessionService authPageSessionService,
             CancellationToken cancellationToken) =>
         {
@@ -70,7 +73,9 @@ public static class EndpointRouteBuilderExtensions
                         context.Request.Query["resource"].ToString(),
                         context.Request.Query["login_hint"].ToString(),
                         context.Request.Query["prompt"].ToString(),
-                        context.Request.Query["nonce"].ToString()),
+                        context.Request.Query["nonce"].ToString(),
+                        headlessAuthService.IsEnabled ? "headless" : "hosted",
+                        context.Request.Query["ui_context"].ToString()),
                     cancellationToken);
                 var requestedView = string.Equals(context.Request.Query["view"], "signup", StringComparison.OrdinalIgnoreCase)
                     ? "signup"
@@ -89,6 +94,19 @@ public static class EndpointRouteBuilderExtensions
                     return Results.Redirect(redirectUrl);
                 }
 
+                if (headlessAuthService.IsEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildUiUrl(
+                        context,
+                        authorizationRequest.Id,
+                        requestedView,
+                        error: null,
+                        pendingToken: null,
+                        email: authorizationRequest.LoginHintEmail,
+                        displayName: null,
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+                }
+
                 var page = await BuildAuthPageViewModelAsync(
                     requestedView,
                     authorizationRequest.Id,
@@ -104,6 +122,17 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
+                if (headlessAuthService.IsEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        "login",
+                        requestId: null,
+                        email: context.Request.Query["login_hint"].ToString(),
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()))
+                        + $"&error={Uri.EscapeDataString(ex.Message)}");
+                }
+
                 var page = await BuildAuthPageViewModelAsync(
                     "login",
                     null,
@@ -121,8 +150,19 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/login", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
+            if (headlessAuthService.IsEnabled)
+            {
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "login",
+                    context.Request.Query["request"].ToString(),
+                    context.Request.Query["email"].ToString(),
+                    SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString())));
+            }
+
             var page = await BuildAuthPageViewModelAsync(
                 "login",
                 context.Request.Query["request"].ToString(),
@@ -317,8 +357,19 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/signup", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
+            if (headlessAuthService.IsEnabled)
+            {
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "signup",
+                    context.Request.Query["request"].ToString(),
+                    context.Request.Query["email"].ToString(),
+                    SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString())));
+            }
+
             var page = await BuildAuthPageViewModelAsync(
                 "signup",
                 context.Request.Query["request"].ToString(),
@@ -383,6 +434,145 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        var headless = endpoints.MapGroup(resolvedHeadlessPath);
+        headless.ExcludeFromDescription();
+
+        headless.MapGet("/requests/{requestId}", async (
+            string requestId,
+            string? view,
+            string? error,
+            string? pendingToken,
+            string? email,
+            string? displayName,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.GetRequestAsync(
+                    requestId,
+                    view,
+                    error,
+                    pendingToken,
+                    email,
+                    displayName,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/identify", async (
+            SqlOSHeadlessIdentifyRequest request,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.IdentifyAsync(request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/password/login", async (
+            SqlOSHeadlessPasswordLoginRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.PasswordLoginAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup", async (
+            SqlOSHeadlessSignupRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.SignUpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/organization/select", async (
+            SqlOSHeadlessOrganizationSelectionRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.SelectOrganizationAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/provider/start", async (
+            SqlOSHeadlessProviderStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.StartProviderAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
             }
         });
 
@@ -533,7 +723,12 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/saml/login/{connectionId}", async (string connectionId, string requestToken, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
             Results.Redirect(await samlService.BuildIdentityProviderRedirectAsync(connectionId, requestToken, cancellationToken)));
 
-        static async Task<IResult> HandleSamlAcsAsync(string connectionId, HttpContext httpContext, SqlOSSamlService samlService, CancellationToken cancellationToken)
+        static async Task<IResult> HandleSamlAcsAsync(
+            string connectionId,
+            HttpContext httpContext,
+            SqlOSSamlService samlService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken)
         {
             var form = await httpContext.Request.ReadFormAsync(cancellationToken);
             var samlResponse = form["SAMLResponse"].ToString();
@@ -543,8 +738,29 @@ public static class EndpointRouteBuilderExtensions
                 return Results.BadRequest(new { error = "SAMLResponse and RelayState are required." });
             }
 
-            var redirectUrl = await samlService.HandleAcsAsync(connectionId, samlResponse, relayState, cancellationToken);
-            return Results.Redirect(redirectUrl);
+            try
+            {
+                var redirectUrl = await samlService.HandleAcsAsync(connectionId, samlResponse, relayState, cancellationToken);
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var headlessErrorRedirect = await headlessAuthService.TryBuildUiUrlForAuthorizationRequestAsync(
+                    httpContext,
+                    relayState,
+                    "login",
+                    ex.Message,
+                    pendingToken: null,
+                    email: null,
+                    displayName: null,
+                    cancellationToken);
+                if (headlessErrorRedirect != null)
+                {
+                    return Results.Redirect(headlessErrorRedirect);
+                }
+
+                return Results.BadRequest(new { error = ex.Message });
+            }
         }
 
         auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);

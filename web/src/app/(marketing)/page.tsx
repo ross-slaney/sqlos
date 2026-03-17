@@ -18,7 +18,7 @@ var projects = await db.Projects
 
 export default function Home() {
   return (
-    <div>
+    <div className="overflow-x-hidden">
       {/* ── Hero ── */}
       <section className="px-6 pt-16 pb-20 sm:pt-24 sm:pb-28">
         <div className="mx-auto max-w-5xl">
@@ -114,7 +114,7 @@ export default function Home() {
 
       {/* ── Auth surface — dark popout ── */}
       <section className="px-6 py-16">
-        <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-stone-950 px-8 py-14 sm:px-12 sm:py-16">
+        <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-stone-950 px-5 py-12 sm:px-12 sm:py-16">
           <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
             <div>
               <p className="text-[12px] font-semibold tracking-[0.1em] uppercase text-white/40">
@@ -252,7 +252,7 @@ export default function Home() {
                   href="/blog/developers-guide-to-hierarchical-rbac"
                   className="text-blue-600 underline decoration-blue-300 underline-offset-2 hover:decoration-blue-500"
                 >
-                  Read The Developer's Guide to Hierarchical RBAC
+                  Read The Developer&apos;s Guide to Hierarchical RBAC
                 </Link>
                 .
               </p>
@@ -279,17 +279,17 @@ export default function Home() {
                 directly into your SQL execution plan — filtering, sorting,
                 pagination, and authorization in a single query.
               </p>
-              <div className="mt-6 grid grid-cols-3 gap-3">
+              <div className="mt-6 grid grid-cols-3 gap-2 sm:gap-3">
                 {[
                   { value: "3.47ms", label: "per page at 1.2M rows" },
                   { value: "<1.5ms", label: "point checks, D=10" },
                   { value: "O(k·D)", label: "bounded, N-free" },
                 ].map((s) => (
                   <div key={s.label} className="text-center">
-                    <div className="text-[16px] font-bold font-mono text-white">
+                    <div className="text-[13px] sm:text-[16px] font-bold font-mono text-white">
                       {s.value}
                     </div>
-                    <div className="mt-0.5 text-[10px] text-white/40">
+                    <div className="mt-0.5 text-[9px] sm:text-[10px] text-white/40">
                       {s.label}
                     </div>
                   </div>
@@ -306,7 +306,7 @@ export default function Home() {
                   ProjectsEndpoint.cs
                 </span>
               </div>
-              <pre className="overflow-x-auto px-5 py-5 font-mono text-[13px] leading-7 text-white/70">
+              <pre className="overflow-x-auto px-4 sm:px-5 py-5 font-mono text-[11px] sm:text-[13px] leading-7 text-white/70">
                 <code>{fgaCode}</code>
               </pre>
             </div>

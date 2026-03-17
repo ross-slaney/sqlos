@@ -20,14 +20,14 @@ function DashboardMockup() {
           <span className="h-2 w-2 rounded-full bg-stone-200" />
           <span className="h-2 w-2 rounded-full bg-stone-200" />
         </div>
-        <div className="flex-1 rounded-md bg-white border border-stone-150 px-2.5 py-0.5 text-[9px] text-stone-400 text-center">
+        <div className="flex-1 truncate rounded-md bg-white border border-stone-150 px-2.5 py-0.5 text-[9px] text-stone-400 text-center">
           localhost:5062/sqlos/admin/auth
         </div>
       </div>
 
       <div className="flex">
         {/* Sidebar */}
-        <div className="w-[100px] shrink-0 border-r border-stone-100 bg-[#1c1917] p-2">
+        <div className="hidden sm:block w-[100px] shrink-0 border-r border-stone-100 bg-[#1c1917] p-2">
           <div className="flex items-center gap-1.5 px-1 mb-3">
             <div className="flex h-4 w-4 items-center justify-center rounded bg-emerald-600 text-[6px] font-bold text-white">SO</div>
             <span className="text-[9px] font-bold text-white/90">SqlOS</span>
@@ -112,21 +112,21 @@ function DashboardMockup() {
 
 export default function HeroViz() {
   return (
-    <div className="relative min-h-[420px]">
+    <div className="relative min-h-[320px] lg:min-h-[420px]">
       {/* Dashboard — back layer, positioned lower-right */}
-      <div className="absolute top-28 -right-4 z-10 w-[95%]">
+      <div className="absolute top-28 right-0 z-10 w-[95%] lg:-right-4">
         <DashboardMockup />
       </div>
 
       {/* Code block — front layer, positioned upper-left */}
-      <div className="relative z-20 w-[75%] overflow-hidden rounded-xl border border-stone-800 bg-stone-950 shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
+      <div className="relative z-20 w-[85%] sm:w-[75%] overflow-hidden rounded-xl border border-stone-800 bg-stone-950 shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
         <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5">
           <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
           <span className="ml-3 text-[11px] text-stone-500">Program.cs</span>
         </div>
-        <pre className="overflow-x-auto px-5 py-4 font-mono text-[11px] leading-[1.8] text-stone-300">
+        <pre className="overflow-x-auto px-3 sm:px-5 py-4 font-mono text-[10px] sm:text-[11px] leading-[1.8] text-stone-300">
           <code>{setupCode}</code>
         </pre>
       </div>

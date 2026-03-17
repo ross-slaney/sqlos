@@ -212,7 +212,9 @@ public static class SqlOSAuthServerModelConfiguration
         {
             entity.ToTable("SqlOSAuthorizationRequests", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.PresentationMode).HasMaxLength(32);
             entity.Property(x => x.LoginHintEmail).HasMaxLength(320);
+            entity.Property(x => x.UiContextJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
             entity.Property(x => x.State).HasMaxLength(256);
             entity.Property(x => x.Scope).HasMaxLength(1000);

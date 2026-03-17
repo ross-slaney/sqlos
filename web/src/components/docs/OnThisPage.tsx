@@ -27,7 +27,11 @@ export default function OnThisPage() {
       if (!el.id) el.id = slugify(el.textContent || "");
     });
 
-    setHeadings(items);
+    const frameId = window.requestAnimationFrame(() => {
+      setHeadings(items);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
   }, []);
 
   useEffect(() => {

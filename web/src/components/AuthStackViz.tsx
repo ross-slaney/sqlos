@@ -94,7 +94,7 @@ export default function AuthStackViz() {
 
   return (
     <div className="flex items-center justify-center">
-      <div className="relative" style={{ width: R * 2 + 80, height: R * 2 + 80 }}>
+      <div className="relative scale-[0.8] sm:scale-100 origin-center" style={{ width: R * 2 + 80, height: R * 2 + 80 }}>
         {/* Connection lines */}
         <svg className="absolute inset-0 w-full h-full" viewBox={`0 0 ${R * 2 + 80} ${R * 2 + 80}`}>
           {providers.map((p, i) => {

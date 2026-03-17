@@ -261,9 +261,11 @@ public sealed class SqlOSAuthorizationRequest
 {
     public string Id { get; set; } = string.Empty;
     public string ClientApplicationId { get; set; } = string.Empty;
+    public string PresentationMode { get; set; } = "hosted";
     public string? OrganizationId { get; set; }
     public string? ConnectionId { get; set; }
     public string? LoginHintEmail { get; set; }
+    public string? UiContextJson { get; set; }
     public string RedirectUri { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
     public string Scope { get; set; } = string.Empty;

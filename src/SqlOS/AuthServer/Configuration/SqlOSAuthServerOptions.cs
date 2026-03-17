@@ -8,6 +8,7 @@ public class SqlOSAuthServerOptions
     public string Schema { get; set; } = "dbo";
     public string BasePath { get; set; } = "/sqlos/auth";
     public string Issuer { get; set; } = "https://localhost/sqlos/auth";
+    public SqlOSAuthPageMode AuthPageMode { get; set; } = SqlOSAuthPageMode.Hosted;
     public string? PublicOrigin { get; set; }
     public string DefaultAudience { get; set; } = "sqlos";
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
@@ -22,8 +23,16 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSAuthServerDashboardOptions Dashboard { get; set; } = new();
+    public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
+
+    public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
+    {
+        AuthPageMode = SqlOSAuthPageMode.Headless;
+        configure(Headless);
+        return this;
+    }
 
     public SqlOSAuthServerOptions SeedAuthPage(Action<SqlOSAuthPageSeedOptions> configure)
     {

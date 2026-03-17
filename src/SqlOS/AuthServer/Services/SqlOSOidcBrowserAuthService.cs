@@ -258,6 +258,20 @@ public sealed class SqlOSOidcBrowserAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         if (!string.IsNullOrWhiteSpace(callbackInput.Error))
         {
+            var headlessErrorRedirect = await TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
+                httpContext,
+                authorizationRequest.Id,
+                "login",
+                callbackInput.ErrorDescription ?? callbackInput.Error,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                cancellationToken);
+            if (headlessErrorRedirect != null)
+            {
+                return Results.Redirect(headlessErrorRedirect);
+            }
+
             return Results.Redirect(BuildAppRedirectUri(
                 authorizationRequest.RedirectUri,
                 new Dictionary<string, string?>
@@ -269,6 +283,20 @@ public sealed class SqlOSOidcBrowserAuthService
 
         if (string.IsNullOrWhiteSpace(callbackInput.Code))
         {
+            var headlessErrorRedirect = await TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
+                httpContext,
+                authorizationRequest.Id,
+                "login",
+                "The OIDC callback was missing the provider code.",
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                cancellationToken);
+            if (headlessErrorRedirect != null)
+            {
+                return Results.Redirect(headlessErrorRedirect);
+            }
+
             return Results.Redirect(BuildAppRedirectUri(
                 authorizationRequest.RedirectUri,
                 new Dictionary<string, string?>
@@ -305,6 +333,20 @@ public sealed class SqlOSOidcBrowserAuthService
         }
         catch (InvalidOperationException ex)
         {
+            var headlessErrorRedirect = await TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
+                httpContext,
+                authorizationRequest.Id,
+                "login",
+                ex.Message,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                cancellationToken);
+            if (headlessErrorRedirect != null)
+            {
+                return Results.Redirect(headlessErrorRedirect);
+            }
+
             return Results.Redirect(BuildAppRedirectUri(
                 authorizationRequest.RedirectUri,
                 new Dictionary<string, string?>
@@ -361,6 +403,39 @@ public sealed class SqlOSOidcBrowserAuthService
 
     private static string BuildAppRedirectUri(string redirectUri, IDictionary<string, string?> parameters)
         => QueryHelpers.AddQueryString(redirectUri, parameters);
+
+    private async Task<string?> TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
+        HttpContext httpContext,
+        string authorizationRequestId,
+        string view,
+        string? error,
+        string? pendingToken,
+        string? email,
+        string? displayName,
+        CancellationToken cancellationToken)
+    {
+        if (_options.AuthPageMode != SqlOSAuthPageMode.Headless || _options.Headless.BuildUiUrl == null)
+        {
+            return null;
+        }
+
+        var authorizationRequest = await _authorizationServerService.TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+        if (authorizationRequest == null || !SqlOSHeadlessAuthService.IsHeadlessRequest(authorizationRequest))
+        {
+            return null;
+        }
+
+        return _options.Headless.BuildUiUrl(
+            new SqlOSHeadlessUiRouteContext(
+                httpContext,
+                authorizationRequest.Id,
+                SqlOSHeadlessAuthService.NormalizeView(view),
+                error,
+                pendingToken,
+                email ?? authorizationRequest.LoginHintEmail,
+                displayName,
+                SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+    }
 
     private static IResult RenderCallbackError(string message)
         => Results.Content(

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -108,6 +109,9 @@ public sealed class SqlOSAuthorizationServerService
         {
             Id = _cryptoService.GenerateId("req"),
             ClientApplicationId = client.Id,
+            PresentationMode = string.Equals(input.PresentationMode, "headless", StringComparison.OrdinalIgnoreCase)
+                ? "headless"
+                : "hosted",
             RedirectUri = input.RedirectUri,
             State = input.State,
             Scope = string.Join(' ', requestedScopes),
@@ -115,6 +119,7 @@ public sealed class SqlOSAuthorizationServerService
             Nonce = input.Nonce,
             Prompt = input.Prompt,
             LoginHintEmail = input.LoginHint,
+            UiContextJson = SqlOSHeadlessAuthService.NormalizeUiContext(input.UiContextJson),
             CodeChallenge = input.CodeChallenge ?? string.Empty,
             CodeChallengeMethod = input.CodeChallengeMethod ?? "S256",
             CreatedAt = DateTime.UtcNow,
@@ -471,7 +476,9 @@ public sealed record SqlOSAuthorizeRequestInput(
     string? Resource,
     string? LoginHint,
     string? Prompt,
-    string? Nonce);
+    string? Nonce,
+    string? PresentationMode,
+    string? UiContextJson);
 
 public sealed record SqlOSPasswordAuthenticationResult(
     SqlOSUser User,

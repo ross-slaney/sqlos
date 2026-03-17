@@ -173,7 +173,7 @@ function TreeNodeComponent({
   const isActive = activeGrant?.nodeId === node.id;
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children && node.children.length > 0;
-  const indent = depth * 20;
+  const indent = depth * 16;
 
   return (
     <div>
@@ -284,7 +284,7 @@ export default function FgaViz() {
   const activeGrant = activeGrantIndex >= 0 ? grantSequence[activeGrantIndex] : null;
 
   return (
-    <div className="relative h-[520px] overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_8px_40px_rgba(0,0,0,0.06)]">
+    <div className="relative h-[480px] sm:h-[520px] overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_8px_40px_rgba(0,0,0,0.06)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50 px-4 py-2.5">
         <div className="flex items-center gap-2">

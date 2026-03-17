@@ -106,7 +106,7 @@ export default function AuthPageViz() {
             <span className="h-2.5 w-2.5 rounded-full bg-stone-200" />
             <span className="h-2.5 w-2.5 rounded-full bg-stone-200" />
           </div>
-          <div className="ml-2 flex-1 rounded-md bg-white px-3 py-1 text-[11px] text-stone-400 border border-stone-150">
+          <div className="ml-2 flex-1 truncate rounded-md bg-white px-3 py-1 text-[11px] text-stone-400 border border-stone-150">
             app.yourproduct.com/sqlos/auth/login
           </div>
         </div>

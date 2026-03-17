@@ -22,3 +22,7 @@ npm run dev
 cd web
 npm run build
 ```
+
+## Deployment
+
+The production deployment targets Azure Container Apps and is documented in [DEPLOYMENT.md](./DEPLOYMENT.md), including the exact GitHub Actions variables, secret names, and Azure service principal setup steps.

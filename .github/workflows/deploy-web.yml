@@ -1,0 +1,231 @@
+name: Deploy Web to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  AZURE_DNS_RESOURCE_GROUP: ${{ vars.AZURE_DNS_RESOURCE_GROUP || 'foundation' }}
+  AZURE_DNS_ZONE_NAME: ${{ vars.AZURE_DNS_ZONE_NAME || 'sqlos.dev' }}
+  AZURE_NAME_PREFIX: ${{ vars.AZURE_NAME_PREFIX }}
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  deploy:
+    name: Deploy Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: >-
+            {"clientId":"${{ env.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ env.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ env.AZURE_TENANT_ID }}"}
+
+      - name: Install Azure Container Apps extension
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          az extension add --name containerapp --upgrade --yes
+
+      - name: Preflight checks
+        run: |
+          set -euo pipefail
+
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location "$AZURE_LOCATION" \
+            --output none
+
+          az network dns zone show \
+            --resource-group "$AZURE_DNS_RESOURCE_GROUP" \
+            --name "$AZURE_DNS_ZONE_NAME" \
+            --output none
+
+          apex_conflicts="$(az network dns record-set list \
+            --resource-group "$AZURE_DNS_RESOURCE_GROUP" \
+            --zone-name "$AZURE_DNS_ZONE_NAME" \
+            --query "[?name=='@' && type=='Microsoft.Network/dnsZones/CNAME'].type" \
+            --output tsv)"
+          if [[ -n "$apex_conflicts" ]]; then
+            echo "The apex record set already contains a CNAME, which blocks the required A record:"
+            echo "$apex_conflicts"
+            exit 1
+          fi
+
+          www_conflicts="$(az network dns record-set list \
+            --resource-group "$AZURE_DNS_RESOURCE_GROUP" \
+            --zone-name "$AZURE_DNS_ZONE_NAME" \
+            --query "[?name=='www' && type!='Microsoft.Network/dnsZones/CNAME'].type" \
+            --output tsv)"
+          if [[ -n "$www_conflicts" ]]; then
+            echo "The www label already contains non-CNAME record types, which block the required CNAME:"
+            echo "$www_conflicts"
+            exit 1
+          fi
+
+      - name: Deploy foundation resources
+        run: |
+          set -euo pipefail
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name foundation \
+            --template-file infra/layers/foundation.bicep \
+            --parameters \
+              location="$AZURE_LOCATION" \
+              projectPrefix="$AZURE_NAME_PREFIX" \
+            --output none
+
+          ACR_NAME="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.acrName.value" --output tsv)"
+          ACR_LOGIN_SERVER="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.acrLoginServer.value" --output tsv)"
+          CONTAINER_APPS_ENV_ID="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.containerAppsEnvId.value" --output tsv)"
+          CONTAINER_APPS_ENV_NAME="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.containerAppsEnvName.value" --output tsv)"
+          CONTAINER_APPS_ENV_STATIC_IP="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.containerAppsEnvStaticIp.value" --output tsv)"
+          UAMI_ID="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.uamiId.value" --output tsv)"
+
+          {
+            echo "ACR_NAME=$ACR_NAME"
+            echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"
+            echo "CONTAINER_APPS_ENV_ID=$CONTAINER_APPS_ENV_ID"
+            echo "CONTAINER_APPS_ENV_NAME=$CONTAINER_APPS_ENV_NAME"
+            echo "CONTAINER_APPS_ENV_STATIC_IP=$CONTAINER_APPS_ENV_STATIC_IP"
+            echo "UAMI_ID=$UAMI_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and push web image
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image sqlos-web:"$IMAGE_TAG" \
+            --image sqlos-web:latest \
+            --file web/Dockerfile \
+            ./web
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Deploy container app and DNS records
+        run: |
+          set -euo pipefail
+
+          APP_IMAGE="${ACR_LOGIN_SERVER}/sqlos-web:${IMAGE_TAG}"
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name applications \
+            --template-file infra/layers/applications.bicep \
+            --parameters \
+              location="$AZURE_LOCATION" \
+              projectPrefix="$AZURE_NAME_PREFIX" \
+              containerAppsEnvId="$CONTAINER_APPS_ENV_ID" \
+              containerAppsEnvStaticIp="$CONTAINER_APPS_ENV_STATIC_IP" \
+              acrLoginServer="$ACR_LOGIN_SERVER" \
+              containerImage="$APP_IMAGE" \
+              uamiId="$UAMI_ID" \
+              dnsResourceGroup="$AZURE_DNS_RESOURCE_GROUP" \
+              dnsZoneName="$AZURE_DNS_ZONE_NAME" \
+            --output none
+
+          CONTAINER_APP_NAME="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name applications --query "properties.outputs.containerAppName.value" --output tsv)"
+          CONTAINER_APP_FQDN="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name applications --query "properties.outputs.containerAppFqdn.value" --output tsv)"
+          CUSTOM_DOMAIN_VERIFICATION_ID="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name applications --query "properties.outputs.customDomainVerificationId.value" --output tsv)"
+
+          {
+            echo "CONTAINER_APP_NAME=$CONTAINER_APP_NAME"
+            echo "CONTAINER_APP_FQDN=$CONTAINER_APP_FQDN"
+            echo "CUSTOM_DOMAIN_VERIFICATION_ID=$CUSTOM_DOMAIN_VERIFICATION_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Wait for public DNS propagation
+        run: |
+          set -euo pipefail
+
+          expected_ip="$CONTAINER_APPS_ENV_STATIC_IP"
+          expected_fqdn="$CONTAINER_APP_FQDN"
+          expected_verification_id="$CUSTOM_DOMAIN_VERIFICATION_ID"
+          www_host="www.${AZURE_DNS_ZONE_NAME}"
+
+          for attempt in $(seq 1 30); do
+            apex_ip="$(dig +short @"1.1.1.1" "$AZURE_DNS_ZONE_NAME" A | tail -n1)"
+            apex_txt="$(dig +short @"1.1.1.1" "asuid.${AZURE_DNS_ZONE_NAME}" TXT | tr -d '"' | tail -n1)"
+            www_cname="$(dig +short @"1.1.1.1" "$www_host" CNAME | sed 's/\.$//' | tail -n1)"
+            www_txt="$(dig +short @"1.1.1.1" "asuid.www.${AZURE_DNS_ZONE_NAME}" TXT | tr -d '"' | tail -n1)"
+
+            if [[ "$apex_ip" == "$expected_ip" && "$apex_txt" == "$expected_verification_id" && "$www_cname" == "$expected_fqdn" && "$www_txt" == "$expected_verification_id" ]]; then
+              exit 0
+            fi
+
+            echo "Attempt $attempt/30 waiting for DNS propagation"
+            echo "Apex IP: expected '$expected_ip', got '${apex_ip:-<empty>}'"
+            echo "Apex TXT: expected '$expected_verification_id', got '${apex_txt:-<empty>}'"
+            echo "WWW CNAME: expected '$expected_fqdn', got '${www_cname:-<empty>}'"
+            echo "WWW TXT: expected '$expected_verification_id', got '${www_txt:-<empty>}'"
+            sleep 20
+          done
+
+          echo "DNS propagation did not converge in time."
+          exit 1
+
+      - name: Bind custom domains
+        run: |
+          set -euo pipefail
+
+          ensure_hostname_added() {
+            local hostname="$1"
+            local existing_count
+
+            existing_count="$(az containerapp hostname list \
+              --name "$CONTAINER_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?name=='${hostname}'] | length(@)" \
+              --output tsv)"
+
+            if [[ "$existing_count" == "0" ]]; then
+              az containerapp hostname add \
+                --name "$CONTAINER_APP_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --hostname "$hostname" \
+                --output none
+            fi
+          }
+
+          ensure_hostname_added "$AZURE_DNS_ZONE_NAME"
+          az containerapp hostname bind \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --environment "$CONTAINER_APPS_ENV_ID" \
+            --hostname "$AZURE_DNS_ZONE_NAME" \
+            --validation-method HTTP \
+            --output none
+
+          ensure_hostname_added "www.${AZURE_DNS_ZONE_NAME}"
+          az containerapp hostname bind \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --environment "$CONTAINER_APPS_ENV_ID" \
+            --hostname "www.${AZURE_DNS_ZONE_NAME}" \
+            --validation-method CNAME \
+            --output none
+
+      - name: Deployment summary
+        run: |
+          echo "Deployment completed successfully."
+          echo "Primary URL: https://${AZURE_DNS_ZONE_NAME}"
+          echo "WWW URL: https://www.${AZURE_DNS_ZONE_NAME}"
+          echo "Resource group: ${AZURE_RESOURCE_GROUP}"
+          echo "DNS resource group: ${AZURE_DNS_RESOURCE_GROUP}"
+          echo "Container app: ${CONTAINER_APP_NAME}"
+          echo "Container app FQDN: ${CONTAINER_APP_FQDN}"
+          echo "Container Apps environment: ${CONTAINER_APPS_ENV_NAME}"
+          echo "Container Apps environment IP: ${CONTAINER_APPS_ENV_STATIC_IP}"
+          echo "ACR: ${ACR_LOGIN_SERVER}"

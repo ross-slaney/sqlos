@@ -13,6 +13,16 @@ section: authserver
 
 AuthServer is the identity module in SqlOS. It handles organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML organization SSO inside your application database.
 
+## Presentation Modes
+
+SqlOS AuthServer separates the authorization protocol from the login presentation layer:
+
+- **Hosted default**: SqlOS renders the built-in AuthPage.
+- **Headless custom UI**: SqlOS still owns `/authorize`, `/token`, PKCE, sessions, OIDC/SAML callbacks, and code issuance while your app renders the UI.
+- **Future hosted custom renderer**: a planned middle ground for teams that want hosted rendering with custom HTML.
+
+If you want a fully app-native authorize popup for Emcy or any other OAuth client without rebuilding OAuth, headless mode is the right fit.
+
 ## Services
 
 | Service | Purpose |
@@ -31,6 +41,22 @@ AuthServer is the identity module in SqlOS. It handles organizations, users, cre
 builder.Services.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer();
+});
+```
+
+Headless mode is opt-in:
+
+```csharp
+builder.Services.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseAuthServer(auth =>
+    {
+        auth.UseHeadlessAuthPage(headless =>
+        {
+            headless.BuildUiUrl = ctx =>
+                $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
+        });
+    });
 });
 ```
 
