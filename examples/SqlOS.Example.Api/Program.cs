@@ -9,6 +9,7 @@ using SqlOS.Example.Api.FgaRetail.Endpoints;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Services;
+using Microsoft.AspNetCore.WebUtilities;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
 
@@ -72,6 +73,51 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
             "Example Web Client",
             exampleCallbackUrl,
             "https://client.example.local/callback");
+
+        var authMode = builder.Configuration["SqlOS:AuthMode"];
+        if (string.Equals(authMode, "Headless", StringComparison.OrdinalIgnoreCase))
+        {
+            var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
+                ?? builder.Configuration["ExampleFrontend:Origin"]
+                ?? "http://localhost:3000";
+
+            auth.UseHeadlessAuthPage(headless =>
+            {
+                headless.BuildUiUrl = ctx =>
+                {
+                    var query = new Dictionary<string, string?>
+                    {
+                        ["request"] = ctx.RequestId,
+                        ["view"] = ctx.View,
+                        ["error"] = ctx.Error,
+                        ["email"] = ctx.Email,
+                        ["pendingToken"] = ctx.PendingToken,
+                        ["displayName"] = ctx.DisplayName,
+                    };
+                    return QueryHelpers.AddQueryString(
+                        $"{headlessFrontendUrl.TrimEnd('/')}/auth/authorize", query);
+                };
+
+                headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+                {
+                    var logger = ctx.HttpContext.RequestServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("HeadlessSignup");
+
+                    var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
+                    var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
+                    var companyName = ctx.CustomFields?["companyName"]?.GetValue<string>();
+
+                    logger.LogInformation(
+                        "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Company={Company}",
+                        ctx.User.DefaultEmail,
+                        ctx.Organization?.Name,
+                        firstName, lastName, companyName);
+
+                    await Task.CompletedTask;
+                };
+            });
+        }
     });
     options.UseFGA(fga =>
     {
@@ -183,6 +229,7 @@ app.UseExampleBearerTokenMiddleware();
 app.UseSqlOSDashboard("/sqlos");
 
 app.MapAuthServer("/sqlos/auth");
+app.MapExampleHeadlessUiEndpoints();
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
 app.MapDemoEndpoints();
