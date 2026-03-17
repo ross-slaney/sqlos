@@ -46,6 +46,38 @@ public static class ExampleEndpoints
             });
         });
 
+        example.MapGet("/profile", async (ExampleAppDbContext context, HttpContext httpContext, CancellationToken cancellationToken) =>
+        {
+            var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var profile = await context.ExampleUserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.SqlOSUserId == subjectId, cancellationToken);
+
+            return Results.Ok(new
+            {
+                userId = subjectId,
+                email = httpContext.User.FindFirst("email")?.Value,
+                displayName = httpContext.User.FindFirst("name")?.Value ?? httpContext.User.Identity?.Name,
+                organizationId = httpContext.User.FindFirst("org_id")?.Value,
+                profile = profile == null
+                    ? null
+                    : new
+                    {
+                        referralSource = profile.ReferralSource,
+                        organizationName = profile.OrganizationName,
+                        defaultEmail = profile.DefaultEmail,
+                        displayName = profile.DisplayName,
+                        createdAt = profile.CreatedAt,
+                        updatedAt = profile.UpdatedAt
+                    }
+            });
+        });
+
         example.MapGet("/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;

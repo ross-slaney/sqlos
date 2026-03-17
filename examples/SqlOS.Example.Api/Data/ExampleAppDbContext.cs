@@ -18,6 +18,7 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
     public DbSet<Chain> Chains => Set<Chain>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+    public DbSet<ExampleUserProfile> ExampleUserProfiles => Set<ExampleUserProfile>();
 
     public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
         string resourceId,
@@ -82,6 +83,19 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
                 .WithMany(x => x.InventoryItems)
                 .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ExampleUserProfile>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.SqlOSUserId).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.DefaultEmail).HasMaxLength(320).IsRequired();
+            entity.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.OrganizationId).HasMaxLength(64);
+            entity.Property(x => x.OrganizationName).HasMaxLength(200);
+            entity.Property(x => x.ReferralSource).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => x.SqlOSUserId).IsUnique();
+            entity.HasIndex(x => x.OrganizationId);
         });
     }
 }

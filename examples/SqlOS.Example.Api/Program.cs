@@ -11,7 +11,9 @@ using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Services;
 using Microsoft.AspNetCore.WebUtilities;
 using SqlOS.Configuration;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.Extensions;
+using SqlOS.Example.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -103,18 +105,51 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
                     var logger = ctx.HttpContext.RequestServices
                         .GetRequiredService<ILoggerFactory>()
                         .CreateLogger("HeadlessSignup");
+                    var dbContext = ctx.HttpContext.RequestServices.GetRequiredService<ExampleAppDbContext>();
 
                     var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
                     var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
-                    var companyName = ctx.CustomFields?["companyName"]?.GetValue<string>();
+                    var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
+
+                    if (string.IsNullOrWhiteSpace(referralSource))
+                    {
+                        throw new SqlOSHeadlessValidationException(
+                            "Tell us how you heard about SqlOS.",
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["referralSource"] = "Select a referral source to complete signup."
+                            });
+                    }
+
+                    var profile = await dbContext.ExampleUserProfiles
+                        .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
+
+                    if (profile == null)
+                    {
+                        profile = new ExampleUserProfile
+                        {
+                            SqlOSUserId = ctx.User.Id,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        dbContext.ExampleUserProfiles.Add(profile);
+                    }
+
+                    profile.DefaultEmail = ctx.User.DefaultEmail ?? string.Empty;
+                    profile.DisplayName = ctx.User.DisplayName ?? ctx.User.DefaultEmail ?? "Example User";
+                    profile.OrganizationId = ctx.Organization?.Id;
+                    profile.OrganizationName = ctx.Organization?.Name;
+                    profile.ReferralSource = referralSource!;
+                    profile.UpdatedAt = DateTime.UtcNow;
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
 
                     logger.LogInformation(
-                        "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Company={Company}",
+                        "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Referral={Referral}",
                         ctx.User.DefaultEmail,
                         ctx.Organization?.Name,
-                        firstName, lastName, companyName);
-
-                    await Task.CompletedTask;
+                        firstName,
+                        lastName,
+                        referralSource);
                 };
             });
         }

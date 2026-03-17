@@ -1,130 +1,117 @@
 ---
 title: "Headless Auth Server Mode: Keep OAuth, Own the UI"
-description: "Hosted auth pages are a great default until product teams want app-native layout, experiments, and conversion tuning. Headless Auth in SqlOS keeps the authorization server protocol in SqlOS while your app owns the UI."
-date: "2026-03-16"
+description: "Hosted auth pages are a great default until product teams need app-native authorize screens, experiments, and app-owned signup fields. Headless mode in SqlOS keeps the auth server in SqlOS while your app owns the UI."
+date: "2026-03-17"
 author: "SqlOS Team"
 tags: ["OAuth", "AuthServer", "SqlOS", "Headless UI"]
 ---
 
-Hosted auth pages solve a real problem. They give teams a working login and signup experience quickly, and they keep the OAuth protocol surface in one place.
+Hosted auth pages are a great default.
 
-But if you are building a serious product, you usually hit the same wall:
+They get a working login and signup experience in front of users quickly, and they keep the browser auth flow in one place.
 
-- the login page does not feel like the rest of your app
-- the signup flow cannot use your real layout system
-- experiments and A/B tests start fighting the hosted page
-- product teams want to optimize conversion without reimplementing OAuth
+But serious product teams tend to hit the same wall:
 
-That tension is exactly why we built **Headless Auth Server Mode** in SqlOS.
+- the authorize popup does not match the real app
+- signup experiments fight the hosted surface
+- product teams want app-owned fields and conversion tuning
+- “bring your own UI” often turns into custom bridge code
+
+That is exactly why we built **Headless Auth Server Mode** in SqlOS.
 
 ## The problem with most auth products
 
-Most auth products force one of two tradeoffs:
+Most auth systems force a binary choice:
 
-1. **Use the hosted page**
-   - protocol stays correct
-   - brand fit is limited
-   - experimentation is constrained
+1. Use the hosted page.
+2. Rebuild the auth UX yourself.
 
-2. **Bring your own UI**
-   - the app gets visual control
-   - the team starts rebuilding redirect validation, PKCE, authorization state, and callback handling
+The first path preserves protocol correctness, but often limits product control.
 
-That second path is where the weird custom bridge code starts showing up.
+The second path gives teams control over the UI, but it also tempts them into rebuilding:
 
-The browser sees a nice app-native login screen, but under the hood the app is stitching OAuth together after the fact instead of actually running a real authorization-server flow.
+- authorization request handling
+- redirect validation
+- PKCE state
+- callback orchestration
+- auth code issuance
 
-## What we wanted instead
+That is where “pretty popup, weird auth plumbing” starts.
 
-We wanted a third option:
+## The boundary we actually wanted
+
+We wanted a cleaner split:
 
 - SqlOS still owns `/authorize`
 - SqlOS still owns `/token`
-- SqlOS still validates PKCE, redirect URIs, and client registrations
+- SqlOS still validates PKCE and redirect URIs
 - SqlOS still runs OIDC and SAML callbacks
-- SqlOS still issues the final authorization code and tokens
+- SqlOS still issues the real auth code and tokens
 - **your app owns the UI**
 
 That is headless mode.
 
-## The mental model
-
-Headless mode is not "replace SqlOS auth with your own auth."
+It is not “replace SqlOS auth with custom auth.”
 
 It is:
 
 - **SqlOS owns the protocol**
 - **your app owns the presentation**
 
-So the authorize popup can be fully app-native while the authorization-server behavior remains centralized and standards-compliant.
-
-## What changes for the app team
-
-With headless mode, your app renders the pages people care about:
-
-- login
-- signup
-- password step
-- organization selection
-- provider buttons
-
-That means you can:
-
-- use your real design system
-- run experiments
-- keep the popup visually aligned with your product
-- capture product-specific signup fields
-
-What you do **not** rebuild:
-
-- authorization request creation
-- PKCE validation
-- redirect URI validation
-- code issuance
-- token exchange
-- session and refresh-token handling
-
 ## Why this matters for OAuth-powered MCP
 
-For modern MCP clients like Emcy, the OAuth popup is not a side detail. It is part of the product experience.
+For products using Emcy or other modern OAuth clients, the authorize popup is part of the product.
 
-If the popup looks like a foreign hosted page, the product feels bolted together.
+If the popup feels like a generic hosted page on another system, the integration feels bolted on.
 
 With headless mode:
 
-- Emcy still hits your authorization endpoint
-- SqlOS still runs the OAuth flow
-- the popup shows your product's own authorize shell
+- the OAuth client still talks to your SqlOS authorization server
+- the standards-facing metadata and token flow stay the same
+- the popup can look like your product instead of generic auth chrome
 
-That means you get the standards-facing OAuth surface an MCP client expects without settling for a generic hosted login screen.
+That is a much better fit for serious app-owned AI and MCP products.
 
-## The EasyCOI example
+## The example we wanted to prove
 
-EasyCOI had exactly this problem.
+We upgraded the SqlOS example app to show the pattern directly:
 
-Its old login and signup pages were product-quality, highly branded, and designed for conversion. But they lived outside the real authorization-server flow, which pushed the system toward a custom bridge pattern.
+- a side-by-side hosted vs headless story
+- a real custom authorize shell at `/auth/authorize`
+- a custom signup field called `referralSource`
+- app-owned persistence of that field in `OnHeadlessSignupAsync`
+- a signed-in app card that reads the value back through the normal product API
 
-Headless mode fixes that shape:
+That last part matters.
 
-- SqlOS owns the authorization request lifecycle
-- EasyCOI owns the UI shell
-- the popup shows the EasyCOI experience
-- the bridge is no longer needed
+It shows that headless mode is not just about prettier HTML. It is about giving product teams a place to own the data and UX that belong to the product while SqlOS keeps the authorization server correct.
 
-That is the pattern we think more teams actually want.
+## The EasyCOI-shaped problem
 
-## Why we think this is the right product boundary
+EasyCOI had product-quality signup and login screens long before it had a proper standards-facing authorization server.
 
-Hosted auth should remain the default. Most teams want a fast path and SqlOS still provides that.
+That is a very common shape:
 
-But for teams that care deeply about product UX, the right boundary is not:
+- the product team builds good auth UX
+- later the app needs real OAuth
+- now there is tension between “keep the good UI” and “stop faking the protocol”
 
-- hosted auth page vs fully custom auth server
+Headless mode resolves that tension much better than a custom bridge.
+
+## Our view
+
+Hosted auth should remain the default. It is the right choice for many teams.
+
+But the more honest decision is not:
+
+- hosted page vs completely custom auth server
 
 It is:
 
-- hosted auth page vs **headless authorization server**
+- hosted page vs **headless authorization server**
 
-That is a much cleaner separation of concerns.
+That is the product boundary we think the market has been missing.
 
-If you want to see the configuration and endpoint surface, read the [Headless Auth](/docs/authserver/headless-auth) guide.
+If you want the implementation guide, read [Headless Auth](/docs/authserver/headless-auth).
+
+If you want the product decision guide, read [Hosted vs Headless Auth](/docs/authserver/hosted-vs-headless).

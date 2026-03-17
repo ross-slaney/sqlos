@@ -1,4 +1,5 @@
 import { AuthorizedApiPanel } from "@/components/authorized-api-panel";
+import { ExampleProfilePanel } from "@/components/example-profile-panel";
 import { LogoutButton } from "@/components/logout-button";
 
 export default function AppPage() {
@@ -8,8 +9,9 @@ export default function AppPage() {
         <section className="hero">
           <h1>Authenticated App</h1>
           <p>
-            This page is protected by NextAuth. Use the button below to make a normal authenticated
-            request to the example API and verify that refresh and sign-out behavior are working.
+            This page shows the payoff from the headless demo. The access token in NextAuth is the
+            same SqlOS-issued token you would use for your normal product API, and the referral
+            source card below proves your app can persist custom signup data without owning OAuth.
           </p>
           <div className="actions">
             <LogoutButton />
@@ -20,6 +22,7 @@ export default function AppPage() {
         </section>
 
         <div className="grid two">
+          <ExampleProfilePanel />
           <section className="card">
             <h2>Validation goal</h2>
             <pre>{JSON.stringify({

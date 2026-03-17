@@ -15,6 +15,7 @@ export type HeadlessViewModel = {
   displayName?: string | null;
   uiContext?: Record<string, unknown> | null;
   providers?: HeadlessProvider[];
+  organizationSelection?: HeadlessOrganizationOption[];
   settings?: HeadlessSettings | null;
   fieldErrors?: Record<string, string>;
 };
@@ -23,6 +24,13 @@ export type HeadlessProvider = {
   connectionId: string;
   providerType: string;
   displayName: string;
+};
+
+export type HeadlessOrganizationOption = {
+  id: string;
+  name: string;
+  primaryDomain?: string | null;
+  role: string;
 };
 
 export type HeadlessSettings = {

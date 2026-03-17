@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SqlOS.Example.Api.Data;
 
@@ -11,9 +12,11 @@ using SqlOS.Example.Api.Data;
 namespace SqlOS.Example.Api.Migrations
 {
     [DbContext(typeof(ExampleAppDbContext))]
-    partial class ExampleAppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260317061751_AddExampleUserProfiles")]
+    partial class AddExampleUserProfiles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
