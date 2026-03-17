@@ -321,7 +321,7 @@ export default function Home() {
             What ships
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-stone-950 sm:text-4xl">
-            Everything you need for AuthN and AuthZ
+            Everything you need for OAuth, AuthN, & AuthZ in .NET
           </h2>
           <p className="mt-5 max-w-2xl text-base leading-7 text-stone-500">
             SqlOS combines authentication and authorization in one library, with
