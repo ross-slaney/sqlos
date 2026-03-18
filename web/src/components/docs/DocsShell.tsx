@@ -65,8 +65,8 @@ export default function DocsShell({ guides, children }: DocsShellProps) {
   }, [guides, pathname]);
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-white lg:flex">
-      <div className="sticky top-16 z-30 border-b border-stone-200 bg-white/95 backdrop-blur-sm lg:hidden">
+    <div className="min-h-[calc(100vh-3.5rem)] bg-white lg:flex">
+      <div className="sticky top-14 z-30 border-b border-stone-200 bg-white/95 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
@@ -117,12 +117,12 @@ export default function DocsShell({ guides, children }: DocsShellProps) {
           <button
             type="button"
             aria-label="Close documentation navigation overlay"
-            className="fixed inset-0 top-16 z-30 bg-stone-950/20 lg:hidden"
+            className="fixed inset-0 top-14 z-30 bg-stone-950/20 lg:hidden"
             onClick={() => setIsNavOpen(false)}
           />
           <div
             id="docs-mobile-nav"
-            className="fixed inset-x-0 bottom-0 top-16 z-40 border-t border-stone-200 bg-white shadow-2xl lg:hidden"
+            className="fixed inset-x-0 bottom-0 top-14 z-40 border-t border-stone-200 bg-white shadow-2xl lg:hidden"
           >
             <div className="flex h-full flex-col">
               <div className="border-b border-stone-200 px-4 py-3 sm:px-6">

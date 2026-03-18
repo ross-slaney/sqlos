@@ -60,7 +60,7 @@ export default function DocsSidebar({
       <div
         className={
           variant === "desktop"
-            ? "sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto px-4 py-6"
+            ? "sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto px-4 py-6"
             : "h-full overflow-y-auto px-4 py-4 sm:px-6"
         }
       >

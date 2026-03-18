@@ -1,4 +1,4 @@
-import DocsHeader from "@/components/docs/DocsHeader";
+import Header from "@/components/Header";
 import DocsShell from "@/components/docs/DocsShell";
 import { getAllGuides } from "@/lib/docs";
 
@@ -11,7 +11,7 @@ export default function DocsLayout({
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <DocsHeader />
+      <Header />
       <DocsShell guides={guides}>{children}</DocsShell>
     </div>
   );
