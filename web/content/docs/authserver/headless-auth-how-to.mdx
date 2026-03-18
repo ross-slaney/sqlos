@@ -11,7 +11,7 @@ section: authserver
 
 ---
 
-If you are still deciding whether headless mode is the right fit, start with [Headless Auth](/docs/authserver/headless-auth) and [Hosted vs Headless Auth](/docs/authserver/hosted-vs-headless).
+If you are still deciding whether headless mode is the right fit, start with [Headless Auth](/docs/guides/authserver/headless-auth) and [Hosted vs Headless Auth](/docs/guides/authserver/hosted-vs-headless).
 
 This page answers a narrower question:
 
@@ -170,7 +170,7 @@ url.searchParams.set(
   JSON.stringify({
     lng,
     template: template || undefined,
-  })
+  }),
 );
 
 window.location.replace(url.toString());
@@ -414,4 +414,4 @@ If you want a starting point:
 - EasyCOI backend: [Program.cs](/Users/employment/Dev/easycoi/api/Program.cs)
 - EasyCOI UI: [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx)
 
-If you want the product framing, go back to [Headless Auth](/docs/authserver/headless-auth) and [Headless Auth Server Mode: Keep OAuth, Own the UI](/blog/headless-auth-server-mode).
+If you want the product framing, go back to [Headless Auth](/docs/guides/authserver/headless-auth) and [Headless Auth Server Mode: Keep OAuth, Own the UI](/blog/headless-auth-server-mode).
