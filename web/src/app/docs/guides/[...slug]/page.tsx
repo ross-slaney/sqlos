@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAllGuides, getGuideBySlug } from "@/lib/docs";
 import { MDXRemote } from "next-mdx-remote/rsc";
+import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import OnThisPage from "@/components/docs/OnThisPage";
 import CopyPageButton from "@/components/docs/CopyPageButton";
@@ -68,8 +69,11 @@ export default async function GuidePage({ params }: PageProps) {
           </p>
         </header>
 
-        <div className="prose prose-stone max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-stone-950 prose-p:leading-7 prose-p:text-stone-700 prose-a:text-violet-700 prose-a:no-underline hover:prose-a:underline prose-strong:text-stone-900 prose-pre:rounded-lg prose-pre:bg-stone-950 prose-pre:text-stone-200 prose-code:text-violet-700 prose-code:before:content-none prose-code:after:content-none prose-img:rounded-xl prose-img:border prose-img:border-stone-200 prose-img:shadow-sm prose-th:text-left prose-table:text-sm">
-          <MDXRemote source={guide.content} />
+        <div className="docs-prose prose prose-stone max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-stone-950 prose-p:leading-7 prose-p:text-stone-700 prose-a:text-violet-700 prose-a:no-underline hover:prose-a:underline prose-strong:text-stone-900 prose-code:text-violet-700 prose-code:before:content-none prose-code:after:content-none prose-img:rounded-xl prose-img:border prose-img:border-stone-200 prose-img:shadow-sm prose-th:text-left prose-table:text-sm">
+          <MDXRemote
+            source={guide.content}
+            options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
+          />
         </div>
 
         <nav

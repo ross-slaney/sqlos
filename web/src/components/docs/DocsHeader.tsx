@@ -11,7 +11,7 @@ const navLinks = [
 export default function DocsHeader() {
   return (
     <>
-      <div className="lg:hidden">
+      <div id="docs-mobile-site-header" className="lg:hidden">
         <Header />
       </div>
 
@@ -25,7 +25,7 @@ export default function DocsHeader() {
             <span className="text-sm text-stone-400">Docs</span>
           </Link>
 
-          <div className="mx-6 max-w-lg flex-1">
+          <div className="mx-6 min-w-0 max-w-xl flex-1">
             <DocsSearch variant="desktop" />
           </div>
 

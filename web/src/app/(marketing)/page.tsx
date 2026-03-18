@@ -18,7 +18,7 @@ var projects = await db.Projects
 
 export default function Home() {
   return (
-    <div className="overflow-x-hidden">
+    <div>
       {/* ── Hero ── */}
       <section className="px-6 pt-16 pb-20 sm:pt-24 sm:pb-28">
         <div className="mx-auto max-w-5xl">

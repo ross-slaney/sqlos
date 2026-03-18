@@ -32,6 +32,49 @@ pre code {
   font-family: var(--font-mono-ui), ui-monospace, monospace;
 }
 
+/* Docs code blocks should feel like tiny, friendly editor windows. */
+.docs-prose pre {
+  position: relative;
+  overflow-x: auto;
+  border-radius: 1rem;
+  border: 1px solid #2d2d30;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 3.15rem 1.125rem 1rem;
+  box-shadow:
+    inset 0 2.55rem 0 #252526,
+    0 12px 28px rgba(28, 25, 23, 0.12);
+}
+
+.docs-prose pre::before {
+  content: "";
+  position: absolute;
+  top: 0.92rem;
+  left: 1rem;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 9999px;
+  background: #ff5f57;
+  box-shadow:
+    1.15rem 0 0 #febc2e,
+    2.3rem 0 0 #28c840;
+}
+
+.docs-prose pre code {
+  display: block;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 0.95em;
+  line-height: 1.7;
+}
+
+.docs-prose :not(pre) > code {
+  border-radius: 0.45rem;
+  background: rgba(148, 163, 184, 0.14);
+  padding: 0.15rem 0.38rem;
+}
+
 /* Landing page animations */
 @keyframes fadeSlideIn {
   from {
@@ -64,4 +107,19 @@ pre code {
 @keyframes grantFadeIn {
   from { opacity: 0; transform: scale(0.8); }
   to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes searchPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-searchPanelIn {
+  animation: searchPanelIn 0.18s ease-out forwards;
 }

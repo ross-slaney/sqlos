@@ -54,14 +54,14 @@ export default function DocsSidebar({
       className={
         variant === "desktop"
           ? "hidden w-64 shrink-0 border-r border-stone-200 bg-white lg:block"
-          : "w-full bg-white"
+          : "min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white [touch-action:pan-y] [-webkit-overflow-scrolling:touch]"
       }
     >
       <div
         className={
           variant === "desktop"
             ? "sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto px-4 py-6 lg:top-16 lg:h-[calc(100vh-4rem)]"
-            : "h-full overflow-y-auto px-4 py-4 sm:px-6"
+            : "px-4 py-4 sm:px-6"
         }
       >
         {sections.map((section) => (
