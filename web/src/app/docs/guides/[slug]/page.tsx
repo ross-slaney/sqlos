@@ -3,6 +3,8 @@ import { getAllGuides, getGuideBySlug } from "@/lib/docs";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
+import OnThisPage from "@/components/docs/OnThisPage";
+import CopyPageButton from "@/components/docs/CopyPageButton";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -44,23 +46,28 @@ export default async function GuidePage({ params }: PageProps) {
       : null;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-16">
-      <Link
-        href="/docs/guides"
-        className="text-sm text-stone-600 hover:text-stone-950"
-      >
-        &larr; Back to Guides
-      </Link>
+    <div className="flex min-w-0 flex-1 justify-center xl:px-8">
+      <article className="w-full min-w-0 max-w-3xl px-4 py-8 sm:px-6 lg:px-12 lg:py-10">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Link
+            href="/docs/guides"
+            className="text-sm text-stone-500 hover:text-stone-800"
+          >
+            &larr; All docs
+          </Link>
+          <CopyPageButton />
+        </div>
 
-      <article className="mt-8">
-        <header className="mb-8">
-          <h1 className="text-4xl font-semibold tracking-tight text-stone-950">
+        <header className="mb-10">
+          <h1 className="text-3xl font-semibold tracking-tight text-stone-950">
             {guide.title}
           </h1>
-          <p className="mt-4 text-lg text-stone-700">{guide.description}</p>
+          <p className="mt-3 text-base leading-7 text-stone-600">
+            {guide.description}
+          </p>
         </header>
 
-        <div className="prose prose-stone max-w-none prose-headings:font-semibold prose-headings:text-stone-950 prose-a:text-emerald-800 prose-a:no-underline hover:prose-a:underline prose-pre:bg-stone-950 prose-pre:text-stone-200 prose-code:text-emerald-800 prose-code:before:content-none prose-code:after:content-none prose-img:rounded-xl prose-img:border prose-img:border-stone-200 prose-img:shadow-sm">
+        <div className="prose prose-stone max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-stone-950 prose-p:leading-7 prose-p:text-stone-700 prose-a:text-emerald-800 prose-a:no-underline hover:prose-a:underline prose-pre:rounded-lg prose-pre:bg-stone-950 prose-pre:text-stone-200 prose-code:text-emerald-800 prose-code:before:content-none prose-code:after:content-none prose-img:rounded-xl prose-img:border prose-img:border-stone-200 prose-img:shadow-sm prose-th:text-left prose-table:text-sm">
           <MDXRemote
             source={guide.content}
             options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
@@ -68,31 +75,37 @@ export default async function GuidePage({ params }: PageProps) {
         </div>
 
         <nav
-          className="mt-12 flex items-center justify-between border-t border-stone-200 pt-8"
+          className="mt-14 flex flex-col gap-3 border-t border-stone-200 pt-6 sm:flex-row sm:items-center sm:justify-between"
           aria-label="Guide navigation"
         >
           {prevGuide ? (
             <Link
               href={`/docs/guides/${prevGuide.slug}`}
-              className="text-sm font-medium text-stone-600 hover:text-stone-950"
+              className="text-sm font-medium text-stone-500 hover:text-stone-900"
             >
               ← {prevGuide.title}
             </Link>
           ) : (
-            <span />
+            <span className="hidden sm:block" />
           )}
           {nextGuide ? (
             <Link
               href={`/docs/guides/${nextGuide.slug}`}
-              className="text-sm font-medium text-stone-600 hover:text-stone-950"
+              className={`text-sm font-medium text-stone-500 hover:text-stone-900 ${
+                prevGuide ? "" : "sm:ml-auto"
+              }`}
             >
               {nextGuide.title} →
             </Link>
           ) : (
-            <span />
+            <span className="hidden sm:block" />
           )}
         </nav>
       </article>
+
+      <div className="hidden xl:block xl:pl-8">
+        <OnThisPage />
+      </div>
     </div>
   );
 }

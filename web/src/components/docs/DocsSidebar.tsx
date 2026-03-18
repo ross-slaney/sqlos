@@ -25,7 +25,17 @@ const SECTION_ORDER: (DocSection | "")[] = [
   "reference",
 ];
 
-export default function DocsSidebar({ guides }: { guides: DocGuide[] }) {
+interface DocsSidebarProps {
+  guides: DocGuide[];
+  variant?: "desktop" | "mobile";
+  onNavigate?: () => void;
+}
+
+export default function DocsSidebar({
+  guides,
+  variant = "desktop",
+  onNavigate,
+}: DocsSidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -39,8 +49,21 @@ export default function DocsSidebar({ guides }: { guides: DocGuide[] }) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   return (
-    <nav className="w-64 shrink-0 border-r border-stone-200 bg-white">
-      <div className="sticky top-[65px] h-[calc(100vh-65px)] overflow-y-auto px-4 py-6">
+    <nav
+      aria-label="Documentation navigation"
+      className={
+        variant === "desktop"
+          ? "hidden w-64 shrink-0 border-r border-stone-200 bg-white lg:block"
+          : "w-full bg-white"
+      }
+    >
+      <div
+        className={
+          variant === "desktop"
+            ? "sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto px-4 py-6"
+            : "h-full overflow-y-auto px-4 py-4 sm:px-6"
+        }
+      >
         {sections.map((section) => (
           <div key={section.key} className="mb-6">
             <button
@@ -67,6 +90,7 @@ export default function DocsSidebar({ guides }: { guides: DocGuide[] }) {
                     <li key={guide.slug}>
                       <Link
                         href={href}
+                        onClick={onNavigate}
                         className={`block rounded-md px-3 py-1.5 text-sm transition-colors ${
                           isActive
                             ? "bg-violet-50 font-medium text-violet-700"
