@@ -6,6 +6,7 @@ export function LogoutButton() {
   return (
     <button
       type="button"
+      className="logout-btn"
       onClick={() => {
         void signOutWithSqlOS("/");
       }}

@@ -2,13 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { UserSwitcher } from "@/components/user-switcher";
 import { LogoutButton } from "@/components/logout-button";
 
 export function Header() {
   const pathname = usePathname();
-  const { data: session } = useSession();
 
   const links: { href: "/retail" | "/retail/chains" | "/retail/stores"; label: string }[] = [
     { href: "/retail", label: "Dashboard" },
@@ -20,7 +18,7 @@ export function Header() {
     <header className="site-header">
       <div className="header-inner">
         <nav className="header-nav">
-          <Link href="/" className="header-brand">
+          <Link href="/retail" className="header-brand">
             Northwind Retail
           </Link>
           {links.map((link) => (
@@ -35,9 +33,6 @@ export function Header() {
         </nav>
         <div className="header-actions">
           <UserSwitcher />
-          {session?.user?.name && (
-            <span className="header-user">{session.user.name}</span>
-          )}
           <LogoutButton />
         </div>
       </div>

@@ -5,10 +5,17 @@ export const dynamic = "force-dynamic";
 
 export default function HeadlessAuthorizePage() {
   return (
-    <main className="headless-auth-page">
-      <Suspense fallback={<div className="shell"><section className="card"><p className="muted">Loading headless auth...</p></section></div>}>
-        <SqlOSHeadlessAuthPanel />
-      </Suspense>
-    </main>
+    <Suspense fallback={
+      <div className="ha">
+        <div className="ha-left">
+          <div className="ha-left-overlay" />
+        </div>
+        <div className="ha-right">
+          <p className="muted">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SqlOSHeadlessAuthPanel />
+    </Suspense>
   );
 }

@@ -1,10 +1,12 @@
-import { Header } from "@/components/header";
+import { Sidebar } from "@/components/sidebar";
 
 export default function RetailLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <Header />
-      <main className="shell retail-shell">{children}</main>
+      <Sidebar />
+      <main className="app-shell">
+        <div className="page-container">{children}</div>
+      </main>
     </>
   );
 }

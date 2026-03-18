@@ -21,6 +21,36 @@ type SwitchResponse = {
   organizationId: string;
 };
 
+function humanizeRole(raw: string): string {
+  return raw
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+function formatLabel(s: DemoSubject): string {
+  const name = s.displayName;
+  if (s.type === "agent") return `${name} (Agent)`;
+  if (s.type === "service_account") return `${name} (API)`;
+
+  const role = s.role;
+  if (!role) return name;
+
+  const parts = role
+    .split(",")
+    .map((r) => r.trim())
+    .filter((r) => r && !/^org_(admin|member)$/i.test(r));
+
+  if (parts.length === 0) return name;
+
+  const humanized = parts.map(humanizeRole).join(", ");
+  const nameLower = name.toLowerCase();
+  if (humanized.toLowerCase().split(" ").every((w) => nameLower.includes(w))) return name;
+
+  return `${name} · ${humanized}`;
+}
+
 export function UserSwitcher() {
   const { data: session } = useSession();
   const [subjects, setSubjects] = useState<DemoSubject[]>([]);
@@ -112,17 +142,15 @@ export function UserSwitcher() {
         value={selectedKey}
         onChange={(e) => void handleSwitch(e.target.value)}
         disabled={switching || subjects.length === 0}
+        title="Switch demo identity"
       >
-        {!selectedKey && <option value="">Select an identity...</option>}
+        {!selectedKey && <option value="">Switch identity...</option>}
         {subjects.map((s) => (
           <option key={selectKey(s)} value={selectKey(s)}>
-            {s.displayName}
-            {s.role ? ` (${s.role})` : ""}
-            {s.type !== "user" ? ` [${s.type}]` : ""}
+            {formatLabel(s)}
           </option>
         ))}
       </select>
-      {switching && <span className="muted">Switching...</span>}
     </div>
   );
 }

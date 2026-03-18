@@ -52,6 +52,9 @@ function buildDisplayName(firstName: string, lastName: string, fallbackEmail: st
   return combined || fallbackEmail.trim() || "Example User";
 }
 
+const IMAGE_LOGIN = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format";
+const IMAGE_SIGNUP = "https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format";
+
 export function SqlOSHeadlessAuthPanel() {
   const searchParams = useSearchParams();
   const requestId = searchParams.get("request");
@@ -169,336 +172,224 @@ export function SqlOSHeadlessAuthPanel() {
   const onIdentify = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId) return;
-    setLoading(true);
-    setError(null);
-    setFieldErrors({});
-    try {
-      const result = await headlessIdentify(requestId, email);
-      await handleResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "We could not start sign in.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError(null); setFieldErrors({});
+    try { await handleResult(await headlessIdentify(requestId, email)); }
+    catch (err) { setError(err instanceof Error ? err.message : "We could not start sign in."); }
+    finally { setLoading(false); }
   };
 
   const onLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId) return;
-    setLoading(true);
-    setError(null);
-    setFieldErrors({});
-    try {
-      const result = await headlessPasswordLogin(requestId, email, password);
-      await handleResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError(null); setFieldErrors({});
+    try { await handleResult(await headlessPasswordLogin(requestId, email, password)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Login failed."); }
+    finally { setLoading(false); }
   };
 
   const onSignup = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId) return;
-    setLoading(true);
-    setError(null);
-    setFieldErrors({});
+    setLoading(true); setError(null); setFieldErrors({});
     try {
-      const result = await headlessSignup(
-        requestId,
-        buildDisplayName(firstName, lastName, email),
-        email,
-        password,
-        organizationName,
-        {
-          referralSource,
-          firstName,
-          lastName,
-        },
-      );
-      await handleResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Signup failed.");
-    } finally {
-      setLoading(false);
-    }
+      await handleResult(await headlessSignup(requestId, buildDisplayName(firstName, lastName, email), email, password, organizationName, { referralSource, firstName, lastName }));
+    } catch (err) { setError(err instanceof Error ? err.message : "Signup failed."); }
+    finally { setLoading(false); }
   };
 
   const onProviderStart = async (connectionId: string) => {
     if (!requestId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await headlessStartProvider(requestId, connectionId, email || undefined);
-      await handleResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Provider auth failed.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError(null);
+    try { await handleResult(await headlessStartProvider(requestId, connectionId, email || undefined)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Provider auth failed."); }
+    finally { setLoading(false); }
   };
 
   const onSelectOrganization = async (organizationId: string) => {
     const activePendingToken = viewModel?.pendingToken ?? pendingToken;
     if (!activePendingToken) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await headlessSelectOrganization(activePendingToken, organizationId);
-      await handleResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Organization selection failed.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true); setError(null);
+    try { await handleResult(await headlessSelectOrganization(activePendingToken, organizationId)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Organization selection failed."); }
+    finally { setLoading(false); }
   };
 
+  const isSignup = view === "signup";
   const showProviderButtons = (view === "login" || view === "identify" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
 
+  const headline = isSignup ? "Start your free trial" : view === "organization" ? "Choose workspace" : "Welcome back";
+  const subtitle = isSignup
+    ? "Create your account and start managing retail operations in minutes."
+    : view === "organization"
+      ? "Select the organization you'd like to sign in to."
+      : "Sign in to your Northwind Retail account.";
+  const testimonialQuote = isSignup
+    ? "Setting up took less than five minutes. We had our entire team onboarded before lunch."
+    : "I love that I can see exactly my stores. No noise, no clutter — just the data I need.";
+  const testimonialName = isSignup ? "Marcus Rivera" : "Priya Sharma";
+  const testimonialRole = isSignup ? "Head of Retail Ops, FreshMart" : "Store Manager, Target #100";
+
   return (
-    <div className="headless-auth-shell">
-      {/* ── Left: brand panel ── */}
-      <section className="headless-auth-brand">
-        <div className="headless-auth-badge">Headless Auth Mode</div>
-        <h1>Northwind Retail</h1>
-        <p>
-          This login page is fully owned by the app. SqlOS handles the
-          authorization protocol, token issuance, and session management
-          underneath.
-        </p>
-        <div className="headless-auth-brand-note">
-          <strong>How it works</strong>
-          <p>
-            Your app renders the UI. SqlOS owns <code>/authorize</code>,{" "}
-            <code>/token</code>, PKCE, and refresh. No bridge flows, no
-            protocol drift when you redesign your login page.
-          </p>
+    <div className="ha">
+      {/* ── Left: image + branding ── */}
+      <div className="ha-left" style={{ backgroundImage: `url(${isSignup ? IMAGE_SIGNUP : IMAGE_LOGIN})` }}>
+        <div className="ha-left-overlay" />
+        <div className="ha-left-content">
+          <Link href="/" className="ha-brand">
+            <div className="ha-brand-icon">N</div>
+            <span>Northwind Retail</span>
+          </Link>
+
+          <div className="ha-left-bottom">
+            <blockquote className="ha-quote">
+              &ldquo;{testimonialQuote}&rdquo;
+            </blockquote>
+            <div className="ha-quote-author">
+              <strong>{testimonialName}</strong>
+              <span>{testimonialRole}</span>
+            </div>
+
+            <div className="ha-badge-row">
+              <span className="ha-tech-badge">Headless Auth</span>
+              <span className="ha-tech-badge">OAuth 2.0 + PKCE</span>
+              <span className="ha-tech-badge">SqlOS</span>
+            </div>
+          </div>
         </div>
-      </section>
+      </div>
 
-      {/* ── Right: form panel ── */}
-      <section className="headless-auth-form-surface">
-        <div className="headless-auth-form-header">
-          <h2>
-            {view === "signup"
-              ? "Create an account"
-              : view === "organization"
-                ? "Select an organization"
-                : "Sign in"}
-          </h2>
-          <p>
-            {view === "signup"
-              ? "Set up your account to get started with Northwind Retail."
-              : view === "organization"
-                ? "Choose which organization to sign in to."
-                : "Enter your email to get started."}
-          </p>
-        </div>
+      {/* ── Right: form ── */}
+      <div className="ha-right">
+        <div className="ha-form-wrapper">
+          <div className="ha-form-header">
+            <h1>{headline}</h1>
+            <p>{subtitle}</p>
+          </div>
 
-        <div className="headless-auth-steps">
-          <span className={`headless-auth-step${view === "login" || view === "identify" || view === "password" ? " active" : ""}`}>
-            1. Identify
-          </span>
-          <span className={`headless-auth-step${view === "signup" ? " active" : ""}`}>
-            2. Signup
-          </span>
-          <span className={`headless-auth-step${view === "organization" ? " active" : ""}`}>
-            3. Organization
-          </span>
-        </div>
+          {error && <div className="ha-error">{error}</div>}
 
-        {error ? <p className="headless-auth-error-banner">{error}</p> : null}
-
-        {!requestId ? (
-          <HeadlessFlowStarter initialView={view === "signup" ? "signup" : "login"} nextPath={nextPath} />
-        ) : (
-          <>
-            {(view === "login" || view === "identify") && (
-              <form className="headless-auth-form" onSubmit={onIdentify}>
-                <label htmlFor="headless-id-email">Work email</label>
-                <input
-                  id="headless-id-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@company.com"
-                  required
-                />
-                {fieldErrors.email ? <p className="headless-auth-field-error">{fieldErrors.email}</p> : null}
-                <button type="submit" disabled={loading}>
-                  {loading ? "Checking your workspace..." : "Continue"}
-                </button>
-                <button type="button" className="secondary" onClick={() => setView("signup")}>
-                  Need an account? Start signup
-                </button>
-              </form>
-            )}
-
-            {view === "password" && (
-              <form className="headless-auth-form" onSubmit={onLogin}>
-                <label htmlFor="headless-password-email">Email</label>
-                <input
-                  id="headless-password-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-                <label htmlFor="headless-password">Password</label>
-                <input
-                  id="headless-password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter your password"
-                  required
-                />
-                {fieldErrors.password ? <p className="headless-auth-field-error">{fieldErrors.password}</p> : null}
-                <button type="submit" disabled={loading}>
-                  {loading ? "Signing in..." : "Complete sign in"}
-                </button>
-                <button type="button" className="secondary" onClick={() => setView("login")}>
-                  Use a different email
-                </button>
-              </form>
-            )}
-
-            {view === "signup" && (
-              <form className="headless-auth-form" onSubmit={onSignup}>
-                <div className="headless-auth-grid">
-                  <div>
-                    <label htmlFor="headless-first-name">First name</label>
-                    <input
-                      id="headless-first-name"
-                      type="text"
-                      value={firstName}
-                      onChange={(event) => setFirstName(event.target.value)}
-                      placeholder="Taylor"
-                      required
-                    />
-                    {fieldErrors.firstName ? <p className="headless-auth-field-error">{fieldErrors.firstName}</p> : null}
+          {!requestId ? (
+            <HeadlessFlowStarter initialView={isSignup ? "signup" : "login"} nextPath={nextPath} />
+          ) : (
+            <>
+              {(view === "login" || view === "identify") && (
+                <form className="ha-form" onSubmit={onIdentify}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-email">Email address</label>
+                    <input id="ha-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required autoFocus />
+                    {fieldErrors.email && <p className="ha-field-error">{fieldErrors.email}</p>}
                   </div>
-                  <div>
-                    <label htmlFor="headless-last-name">Last name</label>
-                    <input
-                      id="headless-last-name"
-                      type="text"
-                      value={lastName}
-                      onChange={(event) => setLastName(event.target.value)}
-                      placeholder="Morgan"
-                      required
-                    />
-                    {fieldErrors.lastName ? <p className="headless-auth-field-error">{fieldErrors.lastName}</p> : null}
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Checking..." : "Continue"}
+                  </button>
+                  <div className="ha-alt">
+                    Don&apos;t have an account?{" "}
+                    <button type="button" className="ha-link-btn" onClick={() => setView("signup")}>Sign up</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "password" && (
+                <form className="ha-form" onSubmit={onLogin}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-pw-email">Email</label>
+                    <input id="ha-pw-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-pw">Password</label>
+                    <input id="ha-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required autoFocus />
+                    {fieldErrors.password && <p className="ha-field-error">{fieldErrors.password}</p>}
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Signing in..." : "Sign in"}
+                  </button>
+                  <div className="ha-alt">
+                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "signup" && (
+                <form className="ha-form" onSubmit={onSignup}>
+                  <div className="ha-row">
+                    <div className="ha-field">
+                      <label htmlFor="ha-fn">First name</label>
+                      <input id="ha-fn" type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Taylor" required />
+                      {fieldErrors.firstName && <p className="ha-field-error">{fieldErrors.firstName}</p>}
+                    </div>
+                    <div className="ha-field">
+                      <label htmlFor="ha-ln">Last name</label>
+                      <input id="ha-ln" type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Morgan" required />
+                      {fieldErrors.lastName && <p className="ha-field-error">{fieldErrors.lastName}</p>}
+                    </div>
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-org">Organization</label>
+                    <input id="ha-org" type="text" value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} placeholder="Your company name" required />
+                    {fieldErrors.organizationName && <p className="ha-field-error">{fieldErrors.organizationName}</p>}
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-su-email">Email</label>
+                    <input id="ha-su-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="taylor@company.com" required />
+                    {fieldErrors.email && <p className="ha-field-error">{fieldErrors.email}</p>}
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-su-pw">Password</label>
+                    <input id="ha-su-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min. 8 characters" required />
+                    {fieldErrors.password && <p className="ha-field-error">{fieldErrors.password}</p>}
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-ref">How did you hear about us?</label>
+                    <select id="ha-ref" value={referralSource} onChange={(e) => setReferralSource(e.target.value)} required>
+                      <option value="">Select one</option>
+                      {referralOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    {fieldErrors.referralSource && <p className="ha-field-error">{fieldErrors.referralSource}</p>}
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Creating account..." : "Create account"}
+                  </button>
+                  <div className="ha-alt">
+                    Already have an account?{" "}
+                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Sign in</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "organization" && (
+                <div className="ha-form">
+                  <div className="ha-org-list">
+                    {(viewModel?.organizationSelection ?? []).map((org) => (
+                      <button key={org.id} type="button" className="ha-org-btn" disabled={loading} onClick={() => void onSelectOrganization(org.id)}>
+                        <div className="ha-org-btn-icon">{org.name.charAt(0).toUpperCase()}</div>
+                        <div>
+                          <strong>{org.name}</strong>
+                          <span>{org.role}</span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
+              )}
 
-                <label htmlFor="headless-signup-org">Organization name</label>
-                <input
-                  id="headless-signup-org"
-                  type="text"
-                  value={organizationName}
-                  onChange={(event) => setOrganizationName(event.target.value)}
-                  placeholder="Northwind Retail"
-                  required
-                />
-                {fieldErrors.organizationName ? <p className="headless-auth-field-error">{fieldErrors.organizationName}</p> : null}
-
-                <label htmlFor="headless-signup-email">Work email</label>
-                <input
-                  id="headless-signup-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="taylor@northwind.dev"
-                  required
-                />
-                {fieldErrors.email ? <p className="headless-auth-field-error">{fieldErrors.email}</p> : null}
-
-                <label htmlFor="headless-signup-password">Password</label>
-                <input
-                  id="headless-signup-password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Create a password"
-                  required
-                />
-                {fieldErrors.password ? <p className="headless-auth-field-error">{fieldErrors.password}</p> : null}
-
-                <label htmlFor="headless-referral-source">How did you hear about SqlOS?</label>
-                <select
-                  id="headless-referral-source"
-                  value={referralSource}
-                  onChange={(event) => setReferralSource(event.target.value)}
-                  required
-                >
-                  <option value="">Select one</option>
-                  {referralOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {fieldErrors.referralSource ? <p className="headless-auth-field-error">{fieldErrors.referralSource}</p> : null}
-
-                <button type="submit" disabled={loading}>
-                  {loading ? "Creating your account..." : "Create account"}
-                </button>
-                <button type="button" className="secondary" onClick={() => setView("login")}>
-                  Already have an account?
-                </button>
-              </form>
-            )}
-
-            {view === "organization" && (
-              <div className="headless-auth-selection">
-                <p className="muted">
-                  This user belongs to multiple organizations. Choose the
-                  workspace that should receive the authorization code.
-                </p>
-                <div className="headless-auth-selection-list">
-                  {(viewModel?.organizationSelection ?? []).map((organization) => (
-                    <button
-                      key={organization.id}
-                      type="button"
-                      className="headless-auth-org-button"
-                      disabled={loading}
-                      onClick={() => void onSelectOrganization(organization.id)}
-                    >
-                      <strong>{organization.name}</strong>
-                      <span>{organization.role}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {showProviderButtons && (
-              <div className="headless-auth-provider-block">
-                <div className="separator">or continue with</div>
-                <div className="stacked-actions">
+              {showProviderButtons && (
+                <div className="ha-providers">
+                  <div className="ha-divider"><span>or</span></div>
                   {(viewModel?.providers ?? []).map((provider) => (
-                    <button
-                      key={provider.connectionId}
-                      type="button"
-                      className="secondary"
-                      disabled={loading}
-                      onClick={() => void onProviderStart(provider.connectionId)}
-                    >
+                    <button key={provider.connectionId} type="button" className="ha-provider-btn" disabled={loading} onClick={() => void onProviderStart(provider.connectionId)}>
                       Continue with {provider.displayName}
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
 
-        <div className="headless-auth-home">
-          <Link href="/">Back to Northwind Retail</Link>
+          <div className="ha-footer">
+            <Link href="/">← Back to Northwind Retail</Link>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
@@ -516,9 +407,7 @@ function HeadlessFlowStarter({ initialView, nextPath }: { initialView: "login" |
       const verifier = createOpaqueToken(48);
       const state = createOpaqueToken(24);
       const challenge = await createCodeChallenge(verifier);
-
       persistSqlOSAuthFlow(flowView, state, verifier, nextPath);
-
       const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("client_id", getExampleClientId());
@@ -526,35 +415,26 @@ function HeadlessFlowStarter({ initialView, nextPath }: { initialView: "login" |
       url.searchParams.set("state", state);
       url.searchParams.set("code_challenge", challenge);
       url.searchParams.set("code_challenge_method", "S256");
-      if (flowView === "signup") {
-        url.searchParams.set("view", "signup");
-      }
-
+      if (flowView === "signup") url.searchParams.set("view", "signup");
       window.location.replace(url.toString());
     } catch (error) {
-      setErr(error instanceof Error ? error.message : "Failed to start headless auth.");
+      setErr(error instanceof Error ? error.message : "Failed to start.");
       setStarting(false);
     }
   };
 
   return (
-    <div className="headless-auth-starter">
-      <div className="headless-auth-starter-copy">
-        <p className="muted">
-          Starting the flow sends the browser through SqlOS{" "}
-          <code>/authorize</code>, then returns here with a real authorization
-          request.
-        </p>
-      </div>
-      {err ? <p className="headless-auth-error-banner">{err}</p> : null}
-      <div className="actions">
-        <button onClick={() => void startFlow("login")} disabled={starting}>
-          {starting && selectedView === "login" ? "Opening authorize flow..." : "Start headless sign in"}
-        </button>
-        <button className="secondary" onClick={() => void startFlow("signup")} disabled={starting}>
-          {starting && selectedView === "signup" ? "Opening signup flow..." : "Start headless signup"}
-        </button>
-      </div>
+    <div className="ha-form">
+      <p className="muted" style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>
+        This page demonstrates <strong>headless auth</strong> — your app owns the UI while SqlOS handles the OAuth protocol underneath.
+      </p>
+      {err && <div className="ha-error">{err}</div>}
+      <button className="ha-submit" onClick={() => void startFlow(initialView)} disabled={starting}>
+        {starting && selectedView === initialView ? "Redirecting..." : initialView === "signup" ? "Start signup flow" : "Start sign in flow"}
+      </button>
+      <button className="ha-provider-btn" onClick={() => void startFlow(initialView === "signup" ? "login" : "signup")} disabled={starting}>
+        {initialView === "signup" ? "Or sign in instead" : "Or create an account"}
+      </button>
     </div>
   );
 }

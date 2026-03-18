@@ -6,17 +6,7 @@ import Link from "next/link";
 import { apiGet } from "@/lib/api";
 
 type PagedResponse<T> = { data: T[]; totalCount: number; hasMore: boolean };
-type LocationDto = {
-  id: string;
-  resourceId: string;
-  chainId: string;
-  chainName?: string;
-  name: string;
-  storeNumber?: string;
-  city?: string;
-  state?: string;
-  createdAt: string;
-};
+type LocationDto = { id: string; resourceId: string; chainId: string; chainName?: string; name: string; storeNumber?: string; city?: string; state?: string; createdAt: string };
 
 export default function StoresPage() {
   const { data: session } = useSession();
@@ -37,29 +27,27 @@ export default function StoresPage() {
   }, [session?.accessToken, search]);
 
   return (
-    <div className="stack">
-      <section className="hero">
+    <div className="gap-20">
+      <div className="page-header">
         <h1>Stores</h1>
-        <p>All store locations visible to your account, across all chains.</p>
-      </section>
+        <p>All store locations visible to your account.</p>
+      </div>
 
       {error && <p className="error">{error}</p>}
 
-      <section className="card">
+      <div className="card">
         <div className="toolbar">
-          <input
-            type="text"
-            placeholder="Search stores..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="toolbar-search"
-          />
+          <input type="text" placeholder="Search stores..." value={search} onChange={(e) => setSearch(e.target.value)} className="toolbar-search" />
+          <span className="badge badge-neutral">{loading ? "..." : `${stores.length} store${stores.length !== 1 ? "s" : ""}`}</span>
         </div>
 
         {loading ? (
-          <p className="muted">Loading...</p>
+          <p className="muted" style={{ marginTop: 16 }}>Loading...</p>
         ) : stores.length === 0 ? (
-          <p className="muted">No stores found.</p>
+          <div className="empty-state">
+            <strong>No stores found</strong>
+            <p>{search ? "Try a different search term." : "No stores visible with your current permissions."}</p>
+          </div>
         ) : (
           <table className="data-table">
             <thead>
@@ -74,13 +62,9 @@ export default function StoresPage() {
             <tbody>
               {stores.map((s) => (
                 <tr key={s.id}>
-                  <td>
-                    <Link href={`/retail/locations/${s.id}`}>{s.name}</Link>
-                  </td>
-                  <td>{s.storeNumber ?? "—"}</td>
-                  <td>
-                    <Link href={`/retail/chains/${s.chainId}`}>{s.chainName ?? s.chainId}</Link>
-                  </td>
+                  <td><Link href={`/retail/locations/${s.id}`}>{s.name}</Link></td>
+                  <td className="mono">{s.storeNumber ?? "—"}</td>
+                  <td><Link href={`/retail/chains/${s.chainId}`} className="muted">{s.chainName ?? s.chainId}</Link></td>
                   <td>{s.city ?? "—"}</td>
                   <td>{s.state ?? "—"}</td>
                 </tr>
@@ -88,7 +72,7 @@ export default function StoresPage() {
             </tbody>
           </table>
         )}
-      </section>
+      </div>
     </div>
   );
 }
