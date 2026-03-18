@@ -3,8 +3,8 @@ import { AppSessionProvider } from "@/components/session-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SqlOS Example Web",
-  description: "Example frontend for embedded SqlOS auth flows."
+  title: "Northwind Retail — SqlOS",
+  description: "Manage chains, stores, and inventory with SqlOS authentication."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

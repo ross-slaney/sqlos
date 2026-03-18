@@ -3,19 +3,14 @@ import { SqlOSAuthRedirect } from "@/components/sqlos-auth-redirect";
 
 export default function SignupPage() {
   return (
-    <main className="shell">
-      <div className="stack">
-        <section className="hero">
-          <h1>Hosted SqlOS signup</h1>
-          <p>
-            Account creation is also handled by the hosted SqlOS AuthPage, so this example uses the
-            same PKCE browser flow for both sign in and sign up.
-          </p>
-        </section>
-        <Suspense fallback={<section className="card"><p className="muted">Preparing hosted signup...</p></section>}>
+    <div className="callback-page">
+      <div className="callback-card">
+        <h2>Redirecting to sign up...</h2>
+        <p>Taking you to the SqlOS hosted auth page.</p>
+        <Suspense fallback={<p className="muted">Preparing...</p>}>
           <SqlOSAuthRedirect view="signup" />
         </Suspense>
       </div>
-    </main>
+    </div>
   );
 }

@@ -166,8 +166,8 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
 export const authOptions: AuthOptions = {
   pages: {
-    signIn: "/login",
-    error: "/login"
+    signIn: "/",
+    error: "/"
   },
   providers: [
     CredentialsProvider({

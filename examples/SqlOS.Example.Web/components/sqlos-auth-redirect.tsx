@@ -61,14 +61,5 @@ export function SqlOSAuthRedirect({ view }: SqlOSAuthRedirectProps) {
     };
   }, [searchParams, view]);
 
-  return (
-    <section className="card">
-      <h2>{view === "signup" ? "Opening signup" : "Opening sign in"}</h2>
-      <p className="muted">
-        {error
-          ? error
-          : "This example now launches the hosted SqlOS AuthPage. The browser will redirect automatically."}
-      </p>
-    </section>
-  );
+  return error ? <p className="error">{error}</p> : null;
 }

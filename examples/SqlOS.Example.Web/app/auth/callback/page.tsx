@@ -5,15 +5,13 @@ export const dynamic = "force-dynamic";
 
 export default function AuthCallbackPage() {
   return (
-    <main className="shell">
-      <div className="stack">
-        <section className="hero">
-          <h1>Hosted SqlOS callback</h1>
-          <Suspense fallback={<p>Completing sign-in...</p>}>
-            <SqlOSAuthCallbackPanel />
-          </Suspense>
-        </section>
+    <div className="callback-page">
+      <div className="callback-card">
+        <h2>Completing sign in...</h2>
+        <Suspense fallback={<p className="muted">Processing...</p>}>
+          <SqlOSAuthCallbackPanel />
+        </Suspense>
       </div>
-    </main>
+    </div>
   );
 }

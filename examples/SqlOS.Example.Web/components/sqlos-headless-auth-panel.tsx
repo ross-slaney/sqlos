@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { jwtDecode } from "jwt-decode";
+import Link from "next/link";
 import {
   getHeadlessRequest,
   headlessIdentify,
@@ -13,7 +14,6 @@ import {
   headlessStartProvider,
   type HeadlessViewModel,
   type HeadlessActionResult,
-  type HeadlessSettings,
 } from "@/lib/sqlos-headless";
 import {
   getExampleAuthServerUrl,
@@ -47,18 +47,6 @@ const referralOptions: ReferralOption[] = [
   { value: "review", label: "Build vs. buy auth evaluation" },
 ];
 
-const productProofPoints = [
-  "App-native login and signup layouts",
-  "Real PKCE authorization flow under the hood",
-  "Custom signup field persisted by your app",
-];
-
-const launchChecklist = [
-  "SqlOS owns /authorize, /token, sessions, and code issuance",
-  "Your app owns the HTML, experiments, and conversion copy",
-  "The popup can look like your product instead of hosted auth chrome",
-];
-
 function buildDisplayName(firstName: string, lastName: string, fallbackEmail: string) {
   const combined = `${firstName} ${lastName}`.trim();
   return combined || fallbackEmail.trim() || "Example User";
@@ -72,12 +60,12 @@ export function SqlOSHeadlessAuthPanel() {
   const initialEmail = searchParams.get("email") || "";
   const pendingToken = searchParams.get("pendingToken");
   const initialDisplayName = searchParams.get("displayName") || "";
+  const nextPath = searchParams.get("next") || "/retail";
 
   const [view, setView] = useState(initialView);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [settings, setSettings] = useState<HeadlessSettings | null>(null);
   const [viewModel, setViewModel] = useState<HeadlessViewModel | null>(null);
 
   const [email, setEmail] = useState(initialEmail);
@@ -101,7 +89,6 @@ export function SqlOSHeadlessAuthPanel() {
           initialDisplayName,
         );
         setViewModel(vm);
-        setSettings(vm.settings ?? null);
         if (vm.view) setView(vm.view);
         if (vm.error) setError(vm.error);
         if (vm.email) setEmail(vm.email);
@@ -162,7 +149,7 @@ export function SqlOSHeadlessAuthPanel() {
         }
 
         clearSqlOSAuthFlow();
-        window.location.replace(flow.nextPath || "/app");
+        window.location.replace(flow.nextPath || "/retail");
         return;
       }
 
@@ -267,101 +254,64 @@ export function SqlOSHeadlessAuthPanel() {
     }
   };
 
-  const primaryColor = settings?.primaryColor || "#55644c";
-  const accentColor = settings?.accentColor || "#1f271b";
-  const backgroundColor = settings?.backgroundColor || "#f7f7f1";
   const showProviderButtons = (view === "login" || view === "identify" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
-  const title = settings?.pageTitle || "Own the authorize experience";
-  const subtitle = settings?.pageSubtitle || "SqlOS keeps the authorization server protocol intact while this app owns the entire UI.";
 
   return (
-    <div
-      className="headless-auth-shell"
-      style={{
-        ["--headless-primary" as never]: primaryColor,
-        ["--headless-accent" as never]: accentColor,
-        ["--headless-surface" as never]: backgroundColor,
-      }}
-    >
-      <section className="headless-auth-showcase">
-        <div className="headless-auth-badge">Headless Auth Server Demo</div>
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
-        <div className="headless-auth-highlight">
-          <strong>What this example proves</strong>
-          <ul>
-            {productProofPoints.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-        <div className="headless-auth-proof-grid">
-          <article>
-            <span>App-owned</span>
-            <strong>Layouts, copy, and experiments</strong>
-            <p>The authorize popup can share the same design system as your marketing and product funnel.</p>
-          </article>
-          <article>
-            <span>SqlOS-owned</span>
-            <strong>Authorize, token, PKCE, refresh</strong>
-            <p>No bridge flow, no app-issued auth codes, and no protocol drift when the UI changes.</p>
-          </article>
-        </div>
-        <div className="headless-auth-mock">
-          <div className="headless-auth-mock-window">
-            <div className="headless-auth-mock-toolbar">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="headless-auth-mock-content">
-              <div className="headless-auth-metric">
-                <label>Custom field</label>
-                <strong>Referral source</strong>
-              </div>
-              <div className="headless-auth-metric">
-                <label>Auth boundary</label>
-                <strong>Still real OAuth</strong>
-              </div>
-              <div className="headless-auth-metric wide">
-                <label>Ship it</label>
-                <strong>Run the example, sign up through headless mode, then inspect the saved profile on the app page.</strong>
-              </div>
-            </div>
-          </div>
+    <div className="headless-auth-shell">
+      {/* ── Left: brand panel ── */}
+      <section className="headless-auth-brand">
+        <div className="headless-auth-badge">Headless Auth Mode</div>
+        <h1>Northwind Retail</h1>
+        <p>
+          This login page is fully owned by the app. SqlOS handles the
+          authorization protocol, token issuance, and session management
+          underneath.
+        </p>
+        <div className="headless-auth-brand-note">
+          <strong>How it works</strong>
+          <p>
+            Your app renders the UI. SqlOS owns <code>/authorize</code>,{" "}
+            <code>/token</code>, PKCE, and refresh. No bridge flows, no
+            protocol drift when you redesign your login page.
+          </p>
         </div>
       </section>
 
+      {/* ── Right: form panel ── */}
       <section className="headless-auth-form-surface">
         <div className="headless-auth-form-header">
-          <div>
-            <p className="headless-auth-eyebrow">App-native authorize UI</p>
-            <h2>{view === "signup" ? "Create an account" : view === "organization" ? "Select an organization" : "Sign in"}</h2>
-            <p>
-              {view === "signup"
-                ? "This signup form captures app-owned data without moving OAuth out of SqlOS."
-                : view === "organization"
-                  ? "Choose the organization that should receive the authorization code."
-                  : "Start with email. SqlOS will still handle home realm discovery, sessions, and token issuance."}
-            </p>
-          </div>
-          {!requestId ? (
-            <div className="headless-auth-pill">No request yet</div>
-          ) : (
-            <div className="headless-auth-pill">Request {requestId.slice(-6)}</div>
-          )}
+          <h2>
+            {view === "signup"
+              ? "Create an account"
+              : view === "organization"
+                ? "Select an organization"
+                : "Sign in"}
+          </h2>
+          <p>
+            {view === "signup"
+              ? "Set up your account to get started with Northwind Retail."
+              : view === "organization"
+                ? "Choose which organization to sign in to."
+                : "Enter your email to get started."}
+          </p>
         </div>
 
         <div className="headless-auth-steps">
-          <span className={`headless-auth-step${view === "login" || view === "identify" || view === "password" ? " active" : ""}`}>1. Identify</span>
-          <span className={`headless-auth-step${view === "signup" ? " active" : ""}`}>2. Signup</span>
-          <span className={`headless-auth-step${view === "organization" ? " active" : ""}`}>3. Organization</span>
+          <span className={`headless-auth-step${view === "login" || view === "identify" || view === "password" ? " active" : ""}`}>
+            1. Identify
+          </span>
+          <span className={`headless-auth-step${view === "signup" ? " active" : ""}`}>
+            2. Signup
+          </span>
+          <span className={`headless-auth-step${view === "organization" ? " active" : ""}`}>
+            3. Organization
+          </span>
         </div>
 
         {error ? <p className="headless-auth-error-banner">{error}</p> : null}
 
         {!requestId ? (
-          <HeadlessFlowStarter initialView={view === "signup" ? "signup" : "login"} />
+          <HeadlessFlowStarter initialView={view === "signup" ? "signup" : "login"} nextPath={nextPath} />
         ) : (
           <>
             {(view === "login" || view === "identify") && (
@@ -376,7 +326,7 @@ export function SqlOSHeadlessAuthPanel() {
                   required
                 />
                 {fieldErrors.email ? <p className="headless-auth-field-error">{fieldErrors.email}</p> : null}
-                <button type="submit" disabled={loading} style={{ background: primaryColor }}>
+                <button type="submit" disabled={loading}>
                   {loading ? "Checking your workspace..." : "Continue"}
                 </button>
                 <button type="button" className="secondary" onClick={() => setView("signup")}>
@@ -405,7 +355,7 @@ export function SqlOSHeadlessAuthPanel() {
                   required
                 />
                 {fieldErrors.password ? <p className="headless-auth-field-error">{fieldErrors.password}</p> : null}
-                <button type="submit" disabled={loading} style={{ background: primaryColor }}>
+                <button type="submit" disabled={loading}>
                   {loading ? "Signing in..." : "Complete sign in"}
                 </button>
                 <button type="button" className="secondary" onClick={() => setView("login")}>
@@ -492,7 +442,7 @@ export function SqlOSHeadlessAuthPanel() {
                 </select>
                 {fieldErrors.referralSource ? <p className="headless-auth-field-error">{fieldErrors.referralSource}</p> : null}
 
-                <button type="submit" disabled={loading} style={{ background: primaryColor }}>
+                <button type="submit" disabled={loading}>
                   {loading ? "Creating your account..." : "Create account"}
                 </button>
                 <button type="button" className="secondary" onClick={() => setView("login")}>
@@ -503,7 +453,10 @@ export function SqlOSHeadlessAuthPanel() {
 
             {view === "organization" && (
               <div className="headless-auth-selection">
-                <p className="muted">This user belongs to multiple organizations. Choose the workspace that should receive the authorization code.</p>
+                <p className="muted">
+                  This user belongs to multiple organizations. Choose the
+                  workspace that should receive the authorization code.
+                </p>
                 <div className="headless-auth-selection-list">
                   {(viewModel?.organizationSelection ?? []).map((organization) => (
                     <button
@@ -542,20 +495,15 @@ export function SqlOSHeadlessAuthPanel() {
           </>
         )}
 
-        <aside className="headless-auth-sidebar-note">
-          <h3>Why this screen matters</h3>
-          <ul>
-            {launchChecklist.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </aside>
+        <div className="headless-auth-home">
+          <Link href="/">Back to Northwind Retail</Link>
+        </div>
       </section>
     </div>
   );
 }
 
-function HeadlessFlowStarter({ initialView }: { initialView: "login" | "signup" }) {
+function HeadlessFlowStarter({ initialView, nextPath }: { initialView: "login" | "signup"; nextPath: string }) {
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<"login" | "signup">(initialView);
@@ -569,7 +517,7 @@ function HeadlessFlowStarter({ initialView }: { initialView: "login" | "signup" 
       const state = createOpaqueToken(24);
       const challenge = await createCodeChallenge(verifier);
 
-      persistSqlOSAuthFlow(flowView, state, verifier, "/app");
+      persistSqlOSAuthFlow(flowView, state, verifier, nextPath);
 
       const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
       url.searchParams.set("response_type", "code");
@@ -593,8 +541,9 @@ function HeadlessFlowStarter({ initialView }: { initialView: "login" | "signup" 
     <div className="headless-auth-starter">
       <div className="headless-auth-starter-copy">
         <p className="muted">
-          This page is the app-owned authorize surface. Starting the flow here still sends the browser
-          through SqlOS <code>/authorize</code>, then comes back with a real authorization request.
+          Starting the flow sends the browser through SqlOS{" "}
+          <code>/authorize</code>, then returns here with a real authorization
+          request.
         </p>
       </div>
       {err ? <p className="headless-auth-error-banner">{err}</p> : null}

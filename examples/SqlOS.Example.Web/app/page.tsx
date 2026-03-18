@@ -1,65 +1,125 @@
+"use client";
+
+import { Suspense, useState } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import {
+  getExampleAuthServerUrl,
+  getExampleClientId,
+  getExampleRedirectUri,
+  createOpaqueToken,
+  createCodeChallenge,
+  persistSqlOSAuthFlow,
+} from "@/lib/sqlos-auth";
 
-export default function HomePage() {
+export default function LandingPage() {
   return (
-    <main className="shell">
-      <div className="stack">
-        <section className="hero">
-          <h1>SqlOS Example Web</h1>
-          <p>
-            The example backend embeds SqlOS and boots the demo in headless mode by default so the
-            authorize popup stays fully app-owned. SqlOS still owns the OAuth protocol underneath;
-            this page shows how the same auth server can power a product-grade custom shell.
-          </p>
-          <div className="actions">
-            <Link className="button" href="/retail">
-              Open Retail Demo
-            </Link>
-            <Link className="button secondary" href={"/auth/authorize" as any}>
-              Headless authorize UI
-            </Link>
-            <a className="button secondary" href="http://localhost:5062/sqlos/">
-              SqlOS dashboard
-            </a>
-          </div>
-        </section>
+    <Suspense>
+      <LandingContent />
+    </Suspense>
+  );
+}
 
-        <div className="grid two">
-          <section className="card">
-            <h2>Hosted AuthPage</h2>
-            <p className="muted">
-              SqlOS still ships a hosted auth page for teams that want the fastest path. This demo
-              app is intentionally running in headless mode so the custom authorize UI is what you
-              see when you start the flow.
-            </p>
-            <div className="actions">
-              <a
-                className="button secondary"
-                href="https://github.com/sqlos/sqlos/blob/main/examples/SqlOS.Example.Api/appsettings.json"
-                target="_blank"
-                rel="noreferrer"
-              >
-                See mode config
-              </a>
-            </div>
-          </section>
-          <section className="card">
-            <h2>Headless Auth</h2>
-            <p className="muted">
-              Best when product teams want to own the authorize popup. This demo captures a custom
-              referral-source field during signup and then shows the saved value inside the app.
-            </p>
-            <div className="actions">
-              <Link className="button secondary" href={"/auth/authorize" as any}>
-                Start headless sign in
-              </Link>
-              <Link className="button secondary" href={"/auth/authorize?view=signup" as any}>
-                Start headless signup
-              </Link>
-            </div>
-          </section>
+function LandingContent() {
+  const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") || "/retail";
+  const [starting, setStarting] = useState<"login" | "signup" | null>(null);
+
+  if (session) {
+    return (
+      <div className="landing">
+        <div className="landing-card">
+          <div className="landing-badge">Powered by SqlOS</div>
+          <h1>Welcome back</h1>
+          <p>
+            Signed in as <strong>{session.user?.name ?? session.user?.email}</strong>.
+          </p>
+          <div className="landing-actions">
+            <Link href="/retail" className="button">
+              Go to Dashboard
+            </Link>
+          </div>
         </div>
       </div>
-    </main>
+    );
+  }
+
+  async function startAuth(view: "login" | "signup") {
+    setStarting(view);
+    try {
+      const verifier = createOpaqueToken(48);
+      const state = createOpaqueToken(24);
+      const challenge = await createCodeChallenge(verifier);
+
+      persistSqlOSAuthFlow(view, state, verifier, next);
+
+      const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", getExampleClientId());
+      url.searchParams.set("redirect_uri", getExampleRedirectUri());
+      url.searchParams.set("state", state);
+      url.searchParams.set("code_challenge", challenge);
+      url.searchParams.set("code_challenge_method", "S256");
+      if (view === "signup") {
+        url.searchParams.set("view", "signup");
+      }
+
+      window.location.replace(url.toString());
+    } catch {
+      setStarting(null);
+    }
+  }
+
+  return (
+    <div className="landing">
+      <div className="landing-card">
+        <div className="landing-badge">Powered by SqlOS</div>
+        <h1>Northwind Retail</h1>
+        <p>
+          Manage chains, stores, and inventory — with fine-grained access
+          control. Sign in to try it out.
+        </p>
+        <div className="landing-actions">
+          <button
+            type="button"
+            disabled={starting !== null}
+            onClick={() => void startAuth("login")}
+          >
+            {starting === "login" ? "Redirecting..." : "Sign In"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={starting !== null}
+            onClick={() => void startAuth("signup")}
+          >
+            {starting === "signup" ? "Redirecting..." : "Sign Up"}
+          </button>
+        </div>
+        <div className="landing-features">
+          <div className="landing-feature">
+            <strong>Chains</strong>
+            <p>Organize retail chains and manage their details.</p>
+          </div>
+          <div className="landing-feature">
+            <strong>Stores</strong>
+            <p>Track locations across regions and chains.</p>
+          </div>
+          <div className="landing-feature">
+            <strong>Inventory</strong>
+            <p>Add, edit, and manage stock at each location.</p>
+          </div>
+          <div className="landing-feature">
+            <strong>Permissions</strong>
+            <p>See only what you're authorized to — powered by FGA.</p>
+          </div>
+        </div>
+        <div className="landing-footer">
+          <a href="http://localhost:5062/sqlos/">Open SqlOS Dashboard</a>
+        </div>
+      </div>
+    </div>
   );
 }

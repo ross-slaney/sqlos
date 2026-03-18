@@ -49,7 +49,7 @@ export function getExampleRedirectUri(): string {
 
 export function normalizeNextPath(nextPath: string | null | undefined): string {
   if (!nextPath) {
-    return "/app";
+    return "/retail";
   }
 
   const trimmed = nextPath.trim();

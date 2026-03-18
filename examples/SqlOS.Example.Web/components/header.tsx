@@ -21,7 +21,7 @@ export function Header() {
       <div className="header-inner">
         <nav className="header-nav">
           <Link href="/" className="header-brand">
-            SqlOS Retail
+            Northwind Retail
           </Link>
           {links.map((link) => (
             <Link
