@@ -22,6 +22,8 @@ Use it when:
 
 If you are still deciding between hosted and headless, read [Hosted vs Headless Auth](/docs/authserver/hosted-vs-headless).
 
+If you already know you want headless mode and just need the implementation checklist, read [Headless Auth How-To](/docs/authserver/headless-auth-how-to).
+
 ## Product boundary
 
 Headless mode is not “replace SqlOS auth with your own auth.”
@@ -49,6 +51,19 @@ SqlOS still owns:
 - auth code issuance
 - token exchange
 - refresh and logout
+
+## What the consumer app actually writes
+
+The consumer app usually implements only four things:
+
+1. `BuildUiUrl(...)`
+2. a custom authorize page
+3. a few `fetch` calls to the headless endpoints
+4. an optional `OnHeadlessSignupAsync(...)` hook for app-specific data
+
+That is the simplest way to think about headless mode.
+
+If you want the exact lifecycle and code snippets from the Example app and EasyCOI, read [Headless Auth How-To](/docs/authserver/headless-auth-how-to).
 
 ## Configuration
 

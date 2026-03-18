@@ -1,0 +1,417 @@
+---
+title: "Headless Auth How-To"
+description: "Step-by-step guide for wiring a custom authorize page to SqlOS headless auth, with snippets from the Example app and EasyCOI."
+order: 1.75
+section: authserver
+---
+
+# Headless Auth How-To
+
+**What this guide covers**: The exact lifecycle your app implements in headless mode, the minimum code you have to write, and concrete snippets from the SqlOS Example app and EasyCOI.
+
+---
+
+If you are still deciding whether headless mode is the right fit, start with [Headless Auth](/docs/authserver/headless-auth) and [Hosted vs Headless Auth](/docs/authserver/hosted-vs-headless).
+
+This page answers a narrower question:
+
+> What does the consumer app actually have to implement?
+
+## Short answer
+
+Very little, relative to building auth from scratch.
+
+Your app provides:
+
+1. a `BuildUiUrl(...)` function so SqlOS knows where your custom page lives
+2. a custom authorize page
+3. a few `fetch` calls to the SqlOS headless endpoints
+4. an optional `OnHeadlessSignupAsync(...)` hook for app-specific signup data
+
+SqlOS still provides:
+
+- `/authorize`
+- `/token`
+- PKCE and `state`
+- auth request persistence
+- home realm discovery
+- SAML and OIDC redirects
+- callback handling
+- authorization code issuance
+- refresh/logout/session behavior
+
+That is why headless mode works without a React SDK.
+
+## The lifecycle
+
+This is the full lifecycle your app participates in.
+
+1. Your page starts a normal OAuth authorization request.
+2. SqlOS validates it and creates an authorization request record.
+3. SqlOS redirects the browser to your custom UI route.
+4. Your page loads the request state from `/headless/requests/{id}`.
+5. Your page posts user actions back to SqlOS:
+   - identify email
+   - password login
+   - signup
+   - start provider login
+   - select organization
+6. SqlOS either:
+   - returns the next view model, or
+   - returns a redirect to SAML/OIDC, or
+   - finishes the flow and redirects to the OAuth client callback with a real code
+
+So the model is:
+
+- **your page is the UI**
+- **SqlOS is the state machine**
+
+## Step 1: Tell SqlOS where your UI lives
+
+This is the most important part. In the Example app, the backend enables headless mode in [Program.cs](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Api/Program.cs#L86):
+
+```csharp
+auth.UseHeadlessAuthPage(headless =>
+{
+    headless.BuildUiUrl = ctx =>
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["request"] = ctx.RequestId,
+            ["view"] = ctx.View,
+            ["error"] = ctx.Error,
+            ["email"] = ctx.Email,
+            ["pendingToken"] = ctx.PendingToken,
+            ["displayName"] = ctx.DisplayName,
+        };
+
+        return QueryHelpers.AddQueryString(
+            $"{headlessFrontendUrl.TrimEnd('/')}/auth/authorize",
+            query);
+    };
+});
+```
+
+That means:
+
+- SqlOS still receives the real `GET /authorize`
+- but when UI is needed, SqlOS redirects to your app page
+- your page gets enough context to resume the flow
+
+EasyCOI does the same thing, just with more app context in [Program.cs](/Users/employment/Dev/easycoi/api/Program.cs#L135):
+
+```csharp
+auth.UseHeadlessAuthPage(headless =>
+{
+    headless.BuildUiUrl = ctx =>
+    {
+        var language = uiContext?["lng"]?.GetValue<string?>()?.Trim() ?? "en";
+        var template = uiContext?["template"]?.GetValue<string?>();
+        var shellUrl = $"{firstPartyWebOrigin.TrimEnd('/')}/{language}/authorize";
+
+        var query = new Dictionary<string, string?>
+        {
+            ["view"] = ctx.View,
+            ["request"] = ctx.RequestId,
+            ["error"] = ctx.Error,
+            ["pendingToken"] = ctx.PendingToken,
+            ["email"] = ctx.Email,
+            ["displayName"] = ctx.DisplayName,
+            ["template"] = string.IsNullOrWhiteSpace(template) ? null : template
+        };
+
+        return QueryHelpers.AddQueryString(shellUrl, query!);
+    };
+});
+```
+
+The only difference is that EasyCOI threads language and template state through `ui_context`.
+
+## Step 2: Start a normal OAuth flow from your custom page
+
+Your custom page still starts a real PKCE authorization request.
+
+In the Example app, the starter lives in [sqlos-headless-auth-panel.tsx](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx#L563):
+
+```tsx
+const verifier = createOpaqueToken(48);
+const state = createOpaqueToken(24);
+const challenge = await createCodeChallenge(verifier);
+
+persistSqlOSAuthFlow(flowView, state, verifier, "/app");
+
+const url = new URL(`${getExampleAuthServerUrl()}/authorize`);
+url.searchParams.set("response_type", "code");
+url.searchParams.set("client_id", getExampleClientId());
+url.searchParams.set("redirect_uri", getExampleRedirectUri());
+url.searchParams.set("state", state);
+url.searchParams.set("code_challenge", challenge);
+url.searchParams.set("code_challenge_method", "S256");
+if (flowView === "signup") {
+  url.searchParams.set("view", "signup");
+}
+
+window.location.replace(url.toString());
+```
+
+EasyCOI does the same thing in [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx#L212):
+
+```tsx
+const url = new URL(`${apiUrl}/oauth/authorize`);
+url.searchParams.set("response_type", "code");
+url.searchParams.set("client_id", SQL_OS_CLIENT_ID);
+url.searchParams.set("redirect_uri", redirectUri);
+url.searchParams.set("state", state);
+url.searchParams.set("code_challenge", challenge);
+url.searchParams.set("code_challenge_method", "S256");
+url.searchParams.set("view", view === "signup" ? "signup" : "login");
+url.searchParams.set(
+  "ui_context",
+  JSON.stringify({
+    lng,
+    template: template || undefined,
+  })
+);
+
+window.location.replace(url.toString());
+```
+
+This is important: the page is custom, but the request is still normal OAuth.
+
+## Step 3: Load the request model
+
+After SqlOS redirects back to your custom page with `?request=req_...`, your page loads the request state.
+
+EasyCOI does that in [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx#L326):
+
+```tsx
+const requestUrl = new URL(`${apiUrl}/oauth/headless/requests/${requestId}`);
+requestUrl.searchParams.set("view", requestedView);
+if (queryError) {
+  requestUrl.searchParams.set("error", queryError);
+}
+
+const response = await fetch(requestUrl.toString(), {
+  credentials: "include",
+  cache: "no-store",
+});
+
+const payload = (await response.json()) as HeadlessModel;
+setModel(payload);
+```
+
+That request model gives your page everything it needs to render the next step:
+
+- current `view`
+- email
+- current error
+- organization choices
+- available providers
+- pending organization token
+
+## Step 4: Post user actions back to SqlOS
+
+This is the main UI integration. Your page does not implement auth rules. It just posts user actions.
+
+### Email first / HRD
+
+EasyCOI posts email identify in [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx#L429):
+
+```tsx
+await postAction("/oauth/headless/identify", {
+  requestId: model.requestId,
+  email,
+});
+```
+
+SqlOS then decides:
+
+- show password
+- redirect to SAML
+- or stay on the current page with an error
+
+### Password login
+
+```tsx
+await postAction("/oauth/headless/password/login", {
+  requestId: model.requestId,
+  email,
+  password,
+});
+```
+
+### Signup
+
+In the Example app, signup sends custom fields in [sqlos-headless-auth-panel.tsx](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx#L214):
+
+```tsx
+const result = await headlessSignup(
+  requestId,
+  buildDisplayName(firstName, lastName, email),
+  email,
+  password,
+  organizationName,
+  {
+    referralSource,
+    firstName,
+    lastName,
+  },
+);
+```
+
+EasyCOI does the same pattern in [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx#L470):
+
+```tsx
+await postAction("/oauth/headless/signup", {
+  requestId: model.requestId,
+  displayName: `${firstName} ${lastName}`.trim(),
+  email,
+  password,
+  organizationName: companyName,
+  customFields: {
+    firstName,
+    lastName,
+    companyName,
+    language: lng,
+    template: template || undefined,
+  },
+});
+```
+
+### OIDC provider start
+
+```tsx
+await postAction("/oauth/headless/provider/start", {
+  requestId: model.requestId,
+  connectionId,
+  email,
+});
+```
+
+### Organization select
+
+```tsx
+await postAction("/oauth/headless/organization/select", {
+  pendingToken: model.pendingToken,
+  organizationId,
+});
+```
+
+## Step 5: Optionally persist app-owned signup data
+
+This is the part that makes headless mode more than “hosted auth with different HTML.”
+
+In the Example app, `OnHeadlessSignupAsync(...)` validates and persists `referralSource` into app-owned data in [Program.cs](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Api/Program.cs#L103):
+
+```csharp
+headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+{
+    var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
+
+    if (string.IsNullOrWhiteSpace(referralSource))
+    {
+        throw new SqlOSHeadlessValidationException(
+            "Tell us how you heard about SqlOS.",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["referralSource"] = "Select a referral source to complete signup."
+            });
+    }
+
+    var profile = await dbContext.ExampleUserProfiles
+        .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
+
+    // create/update app-owned profile row here
+};
+```
+
+EasyCOI delegates the same idea to an app service in [Program.cs](/Users/employment/Dev/easycoi/api/Program.cs#L161):
+
+```csharp
+headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+{
+    var provisioner = ctx.HttpContext.RequestServices
+        .GetRequiredService<IEasyCoiHeadlessSignupProvisioningService>();
+    await provisioner.HandleAsync(ctx, cancellationToken);
+};
+```
+
+That is the clean pattern:
+
+- SqlOS owns the auth records
+- your app owns the extra product data
+
+## Step 6: Let SqlOS finish the flow
+
+This is the part you do **not** write.
+
+When your page posts an action, SqlOS returns one of two things:
+
+- a new view model
+- a redirect URL
+
+In the Example app, the UI reacts like this in [sqlos-headless-auth-panel.tsx](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx#L145):
+
+```tsx
+if (result.type === "redirect" && result.redirectUrl) {
+  const url = new URL(result.redirectUrl);
+  const code = url.searchParams.get("code");
+
+  if (code) {
+    // exchange code, create session, enter app
+  }
+
+  window.location.href = result.redirectUrl;
+  return;
+}
+
+if (result.viewModel) {
+  setViewModel(result.viewModel);
+}
+```
+
+That is the whole contract:
+
+- if SqlOS wants the browser somewhere else, follow the redirect
+- if SqlOS wants the app to render another step, render the next view model
+
+## Minimum implementation checklist
+
+If you are building a consumer app, this is the minimum lifecycle to implement:
+
+1. Configure `UseHeadlessAuthPage(...)`
+2. Implement `BuildUiUrl(...)`
+3. Create a custom authorize page route
+4. Start a real PKCE `/authorize` request from that page
+5. Load `GET /headless/requests/{requestId}`
+6. Post the five user actions back to SqlOS
+7. Follow redirect results
+8. Optionally implement `OnHeadlessSignupAsync(...)` for app-specific fields
+
+That is all you need.
+
+## What you do **not** need to implement
+
+You do **not** need to write:
+
+- a React SDK
+- authorization code issuance
+- redirect URI validation
+- PKCE validation
+- OIDC callback logic
+- SAML ACS handling
+- token issuance rules
+- refresh rotation
+
+That is the entire point of headless mode.
+
+## Copy this pattern
+
+If you want a starting point:
+
+- Example API backend: [Program.cs](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Api/Program.cs)
+- Example web UI: [sqlos-headless-auth-panel.tsx](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx)
+- EasyCOI backend: [Program.cs](/Users/employment/Dev/easycoi/api/Program.cs)
+- EasyCOI UI: [HeadlessAuthorizeClient.tsx](/Users/employment/Dev/easycoi/web/app/components/auth/HeadlessAuthorizeClient.tsx)
+
+If you want the product framing, go back to [Headless Auth](/docs/authserver/headless-auth) and [Headless Auth Server Mode: Keep OAuth, Own the UI](/blog/headless-auth-server-mode).
