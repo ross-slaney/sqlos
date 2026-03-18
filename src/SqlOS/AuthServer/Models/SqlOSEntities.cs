@@ -254,6 +254,7 @@ public sealed class SqlOSAuthPageSettings
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public string EnabledCredentialTypesJson { get; set; } = "[\"password\"]";
+    public string PresentationMode { get; set; } = "hosted";
     public DateTime UpdatedAt { get; set; }
 }
 

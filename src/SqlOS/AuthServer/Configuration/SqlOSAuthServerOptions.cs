@@ -29,7 +29,6 @@ public class SqlOSAuthServerOptions
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
     {
-        AuthPageMode = SqlOSAuthPageMode.Headless;
         configure(Headless);
         return this;
     }

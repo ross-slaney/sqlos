@@ -59,6 +59,10 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
         auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
         auth.DefaultSigningKeyRotationIntervalDays = 90;
         auth.DefaultSigningKeyGraceWindowDays = 7;
+        var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
+            ?? builder.Configuration["ExampleFrontend:Origin"]
+            ?? "http://localhost:3000";
+
         auth.SeedAuthPage(page =>
         {
             page.PageTitle = "Sign in";
@@ -69,6 +73,7 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
             page.Layout = "split";
             page.EnablePasswordSignup = true;
             page.EnabledCredentialTypes = ["password"];
+            page.PresentationMode = "headless";
         });
         auth.SeedBrowserClient(
             exampleClientId,
@@ -76,83 +81,75 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
             exampleCallbackUrl,
             "https://client.example.local/callback");
 
-        var authMode = builder.Configuration["SqlOS:AuthMode"];
-        if (string.Equals(authMode, "Headless", StringComparison.OrdinalIgnoreCase))
+        auth.UseHeadlessAuthPage(headless =>
         {
-            var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
-                ?? builder.Configuration["ExampleFrontend:Origin"]
-                ?? "http://localhost:3000";
-
-            auth.UseHeadlessAuthPage(headless =>
+            headless.BuildUiUrl = ctx =>
             {
-                headless.BuildUiUrl = ctx =>
+                var query = new Dictionary<string, string?>
                 {
-                    var query = new Dictionary<string, string?>
-                    {
-                        ["request"] = ctx.RequestId,
-                        ["view"] = ctx.View,
-                        ["error"] = ctx.Error,
-                        ["email"] = ctx.Email,
-                        ["pendingToken"] = ctx.PendingToken,
-                        ["displayName"] = ctx.DisplayName,
-                    };
-                    return QueryHelpers.AddQueryString(
-                        $"{headlessFrontendUrl.TrimEnd('/')}/auth/authorize", query);
+                    ["request"] = ctx.RequestId,
+                    ["view"] = ctx.View,
+                    ["error"] = ctx.Error,
+                    ["email"] = ctx.Email,
+                    ["pendingToken"] = ctx.PendingToken,
+                    ["displayName"] = ctx.DisplayName,
                 };
+                return QueryHelpers.AddQueryString(
+                    $"{headlessFrontendUrl.TrimEnd('/')}/auth/authorize", query);
+            };
 
-                headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+            headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+            {
+                var logger = ctx.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("HeadlessSignup");
+                var dbContext = ctx.HttpContext.RequestServices.GetRequiredService<ExampleAppDbContext>();
+
+                var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
+                var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
+                var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
+
+                if (string.IsNullOrWhiteSpace(referralSource))
                 {
-                    var logger = ctx.HttpContext.RequestServices
-                        .GetRequiredService<ILoggerFactory>()
-                        .CreateLogger("HeadlessSignup");
-                    var dbContext = ctx.HttpContext.RequestServices.GetRequiredService<ExampleAppDbContext>();
-
-                    var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
-                    var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
-                    var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
-
-                    if (string.IsNullOrWhiteSpace(referralSource))
-                    {
-                        throw new SqlOSHeadlessValidationException(
-                            "Tell us how you heard about SqlOS.",
-                            new Dictionary<string, string>(StringComparer.Ordinal)
-                            {
-                                ["referralSource"] = "Select a referral source to complete signup."
-                            });
-                    }
-
-                    var profile = await dbContext.ExampleUserProfiles
-                        .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
-
-                    if (profile == null)
-                    {
-                        profile = new ExampleUserProfile
+                    throw new SqlOSHeadlessValidationException(
+                        "Tell us how you heard about SqlOS.",
+                        new Dictionary<string, string>(StringComparer.Ordinal)
                         {
-                            SqlOSUserId = ctx.User.Id,
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        dbContext.ExampleUserProfiles.Add(profile);
-                    }
+                            ["referralSource"] = "Select a referral source to complete signup."
+                        });
+                }
 
-                    profile.DefaultEmail = ctx.User.DefaultEmail ?? string.Empty;
-                    profile.DisplayName = ctx.User.DisplayName ?? ctx.User.DefaultEmail ?? "Example User";
-                    profile.OrganizationId = ctx.Organization?.Id;
-                    profile.OrganizationName = ctx.Organization?.Name;
-                    profile.ReferralSource = referralSource!;
-                    profile.UpdatedAt = DateTime.UtcNow;
+                var profile = await dbContext.ExampleUserProfiles
+                    .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
 
-                    await dbContext.SaveChangesAsync(cancellationToken);
+                if (profile == null)
+                {
+                    profile = new ExampleUserProfile
+                    {
+                        SqlOSUserId = ctx.User.Id,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    dbContext.ExampleUserProfiles.Add(profile);
+                }
 
-                    logger.LogInformation(
-                        "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Referral={Referral}",
-                        ctx.User.DefaultEmail,
-                        ctx.Organization?.Name,
-                        firstName,
-                        lastName,
-                        referralSource);
-                };
-            });
-        }
+                profile.DefaultEmail = ctx.User.DefaultEmail ?? string.Empty;
+                profile.DisplayName = ctx.User.DisplayName ?? ctx.User.DefaultEmail ?? "Example User";
+                profile.OrganizationId = ctx.Organization?.Id;
+                profile.OrganizationName = ctx.Organization?.Name;
+                profile.ReferralSource = referralSource!;
+                profile.UpdatedAt = DateTime.UtcNow;
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                logger.LogInformation(
+                    "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Referral={Referral}",
+                    ctx.User.DefaultEmail,
+                    ctx.Organization?.Name,
+                    firstName,
+                    lastName,
+                    referralSource);
+            };
+        });
     });
     options.UseFGA(fga =>
     {

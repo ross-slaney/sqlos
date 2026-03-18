@@ -288,8 +288,10 @@ public sealed record SqlOSAuthPageSettingsDto(
     string PageSubtitle,
     bool EnablePasswordSignup,
     string[] EnabledCredentialTypes,
+    string PresentationMode,
     DateTime UpdatedAt,
-    bool ManagedByStartupSeed);
+    bool ManagedByStartupSeed,
+    bool HeadlessCapabilityRegistered);
 
 public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string? LogoBase64,
@@ -300,7 +302,8 @@ public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string PageTitle,
     string PageSubtitle,
     bool EnablePasswordSignup,
-    string[] EnabledCredentialTypes);
+    string[] EnabledCredentialTypes,
+    string PresentationMode);
 
 public sealed record SqlOSAuthorizationServerMetadataDto(
     string Issuer,

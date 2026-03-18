@@ -12,3 +12,11 @@ BEGIN
     ADD [UiContextJson] NVARCHAR(MAX) NULL;
 END
 GO
+
+IF COL_LENGTH('{Schema}.SqlOSAuthPageSettings', 'PresentationMode') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSAuthPageSettings]
+    ADD [PresentationMode] NVARCHAR(32) NOT NULL
+        CONSTRAINT [DF_SqlOSAuthPageSettings_PresentationMode] DEFAULT 'hosted';
+END
+GO
