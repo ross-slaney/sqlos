@@ -675,7 +675,266 @@ input::placeholder { color: var(--color-text-tertiary); }
   flex-shrink: 0;
 }
 
-/* (Landing page styles are at the bottom of this file) */
+/* ── Dashboard Greeting ── */
+
+.dash-greeting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dash-greeting-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-greeting-top h1 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+/* ── Northy Assistant ── */
+
+.northy {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, #eef2ff 0%, #faf5ff 100%);
+  border: 1px solid var(--color-primary-muted);
+}
+
+.northy-character {
+  flex-shrink: 0;
+}
+
+.northy-bag {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: northy-bob 3s ease-in-out infinite;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+.northy-face {
+  font-size: 22px;
+  line-height: 1;
+}
+
+@keyframes northy-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.northy-bubble {
+  flex: 1;
+  min-width: 0;
+}
+
+.northy-bubble p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+/* ── Quick Actions ── */
+
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  text-decoration: none;
+  transition: all 0.15s;
+  box-shadow: var(--shadow-sm);
+}
+
+.quick-action:hover {
+  border-color: var(--color-primary-muted);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  text-decoration: none;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-hover);
+}
+
+.quick-action-icon {
+  font-size: 15px;
+}
+
+/* ── Alert Card ── */
+
+.alert-card {
+  border-color: #fde68a;
+  background: #fffef5;
+}
+
+.alert-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.alert-card-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-card-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 0;
+}
+
+.alert-card-header p {
+  font-size: 12px;
+  color: #a16207;
+}
+
+.alert-items {
+  display: grid;
+  gap: 6px;
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: white;
+  border: 1px solid #fde68a;
+  text-decoration: none;
+  color: var(--color-text);
+  transition: all 0.15s;
+}
+
+.alert-item:hover {
+  border-color: var(--color-warning);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.alert-item-info strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.alert-item-info span {
+  font-size: 12px;
+}
+
+/* ── Store Inventory Grid ── */
+
+.store-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.store-inv-card {
+  display: block;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: all 0.2s;
+}
+
+.store-inv-card:hover {
+  border-color: var(--color-primary-muted);
+  box-shadow: var(--shadow-hover);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.store-inv-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.store-inv-card-header strong {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.store-inv-stats {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 10px;
+}
+
+.store-inv-stats > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.store-inv-num {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.store-inv-label {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.store-inv-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.store-inv-bar-seg {
+  border-radius: 3px;
+  min-width: 4px;
+}
+
+.store-inv-bar-seg.ok { background: var(--color-success); }
+.store-inv-bar-seg.low { background: var(--color-warning); }
+.store-inv-bar-seg.out { background: var(--color-danger); }
 
 /* ── Headless Auth (split image + form) ── */
 
