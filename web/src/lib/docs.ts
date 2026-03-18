@@ -6,6 +6,13 @@ const guidesDirectory = path.join(process.cwd(), "content/docs");
 
 export type DocSection = "authserver" | "fga" | "reference" | null;
 
+const DOC_SECTION_LABELS: Record<string, string> = {
+  "": "Getting Started",
+  authserver: "AuthServer",
+  fga: "Fine-Grained Auth",
+  reference: "Reference",
+};
+
 export interface DocGuide {
   slug: string;
   title: string;
@@ -13,6 +20,27 @@ export interface DocGuide {
   order: number;
   section: DocSection;
   content: string;
+}
+
+export interface DocsSearchResult {
+  slug: string;
+  href: string;
+  title: string;
+  description: string;
+  section: DocSection;
+  sectionLabel: string;
+  snippet: string;
+  matchedFields: ("title" | "description" | "content")[];
+}
+
+export interface DocsSearchResponse {
+  query: string;
+  total: number;
+  results: DocsSearchResult[];
+}
+
+export function getDocSectionLabel(section: DocSection): string {
+  return DOC_SECTION_LABELS[section ?? ""] ?? "Documentation";
 }
 
 function findMdxFiles(dir: string, baseDir: string = dir): string[] {

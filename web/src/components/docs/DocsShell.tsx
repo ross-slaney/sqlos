@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { DocGuide } from "@/lib/docs";
+import DocsSearch from "@/components/docs/DocsSearch";
 import DocsSidebar from "@/components/docs/DocsSidebar";
 
 interface DocsShellProps {
@@ -77,34 +78,37 @@ export default function DocsShell({ guides, children }: DocsShellProps) {
             </p>
           </div>
 
-          <button
-            type="button"
-            aria-expanded={isNavOpen}
-            aria-controls="docs-mobile-nav"
-            aria-label={
-              isNavOpen ? "Close documentation navigation" : "Open documentation navigation"
-            }
-            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition-colors hover:border-stone-300 hover:text-stone-950"
-            onClick={() => setIsNavOpen((open) => !open)}
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          <div className="flex shrink-0 items-center gap-2">
+            <DocsSearch variant="mobile" />
+            <button
+              type="button"
+              aria-expanded={isNavOpen}
+              aria-controls="docs-mobile-nav"
+              aria-label={
+                isNavOpen ? "Close documentation navigation" : "Open documentation navigation"
+              }
+              className="inline-flex shrink-0 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition-colors hover:border-stone-300 hover:text-stone-950"
+              onClick={() => setIsNavOpen((open) => !open)}
             >
-              {isNavOpen ? (
-                <path d="M6 6l12 12M18 6L6 18" />
-              ) : (
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              )}
-            </svg>
-            Browse docs
-          </button>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                {isNavOpen ? (
+                  <path d="M6 6l12 12M18 6L6 18" />
+                ) : (
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                )}
+              </svg>
+              <span className="hidden sm:inline">Browse docs</span>
+            </button>
+          </div>
         </div>
       </div>
 
