@@ -65,7 +65,7 @@ export default function DocsShell({ guides, children }: DocsShellProps) {
   }, [guides, pathname]);
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-white lg:flex">
+    <div className="min-h-[calc(100vh-3.5rem)] bg-white lg:min-h-[calc(100vh-4rem)] lg:flex">
       <div className="sticky top-14 z-30 border-b border-stone-200 bg-white/95 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="min-w-0">
