@@ -11,6 +11,7 @@ Add these in GitHub at:
 - Put the values in the `Variables` tab unless the table says `Secret`.
 - Put `AZURE_CLIENT_SECRET` in the `Secrets` tab.
 - Do not wrap values in quotes.
+- Add them at the repository level. This workflow does not currently use a GitHub `environment:`, so environment-scoped secrets/variables will not be available to it.
 
 ### Required GitHub Actions values
 
@@ -25,6 +26,20 @@ Add these in GitHub at:
 | `AZURE_TENANT_ID` | Variable | `22222222-2222-2222-2222-222222222222` | Azure Entra tenant ID that owns the subscription and service principal. | `az account show --query tenantId -o tsv` |
 | `AZURE_SUBSCRIPTION_ID` | Variable | `33333333-3333-3333-3333-333333333333` | Azure subscription ID where both the app RG and DNS zone live. | `az account show --query id -o tsv` |
 | `AZURE_CLIENT_SECRET` | Secret | `...` | Client secret for the Azure service principal used by GitHub Actions. | From `az ad sp create-for-rbac` output, or by creating a new app credential. |
+
+If the workflow fails in the `Azure login` step with a message like `Not all parameters are provided in 'creds'`, one of these four values is empty at runtime:
+
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_CLIENT_SECRET`
+
+The most common causes are:
+
+- `AZURE_CLIENT_SECRET` was added as a variable instead of a secret
+- the values were added under a GitHub Environment instead of at repository scope
+- one of the names does not match exactly
+- the secret was created but saved with an empty value
 
 ### Recommended values for this repo
 

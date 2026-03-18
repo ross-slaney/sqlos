@@ -23,11 +23,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Validate Azure login inputs
+        env:
+          INPUT_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          INPUT_AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          INPUT_AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          INPUT_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+
+          [[ -n "${INPUT_AZURE_CLIENT_ID:-}" ]] || missing+=("AZURE_CLIENT_ID (repository variable)")
+          [[ -n "${INPUT_AZURE_TENANT_ID:-}" ]] || missing+=("AZURE_TENANT_ID (repository variable)")
+          [[ -n "${INPUT_AZURE_SUBSCRIPTION_ID:-}" ]] || missing+=("AZURE_SUBSCRIPTION_ID (repository variable)")
+          [[ -n "${INPUT_AZURE_CLIENT_SECRET:-}" ]] || missing+=("AZURE_CLIENT_SECRET (repository secret)")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "Missing Azure login values:"
+            printf ' - %s\n' "${missing[@]}"
+            echo ""
+            echo "Add repository variables/secrets at:"
+            echo "Settings -> Secrets and variables -> Actions"
+            echo ""
+            echo "This workflow does not read GitHub Environment-scoped values."
+            exit 1
+          fi
+
       - name: Azure login
         uses: azure/login@v2
         with:
-          creds: >-
-            {"clientId":"${{ env.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ env.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ env.AZURE_TENANT_ID }}"}
+          creds: '{"clientId":"${{ vars.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
 
       - name: Install Azure Container Apps extension
         run: |
