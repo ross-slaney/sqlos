@@ -8,7 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
 } from "react-native";
-import { Redirect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useAuth } from "../services/AuthContext";
 import { Colors } from "../services/theme";
 
@@ -76,9 +76,7 @@ export default function LandingScreen() {
     );
   }
 
-  if (isAuthenticated) {
-    return <Redirect href="/(app)" />;
-  }
+  // Root layout handles redirect to /(app) when authenticated
 
   return (
     <View style={styles.container}>

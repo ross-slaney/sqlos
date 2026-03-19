@@ -16,7 +16,7 @@ export default function SettingsScreen() {
         style: "destructive",
         onPress: async () => {
           await logout();
-          router.replace("/");
+          // Root layout handles redirect to landing
         },
       },
     ]);

@@ -1,6 +1,5 @@
-import { Tabs, Redirect } from "expo-router";
+import { Tabs } from "expo-router";
 import { Text } from "react-native";
-import { useAuth } from "../../services/AuthContext";
 import { Colors } from "../../services/theme";
 
 function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
@@ -12,12 +11,6 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
 }
 
 export default function AppTabLayout() {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  if (!isLoading && !isAuthenticated) {
-    return <Redirect href="/" />;
-  }
-
   return (
     <Tabs
       screenOptions={{
