@@ -5,51 +5,53 @@ order: 5.2
 section: authserver
 ---
 
-**What this guide covers**: Session idle timeout, absolute lifetime, refresh token lifetime, dashboard configuration.
+Security settings control how long sessions and tokens remain valid.
 
-**Dashboard path**: Auth Server → Security  
-**URL**: `http://localhost:5062/sqlos/admin/auth/security`
+## Configuration
 
----
+**Dashboard**: Auth Server > Security
 
-Security settings control how long sessions and tokens remain valid. They can be configured via the dashboard or the admin API.
+**Admin API**:
+
+```bash
+# Get current settings
+curl http://localhost:5062/sqlos/admin/auth/api/settings/security
+
+# Update settings
+curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshTokenLifetimeMinutes": 10080,
+    "sessionIdleTimeoutMinutes": 1440,
+    "sessionAbsoluteLifetimeMinutes": 43200
+  }'
+```
 
 ## Settings
 
-| Setting | Description | API field |
-|---------|-------------|-----------|
-| **Refresh token lifetime** | How long a refresh token is valid | `refreshTokenLifetimeMinutes` |
-| **Session idle timeout** | Session expires after this period of inactivity | `sessionIdleTimeoutMinutes` |
-| **Session absolute lifetime** | Hard session expiration regardless of activity | `sessionAbsoluteLifetimeMinutes` |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Refresh token lifetime | 7 days | How long a refresh token is valid |
+| Session idle timeout | 1 day | Session expires after inactivity |
+| Session absolute lifetime | 30 days | Hard expiration regardless of activity |
 
-## Dashboard
+## Access token lifetime
 
-The Security page shows current values and allows updating them.
-
-## API
-
-```text
-GET  /sqlos/admin/auth/api/settings/security
-PUT  /sqlos/admin/auth/api/settings/security
-```
-
-```json
-{
-  "refreshTokenLifetimeMinutes": 10080,
-  "sessionIdleTimeoutMinutes": 1440,
-  "sessionAbsoluteLifetimeMinutes": 43200
-}
-```
-
-## Code Example
-
-Security settings are resolved at runtime by `SqlOSSettingsService`:
+The access token lifetime is configured separately in startup code since it affects JWT generation:
 
 ```csharp
-var settings = await settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
+options.UseAuthServer(auth =>
+{
+    auth.AccessTokenLifetime = TimeSpan.FromMinutes(15);
+});
+```
+
+## Reading settings in code
+
+```csharp
+var settings = await settingsService.GetResolvedSecuritySettingsAsync(ct);
+
 // settings.RefreshTokenLifetime    → TimeSpan
 // settings.SessionIdleTimeout      → TimeSpan
 // settings.SessionAbsoluteLifetime → TimeSpan
 ```
-
-These values are used internally when creating sessions and refresh tokens. The access token lifetime is configured separately in `SqlOSAuthServerOptions.AccessTokenLifetime`.

@@ -1,19 +1,8 @@
 ---
 title: "Getting Started"
-description: "Wire SqlOS into your .NET app: install, configure, and run the example stack."
+description: "Install SqlOS and run the example stack in five minutes."
 order: 0
 ---
-
-**What this guide covers**: Install, service registration, DbContext setup, startup bootstrap, example stack URLs, AuthServer and Fga module overview.
-
----
-
-SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into your ASP.NET + EF Core app with a single package and minimal configuration.
-
-## Overview
-
-- **AuthServer**: Organizations, users, credentials, sessions, refresh tokens, OIDC providers, SAML organization SSO
-- **Fga**: Hierarchical resources, grants, roles, permission keys, access checks , query-time filtering
 
 ## Install
 
@@ -21,19 +10,21 @@ SqlOS is one runtime with two modules: **AuthServer** and **Fga**. Wire it into 
 dotnet add package SqlOS
 ```
 
-## Setup
+## Configure services
+
+Register SqlOS with your EF Core `DbContext`. Enable one or both modules:
 
 ```csharp
 builder.Services.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseFGA();
     options.UseAuthServer();
+    options.UseFGA();
 });
 ```
 
-### DbContext Setup
+## Set up your DbContext
 
-Your context implements both interfaces and registers both module models:
+Your context implements both module interfaces and registers their models:
 
 ```csharp
 public sealed class AppDbContext : DbContext,
@@ -57,7 +48,7 @@ public sealed class AppDbContext : DbContext,
 }
 ```
 
-## Startup
+## Map routes
 
 ```csharp
 var app = builder.Build();
@@ -67,72 +58,67 @@ app.MapAuthServer("/sqlos/auth");
 app.UseSqlOSDashboard("/sqlos");
 ```
 
-**Default routes**:
+This gives you:
 
-| Path                | Purpose                |
-| ------------------- | ---------------------- |
-| `/sqlos`            | Dashboard shell        |
-| `/sqlos/admin/auth` | Auth admin UI          |
-| `/sqlos/admin/fga`  | FGA admin UI           |
-| `/sqlos/auth/*`     | Auth runtime endpoints |
+| Path | What it does |
+| --- | --- |
+| `/sqlos` | Admin dashboard |
+| `/sqlos/auth/*` | OAuth 2.0 endpoints (authorize, token, JWKS) |
+| `/sqlos/admin/auth` | Auth management UI |
+| `/sqlos/admin/fga` | FGA management UI |
 
-## Example stack
+## Seed a client
 
-**Projects**: `SqlOS.Example.Api`, `SqlOS.Example.Web`, `SqlOS.Example.AppHost`
+Register your frontend as an OAuth client so users can sign in immediately:
+
+```csharp
+options.UseAuthServer(auth =>
+{
+    auth.SeedBrowserClient(
+        "my-app",
+        "My Application",
+        "http://localhost:3000/auth/callback");
+});
+```
+
+## Protect the dashboard
+
+Set a dashboard password in `appsettings.json`:
+
+```json
+{
+  "SqlOS": {
+    "Dashboard": {
+      "AuthMode": "Password",
+      "Password": "your-strong-password"
+    }
+  }
+}
+```
+
+## Run the example stack
+
+The repo includes a complete example with API, Next.js frontend, Angular frontend, and Expo mobile app:
 
 ```bash
-cd examples/SqlOS.Example.Web
-npm install
-
+cd examples/SqlOS.Example.Web && npm install
 cd /path/to/SqlOS
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-**URLs**:
-
-| URL                                       | Purpose         |
-| ----------------------------------------- | --------------- |
-| `http://localhost:5062/sqlos/`            | Dashboard       |
-| `http://localhost:5062/sqlos/admin/auth/` | Auth admin      |
-| `http://localhost:5062/sqlos/admin/fga/`  | FGA admin       |
-| `http://localhost:5062/swagger`           | Swagger UI      |
-| `http://localhost:3010/`                  | Example web app |
-
-## AuthServer module
-
-- Organizations, memberships, users, emails, password credentials
-- Sessions, refresh rotation, logout, revoke
-- SAML org SSO, Google/Microsoft/Apple/custom OIDC login
-- Admin UI: orgs, users, clients, sessions, SSO, OIDC
-
-## Fga module
-
-- Resource tree, grants, roles, permissions
-- Authorization filters for EF Core queries
-- Point checks for mutations
-- FGA dashboard for resources and grants
-
-```csharp
-var filter = await authService
-    .GetAuthorizationFilterAsync<Project>(subjectId, "PROJECT_VIEW");
-
-var projects = await dbContext.Projects
-    .Where(filter)
-    .OrderBy(x => x.Name)
-    .ToListAsync();
-```
+| URL | App |
+| --- | --- |
+| `http://localhost:5062/sqlos/` | Dashboard |
+| `http://localhost:5062/swagger` | Swagger UI |
+| `http://localhost:3010/` | Next.js app |
+| `http://localhost:4200/` | Angular app |
 
 ## Schema management
 
-- Library-owned SQL schema
-- Embedded versioned SQL scripts
-- Idempotent bootstrap via `UseSqlOSAsync()`
-- Consumer migrations do not own SqlOS tables
+SqlOS owns its own database schema. On startup, `UseSqlOSAsync()` runs embedded SQL scripts to create or update tables. Your app's EF Core migrations do not manage SqlOS tables.
 
-## Testing
+## Next steps
 
-```bash
-dotnet test SqlOS.sln
-```
-
-Integration tests run against SQL Server via Aspire.
+- [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, and auth flows
+- [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization and query filtering
+- [SDK Reference](/docs/guides/reference/sdk-reference) -- all services and methods

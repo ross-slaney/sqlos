@@ -1,59 +1,101 @@
 ---
-title: "Mutation / Create Resource"
-description: "Authorize mutations and create resources in the hierarchy."
+title: "Mutations"
+description: "Authorize writes and create resources in the hierarchy."
 order: 11
 section: fga
 ---
 
-**What this guide covers**: Authorization check before mutation, creating a resource in the hierarchy.
+For create, update, and delete operations, check authorization first with `CheckAccessAsync`, then perform the mutation.
 
----
+## Create pattern
 
-For create/update/delete operations, check authorization first with `CheckAccessAsync`, then create the FGA resource alongside your domain entity.
-
-## Full Create Flow
-
-From the retail example — creating a chain:
+1. Check permission on the parent resource
+2. Create the FGA resource
+3. Create your domain entity with the resource ID
+4. Save in one transaction
 
 ```csharp
-group.MapPost("/", async (
-    CreateChainRequest request,
+app.MapPost("/api/chains/{chainId}/locations", async (
+    string chainId,
+    CreateLocationRequest request,
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
     HttpContext http) =>
 {
     var subjectId = http.GetSubjectId();
+    var chain = await context.Chains.FindAsync(chainId);
+    if (chain == null) return Results.NotFound();
 
-    // 1. Check permission on the parent resource
     var access = await authService.CheckAccessAsync(
-        subjectId, RetailPermissionKeys.ChainEdit, "retail_root");
+        subjectId, "LOCATION_EDIT", chain.ResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    // 2. Create FGA resource as child of parent
     var resourceId = context.CreateResource(
-        "retail_root", request.Name, RetailResourceTypeIds.Chain);
+        chain.ResourceId, request.Name, "location");
 
-    // 3. Create domain entity with the resource ID
-    var chain = new Chain
+    var location = new Location
     {
         ResourceId = resourceId,
+        ChainId = chainId,
         Name = request.Name,
-        Description = request.Description,
-        HeadquartersAddress = request.HeadquartersAddress
+        Address = request.Address
     };
-    context.Chains.Add(chain);
-
-    // 4. Save both in one transaction
+    context.Locations.Add(location);
     await context.SaveChangesAsync();
 
-    return Results.Created($"/api/chains/{chain.Id}", new ChainDetailDto { ... });
+    return Results.Created($"/api/locations/{location.Id}", location);
 });
 ```
 
-## Pattern Summary
+## Update pattern
 
-1. **Check** — `CheckAccessAsync` on the parent resource with the edit permission
-2. **Create resource** — `context.CreateResource(parentId, name, typeId)` returns a resource ID
-3. **Create entity** — assign `ResourceId` to your domain model
-4. **Save** — both the FGA resource and domain entity save in one `SaveChangesAsync` call
+```csharp
+app.MapPut("/api/chains/{id}", async (
+    string id,
+    UpdateChainRequest request,
+    ExampleAppDbContext context,
+    ISqlOSFgaAuthService authService,
+    HttpContext http) =>
+{
+    var subjectId = http.GetSubjectId();
+    var chain = await context.Chains.FindAsync(id);
+    if (chain == null) return Results.NotFound();
+
+    var access = await authService.CheckAccessAsync(
+        subjectId, "CHAIN_EDIT", chain.ResourceId);
+    if (!access.Allowed)
+        return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+    chain.Name = request.Name;
+    chain.Description = request.Description;
+    await context.SaveChangesAsync();
+
+    return Results.Ok(chain);
+});
+```
+
+## Delete pattern
+
+```csharp
+app.MapDelete("/api/chains/{id}", async (
+    string id,
+    ExampleAppDbContext context,
+    ISqlOSFgaAuthService authService,
+    HttpContext http) =>
+{
+    var subjectId = http.GetSubjectId();
+    var chain = await context.Chains.FindAsync(id);
+    if (chain == null) return Results.NotFound();
+
+    var access = await authService.CheckAccessAsync(
+        subjectId, "CHAIN_EDIT", chain.ResourceId);
+    if (!access.Allowed)
+        return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+    context.Chains.Remove(chain);
+    await context.SaveChangesAsync();
+
+    return Results.NoContent();
+});
+```

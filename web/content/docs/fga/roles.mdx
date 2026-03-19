@@ -5,34 +5,54 @@ order: 2
 section: fga
 ---
 
-**What this guide covers**: Role model, role-permission linking, built-in vs custom roles.
+A role is a named set of permissions. When you grant a role to a subject on a resource, the subject gains all of that role's permissions on that resource and its descendants.
 
-**Dashboard path**: Fine-Grained Auth → Roles  
-**URL**: `http://localhost:5062/sqlos/admin/fga/roles`
+## Define roles in startup
 
----
+```csharp
+options.UseFGA(fga =>
+{
+    fga.SeedRole("CompanyAdmin", "Company Admin", new[]
+    {
+        "CHAIN_VIEW", "CHAIN_EDIT",
+        "LOCATION_VIEW", "LOCATION_EDIT",
+        "INVENTORY_VIEW", "INVENTORY_EDIT"
+    });
 
-A role is a flat set of permissions. Roles are stored in `SqlOSFgaRole` and linked to permissions via `SqlOSFgaRolePermission`.
+    fga.SeedRole("StoreClerk", "Store Clerk", new[]
+    {
+        "INVENTORY_VIEW"
+    });
+});
+```
 
-## Model
+Roles defined in startup are reapplied on boot. Custom roles created through the dashboard are preserved.
+
+## Dashboard
+
+**Path**: Fine-Grained Auth > Roles
+
+![Roles page](/docs/dashboard-roles.png)
+
+The Roles page lists all roles with their permission count. Create new roles or view the permissions linked to each role.
+
+## Role model
 
 ```csharp
 public class SqlOSFgaRole
 {
     public string Id { get; set; }
-    public string Key { get; set; }        // e.g., "org_member"
-    public string DisplayName { get; set; } // e.g., "Organization Member"
+    public string Key { get; set; }         // e.g., "CompanyAdmin"
+    public string DisplayName { get; set; } // e.g., "Company Admin"
     public string? Description { get; set; }
 }
 ```
 
-## Example Roles (Retail)
+## Example: retail app roles
 
-| Role Key | Permissions |
-|----------|-------------|
-| `org_member` | `CHAIN_VIEW`, `LOCATION_VIEW`, `INVENTORY_VIEW` |
-| `org_admin` | `CHAIN_VIEW`, `CHAIN_EDIT`, `LOCATION_VIEW`, `LOCATION_EDIT`, `INVENTORY_VIEW`, `INVENTORY_EDIT` |
-
-## Dashboard
-
-The Roles page lists all roles with their linked permissions. You can create roles and link permissions through the dashboard.
+| Role | Key | Permissions |
+| --- | --- | --- |
+| Company Admin | `CompanyAdmin` | All chain, location, and inventory permissions |
+| Chain Manager | `ChainManager` | CHAIN_VIEW, LOCATION_VIEW, LOCATION_EDIT, INVENTORY_VIEW, INVENTORY_EDIT |
+| Store Manager | `StoreManager` | LOCATION_VIEW, INVENTORY_VIEW, INVENTORY_EDIT |
+| Store Clerk | `StoreClerk` | INVENTORY_VIEW |

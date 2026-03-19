@@ -1,25 +1,15 @@
 ---
 title: "Headless Auth How-To"
-description: "Step-by-step guide for wiring a custom authorize page to SqlOS headless auth, with snippets from the Example app and EasyCOI."
-order: 1.75
+description: "Step-by-step implementation guide for custom authorize pages."
+order: 1.76
 section: authserver
 ---
 
-**What this guide covers**: The exact lifecycle your app implements in headless mode, the minimum code you have to write, and concrete snippets from the SqlOS Example app and EasyCOI.
+This is the implementation guide for [Headless Auth](/docs/guides/authserver/headless-auth). It covers the exact lifecycle and code your app needs.
 
----
+## What you implement
 
-If you are still deciding whether headless mode is the right fit, start with [Headless Auth](/docs/guides/authserver/headless-auth) and [Hosted vs Headless Auth](/docs/guides/authserver/hosted-vs-headless).
-
-This page answers a narrower question:
-
-> What does the consumer app actually have to implement?
-
-## Short answer
-
-Very little, relative to building auth from scratch.
-
-Your app provides:
+Your app provides four things:
 
 1. a `BuildUiUrl(...)` function so SqlOS knows where your custom page lives
 2. a custom authorize page

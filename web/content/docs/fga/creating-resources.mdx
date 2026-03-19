@@ -1,17 +1,32 @@
 ---
 title: "Creating Resources"
-description: "Add resources to the FGA hierarchy with CreateResource."
+description: "Add resources to the FGA hierarchy."
 order: 13
 section: fga
 ---
 
-**What this guide covers**: The `CreateResource` extension method for adding resources to the hierarchy.
+`CreateResource` is a convenience extension on `ISqlOSFgaDbContext` that creates an `SqlOSFgaResource` and adds it to the change tracker.
 
----
+## Usage
 
-`CreateResource` is a convenience extension on `ISqlOSFgaDbContext` that creates an `SqlOSFgaResource` and adds it to the change tracker. It returns the resource ID so you can assign it to your domain entity.
+```csharp
+// Auto-generated ID
+var resourceId = context.CreateResource(
+    parentId: "retail_root",
+    name: "Walmart",
+    resourceTypeId: "chain"
+);
 
-## Method Signature
+// Custom ID
+var orgResourceId = context.CreateResource(
+    parentId: "root",
+    name: "Acme Corp",
+    resourceTypeId: "organization",
+    id: $"org::{org.Id}"
+);
+```
+
+## Method signature
 
 ```csharp
 public static string CreateResource(
@@ -23,24 +38,23 @@ public static string CreateResource(
 ```
 
 | Parameter | Description |
-|-----------|-------------|
+| --- | --- |
 | `parentId` | Parent resource ID in the hierarchy |
-| `name` | Display name for the resource |
+| `name` | Display name |
 | `resourceTypeId` | Resource type (e.g., `chain`, `location`) |
-| `id` | Optional custom ID. If null, a GUID is generated. |
+| `id` | Optional. If null, a GUID is generated |
 
-## Code Example
+Returns the resource ID (generated or custom).
+
+## Transaction behavior
+
+`CreateResource` adds the resource to the EF Core change tracker but does not call `SaveChangesAsync`. Save it alongside your domain entity in one transaction:
 
 ```csharp
-// Auto-generated ID
 var resourceId = context.CreateResource("retail_root", request.Name, "chain");
-chain.ResourceId = resourceId;
 
-// Custom ID
-var orgResourceId = context.CreateResource("root", org.Name, "organization",
-    id: $"org::{org.Id}");
+var chain = new Chain { ResourceId = resourceId, Name = request.Name };
+context.Chains.Add(chain);
+
+await context.SaveChangesAsync(); // saves both the resource and the chain
 ```
-
-## Important
-
-`CreateResource` adds the entity to the change tracker but does **not** call `SaveChangesAsync`. Save it along with your domain entity in a single transaction.

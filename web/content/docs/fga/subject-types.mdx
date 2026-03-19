@@ -1,46 +1,27 @@
 ---
 title: "Subject Types"
-description: "Users, agents, service accounts, and groups as authorization subjects."
+description: "Users, agents, service accounts, and groups."
 order: 6
 section: fga
 ---
 
-**What this guide covers**: Subject model, subject types, FGA-specific user/agent/service account/group entities.
+A subject is the entity being authorized. Every grant links a subject to a role on a resource.
 
-**Dashboard paths**: Fine-Grained Auth → Users, Agents, Service Accounts, User Groups
+## Subject types
 
----
+| Type | Entity | Use case |
+| --- | --- | --- |
+| `user` | `SqlOSFgaUser` | Human users (synced from AuthServer) |
+| `agent` | `SqlOSFgaAgent` | AI agents, bots, automated processes |
+| `service_account` | `SqlOSFgaServiceAccount` | API keys for service-to-service access |
+| `user_group` | `SqlOSFgaUserGroup` | Logical groups of users |
 
-A subject is the entity being authorized. Every subject has a type and is stored in `SqlOSFgaSubject`.
+## Create a subject
 
-## Subject Model
-
-```csharp
-public class SqlOSFgaSubject
-{
-    public string Id { get; set; }
-    public string SubjectTypeId { get; set; }  // "user", "agent", etc.
-    public string DisplayName { get; set; }
-    public string? OrganizationId { get; set; }
-    public string? ExternalRef { get; set; }
-}
-```
-
-## Subject Types
-
-| Type | Entity | Purpose |
-|------|--------|---------|
-| `user` | `SqlOSFgaUser` | Human users synced from AuthServer |
-| `agent` | `SqlOSFgaAgent` | Automated agents or bots |
-| `service_account` | `SqlOSFgaServiceAccount` | Service-to-service access |
-| `user_group` | `SqlOSFgaUserGroup` | Groups of users |
-
-## Creating Subjects
-
-Subjects are typically synced from AuthServer on login. See [Syncing Auth to FGA](/docs/guides/fga/syncing-auth-to-fga) for the pattern.
+**Users** are typically synced from AuthServer on login (see [Syncing Auth to FGA](/docs/guides/fga/syncing-auth-to-fga)):
 
 ```csharp
-_context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
+context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
 {
     Id = user.Id,
     SubjectTypeId = "user",
@@ -49,3 +30,44 @@ _context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
     ExternalRef = user.Id
 });
 ```
+
+**Agents** and **service accounts** can be created through the dashboard or seeded in startup:
+
+```csharp
+context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
+{
+    Id = "inventory_sync_agent",
+    SubjectTypeId = "agent",
+    DisplayName = "Inventory Sync Agent"
+});
+```
+
+## Authentication by subject type
+
+The example app supports multiple auth methods that map to different subject types:
+
+```csharp
+public static string? GetSubjectId(this HttpContext http)
+{
+    // Bearer JWT → user subject
+    var auth = http.Request.Headers.Authorization.ToString();
+    if (auth.StartsWith("Bearer "))
+        return ValidateAndGetUserId(auth);
+
+    // X-Api-Key → service account subject
+    if (http.Request.Headers.TryGetValue("X-Api-Key", out var apiKey))
+        return apiKey.ToString();
+
+    // X-Agent-Token → agent subject
+    if (http.Request.Headers.TryGetValue("X-Agent-Token", out var agent))
+        return agent.ToString();
+
+    return null;
+}
+```
+
+All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `GetAuthorizationFilterAsync` calls work regardless of whether the subject is a user, agent, or service account.
+
+## Dashboard
+
+Manage subjects under Fine-Grained Auth > Users / Agents / Service Accounts / User Groups.

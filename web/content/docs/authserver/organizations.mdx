@@ -1,34 +1,19 @@
 ---
-title: "Creating an Organization"
-description: "Create tenants and set primary domains for SSO."
+title: "Organizations"
+description: "Create tenants and manage multi-org membership."
 order: 2
 section: authserver
 ---
 
-**What this guide covers**: Create organization form, fields, primary domain for SSO.
+Organizations are tenants in SqlOS. Each organization has its own users (via memberships), optional SSO configuration, and a slug for URL-friendly identification.
 
-**Dashboard path**: Auth Server → Organizations  
-**URL**: `http://localhost:5062/sqlos/admin/auth/organizations`
+## Create an organization
 
----
+**Dashboard**: Auth Server > Organizations
 
-Organizations are top-level tenants. Each has users, memberships, and optional SSO.
+![Organizations page](/docs/dashboard-organizations.png)
 
-## Create Organization Form
-
-![Organizations page](/docs/organizations-page.png)
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| **Organization name** | Yes | Display name (e.g., "Acme Corp") |
-| **Slug** | No | URL-friendly identifier |
-| **Primary domain** | No | Login domain for SSO (e.g., `acme.com`). Users with `@acme.com` emails are routed to this org's SSO. |
-
-## Primary Domain and SSO
-
-Set **primary domain** when using SAML SSO. It must match the email domain of SSO users. Example: users with `@customer.com` → set primary domain to `customer.com`.
-
-## Code Example
+**SDK**:
 
 ```csharp
 var org = await adminService.CreateOrganizationAsync(new CreateOrganizationRequest
@@ -39,4 +24,53 @@ var org = await adminService.CreateOrganizationAsync(new CreateOrganizationReque
 });
 ```
 
-**Next**: [Adding SSO to an organization](/docs/guides/authserver/saml-sso)
+**Admin API**:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/organizations \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Corp", "slug": "acme", "primaryDomain": "acme.com"}'
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `name` | Yes | Display name |
+| `slug` | No | URL-friendly identifier, auto-generated if omitted |
+| `primaryDomain` | No | Email domain for SSO routing (e.g., `acme.com`) |
+
+## Primary domain
+
+When you set a primary domain, AuthServer uses it for [home realm discovery](/docs/guides/authserver/password-login). Users with matching email domains are automatically routed to SSO instead of password login.
+
+## Create a membership
+
+Users join organizations through memberships. Each membership has a role.
+
+```csharp
+var membership = await adminService.CreateMembershipAsync(new CreateMembershipRequest
+{
+    OrganizationId = org.Id,
+    UserId = user.Id,
+    Role = "admin"
+});
+```
+
+## Multi-org login
+
+When a user belongs to multiple organizations and logs in without specifying one, AuthServer returns a `RequiresOrganizationSelection` response with the list of available organizations. Your app presents the list and calls `SelectOrganizationAsync` to complete login.
+
+```csharp
+var result = await authService.LoginWithPasswordAsync(
+    new SqlOSPasswordLoginRequest(email, password, clientId),
+    httpContext, ct);
+
+if (result.RequiresOrganizationSelection)
+{
+    // result.Organizations contains the options
+    // result.PendingAuthToken is used to complete selection
+}
+```
+
+## Organization switching
+
+Users can switch organizations without re-authenticating by passing a different `organizationId` during [token refresh](/docs/guides/authserver/sessions-and-tokens).

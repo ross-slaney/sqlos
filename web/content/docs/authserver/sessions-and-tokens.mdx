@@ -1,59 +1,115 @@
 ---
 title: "Sessions and Tokens"
-description: "Access tokens, refresh tokens, and session lifecycle."
+description: "Access tokens, refresh tokens, validation, and session lifecycle."
 order: 4.9
 section: authserver
 ---
 
-**What this guide covers**: Session creation, access token structure, refresh token rotation, token lifetimes.
+Every successful login creates a session with an access token and a refresh token.
 
----
+## Token response
 
-Every successful login creates a session with an access token and a refresh token. The session tracks the user, client, authentication method, and expiration.
+After login, you receive:
 
-## Session Model
-
-| Field | Description |
-|-------|-------------|
-| `Id` | Session identifier (prefix `ses_`) |
-| `UserId` | Authenticated user |
-| `ClientApplicationId` | Client that initiated login |
-| `AuthenticationMethod` | `password`, `sso`, `oidc` |
-| `IdleExpiresAt` | Resets on each refresh |
-| `AbsoluteExpiresAt` | Hard expiration, cannot be extended |
-| `RevokedAt` | Set on logout or forced revocation |
-
-## Token Response
-
-```csharp
-var tokens = await authService.CreateSessionTokensForUserAsync(
-    user, client, organizationId, "password",
-    userAgent, ipAddress, cancellationToken);
-
-// tokens.AccessToken      — JWT, short-lived
-// tokens.RefreshToken     — opaque, rotated on use
-// tokens.SessionId        — session reference
-// tokens.ClientId         — issuing client
-// tokens.OrganizationId   — scoped org (nullable)
-// tokens.AccessTokenExpiresAt
-// tokens.RefreshTokenExpiresAt
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "rt_a1b2c3d4...",
+  "sessionId": "ses_443b577029cb43139d119ab6",
+  "clientId": "my-web-app",
+  "organizationId": "org_beae09ea40854f4488d6b3f1",
+  "accessTokenExpiresAt": "2026-03-19T14:30:00Z",
+  "refreshTokenExpiresAt": "2026-03-26T13:30:00Z"
+}
 ```
 
-## Access Token
+## Access tokens
 
-JWT signed with the RSA key from `SqlOSCryptoService`. Contains claims for user ID, session ID, client ID, organization ID, and custom claims. Validated via JWKS at `/.well-known/jwks.json`.
+Access tokens are RS256-signed JWTs containing user, session, client, and organization claims. Validate them server-side:
 
-## Refresh Token
+```csharp
+var validated = await authService.ValidateAccessTokenAsync(rawToken, ct);
 
-Opaque token stored as a hash. Each use rotates the token: the old token is marked as consumed and a new one is issued. Reuse of a consumed token triggers family revocation (all tokens in the chain are revoked along with the session).
+if (validated == null)
+    return Results.Unauthorized();
 
-## Lifetimes
+var userId = validated.UserId;
+var sessionId = validated.SessionId;
+var orgId = validated.OrganizationId;
+```
 
-Configured via security settings (dashboard or `SqlOSSettingsService`):
+| Field | Description |
+| --- | --- |
+| `UserId` | Authenticated user |
+| `SessionId` | Active session |
+| `ClientId` | OAuth client that initiated login |
+| `OrganizationId` | Scoped organization (nullable) |
+| `Principal` | `ClaimsPrincipal` with all JWT claims |
 
-| Setting | Default |
-|---------|---------|
-| Access token lifetime | Configured in `SqlOSAuthServerOptions.AccessTokenLifetime` |
-| Refresh token lifetime | From security settings |
-| Session idle timeout | From security settings |
-| Session absolute lifetime | From security settings |
+## JWKS endpoint
+
+External services can validate SqlOS-issued JWTs using the public key at:
+
+```
+GET /sqlos/auth/.well-known/jwks.json
+```
+
+## Refresh tokens
+
+Refresh tokens are opaque and rotated on every use. Each refresh consumes the old token and issues a new one.
+
+```csharp
+var tokens = await authService.RefreshAsync(
+    new SqlOSRefreshRequest(refreshToken, organizationId: null), ct);
+```
+
+**Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
+
+**Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
+
+## Logout
+
+Revoke a session by refresh token or session ID:
+
+```csharp
+await authService.LogoutAsync(refreshToken: "rt_...", sessionId: null, ct);
+```
+
+Revoke all sessions for a user:
+
+```csharp
+await authService.LogoutAllAsync(userId, ct);
+```
+
+## Session lifetimes
+
+Configured via the dashboard (Auth Server > Security) or the admin API:
+
+| Setting | Description |
+| --- | --- |
+| Refresh token lifetime | How long a refresh token is valid |
+| Session idle timeout | Session expires after this period of inactivity |
+| Session absolute lifetime | Hard expiration regardless of activity |
+
+```json
+{
+  "refreshTokenLifetimeMinutes": 10080,
+  "sessionIdleTimeoutMinutes": 1440,
+  "sessionAbsoluteLifetimeMinutes": 43200
+}
+```
+
+The access token lifetime is configured separately in startup:
+
+```csharp
+options.UseAuthServer(auth =>
+{
+    auth.AccessTokenLifetime = TimeSpan.FromMinutes(15);
+});
+```
+
+## Viewing active sessions
+
+The dashboard Sessions page shows all active sessions with authentication method, client, and expiration.
+
+![Active sessions](/docs/dashboard-sessions.png)

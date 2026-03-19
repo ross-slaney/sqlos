@@ -1,15 +1,11 @@
 ---
 title: "IHasResourceId"
-description: "Entity contract that links domain entities to FGA resources."
+description: "Connect your EF Core entities to the FGA resource tree."
 order: 7
 section: fga
 ---
 
-**What this guide covers**: The `IHasResourceId` interface, how to implement it on domain entities.
-
----
-
-`IHasResourceId` is the contract that connects your domain entities to the FGA resource tree. Any entity that needs authorization filtering must implement it.
+`IHasResourceId` is the interface that connects your domain entities to the FGA resource tree. Any entity that needs authorization filtering must implement it.
 
 ## Interface
 
@@ -22,6 +18,8 @@ public interface IHasResourceId
 
 ## Implementation
 
+Add `ResourceId` to your entity and implement the interface:
+
 ```csharp
 public class Chain : IHasResourceId
 {
@@ -30,30 +28,36 @@ public class Chain : IHasResourceId
     public string Name { get; set; } = "";
     public string? Description { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public List<Location> Locations { get; set; } = new();
 }
 ```
 
-The `ResourceId` property maps the entity to its corresponding `SqlOSFgaResource.Id` in the hierarchy.
+## Assigning the ResourceId
 
-## Usage in Authorization
+When creating an entity, create the FGA resource first and assign the ID:
 
-When you call `GetAuthorizationFilterAsync<Chain>`, the filter uses `ResourceId` to join against the accessible resources for the subject:
+```csharp
+var resourceId = context.CreateResource("org::acme", request.Name, "chain");
+
+var chain = new Chain
+{
+    ResourceId = resourceId,
+    Name = request.Name
+};
+
+context.Chains.Add(chain);
+await context.SaveChangesAsync(ct);
+```
+
+## How it's used
+
+When you call `GetAuthorizationFilterAsync<T>`, the filter joins your entity's `ResourceId` against the set of accessible resources for the subject:
 
 ```csharp
 var filter = await authService
     .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 
-var chains = await dbContext.Chains
-    .Where(filter)
-    .ToListAsync();
+// The filter expression uses chain.ResourceId to check access
+var chains = await dbContext.Chains.Where(filter).ToListAsync();
 ```
 
-## When Creating Entities
-
-Assign a `ResourceId` when creating the entity by calling `CreateResource`:
-
-```csharp
-var resourceId = context.CreateResource("org::acme", "New Chain", "chain");
-chain.ResourceId = resourceId;
-```
+This translates to a SQL Server table-valued function join, so authorization happens at the database level.

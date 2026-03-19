@@ -1,17 +1,13 @@
 ---
 title: "Token Validation"
-description: "Validate bearer access tokens and extract claims."
+description: "Validate access tokens and extract user claims."
 order: 5.0
 section: authserver
 ---
 
-**What this guide covers**: Validate JWT access tokens, extract user/session/org claims.
+Access tokens are RS256-signed JWTs. Validate them server-side to authenticate API requests.
 
----
-
-Access tokens are JWTs signed with the AuthServer's RSA key. Validate them server-side using `SqlOSAuthService.ValidateAccessTokenAsync`.
-
-## Code Example
+## Validate with the SDK
 
 ```csharp
 var bearerToken = httpContext.Request.Headers.Authorization.ToString();
@@ -19,35 +15,68 @@ if (!bearerToken.StartsWith("Bearer "))
     return Results.Unauthorized();
 
 var validated = await authService.ValidateAccessTokenAsync(
-    bearerToken["Bearer ".Length..].Trim(),
-    cancellationToken);
+    bearerToken["Bearer ".Length..].Trim(), ct);
 
 if (validated == null)
     return Results.Unauthorized();
 
-// validated.UserId
-// validated.SessionId
-// validated.ClientId
-// validated.OrganizationId
-// validated.Principal.Claims
+// Use the validated claims
+var userId = validated.UserId;
+var orgId = validated.OrganizationId;
 ```
 
-## ValidatedToken Fields
+## Middleware pattern
 
-| Field | Description |
-|-------|-------------|
-| `UserId` | The authenticated user's ID |
-| `SessionId` | Active session ID |
-| `ClientId` | Client application that issued the token |
-| `OrganizationId` | Scoped organization (nullable) |
-| `Principal` | `ClaimsPrincipal` with all JWT claims |
+The example app uses middleware to extract the subject ID from multiple auth methods:
 
-## JWKS Endpoint
+```csharp
+public static string? GetSubjectId(this HttpContext http)
+{
+    // Bearer JWT
+    var auth = http.Request.Headers.Authorization.ToString();
+    if (auth.StartsWith("Bearer "))
+    {
+        var token = auth["Bearer ".Length..].Trim();
+        var validated = http.RequestServices
+            .GetRequiredService<SqlOSAuthService>()
+            .ValidateAccessTokenAsync(token, ct).Result;
+        return validated?.UserId;
+    }
 
-The public key for token validation is exposed at:
+    // API key (service accounts)
+    if (http.Request.Headers.TryGetValue("X-Api-Key", out var apiKey))
+        return apiKey.ToString();
 
-```text
+    // Agent token
+    if (http.Request.Headers.TryGetValue("X-Agent-Token", out var agentToken))
+        return agentToken.ToString();
+
+    return null;
+}
+```
+
+## JWKS for external validation
+
+External services can validate SqlOS JWTs without calling the SDK by using the JWKS endpoint:
+
+```
 GET /sqlos/auth/.well-known/jwks.json
 ```
 
-External services can use this endpoint to validate SqlOS-issued JWTs without calling the SqlOS API.
+And the OAuth metadata endpoint:
+
+```
+GET /sqlos/auth/.well-known/oauth-authorization-server
+```
+
+## Token claims
+
+| Claim | Description |
+| --- | --- |
+| `sub` | User ID |
+| `sid` | Session ID |
+| `client_id` | OAuth client |
+| `org_id` | Organization (if scoped) |
+| `iss` | Issuer URL |
+| `aud` | Audience |
+| `exp` | Expiration |

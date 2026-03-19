@@ -1,34 +1,31 @@
 ---
-title: "HasCapability"
-description: "Root-level capability check for global permissions."
+title: "Capability Checks"
+description: "Root-level permission checks for global gates."
 order: 12
 section: fga
 ---
 
-**What this guide covers**: `HasCapabilityAsync` for checking if a subject has a permission at root level.
+`HasCapabilityAsync` checks whether a subject has a specific permission anywhere in the resource tree. Use it for broad capability gates where you don't have a specific resource ID.
 
----
-
-`HasCapabilityAsync` checks whether a subject has a specific permission anywhere in the resource tree (effectively at root level). Use it for global capability gates.
-
-## Code Example
+## Usage
 
 ```csharp
-var canManageChains = await authService.HasCapabilityAsync(
-    subjectId, "CHAIN_EDIT");
+var canCreateChains = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
 
-if (!canManageChains)
+if (!canCreateChains)
     return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 ```
 
-## Method Signature
+## When to use
 
-```csharp
-Task<bool> HasCapabilityAsync(string subjectId, string permissionKey);
-```
+| Scenario | Method |
+| --- | --- |
+| "Can this user edit *this* chain?" | `CheckAccessAsync` with a resource ID |
+| "Can this user edit *any* chain?" | `HasCapabilityAsync` |
+| "Show me all chains this user can see" | `GetAuthorizationFilterAsync` |
 
-## When to Use
+`HasCapabilityAsync` is useful for:
 
-- **Global gates** — "can this user create anything at all?"
-- **UI toggles** — show/hide buttons based on broad capabilities
-- For resource-specific checks, use `CheckAccessAsync` with a resource ID instead
+- **UI toggles** -- show/hide "Create" buttons based on broad permissions
+- **Top-level gates** -- "does this user have any write access at all?"
+- **Feature flags** -- enable/disable features based on capabilities

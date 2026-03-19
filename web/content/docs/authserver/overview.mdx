@@ -5,83 +5,66 @@ order: 0
 section: authserver
 ---
 
-**What this guide covers**: AuthServer scope, available services, registration, and the authentication flow.
+AuthServer is the identity module in SqlOS. It handles user authentication, organizations, sessions, token management, OIDC social login, and SAML enterprise SSO -- all embedded in your .NET app, all stored in your database.
 
----
+## What you get
 
-AuthServer is the identity module in SqlOS. It handles organizations, users, credentials, sessions, refresh tokens, OIDC providers, and SAML organization SSO inside your application database.
+- **Organizations** -- multi-tenant with memberships and roles
+- **Users** -- email/password, SSO-provisioned, or OIDC-linked
+- **Sessions** -- access tokens (JWT), refresh token rotation, replay detection
+- **OIDC** -- Google, Microsoft, Apple, and custom providers
+- **SAML SSO** -- enterprise SSO with auto-provisioning
+- **Hosted or Headless auth UI** -- use the built-in auth pages or render your own
 
-## Presentation Modes
-
-SqlOS AuthServer separates the authorization protocol from the login presentation layer:
-
-- **Hosted AuthPage**: SqlOS renders the built-in browser auth UI.
-- **Headless Auth**: SqlOS still owns `/authorize`, `/token`, PKCE, sessions, OIDC/SAML callbacks, and code issuance while your app renders the UI.
-
-If you want a fully app-native authorize popup for Emcy or any other OAuth client without rebuilding OAuth, headless mode is the right fit.
-
-Read next:
-
-- [Headless Auth](/docs/guides/authserver/headless-auth)
-- [Headless Auth How-To](/docs/guides/authserver/headless-auth-how-to)
-- [Hosted vs Headless Auth](/docs/guides/authserver/hosted-vs-headless)
-
-## Services
-
-| Service                          | Purpose                                                    |
-| -------------------------------- | ---------------------------------------------------------- |
-| `SqlOSAuthService`               | Login, refresh, logout, token validation, session creation |
-| `SqlOSAdminService`              | Create orgs, users, memberships, clients, SSO drafts       |
-| `SqlOSCryptoService`             | Token generation, PKCE, password hashing, JWKS             |
-| `SqlOSHomeRealmDiscoveryService` | Discover login mode by email domain                        |
-| `SqlOSSsoAuthorizationService`   | SAML SSO authorization and code exchange                   |
-| `SqlOSOidcAuthService`           | Google, Microsoft, Apple, and custom OIDC authorization    |
-| `SqlOSSettingsService`           | Security settings (session lifetimes)                      |
-
-## Registration
+## Setup
 
 ```csharp
 builder.Services.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer();
 });
-```
 
-Headless mode is opt-in:
-
-```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer(auth =>
-    {
-        auth.UseHeadlessAuthPage(headless =>
-        {
-            headless.BuildUiUrl = ctx =>
-                $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
-        });
-    });
-});
-```
-
-The hosted mode remains the default and requires no extra configuration.
-
-## Startup
-
-```csharp
+var app = builder.Build();
 await app.UseSqlOSAsync();
 app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");
 ```
 
-## Authentication Flow
+## Auth flow
 
-1. **Discover** — `POST /api/v1/auth/discover` with email → returns mode (`password`, `sso`)
-2. **Password** — `LoginWithPasswordAsync` → may require org selection → returns tokens
-3. **SSO** — `StartAuthorizationAsync` → SAML redirect → `ExchangeCodeAsync` → tokens
-4. **OIDC** — `StartAuthorizationAsync` → provider redirect → callback → `CompleteAuthorizationAsync` → tokens
-5. **Refresh** — `RefreshAsync` with refresh token → rotated tokens
-6. **Logout** — `LogoutAsync` → session and tokens revoked
+The typical authentication flow works like this:
+
+1. Frontend redirects to `/sqlos/auth/authorize` with PKCE
+2. User enters email -- AuthServer runs [home realm discovery](/docs/guides/authserver/password-login) to determine password vs SSO
+3. User authenticates (password, OIDC, or SAML)
+4. If the user belongs to multiple organizations, they select one
+5. AuthServer issues an authorization code
+6. Frontend exchanges the code for access + refresh tokens
+
+![Hosted sign-in page](/docs/auth-signin-page.png)
 
 ## Dashboard
 
-Auth admin UI is available at `/sqlos/admin/auth/` with pages for organizations, users, memberships, clients, OIDC connections, SSO, security settings, sessions, and audit events.
+The auth admin UI at `/sqlos/admin/auth/` lets you manage organizations, users, memberships, clients, OIDC connections, SSO, security settings, and active sessions.
+
+![Dashboard users](/docs/dashboard-users.png)
+
+## SDK services
+
+| Service | Purpose |
+| --- | --- |
+| `SqlOSAuthService` | Login, refresh, logout, token validation |
+| `SqlOSAdminService` | Create orgs, users, memberships, clients, SSO |
+| `SqlOSCryptoService` | Token generation, PKCE, password hashing, JWKS |
+| `SqlOSHomeRealmDiscoveryService` | Route users to password or SSO by email domain |
+| `SqlOSSsoAuthorizationService` | SAML SSO authorization and code exchange |
+| `SqlOSOidcAuthService` | Google, Microsoft, Apple, and custom OIDC |
+| `SqlOSSettingsService` | Session lifetimes and security configuration |
+
+## Presentation modes
+
+SqlOS separates the auth protocol from the login UI:
+
+- **Hosted AuthPage** (default) -- SqlOS renders the sign-in and sign-up pages
+- **Headless Auth** -- SqlOS owns the OAuth protocol while your app renders the UI
+
+Read more in [Headless Auth](/docs/guides/authserver/headless-auth) and [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless).

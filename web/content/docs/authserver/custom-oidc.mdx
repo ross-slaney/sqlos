@@ -1,33 +1,44 @@
 ---
 title: "Custom OIDC"
-description: "Configure discovery-based or manual custom OIDC providers in SqlOS AuthServer."
-order: 5.14
+description: "Connect any OIDC-compliant provider."
+order: 5.6
 section: authserver
 ---
 
-**Dashboard path**: Auth Server → OIDC
+## Discovery-based setup
 
-SqlOS supports both:
+For providers that publish a `.well-known/openid-configuration` endpoint (Okta, Auth0, Keycloak, etc.):
 
-- discovery-based custom OIDC connections
-- manual endpoint configuration
-
-## Setup
-
-1. Create the custom OIDC connection in SqlOS.
-2. If discovery is available, use the discovery URL.
-3. Otherwise provide issuer, authorization endpoint, token endpoint, and JWKS URI manually.
-4. Copy the connection ID from the OIDC connections list.
-5. Register the final callback URI:
-
-```text
-http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "custom",
+    "displayName": "Okta",
+    "clientId": "YOUR_CLIENT_ID",
+    "clientSecret": "YOUR_CLIENT_SECRET",
+    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration"
+  }'
 ```
 
-6. If the provider uses nonstandard claims, configure claim mapping JSON.
+SqlOS fetches the authorization, token, and userinfo endpoints automatically from the discovery document.
 
-## Notes
+## Manual configuration
 
-- Prefer discovery when possible.
-- Use `ClientSecretPost` or `ClientSecretBasic` depending on the provider.
-- Enable the userinfo endpoint only when the ID token alone is not enough.
+For providers without a discovery endpoint:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "custom",
+    "displayName": "Custom Provider",
+    "clientId": "YOUR_CLIENT_ID",
+    "clientSecret": "YOUR_CLIENT_SECRET",
+    "authorizationEndpoint": "https://provider.com/authorize",
+    "tokenEndpoint": "https://provider.com/token",
+    "userinfoEndpoint": "https://provider.com/userinfo"
+  }'
+```
+
+Enable and set the callback URI as with any other provider. See [OIDC Social Login](/docs/guides/authserver/oidc-auth) for the complete auth flow.

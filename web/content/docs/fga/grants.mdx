@@ -1,57 +1,79 @@
 ---
 title: "Grants"
-description: "Assign roles to subjects on resources with downward inheritance."
+description: "Assign roles to subjects on resources."
 order: 4
 section: fga
 ---
 
-**What this guide covers**: Grant model, inheritance, creating and revoking grants.
+A grant links a subject, a role, and a resource. The subject gains all permissions from the role on that resource and every descendant.
 
-**Dashboard path**: Fine-Grained Auth → Grants  
-**URL**: `http://localhost:5062/sqlos/admin/fga/grants`
+## Create a grant
 
----
+**Dashboard**: Fine-Grained Auth > Grants
 
-A grant links a subject, a role, and a resource. Because resources form a tree, a grant on a parent resource gives the subject that role on all descendants.
+![Grants page](/docs/dashboard-grants.png)
 
-## Model
+**SDK**:
 
 ```csharp
-public class SqlOSFgaGrant
+context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
 {
-    public string Id { get; set; }
-    public string SubjectId { get; set; }
-    public string ResourceId { get; set; }
-    public string RoleId { get; set; }
-    public string? Description { get; set; }
-}
+    Id = SqlOSCryptoService.GenerateId("grant"),
+    SubjectId = userId,
+    ResourceId = "org::acme",
+    RoleId = companyAdminRole.Id,
+    Description = "Full access to Acme Corp"
+});
+await context.SaveChangesAsync(ct);
+```
+
+**Admin API**:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/fga/api/grants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subjectId": "usr_...",
+    "roleId": "role_...",
+    "resourceId": "org::acme"
+  }'
 ```
 
 ## Inheritance
 
-Grant on `org::acme` with role `org_member` (which has `CHAIN_VIEW`) means the subject can view all chains under `org::acme`:
+Grants inherit downward through the resource tree:
 
-```text
-org::acme          ← grant: user-1 / org_member
-  ├── chain-1      ← user-1 inherits CHAIN_VIEW
-  ├── chain-2      ← user-1 inherits CHAIN_VIEW
-  └── chain-3      ← user-1 inherits CHAIN_VIEW
+```
+org::acme              ← grant: jane / Company Admin
+  ├── walmart          ← jane inherits CHAIN_VIEW, CHAIN_EDIT
+  │   ├── store-001    ← jane inherits LOCATION_VIEW, LOCATION_EDIT
+  │   └── store-002    ← jane inherits LOCATION_VIEW, LOCATION_EDIT
+  └── target           ← jane inherits CHAIN_VIEW, CHAIN_EDIT
 ```
 
-## Code Example
+Grant at a higher level = broader access. Grant at a lower level = narrower access.
+
+A Store Clerk granted on `store-001` can only see that one store's inventory. A Company Admin granted on `org::acme` sees everything underneath.
+
+## Revoke a grant
+
+**Admin API**:
+
+```bash
+curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{grantId}
+```
+
+## Time-bounded grants
+
+Grants support optional `EffectiveFrom` and `EffectiveTo` dates for temporary access:
 
 ```csharp
-_context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+new SqlOSFgaGrant
 {
-    Id = "grant_user1_acme",
-    SubjectId = "user-1",
-    ResourceId = "org::acme",
-    RoleId = orgMemberRole.Id,
-    Description = "Synced from auth membership."
-});
-await _context.SaveChangesAsync(cancellationToken);
+    SubjectId = contractorId,
+    ResourceId = "store-001",
+    RoleId = storeManagerRole.Id,
+    EffectiveFrom = DateTime.UtcNow,
+    EffectiveTo = DateTime.UtcNow.AddMonths(3)
+}
 ```
-
-## Dashboard
-
-The Grants page lets you inspect and manage all grants. You can filter by subject, resource, or role.

@@ -1,31 +1,19 @@
 ---
 title: "Clients"
-description: "Register client applications with IDs, audiences, and redirect URIs."
+description: "Register OAuth client applications with redirect URIs."
 order: 4.6
 section: authserver
 ---
 
-**What this guide covers**: Client applications, startup seeding, client ID, audience, redirect URIs.
+A client represents an application that authenticates users through SqlOS. Each client has a unique ID, an audience, and a list of allowed redirect URIs for OAuth PKCE flows.
 
-**Dashboard path**: Auth Server → Clients  
-**URL**: `http://localhost:5062/sqlos/admin/auth/clients`
+## Register a client
 
----
+**Dashboard**: Auth Server > Clients
 
-A client represents an application that authenticates users through SqlOS. Each client has a unique client ID and explicit redirect URIs for browser PKCE flows.
+![Clients page](/docs/dashboard-clients.png)
 
-## Fields
-
-| Field             | Required | Description                             |
-| ----------------- | -------- | --------------------------------------- |
-| **Client ID**     | Yes      | Unique identifier (e.g., `example-web`) |
-| **Name**          | Yes      | Display name                            |
-| **Audience**      | No       | Token audience claim                    |
-| **Redirect URIs** | Yes for browser clients | Allowed callback URIs for OAuth flows   |
-
-## Recommended setup
-
-Seed first-party clients in startup so the app boots into a working hosted auth flow without dashboard setup:
+**Startup seeding** (recommended for first-party apps):
 
 ```csharp
 builder.Services.AddSqlOS<AppDbContext>(options =>
@@ -35,10 +23,44 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
         auth.SeedBrowserClient(
             "my-web-app",
             "My Web Application",
-            "http://localhost:3010/auth/callback",
+            "http://localhost:3000/auth/callback",
             "https://app.example.com/auth/callback");
     });
 });
 ```
 
-Dashboard-created clients are still supported. If a client is marked as startup managed in the dashboard, startup code is authoritative and those values are reapplied on restart.
+**Admin API**:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientId": "my-web-app",
+    "name": "My Web Application",
+    "audience": "sqlos",
+    "redirectUris": ["http://localhost:3000/auth/callback"]
+  }'
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `clientId` | Yes | Unique identifier (e.g., `my-web-app`) |
+| `name` | Yes | Display name |
+| `audience` | No | Token audience claim |
+| `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
+
+## Startup-managed vs dashboard-created
+
+Clients seeded in startup code are marked as **startup managed**. Their configuration is reapplied on every restart, so changes made in the dashboard will be overwritten.
+
+Dashboard-created clients are fully editable and persist across restarts.
+
+## Multiple clients
+
+Register separate clients for each frontend. The example stack seeds three:
+
+```csharp
+auth.SeedBrowserClient("example-web", "Example Web", "http://localhost:3010/auth/callback");
+auth.SeedBrowserClient("example-angular", "Example Angular", "http://localhost:4200/auth/callback");
+auth.SeedBrowserClient("example-expo", "Example Expo", "sqlos-expo://auth-callback");
+```

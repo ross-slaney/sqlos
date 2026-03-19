@@ -1,48 +1,69 @@
 ---
 title: "Resource Hierarchy"
-description: "Parent-child resource tree and ancestor-based permission inheritance."
+description: "Model your app's data as a tree for inherited permissions."
 order: 5
 section: fga
 ---
 
-**What this guide covers**: Resource tree structure, parent-child relationships, ancestor-based inheritance.
+Resources form a tree. Each resource has exactly one parent (except root). When checking access, FGA walks from the target resource up to the root, looking for matching grants.
 
----
+## Tree structure
 
-Resources form a tree. Each resource has exactly one parent (except the root). When checking access, FGA walks up the tree from the target resource to the root, looking for grants that include the required permission.
+Model your app's hierarchy as nested resources:
 
-## Tree Structure
-
-```text
+```
 root
-├── org::acme
-│   ├── chain-1
-│   │   ├── location-1
-│   │   └── location-2
-│   └── chain-2
-└── org::globex
-    └── chain-3
+├── org::acme (Organization)
+│   ├── chain-1 (Chain)
+│   │   ├── location-1 (Location)
+│   │   │   ├── item-1 (Inventory)
+│   │   │   └── item-2 (Inventory)
+│   │   └── location-2 (Location)
+│   └── chain-2 (Chain)
+└── org::globex (Organization)
+    └── chain-3 (Chain)
 ```
 
-## Creating Resources
+## Create a resource
 
-Use `CreateResource` to add a resource as a child of an existing parent:
+Use `CreateResource` to add a node to the tree:
 
 ```csharp
 var resourceId = context.CreateResource(
     parentId: "org::acme",
-    name: "Downtown Store",
+    name: "New Chain",
     resourceTypeId: "chain"
 );
 ```
 
-The resource is added to the `SqlOSFgaResource` table with the given parent. It inherits all grants from its ancestors.
+With a custom ID:
 
-## How Inheritance Works
+```csharp
+var resourceId = context.CreateResource(
+    parentId: "root",
+    name: "Acme Corp",
+    resourceTypeId: "organization",
+    id: $"org::{org.Id}"
+);
+```
+
+`CreateResource` adds the resource to the EF Core change tracker. Call `SaveChangesAsync` to persist.
+
+## How inheritance works
 
 When checking `CHAIN_VIEW` on `chain-1`:
 
-1. Check grants on `chain-1` → any grant with a role that includes `CHAIN_VIEW`?
-2. Check grants on `org::acme` (parent) → any matching grant?
-3. Check grants on `root` (grandparent) → any matching grant?
-4. If any ancestor has a matching grant → access allowed
+1. Check grants directly on `chain-1`
+2. Check grants on `org::acme` (parent)
+3. Check grants on `root` (grandparent)
+4. If any ancestor has a grant with a role that includes `CHAIN_VIEW`, access is allowed
+
+This means a single grant at the organization level gives access to everything underneath, without creating per-resource grants.
+
+## Browse in the dashboard
+
+**Path**: Fine-Grained Auth > Resources
+
+![Resource hierarchy](/docs/dashboard-fga-resources.png)
+
+The Resources page shows the full tree with resource types, child counts, and grant counts.

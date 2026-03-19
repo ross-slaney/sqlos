@@ -1,17 +1,13 @@
 ---
-title: "List Filter"
-description: "Query-time authorization filtering with GetAuthorizationFilterAsync."
+title: "List Filtering"
+description: "Filter EF Core queries by authorization at query time."
 order: 9
 section: fga
 ---
 
-**What this guide covers**: `GetAuthorizationFilterAsync` for filtering EF Core queries by authorization.
+`GetAuthorizationFilterAsync` produces an `Expression<Func<T, bool>>` that restricts a query to only the resources the subject can access. This is the primary way to authorize list endpoints.
 
----
-
-Use `GetAuthorizationFilterAsync` to produce an `Expression<Func<T, bool>>` that restricts a query to only the resources the subject can access. This is the primary way to authorize list endpoints.
-
-## Code Example
+## Basic usage
 
 ```csharp
 var filter = await authService
@@ -23,37 +19,66 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-## Method Signature
+The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
 
-```csharp
-Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
-    string subjectId,
-    string permissionKey) where T : IHasResourceId;
-```
+## With pagination and search
 
-## How It Works
-
-1. Find all resources the subject can access with the given permission (walking up the tree)
-2. Produce a SQL expression that joins the entity's `ResourceId` against the accessible resource set
-3. The expression translates to a SQL Server table-valued function call at query time
-
-## With PagedSpec
-
-The `PagedSpec` builder integrates authorization automatically:
+Use `PagedSpec` for built-in pagination, sorting, search, and authorization:
 
 ```csharp
 var spec = PagedSpec.For<Chain>(c => c.Id)
-    .RequirePermission(RetailPermissionKeys.ChainView)
+    .RequirePermission("CHAIN_VIEW")
     .SortByString("name", c => c.Name, isDefault: true)
-    .Search(search, c => c.Name, c => c.Description)
-    .Build(pageSize, cursor, sortBy, sortDir);
+    .Search(searchQuery, c => c.Name, c => c.Description)
+    .Build(pageSize: 20, cursor, sortBy, sortDir);
 
 var result = await executor.ExecuteAsync(
-    context.Chains, spec, subjectId, c => new ChainDto { ... });
+    dbContext.Chains, spec, subjectId,
+    chain => new ChainDto
+    {
+        Id = chain.Id,
+        Name = chain.Name,
+        Description = chain.Description,
+        CreatedAt = chain.CreatedAt
+    });
+
+// result.Items     → authorized, searched, sorted, paged
+// result.NextCursor → cursor for next page
+// result.HasMore   → whether more results exist
 ```
 
-## When to Use
+## Full endpoint example
 
-- **List endpoints** — filter results by what the user can see
-- **Search** — combine with text search and sorting
-- Prefer this over `CheckAccessAsync` for multi-entity queries
+From the retail example app:
+
+```csharp
+app.MapGet("/api/chains", async (
+    ExampleAppDbContext context,
+    ISqlOSFgaAuthService authService,
+    ISpecificationExecutor executor,
+    HttpContext http,
+    string? search, int? pageSize, string? cursor,
+    string? sortBy, string? sortDir) =>
+{
+    var subjectId = http.GetSubjectId();
+
+    var spec = PagedSpec.For<Chain>(c => c.Id)
+        .RequirePermission(RetailPermissionKeys.ChainView)
+        .SortByString("name", c => c.Name, isDefault: true)
+        .Search(search, c => c.Name, c => c.Description)
+        .Build(pageSize ?? 20, cursor, sortBy, sortDir);
+
+    return await executor.ExecuteAsync(
+        context.Chains.Include(c => c.Locations),
+        spec, subjectId,
+        chain => new ChainListDto { /* ... */ });
+});
+```
+
+## When to use
+
+- **List endpoints** -- filter results by what the user can see
+- **Search** -- combine authorization with text search and sorting
+- **Dashboards** -- aggregate only accessible data
+
+For single-resource access, use [AuthorizedDetailAsync](/docs/guides/fga/detail-endpoint). For mutations, use [CheckAccessAsync](/docs/guides/fga/checking-a-permission).

@@ -1,22 +1,16 @@
 ---
-title: "Detail Endpoint"
-description: "Single-entity authorization with AuthorizedDetailAsync."
+title: "Detail Endpoints"
+description: "Fetch and authorize a single entity in one call."
 order: 10
 section: fga
 ---
 
-**What this guide covers**: `AuthorizedDetailAsync` for fetch-and-check-in-one-call detail endpoints.
+`AuthorizedDetailAsync` fetches a single entity, checks authorization, and returns the appropriate HTTP result. It handles 404, 403, and 200 in one call.
 
----
-
-`AuthorizedDetailAsync` is a convenience method that fetches a single entity, checks authorization, and returns the appropriate HTTP result (404, 403, or 200).
-
-## Code Example
-
-From the retail example — getting a single chain:
+## Usage
 
 ```csharp
-group.MapGet("/{id}", async (
+app.MapGet("/api/chains/{id}", async (
     string id,
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
@@ -27,7 +21,7 @@ group.MapGet("/{id}", async (
     return await authService.AuthorizedDetailAsync(
         context.Chains.Include(c => c.Locations),
         c => c.Id == id,
-        subjectId, RetailPermissionKeys.ChainView,
+        subjectId, "CHAIN_VIEW",
         chain => new ChainDetailDto
         {
             Id = chain.Id,
@@ -35,13 +29,20 @@ group.MapGet("/{id}", async (
             Name = chain.Name,
             Description = chain.Description,
             LocationCount = chain.Locations.Count,
-            CreatedAt = chain.CreatedAt,
-            UpdatedAt = chain.UpdatedAt
+            CreatedAt = chain.CreatedAt
         });
 });
 ```
 
-## Method Signature
+## What it returns
+
+| Condition | HTTP result |
+| --- | --- |
+| Entity not found | `404 Not Found` |
+| Subject lacks permission | `403 { error: "Permission denied" }` |
+| Access granted | `200` with mapped DTO |
+
+## Method signature
 
 ```csharp
 Task<IResult> AuthorizedDetailAsync<TEntity, TDto>(
@@ -52,10 +53,16 @@ Task<IResult> AuthorizedDetailAsync<TEntity, TDto>(
     Func<TEntity, TDto> selector) where TEntity : class, IHasResourceId;
 ```
 
-## Return Values
+## When to use
 
-| Condition | HTTP Result |
-|-----------|-------------|
-| Entity not found | `404 Not Found` |
-| Access denied | `403 { error: "Permission denied" }` |
-| Access granted | `200` with mapped DTO |
+Use `AuthorizedDetailAsync` for any `GET /resource/{id}` endpoint. It replaces the common pattern of:
+
+```csharp
+var entity = await query.FirstOrDefaultAsync(e => e.Id == id);
+if (entity == null) return Results.NotFound();
+
+var access = await authService.CheckAccessAsync(subjectId, "CHAIN_VIEW", entity.ResourceId);
+if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+return Results.Ok(MapToDto(entity));
+```

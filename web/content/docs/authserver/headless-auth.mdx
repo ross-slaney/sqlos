@@ -1,67 +1,20 @@
 ---
 title: "Headless Auth"
-description: "Run SqlOS as the authorization server while your app owns the authorize UI."
+description: "Use SqlOS as the authorization server while your app owns the login UI."
 order: 1.7
 section: authserver
 ---
 
-**What this guide covers**: When to use headless mode, how the handoff works, how custom signup fields stay app-owned, and how the SqlOS example demonstrates the pattern end to end.
+Headless mode keeps the authorization server in SqlOS while moving the login UI into your application. SqlOS still owns `/authorize`, `/token`, PKCE, sessions, OIDC, SAML, and code issuance. Your app owns the HTML.
 
----
+## When to use headless
 
-Headless mode keeps the authorization server in SqlOS while moving the authorize UI into your application.
+- The hosted auth page doesn't match your product's design
+- You need app-owned signup fields (referral source, company name, etc.)
+- You want to A/B test login and signup flows
+- You want the OAuth popup to look like your app
 
-Use it when:
-
-- the hosted AuthPage is too generic for your product
-- the OAuth popup should match your real app layout
-- you want experiments, conversion copy, and app-owned signup fields
-- you still want SqlOS to own `/authorize`, `/token`, PKCE, sessions, refresh, OIDC, SAML, and code issuance
-
-If you are still deciding between hosted and headless, read [Hosted vs Headless Auth](/docs/guides/authserver/hosted-vs-headless).
-
-If you already know you want headless mode and just need the implementation checklist, read [Headless Auth How-To](/docs/guides/authserver/headless-auth-how-to).
-
-## Product boundary
-
-Headless mode is not “replace SqlOS auth with your own auth.”
-
-It is:
-
-- **SqlOS owns the protocol**
-- **your app owns the presentation**
-
-That is the key difference from the usual “nice login page plus custom bridge code” pattern.
-
-Your app can own:
-
-- HTML and layout
-- experiments and copy
-- design system integration
-- app-specific signup fields
-
-SqlOS still owns:
-
-- authorization request creation
-- redirect URI validation
-- PKCE validation
-- OIDC and SAML callbacks
-- auth code issuance
-- token exchange
-- refresh and logout
-
-## What the consumer app actually writes
-
-The consumer app usually implements only four things:
-
-1. `BuildUiUrl(...)`
-2. a custom authorize page
-3. a few `fetch` calls to the headless endpoints
-4. an optional `OnHeadlessSignupAsync(...)` hook for app-specific data
-
-That is the simplest way to think about headless mode.
-
-If you want the exact lifecycle and code snippets from the Example app and EasyCOI, read [Headless Auth How-To](/docs/guides/authserver/headless-auth-how-to).
+If you're unsure, start with the [hosted auth page](/docs/guides/authserver/hosted-vs-headless). You can switch to headless later.
 
 ## Configuration
 
@@ -70,153 +23,103 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer(auth =>
     {
-        auth.BasePath = "/oauth";
-        auth.Issuer = "https://app.example.com/oauth";
-
         auth.UseHeadlessAuthPage(headless =>
         {
             headless.BuildUiUrl = ctx =>
                 $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
-
-            headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
-            {
-                var referralSource = ctx.CustomFields["referralSource"]?.GetValue<string>();
-
-                if (string.IsNullOrWhiteSpace(referralSource))
-                {
-                    throw new SqlOSHeadlessValidationException(
-                        "Tell us how you heard about the product.",
-                        new Dictionary<string, string>
-                        {
-                            ["referralSource"] = "Select a referral source to continue."
-                        });
-                }
-
-                // Persist app-owned profile data here.
-                await Task.CompletedTask;
-            };
         });
     });
 });
 ```
 
-## Example project
+When an OAuth client redirects to `/authorize`, SqlOS creates an authorization request and redirects to your `BuildUiUrl`. Your app takes over the UI from there.
 
-The SqlOS example app is now the canonical headless reference. It demonstrates:
+## Headless endpoints
 
-- a full custom authorize shell at `/auth/authorize`
-- a real PKCE browser flow through SqlOS `/authorize`
-- a custom signup field named `referralSource`
-- persistence of that field into example-owned data during `OnHeadlessSignupAsync`
-- a signed-in app card that reads the stored profile back through the normal API
+Your custom UI interacts with SqlOS through these endpoints:
 
-### Backend
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /headless/requests/{requestId}` | Get the current authorization request state |
+| `POST /headless/identify` | Submit email for home realm discovery |
+| `POST /headless/password/login` | Submit email + password |
+| `POST /headless/signup` | Create account with optional custom fields |
+| `POST /headless/organization/select` | Select org for multi-org users |
+| `POST /headless/provider/start` | Start OIDC or SSO flow |
 
-The example API enables headless mode when `SqlOS:AuthMode` is `Headless`.
+## Custom signup fields
 
-```json
+Capture app-specific data during signup with `customFields` and validate it in `OnHeadlessSignupAsync`:
+
+```csharp
+auth.UseHeadlessAuthPage(headless =>
 {
-  "SqlOS": {
-    "AuthMode": "Headless",
-    "HeadlessFrontendUrl": "http://localhost:3000"
-  }
+    headless.BuildUiUrl = ctx =>
+        $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
+
+    headless.OnHeadlessSignupAsync = async (ctx, ct) =>
+    {
+        var referral = ctx.CustomFields["referralSource"]?.GetValue<string>();
+
+        if (string.IsNullOrWhiteSpace(referral))
+        {
+            throw new SqlOSHeadlessValidationException(
+                "Tell us how you heard about the product.",
+                new Dictionary<string, string>
+                {
+                    ["referralSource"] = "Required."
+                });
+        }
+
+        // Persist to your own table
+        await SaveProfileAsync(ctx.UserId, referral);
+    };
+});
+```
+
+## Frontend implementation
+
+The example app ships a complete headless implementation. Key files:
+
+```
+app/auth/authorize/page.tsx          → Custom authorize route
+components/sqlos-headless-auth-panel.tsx → Login/signup/org-selection UI
+lib/sqlos-headless.ts                → Typed client for headless endpoints
+```
+
+**Typical flow** in your custom authorize page:
+
+```typescript
+// 1. Read the authorization request
+const request = await getHeadlessRequest(requestId);
+
+// 2. Show login or signup based on request.view
+if (request.view === "signup") {
+  // Show signup form
 }
+
+// 3. User submits email
+const identified = await headlessIdentify(requestId, email);
+// identified.mode → "password" | "sso" | "signup"
+
+// 4. User submits password
+const result = await headlessPasswordLogin(requestId, email, password);
+
+// 5. If multi-org, select organization
+if (result.requiresOrganizationSelection) {
+  await headlessSelectOrganization(requestId, orgId);
+}
+
+// 6. SqlOS issues the auth code and redirects back to the OAuth client
 ```
 
-Or:
+## What doesn't change
 
-```bash
-SqlOS__AuthMode=Headless dotnet run --project examples/SqlOS.Example.Api
-```
-
-The example’s `OnHeadlessSignupAsync(...)` does real application work:
-
-- validates `referralSource`
-- writes an example-owned profile row keyed to the SqlOS user
-- keeps the flow fully automatic with no dashboard setup steps
-
-### Frontend
-
-The Next.js example ships a real app-owned authorize experience at `/auth/authorize`.
-
-Key files:
-
-- `app/auth/authorize/page.tsx` — app-owned authorize route
-- `components/sqlos-headless-auth-panel.tsx` — custom shell, login, signup, provider, and organization-selection UI
-- `components/example-profile-panel.tsx` — signed-in proof that app-owned signup data was persisted
-- `lib/sqlos-headless.ts` — typed client for the six existing headless endpoints
-
-When no `request` query parameter is present, the route still renders the full custom shell and starts a real PKCE flow from that UI.
-
-### Try it
-
-1. Start the API in headless mode.
-2. Start the example frontend.
-3. Visit `http://localhost:3000`.
-4. Click **Headless authorize UI** or **Start headless signup**.
-5. Complete signup and choose a **Referral source**.
-6. SqlOS issues the code and tokens normally.
-7. After sign-in, visit `/app` and inspect the **Headless custom field demo** card.
-
-That card is the important part: it proves the signup field belongs to the app while the OAuth flow still belongs to SqlOS.
-
-## Flow
-
-1. OAuth client calls `GET /oauth/authorize?...`
-2. SqlOS validates the request and creates an authorization request record
-3. SqlOS redirects to the UI URL from `BuildUiUrl(...)`
-4. Your UI calls the SqlOS headless endpoints to continue the flow
-5. SqlOS authenticates the user and issues the final authorization code
-6. The OAuth client exchanges the code at `POST /oauth/token`
-
-## Headless endpoint surface
-
-These endpoints are unchanged in headless mode:
-
-- `GET /oauth/headless/requests/{requestId}`
-- `POST /oauth/headless/identify`
-- `POST /oauth/headless/password/login`
-- `POST /oauth/headless/signup`
-- `POST /oauth/headless/organization/select`
-- `POST /oauth/headless/provider/start`
-
-The UI treats those endpoints as the state machine for the current authorization request.
-
-## App-owned signup data
-
-SqlOS keeps its core auth tables narrow. App-specific fields belong in `customFields`.
-
-Typical examples:
-
-- referral source
-- campaign variant
-- company profile data
-- invitation code
-
-In the example app, `referralSource` is:
-
-1. captured by the custom UI
-2. sent through `customFields`
-3. validated in `OnHeadlessSignupAsync`
-4. persisted into an example-owned profile table
-5. surfaced after sign-in through the example API
-
-That is the pattern to copy in a real product.
-
-## Emcy and MCP
-
-Headless mode does **not** change the OAuth wire flow for Emcy or any other modern OAuth client.
-
-You still expose:
+Headless mode does not affect the OAuth wire protocol. External clients (including MCP clients) still see:
 
 - `/.well-known/oauth-authorization-server`
 - `/authorize`
 - `/token`
 - `/.well-known/jwks.json`
 
-The only thing that changes is what the user sees in the popup:
-
-- hosted mode: SqlOS AuthPage
-- headless mode: your app-native authorize UI
-
-That is why headless mode is a good fit for product teams that want a polished Emcy/MCP popup without rebuilding OAuth.
+The only difference is what the user sees in the browser during authorization.

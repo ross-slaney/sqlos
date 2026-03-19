@@ -1,55 +1,86 @@
 ---
-title: "Checking a Permission"
-description: "Point-check whether a subject can perform an action on a resource."
+title: "Access Checks"
+description: "Point-check whether a subject can perform an action."
 order: 8
 section: fga
 ---
 
-**What this guide covers**: `CheckAccessAsync` for point authorization checks.
+Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action on this resource?
 
----
-
-Use `CheckAccessAsync` when you need a yes/no answer: can this subject perform this action on this resource?
-
-## Code Example
-
-From the retail example — checking before creating a chain:
+## CheckAccessAsync
 
 ```csharp
 var access = await authService.CheckAccessAsync(
     subjectId,
-    RetailPermissionKeys.ChainEdit,  // "CHAIN_EDIT"
-    "retail_root"                     // resource ID
+    "CHAIN_EDIT",
+    resourceId
 );
 
 if (!access.Allowed)
     return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 ```
 
-## Method Signature
+Use this for:
+
+- **Mutations** -- check before creating, updating, or deleting
+- **Single-resource gates** -- when you already have the resource ID
+
+## HasCapabilityAsync
+
+Check if a subject has a permission anywhere in the tree (effectively a root-level check):
 
 ```csharp
-Task<SqlOSFgaAccessCheckResult> CheckAccessAsync(
-    string subjectId,
-    string permissionKey,
-    string resourceId);
+var canManageChains = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
 ```
 
-## Result
+Use this for:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `Allowed` | `bool` | Whether access is granted |
+- **Global UI toggles** -- show/hide "Create Chain" button
+- **Broad capability gates** -- "can this user create anything at all?"
 
-## How It Works
+## Access Tester (dashboard)
 
-1. Find all grants for the subject
-2. For each grant, check if the grant's role includes the required permission
-3. Walk up the resource hierarchy from `resourceId` to root
-4. If any grant on any ancestor matches → `Allowed = true`
+Test access decisions visually in the dashboard at Fine-Grained Auth > Access Tester.
 
-## When to Use
+![Access Tester](/docs/dashboard-access-tester.png)
 
-- **Mutations** (create, update, delete) — check before writing
-- **Single-resource access** where you already have the resource ID
-- For **list queries**, prefer `GetAuthorizationFilterAsync` instead
+Select a subject, permission, and resource to see whether access is allowed and trace the decision path.
+
+## Full mutation example
+
+From the retail example -- creating a chain with authorization:
+
+```csharp
+app.MapPost("/api/chains", async (
+    CreateChainRequest request,
+    ExampleAppDbContext context,
+    ISqlOSFgaAuthService authService,
+    HttpContext http) =>
+{
+    var subjectId = http.GetSubjectId();
+
+    // 1. Check permission on the parent resource
+    var access = await authService.CheckAccessAsync(
+        subjectId, "CHAIN_EDIT", "retail_root");
+    if (!access.Allowed)
+        return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+
+    // 2. Create FGA resource as child of parent
+    var resourceId = context.CreateResource(
+        "retail_root", request.Name, "chain");
+
+    // 3. Create domain entity with the resource ID
+    var chain = new Chain
+    {
+        ResourceId = resourceId,
+        Name = request.Name,
+        Description = request.Description
+    };
+    context.Chains.Add(chain);
+
+    // 4. Save in one transaction
+    await context.SaveChangesAsync();
+
+    return Results.Created($"/api/chains/{chain.Id}", chain);
+});
+```

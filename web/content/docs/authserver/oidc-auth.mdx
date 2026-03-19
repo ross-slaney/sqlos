@@ -1,50 +1,151 @@
 ---
-title: "OIDC Auth"
-description: "Configure Google, Microsoft, Apple, and custom OIDC login in SqlOS AuthServer."
+title: "OIDC Social Login"
+description: "Configure Google, Microsoft, Apple, and custom OIDC providers."
 order: 5.1
 section: authserver
 ---
 
-**Dashboard path**: Auth Server → OIDC  
-**URL**: `http://localhost:5062/sqlos/admin/auth/oidc`
+SqlOS supports social login via OpenID Connect. Users click a provider button, authenticate with the provider, and are linked or created in SqlOS.
 
-SqlOS AuthServer supports first-party OIDC login for:
+## Supported providers
 
-- Google
-- Microsoft
-- Apple
-- custom OpenID Connect providers
+| Provider | Key | Notes |
+| --- | --- | --- |
+| Google | `google` | Standard OAuth 2.0 |
+| Microsoft | `microsoft` | Entra ID (Azure AD) |
+| Apple | `apple` | Web only, requires Apple Developer account |
+| Custom | any | Any OIDC-compliant provider via discovery or manual config |
 
-The example frontend still talks only to the example backend. The backend uses `SqlOSOidcAuthService` directly.
+## Setup
 
-## Callback Pattern
+### 1. Create the connection
 
-Each OIDC connection gets its own callback URI:
+**Dashboard**: Auth Server > OIDC > Create Connection
 
-```text
+**Admin API**:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "google",
+    "displayName": "Google",
+    "clientId": "your-google-client-id",
+    "clientSecret": "your-google-client-secret"
+  }'
+```
+
+### 2. Configure the callback URI
+
+Each connection gets a unique callback URI:
+
+```
 http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
 ```
 
-Create the connection first, then copy the connection ID from the OIDC connection list and update both:
+Add this URI to your provider's allowed redirect URIs.
 
-- the provider redirect URI
-- the SqlOS allowed callback URI list
+### 3. Enable the connection
 
-## Flow
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+```
 
-1. Frontend loads providers from `GET /api/v1/auth/oidc/providers`
-2. User clicks provider → `POST /api/v1/auth/oidc/start`
-3. Backend runs home realm discovery first
-4. If the domain matches org SSO, backend starts SAML instead
-5. Otherwise backend redirects to the OIDC provider
-6. Provider returns to `GET|POST /api/v1/auth/oidc/callback/{connectionId}`
-7. Backend completes the provider flow through `SqlOSOidcAuthService`
-8. Backend redirects to the frontend with a short-lived handoff token
-9. Frontend completes sign-in with `POST /api/v1/auth/oidc/complete`
+## Auth flow
 
-## Providers
+```
+Frontend                    Backend                     Provider
+   │                          │                            │
+   ├─ GET /oidc/providers ───►│                            │
+   │◄── provider list ────────│                            │
+   │                          │                            │
+   ├─ POST /oidc/start ──────►│                            │
+   │◄── authorizationUrl ─────│                            │
+   │                          │                            │
+   ├──── redirect to provider ────────────────────────────►│
+   │◄── callback with code ────────────────────────────────│
+   │                          │                            │
+   │    GET /oidc/callback ──►│── exchange code ──────────►│
+   │                          │◄── user info ──────────────│
+   │◄── redirect with handoff │                            │
+   │                          │                            │
+   ├─ POST /oidc/complete ───►│                            │
+   │◄── tokens ───────────────│                            │
+```
 
-- [Google OIDC](/docs/guides/authserver/google-oidc)
-- [Microsoft OIDC](/docs/guides/authserver/microsoft-oidc)
-- [Apple OIDC](/docs/guides/authserver/apple-oidc)
-- [Custom OIDC](/docs/guides/authserver/custom-oidc)
+### Backend code (from the example API)
+
+```csharp
+// Start OIDC flow
+app.MapPost("/api/v1/auth/oidc/start", async (
+    OidcStartRequest request,
+    SqlOSOidcAuthService oidcService,
+    SqlOSHomeRealmDiscoveryService discoveryService) =>
+{
+    var discovery = await discoveryService.DiscoverAsync(
+        new SqlOSHomeRealmDiscoveryRequest(request.Email), ct);
+
+    if (discovery.Mode == "sso")
+        return Results.Ok(new { mode = "sso", discovery.SsoConnectionId });
+
+    var result = await oidcService.StartAuthorizationAsync(
+        new SqlOSStartOidcAuthorizationRequest
+        {
+            ConnectionId = request.ConnectionId,
+            RedirectUri = $"{origin}/api/v1/auth/oidc/callback/{request.ConnectionId}",
+            State = state
+        }, ipAddress, ct);
+
+    return Results.Ok(new { authorizationUrl = result.AuthorizationUrl });
+});
+```
+
+### Frontend code (Next.js)
+
+```typescript
+const { providers } = await apiGet("/api/v1/auth/oidc/providers");
+
+// User clicks a provider
+const { authorizationUrl } = await apiPost("/api/v1/auth/oidc/start", {
+  email,
+  connectionId: provider.connectionId,
+});
+
+window.location.href = authorizationUrl;
+```
+
+## Provider-specific setup
+
+### Google
+
+1. Create an OAuth 2.0 Client ID in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Set the callback URI to `http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}`
+3. Create the connection with `providerType: "google"`, your client ID and secret
+
+### Microsoft
+
+1. Register an app in [Azure Portal > App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps)
+2. Add the callback URI under Authentication > Web
+3. Create the connection with `providerType: "microsoft"`, your client ID and secret
+
+### Apple
+
+1. Register in [Apple Developer Portal](https://developer.apple.com/account/resources/identifiers/list/serviceId)
+2. Enable "Sign in with Apple" and configure the callback domain
+3. Create the connection with `providerType: "apple"`, your service ID and key
+
+### Custom OIDC
+
+For any OIDC-compliant provider, use discovery-based or manual configuration:
+
+```bash
+# Discovery-based (auto-fetches endpoints from .well-known)
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -d '{
+    "providerType": "custom",
+    "displayName": "Okta",
+    "clientId": "...",
+    "clientSecret": "...",
+    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration"
+  }'
+```

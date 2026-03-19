@@ -1,52 +1,70 @@
 ---
 title: "Refresh and Logout"
-description: "Rotate refresh tokens and revoke sessions."
+description: "Rotate refresh tokens, switch organizations, and revoke sessions."
 order: 5.1
 section: authserver
 ---
 
-**What this guide covers**: Refresh token rotation, organization switching on refresh, logout, session revocation.
-
----
-
 ## Refresh
 
-Refresh rotates the token: the current refresh token is consumed, a new one is issued, and the session idle timeout is extended.
+Each refresh consumes the current token and issues a new one. The session idle timeout is extended.
 
 ```csharp
 var tokens = await authService.RefreshAsync(
-    new SqlOSRefreshRequest(refreshToken, organizationId: null),
-    cancellationToken);
-
-// tokens.AccessToken       — new JWT
-// tokens.RefreshToken      — new opaque token (old one is consumed)
-// tokens.SessionId         — same session
+    new SqlOSRefreshRequest(refreshToken, organizationId: null), ct);
 ```
 
-### Organization Switching
+**Frontend**:
 
-Pass a different `organizationId` during refresh to switch the token's org scope. The user must be a member of the target organization.
+```typescript
+const tokens = await apiPost("/api/v1/auth/refresh", {
+  refreshToken: storedRefreshToken,
+});
 
-### Replay Detection
+localStorage.setItem("access_token", tokens.accessToken);
+localStorage.setItem("refresh_token", tokens.refreshToken);
+```
 
-If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
+### Organization switching
+
+Switch organizations without re-authenticating by passing a different `organizationId`:
+
+```csharp
+var tokens = await authService.RefreshAsync(
+    new SqlOSRefreshRequest(refreshToken, organizationId: "org_newOrgId"), ct);
+```
+
+### Replay detection
+
+If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft -- if an attacker captures a refresh token and uses it, the legitimate user's next refresh attempt triggers revocation of everything.
 
 ## Logout
 
-Logout revokes the session and all its refresh tokens.
+Revoke a session by refresh token:
 
 ```csharp
-// By refresh token
-await authService.LogoutAsync(refreshToken: "...", sessionId: null, cancellationToken);
-
-// By session ID
-await authService.LogoutAsync(refreshToken: null, sessionId: "ses_...", cancellationToken);
+await authService.LogoutAsync(refreshToken: "rt_...", sessionId: null, ct);
 ```
 
-### Logout All Sessions
+By session ID:
 
 ```csharp
-await authService.LogoutAllAsync(userId, cancellationToken);
+await authService.LogoutAsync(refreshToken: null, sessionId: "ses_...", ct);
 ```
 
-Revokes every active session for the user.
+Revoke all sessions for a user:
+
+```csharp
+await authService.LogoutAllAsync(userId, ct);
+```
+
+**Frontend**:
+
+```typescript
+await apiPost("/api/v1/auth/logout", {
+  refreshToken: storedRefreshToken,
+});
+
+localStorage.removeItem("access_token");
+localStorage.removeItem("refresh_token");
+```

@@ -1,59 +1,51 @@
 ---
-title: "Dashboard Overview"
-description: "SqlOS control plane: home page, navigation, stats, and URLs."
+title: "Dashboard"
+description: "Manage auth and authorization from the embedded admin UI."
 order: 1
 section: authserver
 ---
 
-**What this guide covers**: Dashboard home page, navigation structure, stats cards, and all dashboard URLs.
+The SqlOS dashboard is an embedded admin UI that runs inside your app. It provides a single control plane for both AuthServer and Fine-Grained Authorization.
 
-**URL**: `http://localhost:5062/sqlos/` (when example stack is running)
+## Accessing the dashboard
 
----
+The dashboard mounts at the path you configure:
 
-The SqlOS dashboard is a single control plane for AuthServer and Fine-Grained Authorization. It runs embedded in your app.
+```csharp
+app.UseSqlOSDashboard("/sqlos");
+```
 
-## Dashboard Home
+Then open `http://localhost:5062/sqlos/` (or your app's URL). The dashboard is protected by a password configured in `appsettings.json`.
 
 ![Dashboard home](/docs/dashboard-home.png)
 
-**Auth Server stats**: Organizations, Users, Clients, SSO Connections, Sessions, Audit Events
+## Auth Server pages
 
-**Fine-Grained Auth stats**: Resources, Subjects, Users, Agents, Service Accounts, User Groups, Grants, Roles, Permissions
+| Page | URL | What you can do |
+| --- | --- | --- |
+| Organizations | `/sqlos/admin/auth/organizations` | Create tenants, set primary domains for SSO |
+| Users | `/sqlos/admin/auth/users` | Create users, assign passwords |
+| Memberships | `/sqlos/admin/auth/memberships` | Link users to organizations with roles |
+| Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs |
+| OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |
+| SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO |
+| Security | `/sqlos/admin/auth/security` | Configure session and token lifetimes |
+| Sessions | `/sqlos/admin/auth/sessions` | View and manage active sessions |
+| Audit Events | `/sqlos/admin/auth/audit` | Review authentication events |
 
-## Navigation Structure
+## FGA pages
 
-| Section | Routes |
-|---------|--------|
-| **Dashboard** | Home (`/sqlos/`) |
-| **Auth Server** | Overview, Organizations, Users, Memberships, Clients, OIDC, SSO, Security, Sessions, Audit Events |
-| **Fine-Grained Auth** | Resources, Grants, Roles, Permissions, Users, Agents, Service Accounts, User Groups, Access Tester |
+| Page | URL | What you can do |
+| --- | --- | --- |
+| Resources | `/sqlos/admin/fga/resources` | Browse the resource hierarchy |
+| Grants | `/sqlos/admin/fga/grants` | Manage subject-role-resource assignments |
+| Roles | `/sqlos/admin/fga/roles` | Define roles and link permissions |
+| Permissions | `/sqlos/admin/fga/permissions` | View permission keys by resource type |
+| Subjects | `/sqlos/admin/fga/users` | Manage FGA users, agents, service accounts, groups |
+| Access Tester | `/sqlos/admin/fga/access-tester` | Test access decisions with a detailed trace |
 
-## Dashboard URLs
+## Sessions
 
-| Path | Purpose |
-|------|---------|
-| `/sqlos/` | Home |
-| `/sqlos/admin/auth/overview` | Auth overview |
-| `/sqlos/admin/auth/organizations` | Create/list orgs |
-| `/sqlos/admin/auth/users` | Create/list users |
-| `/sqlos/admin/auth/memberships` | Create/list memberships |
-| `/sqlos/admin/auth/clients` | Create/list clients |
-| `/sqlos/admin/auth/oidc` | OIDC connections |
-| `/sqlos/admin/auth/sso` | SAML drafts, metadata import |
-| `/sqlos/admin/auth/security` | Session lifetimes |
-| `/sqlos/admin/auth/sessions` | Active sessions |
-| `/sqlos/admin/auth/audit` | Audit events |
-| `/sqlos/admin/fga/resources` | Resource hierarchy |
-| `/sqlos/admin/fga/grants` | Subject grants |
-| `/sqlos/admin/fga/access-tester` | Access decision tracer |
+The Sessions page shows all active sessions with their authentication method, client, and expiration times.
 
-## Run the Example
-
-```bash
-cd examples/SqlOS.Example.Web && npm install
-cd /path/to/SqlOS
-dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
-```
-
-Then open `http://localhost:5062/sqlos/`.
+![Active sessions](/docs/dashboard-sessions.png)

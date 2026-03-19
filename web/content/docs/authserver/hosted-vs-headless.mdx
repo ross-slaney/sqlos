@@ -1,131 +1,77 @@
 ---
-title: "Hosted vs Headless Auth"
-description: "Choose between SqlOS hosted AuthPage, headless auth, and rebuilding auth yourself."
+title: "Hosted vs Headless"
+description: "Choose the right auth presentation mode for your app."
 order: 1.75
 section: authserver
 ---
 
-**What this guide covers**: Which SqlOS auth mode to choose, why headless exists, and why “bring your own UI” without a real authorization server usually becomes a maintenance problem.
+SqlOS separates the OAuth protocol from the login UI. You choose how the user experiences authentication.
 
----
+## Hosted AuthPage
 
-Most teams do **not** need headless auth.
+The default. SqlOS renders the sign-in, sign-up, and organization selection pages.
 
-The hosted AuthPage is the right default because it ships quickly and keeps the whole browser auth flow in one place.
+**Choose hosted when:**
 
-But some teams care deeply about:
+- You want the fastest setup
+- The built-in auth UI is good enough
+- You don't need app-owned signup fields
 
-- app-native popup design
-- A/B testing on signup and login
-- app-owned signup fields
-- keeping auth UX inside the same design system as the product
+**What you get:**
 
-That is the point where headless mode becomes the better boundary.
+- Working OAuth 2.0 flow out of the box
+- Branded login page with your app name and logo
+- Password, OIDC, and SAML support
+- No frontend auth code to write
 
-## Option 1: Hosted AuthPage
+**Tradeoff:** Less control over the authorize popup design.
 
-Best when:
+![Hosted sign-in page](/docs/auth-signin-page.png)
 
-- you want the fastest setup
-- you are fine with SqlOS rendering the browser auth UI
-- you want a branded default without building a custom shell
+## Headless Auth
 
-You still get:
+SqlOS owns the OAuth protocol. Your app owns the UI.
 
-- `/authorize`
-- `/token`
-- metadata and JWKS
-- password, OIDC, and SAML support
-- refresh and logout
+**Choose headless when:**
 
-Tradeoff:
+- The auth popup should match your app's design system
+- You want A/B testing on signup and login
+- You need app-owned custom fields (referral source, company profile, etc.)
+- You want the OAuth popup to feel native to your product
 
-- product teams have less control over the actual authorize popup
+**What you get:**
 
-## Option 2: Headless Auth Server
+- Full control over the authorize UI
+- App-owned signup fields via `customFields`
+- Same OAuth protocol underneath (PKCE, redirect validation, code issuance)
+- OIDC and SAML still handled by SqlOS
 
-Best when:
+**Tradeoff:** You write and maintain the authorize page.
 
-- your app should own the popup UI
-- marketing and product want custom layouts and experiments
-- signup needs product-specific fields
-- you still want a real authorization server underneath
+```csharp
+options.UseAuthServer(auth =>
+{
+    auth.UseHeadlessAuthPage(headless =>
+    {
+        headless.BuildUiUrl = ctx =>
+            $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
+    });
+});
+```
 
-With headless mode:
+## Don't rebuild the auth flow
 
-- SqlOS owns the OAuth protocol
-- your app owns the UI
+Some teams try to keep their own login page and "attach OAuth later." This usually turns into:
 
-That means:
+- Custom bridge code for redirect validation
+- App-issued authorization codes
+- Awkward callback branches
+- Auth behavior drifting from the spec
 
-- app-native authorize screens
-- app-owned custom fields
-- real PKCE, redirect validation, code issuance, refresh, and logout
+If you want to own the UI, use headless mode. Don't rebuild the authorization flow itself.
 
-This is the mode that most closely matches what serious product teams actually want.
+## Switching modes
 
-## Option 3: Rebuild the whole flow yourself
+You can switch between hosted and headless at any time. The OAuth protocol, token format, sessions, and refresh behavior are identical in both modes. Only the user-facing login UI changes.
 
-Sometimes teams try to keep their own login page and then “attach OAuth later.”
-
-That usually turns into:
-
-- custom bridge code
-- ad hoc redirect validation
-- app-issued authorization codes
-- awkward callback branches
-- auth behavior drifting away from the actual spec surface
-
-This is usually the worst product boundary.
-
-If the goal is “own the popup UI,” headless auth is almost always better than rebuilding the authorization flow itself.
-
-## The AuthKit-style tradeoff
-
-Hosted auth products are attractive because they give you a working flow quickly.
-
-That is real value.
-
-But they usually force a tradeoff:
-
-- fast hosted page
-- or lots of custom work once the product team wants deeper control
-
-SqlOS keeps the fast hosted path, but headless auth gives you another option:
-
-- keep the standards-facing auth server in SqlOS
-- move only the presentation layer into your app
-
-That is why headless mode exists.
-
-## Recommendation
-
-Pick **Hosted AuthPage** if:
-
-- you want to move fast
-- the default page is good enough
-- you do not need app-owned signup fields yet
-
-Pick **Headless Auth** if:
-
-- the popup is part of your product experience
-- experiments and conversion matter
-- the UI must look like your app
-- you want custom fields without owning the OAuth state machine
-
-Avoid **rebuilding the whole auth flow** unless your team is deliberately choosing to own authorization-server behavior itself.
-
-## See it in the example
-
-The SqlOS example app shows both modes side by side:
-
-- hosted mode for the fast path
-- headless mode for the app-native path
-
-The headless example also persists a custom `referralSource` field after signup, so you can see the product boundary clearly instead of reading about it in the abstract.
-
-Next:
-
-- [Headless Auth](/docs/guides/authserver/headless-auth)
-- [AuthServer Overview](/docs/guides/authserver/overview)
-- [Headless Auth Server Mode: Keep OAuth, Own the UI](/blog/headless-auth-server-mode)
+Read the implementation guide: [Headless Auth](/docs/guides/authserver/headless-auth)

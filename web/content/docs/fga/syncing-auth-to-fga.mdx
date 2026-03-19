@@ -1,51 +1,62 @@
 ---
 title: "Syncing Auth to FGA"
-description: "Sync AuthServer users and memberships into the FGA model."
+description: "Sync AuthServer users and memberships into FGA subjects and grants."
 order: 14
 section: fga
 ---
 
-**What this guide covers**: The pattern for syncing AuthServer users and organization memberships into FGA subjects, resources, and grants.
+When using both AuthServer and FGA, you need to sync authenticated users into the FGA model so they can be authorized. The typical pattern is to sync on login.
 
----
+## The pattern
 
-When a user logs in and selects an organization, you need to ensure they exist as an FGA subject with a grant on the organization resource. The example app does this in `ExampleFgaService.EnsureUserAccessAsync`.
-
-## Code Example
+After login, ensure the user exists as an FGA subject, the organization exists as an FGA resource, and the membership is mapped to a grant:
 
 ```csharp
 public async Task EnsureUserAccessAsync(
-    string userId, string organizationId, CancellationToken cancellationToken)
+    string userId, string organizationId, CancellationToken ct)
 {
     var user = await _context.Set<SqlOSUser>()
-        .FirstAsync(x => x.Id == userId, cancellationToken);
+        .FirstAsync(x => x.Id == userId, ct);
     var organization = await _context.Set<SqlOSOrganization>()
-        .FirstAsync(x => x.Id == organizationId, cancellationToken);
+        .FirstAsync(x => x.Id == organizationId, ct);
     var membership = await _context.Set<SqlOSMembership>()
         .FirstAsync(x => x.UserId == userId
             && x.OrganizationId == organizationId
-            && x.IsActive, cancellationToken);
+            && x.IsActive, ct);
 
-    await EnsureSubjectAsync(user, organizationId, cancellationToken);
-    await EnsureOrganizationResourceAsync(organization, cancellationToken);
-    await EnsureMembershipGrantAsync(userId, organizationId, membership.Role, cancellationToken);
+    await EnsureSubjectAsync(user, organizationId, ct);
+    await EnsureOrganizationResourceAsync(organization, ct);
+    await EnsureMembershipGrantAsync(userId, organizationId, membership.Role, ct);
 }
 ```
 
-## What It Does
+## What each step does
 
-1. **Ensure subject** — creates or updates `SqlOSFgaSubject` and `SqlOSFgaUser` for the auth user
-2. **Ensure organization resource** — creates `SqlOSFgaResource` for the org under `root` if it doesn't exist
-3. **Ensure membership grant** — creates a `SqlOSFgaGrant` linking the subject to a role on the org resource, mapping the auth membership role to an FGA role (`admin`/`owner` → `org_admin`, otherwise → `org_member`)
+**EnsureSubjectAsync** -- creates or updates `SqlOSFgaSubject` and `SqlOSFgaUser` for the authenticated user.
 
-## When to Call
+**EnsureOrganizationResourceAsync** -- creates an `SqlOSFgaResource` for the organization under root (if it doesn't exist).
 
-Call `EnsureUserAccessAsync` after successful login, during token creation. The example app calls it in `ToTokenResponseAsync`:
+**EnsureMembershipGrantAsync** -- creates a grant linking the user to a role on the organization resource, mapping the auth membership role to an FGA role:
+
+| Auth role | FGA role |
+| --- | --- |
+| `admin` or `owner` | `org_admin` (full access) |
+| everything else | `org_member` (read access) |
+
+## When to call
+
+Call `EnsureUserAccessAsync` after successful login, during token creation:
 
 ```csharp
 if (!string.IsNullOrWhiteSpace(tokens.OrganizationId))
 {
     await fgaService.EnsureUserAccessAsync(
-        user.Id, tokens.OrganizationId, cancellationToken);
+        user.Id, tokens.OrganizationId, ct);
 }
 ```
+
+The example app calls this in the token response helper, so every login automatically ensures the user has the right FGA grants based on their auth membership.
+
+## Why sync instead of query auth directly?
+
+FGA subjects and grants are stored in tables optimized for the authorization query (tree walk + table-valued function). By syncing auth data into FGA at login time, authorization checks run entirely in SQL without joining against auth tables at query time.

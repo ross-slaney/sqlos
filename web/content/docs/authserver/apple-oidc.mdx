@@ -1,33 +1,36 @@
 ---
 title: "Apple OIDC"
 description: "Configure Sign in with Apple for SqlOS AuthServer."
-order: 5.13
+order: 5.5
 section: authserver
 ---
 
-**Dashboard path**: Auth Server → OIDC
-
-Apple support is web-only in v1 and requires a public HTTPS callback.
-
 ## Setup
 
-1. Create a Services ID in the Apple Developer portal.
-2. Enable Sign in with Apple.
-3. Create the Apple OIDC connection in SqlOS.
-4. Copy the connection ID from the OIDC connections list.
-5. Register a final HTTPS callback URI using:
+Sign in with Apple requires an Apple Developer account and works on web only.
 
-```text
-https://your-public-host/api/v1/auth/oidc/callback/{connectionId}
+1. In [Apple Developer Portal](https://developer.apple.com/account/resources/identifiers/list/serviceId), register a Services ID
+2. Enable **Sign in with Apple** and configure:
+   - **Domain**: your app domain
+   - **Return URL**: `http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}`
+3. Create a key for Sign in with Apple
+4. Create the OIDC connection in SqlOS:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "apple",
+    "displayName": "Apple",
+    "clientId": "YOUR_APPLE_SERVICES_ID",
+    "clientSecret": "YOUR_APPLE_KEY"
+  }'
 ```
 
-6. Paste these fields into SqlOS:
-   - Services ID / client ID
-   - Team ID
-   - Key ID
-   - private key PEM
+5. Enable the connection:
 
-## Notes
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+```
 
-- Apple uses a backend-generated client secret JWT.
-- Apple may only return the user's name on first consent.
+See [OIDC Social Login](/docs/guides/authserver/oidc-auth) for the complete auth flow.

@@ -5,43 +5,63 @@ order: 3
 section: fga
 ---
 
-**What this guide covers**: Permission model, resource type scoping, permission keys.
+A permission is a capability key scoped to a resource type. Permissions define what actions can be performed on which kinds of resources.
 
-**Dashboard path**: Fine-Grained Auth → Permissions  
-**URL**: `http://localhost:5062/sqlos/admin/fga/permissions`
+## Define permissions in startup
 
----
+```csharp
+options.UseFGA(fga =>
+{
+    fga.SeedResourceType("chain", "Chain");
+    fga.SeedResourceType("location", "Location");
+    fga.SeedResourceType("inventory", "Inventory Item");
 
-A permission is a capability key associated with a resource type. It defines what action can be performed on resources of that type.
+    fga.SeedPermission("CHAIN_VIEW", "View Chain", "chain");
+    fga.SeedPermission("CHAIN_EDIT", "Edit Chain", "chain");
+    fga.SeedPermission("LOCATION_VIEW", "View Location", "location");
+    fga.SeedPermission("LOCATION_EDIT", "Edit Location", "location");
+    fga.SeedPermission("INVENTORY_VIEW", "View Inventory", "inventory");
+    fga.SeedPermission("INVENTORY_EDIT", "Edit Inventory", "inventory");
+});
+```
 
-## Model
+## Naming convention
+
+Use `RESOURCETYPE_ACTION` in uppercase:
+
+| Key | Resource type | Action |
+| --- | --- | --- |
+| `CHAIN_VIEW` | chain | Read access |
+| `CHAIN_EDIT` | chain | Write access |
+| `LOCATION_VIEW` | location | Read access |
+| `INVENTORY_EDIT` | inventory | Write access |
+
+## Usage in code
+
+Permission keys are strings passed to authorization checks:
+
+```csharp
+// List filtering
+var filter = await authService
+    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+// Point check
+var access = await authService
+    .CheckAccessAsync(subjectId, "CHAIN_EDIT", resourceId);
+
+// Capability check
+var canEdit = await authService
+    .HasCapabilityAsync(subjectId, "CHAIN_EDIT");
+```
+
+## Permission model
 
 ```csharp
 public class SqlOSFgaPermission
 {
     public string Id { get; set; }
-    public string Key { get; set; }            // e.g., "CHAIN_VIEW"
-    public string DisplayName { get; set; }
-    public string ResourceTypeId { get; set; } // e.g., "chain"
+    public string Key { get; set; }            // "CHAIN_VIEW"
+    public string DisplayName { get; set; }    // "View Chain"
+    public string ResourceTypeId { get; set; } // "chain"
 }
-```
-
-## Naming Convention
-
-Permission keys are typically `RESOURCETYPE_ACTION` in uppercase:
-
-| Key | Resource Type | Action |
-|-----|---------------|--------|
-| `CHAIN_VIEW` | `chain` | Read access |
-| `CHAIN_EDIT` | `chain` | Write access |
-| `LOCATION_VIEW` | `location` | Read access |
-| `INVENTORY_EDIT` | `inventory` | Write access |
-
-## Usage
-
-Permissions are referenced by key in authorization checks:
-
-```csharp
-var filter = await authService
-    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 ```

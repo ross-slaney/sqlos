@@ -1,38 +1,63 @@
 ---
 title: "Home Realm Discovery"
-description: "Determine login mode by email domain: password or SSO, before OIDC starts."
+description: "Route users to password or SSO by email domain."
 order: 4.8
 section: authserver
 ---
 
-**What this guide covers**: Discover login mode by email, routing to password or SSO before OIDC starts.
+Home realm discovery inspects an email address and returns the appropriate login method. It determines whether a user should log in with password or be redirected to their organization's SSO identity provider.
 
----
+## How it works
 
-Home realm discovery inspects an email address and returns the appropriate login method. It checks whether the email domain matches an organization with SAML SSO enabled or whether the user should use password login. If password is returned, the login screen can still offer configured OIDC providers.
+1. Extract the email domain
+2. Check if any organization has a matching primary domain with an active SSO connection
+3. If yes, return `sso` with the organization and connection details
+4. If no, return `password`
 
-## Response Modes
-
-| Mode | Meaning |
-|------|---------|
-| `password` | User should log in with email + password |
-| `sso` | Email domain matches an org with SAML SSO; redirect to IdP |
-
-## Code Example
+## SDK
 
 ```csharp
 var discovery = await discoveryService.DiscoverAsync(
-    new SqlOSHomeRealmDiscoveryRequest("user@acme.com"),
-    cancellationToken);
+    new SqlOSHomeRealmDiscoveryRequest("user@acme.com"), ct);
 
-// discovery.Mode → "password" | "sso"
-// discovery.OrganizationId / PrimaryDomain → matching SSO org if applicable
+switch (discovery.Mode)
+{
+    case "sso":
+        // Redirect to IdP via SqlOSSsoAuthorizationService
+        break;
+    case "password":
+        // Show password form, optionally show OIDC provider buttons
+        break;
+}
 ```
 
-## How It Works
+## API
 
-1. Normalize the email domain
-2. Check for an organization with a matching primary domain that has an active SSO connection → mode `sso`
-3. Default → mode `password`
+```bash
+curl -X POST http://localhost:5062/api/v1/auth/discover \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@acme.com"}'
+```
 
-The example frontend uses this on the login page to decide which UI to show.
+Response:
+
+```json
+{
+  "mode": "password",
+  "organizations": []
+}
+```
+
+Or for an SSO user:
+
+```json
+{
+  "mode": "sso",
+  "organizationId": "org_...",
+  "ssoConnectionId": "sso_..."
+}
+```
+
+## Usage in the login UI
+
+The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows either a password form or redirects to SSO. If the mode is `password`, the UI can also display configured [OIDC providers](/docs/guides/authserver/oidc-auth).

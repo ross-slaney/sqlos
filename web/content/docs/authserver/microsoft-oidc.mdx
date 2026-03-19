@@ -1,34 +1,37 @@
 ---
 title: "Microsoft OIDC"
 description: "Configure Microsoft Entra OAuth for SqlOS AuthServer."
-order: 5.12
+order: 5.4
 section: authserver
 ---
 
-**Dashboard path**: Auth Server → OIDC
-
 ## Setup
 
-1. Create an app registration in Microsoft Entra.
-2. Create the Microsoft OIDC connection in SqlOS.
-3. Copy the connection ID from the OIDC connections list.
-4. Register this final callback URI in Entra:
+1. Register an app in [Azure Portal > App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps)
+2. Under **Authentication > Web**, add the redirect URI:
 
-```text
+```
 http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
 ```
 
-5. Update the SqlOS allowed callback URI list to the same value.
+3. Under **Certificates & secrets**, create a client secret
+4. Create the OIDC connection in SqlOS:
 
-## SqlOS Fields
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "microsoft",
+    "displayName": "Microsoft",
+    "clientId": "YOUR_AZURE_APP_CLIENT_ID",
+    "clientSecret": "YOUR_AZURE_APP_CLIENT_SECRET"
+  }'
+```
 
-- Provider: `Microsoft`
-- Client ID
-- Client secret
-- Optional tenant override, otherwise `common`
-- Allowed callback URIs
+5. Enable the connection:
 
-## Notes
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+```
 
-- SqlOS accepts `preferred_username` when `email` is not returned.
-- Org SAML still wins when the entered email domain matches an enabled SSO org.
+See [OIDC Social Login](/docs/guides/authserver/oidc-auth) for the complete auth flow.
