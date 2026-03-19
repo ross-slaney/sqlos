@@ -54,7 +54,7 @@ function selectKey(subject: DemoSubject): string {
           <option value="">Switch identity...</option>
         }
         @for (s of subjects(); track selectKey(s)) {
-          <option [value]="selectKey(s)">{{ formatLabel(s) }}</option>
+          <option [value]="selectKey(s)" [selected]="selectKey(s) === selectedKey()">{{ formatLabel(s) }}</option>
         }
       </select>
     </div>
