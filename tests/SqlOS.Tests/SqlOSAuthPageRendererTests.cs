@@ -90,8 +90,10 @@ public sealed class SqlOSAuthPageRendererTests
             PageSubtitle: "Use your work email to access the Example workspace.",
             EnablePasswordSignup: false,
             EnabledCredentialTypes: ["password"],
+            PresentationMode: "default",
             UpdatedAt: DateTime.UtcNow,
-            ManagedByStartupSeed: false);
+            ManagedByStartupSeed: false,
+            HeadlessCapabilityRegistered: false);
 
         var html = SqlOSAuthPageRenderer.RenderPage(CreateModel(
             mode: "login",
@@ -122,8 +124,10 @@ public sealed class SqlOSAuthPageRendererTests
             PageSubtitle: "Test auth page",
             EnablePasswordSignup: false,
             EnabledCredentialTypes: ["password"],
+            PresentationMode: "default",
             UpdatedAt: DateTime.UtcNow,
-            ManagedByStartupSeed: false);
+            ManagedByStartupSeed: false,
+            HeadlessCapabilityRegistered: false);
 
         var loginHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(
             mode: "login",
@@ -162,8 +166,10 @@ public sealed class SqlOSAuthPageRendererTests
                 PageSubtitle: "Test auth page",
                 EnablePasswordSignup: true,
                 EnabledCredentialTypes: ["password"],
+                PresentationMode: "default",
                 UpdatedAt: DateTime.UtcNow,
-                ManagedByStartupSeed: false),
+                ManagedByStartupSeed: false,
+                HeadlessCapabilityRegistered: false),
             "/sqlos/auth",
             requestId,
             email,

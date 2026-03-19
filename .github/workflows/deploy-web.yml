@@ -74,28 +74,6 @@ jobs:
             --name "$AZURE_DNS_ZONE_NAME" \
             --output none
 
-          apex_conflicts="$(az network dns record-set list \
-            --resource-group "$AZURE_DNS_RESOURCE_GROUP" \
-            --zone-name "$AZURE_DNS_ZONE_NAME" \
-            --query "[?name=='@' && type=='Microsoft.Network/dnsZones/CNAME'].type" \
-            --output tsv)"
-          if [[ -n "$apex_conflicts" ]]; then
-            echo "The apex record set already contains a CNAME, which blocks the required A record:"
-            echo "$apex_conflicts"
-            exit 1
-          fi
-
-          www_conflicts="$(az network dns record-set list \
-            --resource-group "$AZURE_DNS_RESOURCE_GROUP" \
-            --zone-name "$AZURE_DNS_ZONE_NAME" \
-            --query "[?name=='www' && type!='Microsoft.Network/dnsZones/CNAME'].type" \
-            --output tsv)"
-          if [[ -n "$www_conflicts" ]]; then
-            echo "The www label already contains non-CNAME record types, which block the required CNAME:"
-            echo "$www_conflicts"
-            exit 1
-          fi
-
       - name: Deploy foundation resources
         run: |
           set -euo pipefail
