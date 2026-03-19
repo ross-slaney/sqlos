@@ -114,6 +114,13 @@ export function SqlOSHeadlessAuthPanel() {
       const url = new URL(result.redirectUrl);
       const code = url.searchParams.get("code");
 
+      // If the redirect is to a custom scheme (e.g. mobile app), don't exchange
+      // the code here — let the native app handle the token exchange itself.
+      if (code && !url.protocol.startsWith("http")) {
+        window.location.href = result.redirectUrl;
+        return;
+      }
+
       if (code) {
         const flow = readSqlOSAuthFlow();
         const tokenRes = await fetch(`${getExampleAuthServerUrl()}/token`, {

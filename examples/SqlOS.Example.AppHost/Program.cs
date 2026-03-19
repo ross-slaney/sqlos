@@ -30,4 +30,9 @@ builder.AddNpmApp("web", "../SqlOS.Example.Web", "dev")
     .WithEnvironment("NEXTAUTH_SECRET", "sqlos-example-local-secret")
     .WaitFor(api);
 
+builder.AddNpmApp("angular-web", "../SqlOS.Example.AngularWeb", "dev")
+    .WithHttpEndpoint(port: 4200, env: "PORT", isProxied: false)
+    .WithEnvironment("NODE_ENV", "development")
+    .WaitFor(api);
+
 builder.Build().Run();

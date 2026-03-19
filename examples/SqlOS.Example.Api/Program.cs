@@ -79,12 +79,23 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
             exampleClientId,
             "Example Web Client",
             exampleCallbackUrl,
-            "https://client.example.local/callback");
+            "https://client.example.local/callback",
+            "sqlos-expo://auth-callback");
+        auth.SeedBrowserClient(
+            "example-angular",
+            "Example Angular Client",
+            "http://localhost:4200/auth/callback");
+        auth.SeedBrowserClient(
+            "example-expo",
+            "Example Expo Client",
+            "sqlos-expo://auth-callback");
 
         auth.UseHeadlessAuthPage(headless =>
         {
             headless.BuildUiUrl = ctx =>
             {
+                var origin = ctx.HttpContext.Items["HeadlessFrontendOrigin"] as string
+                    ?? headlessFrontendUrl;
                 var query = new Dictionary<string, string?>
                 {
                     ["request"] = ctx.RequestId,
@@ -95,7 +106,7 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
                     ["displayName"] = ctx.DisplayName,
                 };
                 return QueryHelpers.AddQueryString(
-                    $"{headlessFrontendUrl.TrimEnd('/')}/auth/authorize", query);
+                    $"{origin.TrimEnd('/')}/auth/authorize", query);
             };
 
             headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
@@ -196,7 +207,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("example-frontend", policy =>
     {
         var origin = builder.Configuration["ExampleFrontend:Origin"] ?? "http://localhost:3000";
-        policy.WithOrigins(origin)
+        policy.WithOrigins(origin, "http://localhost:4200")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -259,6 +270,18 @@ app.UseExampleBearerTokenMiddleware();
 //         options.RefreshInterval = TimeSpan.FromHours(1); // optional: more frequent background JWKS refresh
 //     });
 app.UseSqlOSDashboard("/sqlos");
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/sqlos/auth/authorize")
+        && context.Request.Query.TryGetValue("redirect_uri", out var redirectUri)
+        && Uri.TryCreate(redirectUri.ToString(), UriKind.Absolute, out var uri)
+        && string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Items["HeadlessFrontendOrigin"] = uri.GetLeftPart(UriPartial.Authority);
+    }
+    await next();
+});
 
 app.MapAuthServer("/sqlos/auth");
 app.MapExampleAuthEndpoints();

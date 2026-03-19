@@ -1,0 +1,30 @@
+export const Colors = {
+  bg: "#fafafa",
+  surface: "#ffffff",
+  text: "#0a0a0a",
+  textSecondary: "#737373",
+  textTertiary: "#a3a3a3",
+  border: "#e5e5e5",
+  borderLight: "#f5f5f5",
+  primary: "#6366f1",
+  primaryHover: "#4f46e5",
+  primarySoft: "#eef2ff",
+  primaryMuted: "#c7d2fe",
+  danger: "#ef4444",
+  dangerSoft: "#fef2f2",
+  success: "#10b981",
+  successSoft: "#ecfdf5",
+  warning: "#f59e0b",
+  warningSoft: "#fffbeb",
+  sidebar: "#0c0c0f",
+  sidebarText: "#e5e5e5",
+  sidebarMuted: "#737373",
+};
+
+export const Fonts = {
+  regular: { fontFamily: "System", fontWeight: "400" as const },
+  medium: { fontFamily: "System", fontWeight: "500" as const },
+  semibold: { fontFamily: "System", fontWeight: "600" as const },
+  bold: { fontFamily: "System", fontWeight: "700" as const },
+  extrabold: { fontFamily: "System", fontWeight: "800" as const },
+};
