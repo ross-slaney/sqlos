@@ -42,8 +42,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await auth.signOut();
     setSession(null);
+    await auth.signOut();
   }, []);
 
   return (

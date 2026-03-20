@@ -86,7 +86,7 @@ export default function AuthCallbackScreen() {
     } catch (e: any) {
       await clearPKCE();
       setError(e.message);
-      setTimeout(() => router.replace("/"), 3000);
+      setTimeout(() => router.replace("/splash" as never), 3000);
     }
   }
 
@@ -95,7 +95,10 @@ export default function AuthCallbackScreen() {
       <SafeAreaView style={styles.center}>
         <Text style={styles.errorTitle}>Authentication Error</Text>
         <Text style={styles.errorText}>{error}</Text>
-        <Pressable style={styles.btn} onPress={() => router.replace("/")}>
+        <Pressable
+          style={styles.btn}
+          onPress={() => router.replace("/splash" as never)}
+        >
           <Text style={styles.btnText}>Back to Home</Text>
         </Pressable>
       </SafeAreaView>

@@ -17,7 +17,7 @@ function RootNavigator() {
     if (isAuthenticated && !inAppGroup) {
       router.replace("/(app)");
     } else if (!isAuthenticated && inAppGroup) {
-      router.replace("/");
+      router.replace("/splash" as never);
     }
   }, [isAuthenticated, isLoading, segments]);
 

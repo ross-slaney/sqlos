@@ -80,6 +80,7 @@ export async function buildAuthorizeUrl(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (view === "login") url.searchParams.set("prompt", "login");
   if (view === "signup") url.searchParams.set("view", "signup");
   return url.toString();
 }

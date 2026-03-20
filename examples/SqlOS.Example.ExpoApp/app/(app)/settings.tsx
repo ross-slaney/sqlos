@@ -16,7 +16,7 @@ export default function SettingsScreen() {
         style: "destructive",
         onPress: async () => {
           await logout();
-          // Root layout handles redirect to landing
+          router.replace("/splash" as never);
         },
       },
     ]);

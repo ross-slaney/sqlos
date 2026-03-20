@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { jwtDecode } from "jwt-decode";
 import { API_URL } from "./config";
+import { clearPKCE } from "./sqlos-auth";
 import type { SessionData, DecodedToken } from "./types";
 
 const SESSION_KEY = "sqlos_session";
@@ -35,8 +36,10 @@ export async function setSession(data: SessionData): Promise<void> {
 
 export async function clearSession(): Promise<void> {
   cachedSession = null;
+  refreshPromise = null;
   await SecureStore.deleteItemAsync(SESSION_KEY);
   await SecureStore.deleteItemAsync(OVERRIDE_KEY);
+  await clearPKCE();
 }
 
 export async function isAuthenticated(): Promise<boolean> {
@@ -134,21 +137,6 @@ async function refreshAccessToken(): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  const session = await getSession();
-  if (session) {
-    try {
-      await fetch(`${API_URL}/api/v1/auth/logout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          refreshToken: session.refreshToken ?? null,
-          sessionId: session.sessionId ?? null,
-        }),
-      });
-    } catch {
-      /* ignore */
-    }
-  }
   await clearSession();
 }
 
