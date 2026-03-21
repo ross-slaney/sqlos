@@ -25,6 +25,10 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         providersResponse.EnsureSuccessStatusCode();
         var providersJson = JsonDocument.Parse(await providersResponse.Content.ReadAsStringAsync());
         providersJson.RootElement.EnumerateArray().Any(x => x.GetProperty("providerType").GetString() == "Google").Should().BeTrue();
+        providersJson.RootElement.EnumerateArray()
+            .Single(x => x.GetProperty("providerType").GetString() == "Google")
+            .GetProperty("logoDataUrl").GetString()
+            .Should().StartWith("data:image/svg+xml");
 
         var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
         {

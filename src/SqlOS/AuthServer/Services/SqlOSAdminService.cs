@@ -287,6 +287,7 @@ public sealed class SqlOSAdminService
             Id = connectionId,
             ProviderType = request.ProviderType,
             DisplayName = request.DisplayName,
+            LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(request.LogoDataUrl),
             ClientId = request.ClientId.Trim(),
             ClientSecretEncrypted = string.IsNullOrWhiteSpace(request.ClientSecret) ? null : _cryptoService.ProtectSecret(request.ClientSecret.Trim()),
             AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks),
@@ -347,6 +348,7 @@ public sealed class SqlOSAdminService
             request.AppleKeyId);
 
         connection.DisplayName = request.DisplayName;
+        connection.LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(request.LogoDataUrl);
         connection.ClientId = request.ClientId.Trim();
         connection.AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks);
         connection.UseDiscovery = normalized.UseDiscovery;
@@ -718,6 +720,8 @@ public sealed class SqlOSAdminService
                 x.Id,
                 ProviderType = x.ProviderType.ToString(),
                 x.DisplayName,
+                x.LogoDataUrl,
+                EffectiveLogoDataUrl = SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl),
                 x.ClientId,
                 AllowedCallbackUris = x.AllowedCallbackUrisJson,
                 x.UseDiscovery,
@@ -729,7 +733,7 @@ public sealed class SqlOSAdminService
                 x.JwksUri,
                 x.MicrosoftTenant,
                 Scopes = x.ScopesJson,
-                x.ClaimMappingJson,
+                ClaimMapping = x.ClaimMappingJson,
                 ClientAuthMethod = x.ClientAuthMethod.ToString(),
                 x.UseUserInfo,
                 x.AppleTeamId,

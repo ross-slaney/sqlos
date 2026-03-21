@@ -403,22 +403,31 @@ public static class SqlOSAuthPageRenderer
             .organization-option[data-loading="true"] .organization-copy {
               opacity: 0.55;
             }
+            .provider-badge {
+              width: 32px;
+              height: 32px;
+              border-radius: 10px;
+              border: 1px solid var(--border);
+              background: var(--input);
+              display: grid;
+              place-items: center;
+              overflow: hidden;
+            }
             .provider-badge,
             .provider-loader,
             .organization-loader {
               flex: none;
             }
             .provider-logo {
-              width: 22px;
-              height: 22px;
+              width: 20px;
+              height: 20px;
               display: block;
+              object-fit: contain;
             }
             .provider-generic {
-              width: 22px;
-              height: 22px;
-              border-radius: 6px;
-              border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
-              background: color-mix(in srgb, var(--primary) 12%, var(--panel));
+              width: 100%;
+              height: 100%;
+              background: color-mix(in srgb, var(--primary) 16%, var(--input));
               display: grid;
               place-items: center;
               font-size: 10px;
@@ -429,7 +438,7 @@ public static class SqlOSAuthPageRenderer
             .provider-label {
               font-size: 14px;
               font-weight: 500;
-              line-height: 1.35;
+              line-height: 1.25;
             }
             .footer-prompt,
             .footer-links {
@@ -662,7 +671,7 @@ public static class SqlOSAuthPageRenderer
         var providerName = Html(provider.DisplayName);
         return $$"""
             <a class="provider-link js-loading-link" href="{{Html(provider.Url)}}" data-loading-label="Connecting to {{providerName}}">
-              <span class="provider-badge">{{RenderProviderBadge(provider.DisplayName)}}</span>
+              <span class="provider-badge">{{RenderProviderBadge(provider)}}</span>
               <span class="provider-label">Continue with {{providerName}}</span>
               <span class="loader loader-sm provider-loader" aria-hidden="true"></span>
             </a>
@@ -726,33 +735,14 @@ public static class SqlOSAuthPageRenderer
             """;
     }
 
-    private static string RenderProviderBadge(string displayName)
+    private static string RenderProviderBadge(SqlOSAuthPageProviderLink provider)
     {
-        if (displayName.Contains("google", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(provider.LogoDataUrl))
         {
-            return """
-                <svg class="provider-logo" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.22 1.26-.93 2.32-1.95 3.03l3.15 2.44c1.84-1.69 2.9-4.18 2.9-7.15 0-.66-.06-1.3-.18-1.92H12z" />
-                  <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.61-2.44l-3.15-2.44c-.87.59-1.99.94-3.46.94-2.66 0-4.92-1.79-5.73-4.19l-3.25 2.5C4.66 19.78 8.06 22 12 22z" />
-                  <path fill="#FBBC05" d="M6.27 13.87c-.21-.59-.33-1.23-.33-1.87s.12-1.28.33-1.87l-3.25-2.5C2.37 8.93 2 10.43 2 12s.37 3.07 1.02 4.37l3.25-2.5z" />
-                  <path fill="#4285F4" d="M12 5.94c1.47 0 2.79.51 3.83 1.5l2.87-2.87C16.95 2.94 14.69 2 12 2 8.06 2 4.66 4.22 3.02 7.63l3.25 2.5c.81-2.4 3.07-4.19 5.73-4.19z" />
-                </svg>
-                """;
+            return $"<img class=\"provider-logo\" src=\"{Html(provider.LogoDataUrl)}\" alt=\"\" aria-hidden=\"true\" />";
         }
 
-        if (displayName.Contains("microsoft", StringComparison.OrdinalIgnoreCase))
-        {
-            return """
-                <svg class="provider-logo" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="2" y="2" width="9" height="9" fill="#F25022" />
-                  <rect x="13" y="2" width="9" height="9" fill="#7FBA00" />
-                  <rect x="2" y="13" width="9" height="9" fill="#00A4EF" />
-                  <rect x="13" y="13" width="9" height="9" fill="#FFB900" />
-                </svg>
-                """;
-        }
-
-        var monogram = GetMonogram(displayName);
+        var monogram = GetMonogram(provider.DisplayName);
         return $"<span class=\"provider-generic\">{Html(monogram)}</span>";
     }
 
@@ -926,4 +916,4 @@ public sealed record SqlOSAuthPageViewModel(
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
     IReadOnlyList<SqlOSAuthPageProviderLink> Providers);
 
-public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url);
+public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

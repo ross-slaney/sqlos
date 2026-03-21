@@ -462,6 +462,63 @@
         return "Custom";
     }
 
+    function getMonogram(value) {
+        const words = String(value || "")
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+
+        if (words.length === 0) {
+            return "?";
+        }
+
+        return words
+            .slice(0, 2)
+            .map(word => word.charAt(0).toUpperCase())
+            .join("");
+    }
+
+    function renderOidcProviderLogo(logoDataUrl, displayName, className = "oidc-provider-logo") {
+        const baseClass = esc(className);
+        if (logoDataUrl) {
+            return `
+                <span class="${baseClass}" aria-hidden="true">
+                    <img src="${esc(logoDataUrl)}" alt="">
+                </span>
+            `;
+        }
+
+        return `
+            <span class="${baseClass} oidc-provider-logo--fallback" aria-hidden="true">
+                ${esc(getMonogram(displayName))}
+            </span>
+        `;
+    }
+
+    function bindDataUrlFileInputs(root = document) {
+        root.querySelectorAll("input[type=\"file\"][data-dataurl-target]").forEach(input => {
+            if (input.dataset.logoBound === "true") {
+                return;
+            }
+
+            input.dataset.logoBound = "true";
+            input.addEventListener("change", () => {
+                const file = input.files?.[0];
+                const targetName = input.getAttribute("data-dataurl-target");
+                const form = input.form;
+                if (!file || !targetName || !form || !form.elements[targetName]) {
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = () => {
+                    form.elements[targetName].value = String(reader.result || "");
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+    }
+
     function renderOidcProviderGuide(providerType, callbackTemplate) {
         const normalized = normalizeOidcProviderType(providerType);
         const callbackUri = callbackTemplate || `${window.location.origin}/api/v1/auth/oidc/callback`;
@@ -547,7 +604,8 @@
             useUserInfo: form.get("useUserInfo") === "on",
             appleTeamId: form.get("appleTeamId") || null,
             appleKeyId: form.get("appleKeyId") || null,
-            applePrivateKeyPem: form.get("applePrivateKeyPem") || null
+            applePrivateKeyPem: form.get("applePrivateKeyPem") || null,
+            logoDataUrl: form.get("logoDataUrl") || null
         };
     }
 
@@ -1594,6 +1652,8 @@
                                 <option value="Custom">Custom</option>
                             </select>
                             <input name="displayName" placeholder="Display name" required>
+                            <label>Logo upload<input type="file" accept="image/*,.svg" data-dataurl-target="logoDataUrl"></label>
+                            <textarea name="logoDataUrl" placeholder="Optional custom logo data URL. Leave blank to use the built-in provider logo when available."></textarea>
                             <input name="clientId" placeholder="Provider client ID / service ID" required>
                             <input name="clientSecret" type="password" placeholder="Client secret (not used for Apple)">
                             <label class="checkbox-line"><input name="useDiscovery" type="checkbox" checked> Use discovery</label>
@@ -1630,10 +1690,26 @@
                     ${renderList(
                         oidcConnections,
                         item => `
-                            <strong>${esc(item.displayName)}</strong>
+                            <div class="list-item-header">
+                                <div class="oidc-provider-summary">
+                                    ${renderOidcProviderLogo(item.effectiveLogoDataUrl || item.logoDataUrl, item.displayName)}
+                                    <div>
+                                        <strong>${esc(item.displayName)}</strong>
+                                        <div class="oidc-provider-subtitle">${esc(item.providerType)} social login</div>
+                                    </div>
+                                </div>
+                            </div>
                             ${renderMetadataRows([
                                 { label: "Provider", value: item.providerType },
                                 { label: "Connection ID", value: item.id },
+                                {
+                                    label: "Effective logo",
+                                    html: renderOidcProviderLogo(item.effectiveLogoDataUrl || item.logoDataUrl, item.displayName, "oidc-provider-logo oidc-provider-logo--meta")
+                                },
+                                {
+                                    label: "Logo source",
+                                    value: item.logoDataUrl ? "Custom upload" : item.effectiveLogoDataUrl ? "Built-in provider logo" : "Initials fallback"
+                                },
                                 { label: "Client ID", value: item.clientId },
                                 { label: "Discovery", value: item.useDiscovery ? "Enabled" : "Manual" },
                                 { label: "Discovery URL", value: item.discoveryUrl },
@@ -1666,6 +1742,8 @@
                             ])}
                             <form id="edit-oidc-${esc(item.id)}" class="nested-form">
                                 <input name="displayName" value="${esc(item.displayName)}" required>
+                                <label>Logo upload<input type="file" accept="image/*,.svg" data-dataurl-target="logoDataUrl"></label>
+                                <textarea name="logoDataUrl" placeholder="Optional custom logo data URL">${esc(item.logoDataUrl || "")}</textarea>
                                 <input name="clientId" value="${esc(item.clientId)}" required>
                                 <input name="clientSecret" type="password" placeholder="Leave blank to keep the current secret">
                                 <label class="checkbox-line"><input name="useDiscovery" type="checkbox" ${item.useDiscovery ? "checked" : ""}> Use discovery</label>
@@ -1714,6 +1792,7 @@
         };
         updateGuide();
         guideProviderSelect?.addEventListener("change", updateGuide);
+        bindDataUrlFileInputs(content);
 
         bindForm("create-oidc-connection-form", async form => {
             await fetchJson(`${authApiBasePath}/oidc-connections`, {

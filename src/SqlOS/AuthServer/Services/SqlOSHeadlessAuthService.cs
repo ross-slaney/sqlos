@@ -396,7 +396,8 @@ public sealed class SqlOSHeadlessAuthService
             .Select(provider => new SqlOSHeadlessProviderDto(
                 provider.ConnectionId,
                 provider.ProviderType,
-                provider.DisplayName))
+                provider.DisplayName,
+                provider.LogoDataUrl))
             .ToArray();
 
         return new SqlOSHeadlessViewModel(

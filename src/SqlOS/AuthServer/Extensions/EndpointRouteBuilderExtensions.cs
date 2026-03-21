@@ -1037,7 +1037,8 @@ public static class EndpointRouteBuilderExtensions
                 request.UseUserInfo,
                 request.AppleTeamId,
                 request.AppleKeyId,
-                request.ApplePrivateKeyPem), cancellationToken);
+                request.ApplePrivateKeyPem,
+                request.LogoDataUrl), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 
@@ -1072,7 +1073,8 @@ public static class EndpointRouteBuilderExtensions
                 request.UseUserInfo,
                 request.AppleTeamId,
                 request.AppleKeyId,
-                request.ApplePrivateKeyPem), cancellationToken);
+                request.ApplePrivateKeyPem,
+                request.LogoDataUrl), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 
@@ -1347,7 +1349,8 @@ public static class EndpointRouteBuilderExtensions
                 .Select(provider => new SqlOSAuthPageProviderLink(
                     provider.ConnectionId,
                     provider.DisplayName,
-                    string.Format(providerBasePath, provider.ConnectionId)))
+                    string.Format(providerBasePath, provider.ConnectionId),
+                    provider.LogoDataUrl))
                 .ToArray();
 
         return new SqlOSAuthPageViewModel(
@@ -1390,6 +1393,8 @@ public static class EndpointRouteBuilderExtensions
         connection.Id,
         ProviderType = connection.ProviderType.ToString(),
         connection.DisplayName,
+        connection.LogoDataUrl,
+        EffectiveLogoDataUrl = SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(connection.ProviderType, connection.LogoDataUrl),
         connection.ClientId,
         AllowedCallbackUris = connection.AllowedCallbackUrisJson,
         connection.UseDiscovery,
@@ -1431,7 +1436,8 @@ public static class EndpointRouteBuilderExtensions
         bool? UseUserInfo,
         string? AppleTeamId,
         string? AppleKeyId,
-        string? ApplePrivateKeyPem);
+        string? ApplePrivateKeyPem,
+        string? LogoDataUrl);
 
     private sealed record UpdateOidcConnectionRequest(
         string DisplayName,
@@ -1452,5 +1458,6 @@ public static class EndpointRouteBuilderExtensions
         bool? UseUserInfo,
         string? AppleTeamId,
         string? AppleKeyId,
-        string? ApplePrivateKeyPem);
+        string? ApplePrivateKeyPem,
+        string? LogoDataUrl);
 }

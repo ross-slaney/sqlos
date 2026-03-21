@@ -14,6 +14,7 @@ import {
   headlessStartProvider,
   type HeadlessViewModel,
   type HeadlessActionResult,
+  type HeadlessProvider,
 } from "@/lib/sqlos-headless";
 import {
   getExampleAuthServerUrl,
@@ -50,6 +51,20 @@ const referralOptions: ReferralOption[] = [
 function buildDisplayName(firstName: string, lastName: string, fallbackEmail: string) {
   const combined = `${firstName} ${lastName}`.trim();
   return combined || fallbackEmail.trim() || "Example User";
+}
+
+function getProviderMonogram(displayName: string) {
+  const parts = displayName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (parts.length === 0) {
+    return "?";
+  }
+
+  return parts.map((part) => part.charAt(0).toUpperCase()).join("");
 }
 
 const IMAGE_LOGIN = "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format";
@@ -384,7 +399,8 @@ export function SqlOSHeadlessAuthPanel() {
                   <div className="ha-divider"><span>or</span></div>
                   {(viewModel?.providers ?? []).map((provider) => (
                     <button key={provider.connectionId} type="button" className="ha-provider-btn" disabled={loading} onClick={() => void onProviderStart(provider.connectionId)}>
-                      Continue with {provider.displayName}
+                      <ProviderBadge provider={provider} />
+                      <span className="ha-provider-btn-label">Continue with {provider.displayName}</span>
                     </button>
                   ))}
                 </div>
@@ -398,6 +414,22 @@ export function SqlOSHeadlessAuthPanel() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ProviderBadge({ provider }: { provider: HeadlessProvider }) {
+  if (provider.logoDataUrl) {
+    return (
+      <span className="ha-provider-logo-badge" aria-hidden="true">
+        <img src={provider.logoDataUrl} alt="" />
+      </span>
+    );
+  }
+
+  return (
+    <span className="ha-provider-logo-badge ha-provider-logo-badge--fallback" aria-hidden="true">
+      {getProviderMonogram(provider.displayName)}
+    </span>
   );
 }
 
