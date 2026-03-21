@@ -21,6 +21,20 @@ function buildDisplayName(firstName: string, lastName: string, fallbackEmail: st
   return combined || fallbackEmail.trim() || 'Example User';
 }
 
+function getProviderMonogram(displayName: string) {
+  const parts = displayName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (parts.length === 0) {
+    return '?';
+  }
+
+  return parts.map((part) => part.charAt(0).toUpperCase()).join('');
+}
+
 const IMAGE_LOGIN = 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1200&q=80&auto=format';
 const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?w=1200&q=80&auto=format';
 
@@ -212,7 +226,16 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 <div class="ha-divider"><span>or</span></div>
                 @for (provider of viewModel()?.providers ?? []; track provider.connectionId) {
                   <button type="button" class="ha-provider-btn" [disabled]="loading()" (click)="onProviderStart(provider.connectionId)">
-                    Continue with {{ provider.displayName }}
+                    @if (provider.logoDataUrl) {
+                      <span class="ha-provider-logo-badge" aria-hidden="true">
+                        <img [src]="provider.logoDataUrl" alt="">
+                      </span>
+                    } @else {
+                      <span class="ha-provider-logo-badge ha-provider-logo-badge--fallback" aria-hidden="true">
+                        {{ providerMonogram(provider.displayName) }}
+                      </span>
+                    }
+                    <span class="ha-provider-btn-label">Continue with {{ provider.displayName }}</span>
                   </button>
                 }
               </div>
@@ -283,6 +306,10 @@ export class AuthAuthorizeComponent implements OnInit {
     const v = this.view();
     return (v === 'login' || v === 'identify' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
   };
+
+  providerMonogram(displayName: string): string {
+    return getProviderMonogram(displayName);
+  }
 
   async ngOnInit() {
     const params = this.route.snapshot.queryParamMap;

@@ -139,7 +139,8 @@ public sealed record SqlOSCreateOidcConnectionRequest(
     bool? UseUserInfo,
     string? AppleTeamId = null,
     string? AppleKeyId = null,
-    string? ApplePrivateKeyPem = null);
+    string? ApplePrivateKeyPem = null,
+    string? LogoDataUrl = null);
 
 public sealed record SqlOSUpdateOidcConnectionRequest(
     string DisplayName,
@@ -160,7 +161,8 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     bool? UseUserInfo,
     string? AppleTeamId = null,
     string? AppleKeyId = null,
-    string? ApplePrivateKeyPem = null);
+    string? ApplePrivateKeyPem = null,
+    string? LogoDataUrl = null);
 
 public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
 
@@ -170,7 +172,8 @@ public sealed record SqlOSOidcProviderSummary(
     string ConnectionId,
     string ProviderType,
     string DisplayName,
-    bool IsEnabled);
+    bool IsEnabled,
+    string? LogoDataUrl = null);
 
 public sealed record SqlOSOidcAuthorizationUrlRequest(
     string ConnectionId,

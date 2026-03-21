@@ -5,7 +5,8 @@ namespace SqlOS.AuthServer.Contracts;
 public sealed record SqlOSHeadlessProviderDto(
     string ConnectionId,
     string ProviderType,
-    string DisplayName);
+    string DisplayName,
+    string? LogoDataUrl = null);
 
 public sealed record SqlOSHeadlessViewModel(
     string View,

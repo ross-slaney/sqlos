@@ -98,6 +98,7 @@ public sealed class SqlOSOidcConnection
     public string Id { get; set; } = string.Empty;
     public SqlOSOidcProviderType ProviderType { get; set; }
     public string DisplayName { get; set; } = string.Empty;
+    public string? LogoDataUrl { get; set; }
     public string ClientId { get; set; } = string.Empty;
     public string? ClientSecretEncrypted { get; set; }
     public string AllowedCallbackUrisJson { get; set; } = "[]";

@@ -376,15 +376,19 @@ public sealed class SqlOSAuthorizationServerService
 
     public async Task<IReadOnlyList<SqlOSOidcProviderSummary>> ListEnabledOidcProvidersAsync(CancellationToken cancellationToken = default)
     {
-        return await _context.Set<SqlOSOidcConnection>()
+        var connections = await _context.Set<SqlOSOidcConnection>()
             .Where(x => x.IsEnabled)
             .OrderBy(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+
+        return connections
             .Select(x => new SqlOSOidcProviderSummary(
                 x.Id,
                 x.ProviderType.ToString(),
                 x.DisplayName,
-                x.IsEnabled))
-            .ToListAsync(cancellationToken);
+                x.IsEnabled,
+                SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl)))
+            .ToList();
     }
 
     public async Task<SqlOSAuthPageSettingsDto> GetAuthPageSettingsAsync(CancellationToken cancellationToken = default)

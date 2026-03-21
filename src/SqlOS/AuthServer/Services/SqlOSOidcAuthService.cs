@@ -51,7 +51,8 @@ public sealed class SqlOSOidcAuthService
                 x.Id,
                 x.ProviderType.ToString(),
                 x.DisplayName,
-                x.IsEnabled))
+                x.IsEnabled,
+                SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl)))
             .ToList();
     }
 

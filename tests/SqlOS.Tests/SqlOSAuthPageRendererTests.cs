@@ -144,6 +144,28 @@ public sealed class SqlOSAuthPageRendererTests
         passwordHtml.Should().NotContain("Get started");
     }
 
+    [TestMethod]
+    public void RenderPage_WhenProviderLogoIsAvailable_RendersProviderImage()
+    {
+        var model = CreateModel(
+            mode: "login",
+            requestId: "req_provider_logo",
+            email: "alice@example.com",
+            providers: new[]
+            {
+                new SqlOSAuthPageProviderLink(
+                    "oidc_microsoft",
+                    "Microsoft",
+                    "/sqlos/auth/login/oidc/oidc_microsoft?request=req_provider_logo&email=alice%40example.com",
+                    "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3C%2Fsvg%3E")
+            });
+
+        var html = SqlOSAuthPageRenderer.RenderPage(model);
+
+        html.Should().Contain("class=\"provider-logo\"");
+        html.Should().Contain("src=\"data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3C%2Fsvg%3E\"");
+    }
+
     private static SqlOSAuthPageViewModel CreateModel(
         string mode,
         string? requestId = null,

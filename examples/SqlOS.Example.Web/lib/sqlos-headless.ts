@@ -24,6 +24,7 @@ export type HeadlessProvider = {
   connectionId: string;
   providerType: string;
   displayName: string;
+  logoDataUrl?: string | null;
 };
 
 export type HeadlessOrganizationOption = {

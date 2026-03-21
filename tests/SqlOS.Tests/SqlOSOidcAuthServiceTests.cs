@@ -279,6 +279,67 @@ public sealed class SqlOSOidcAuthServiceTests
         result.OrganizationId.Should().BeNull();
     }
 
+    [TestMethod]
+    public async Task ListEnabledProviders_UsesBuiltInAndCustomLogoDataUrls()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+
+        await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Microsoft,
+            "Microsoft",
+            "microsoft-client",
+            "microsoft-secret",
+            ["https://app.example.local/callback/microsoft"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "common",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+        var customConnection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Custom,
+            "Acme Identity",
+            "custom-client",
+            "custom-secret",
+            ["https://app.example.local/callback/custom"],
+            false,
+            null,
+            "https://oidc.example.local",
+            "https://oidc.example.local/authorize",
+            "https://oidc.example.local/token",
+            "https://oidc.example.local/userinfo",
+            "https://oidc.example.local/jwks",
+            null,
+            ["openid", "profile", "email"],
+            null,
+            SqlOSOidcClientAuthMethod.ClientSecretPost,
+            true,
+            null,
+            null,
+            null,
+            "data:image/png;base64,custom-logo"));
+
+        var providers = await oidc.ListEnabledProvidersAsync();
+
+        providers.Should().Contain(x =>
+            x.ProviderType == "Microsoft" &&
+            !string.IsNullOrWhiteSpace(x.LogoDataUrl) &&
+            x.LogoDataUrl.StartsWith("data:image/svg+xml", StringComparison.Ordinal));
+        providers.Should().Contain(x =>
+            x.ConnectionId == customConnection.Id &&
+            x.LogoDataUrl == "data:image/png;base64,custom-logo");
+    }
+
     private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(TestSqlOSInMemoryDbContext context)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());

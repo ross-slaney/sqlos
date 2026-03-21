@@ -23,6 +23,7 @@ public sealed class OidcAuthIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        const string customLogo = "data:image/svg+xml;charset=utf-8,%3Csvg%20viewBox%3D%220%200%2024%2024%22%3E%3C%2Fsvg%3E";
 
         var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Google,
@@ -43,7 +44,10 @@ public sealed class OidcAuthIntegrationTests
             null,
             null,
             null,
-            null));
+            null,
+            null,
+            customLogo));
+        connection.LogoDataUrl.Should().Be(customLogo);
 
         var updated = await admin.UpdateOidcConnectionAsync(connection.Id, new SqlOSUpdateOidcConnectionRequest(
             "Google Login",
@@ -63,10 +67,12 @@ public sealed class OidcAuthIntegrationTests
             null,
             null,
             null,
+            null,
             null));
 
         updated.DisplayName.Should().Be("Google Login");
         updated.ClientId.Should().Be("google-client-updated");
+        updated.LogoDataUrl.Should().BeNull();
 
         var disabled = await admin.SetOidcConnectionEnabledAsync(connection.Id, false);
         disabled.IsEnabled.Should().BeFalse();

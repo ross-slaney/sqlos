@@ -118,6 +118,7 @@ export interface HeadlessProvider {
   connectionId: string;
   providerType: string;
   displayName: string;
+  logoDataUrl?: string | null;
 }
 
 export interface HeadlessOrganizationOption {

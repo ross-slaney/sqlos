@@ -353,6 +353,57 @@ nav a.active {
     color: var(--zinc-500);
 }
 
+.oidc-provider-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.oidc-provider-subtitle {
+    font-size: 12px;
+    color: var(--zinc-500);
+}
+
+.oidc-provider-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid var(--zinc-200);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex: none;
+}
+
+.oidc-provider-logo img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    display: block;
+}
+
+.oidc-provider-logo--fallback {
+    background: var(--zinc-900);
+    border-color: var(--zinc-900);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+}
+
+.oidc-provider-logo--meta {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+}
+
+.oidc-provider-logo--meta img {
+    width: 20px;
+    height: 20px;
+}
+
 .callout {
     display: grid;
     gap: 8px;
