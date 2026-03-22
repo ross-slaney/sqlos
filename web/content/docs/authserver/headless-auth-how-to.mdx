@@ -5,58 +5,56 @@ order: 1.76
 section: authserver
 ---
 
-This is the implementation guide for [Headless Auth](/docs/guides/authserver/headless-auth). It covers the exact lifecycle and code your app needs.
+Step-by-step companion to [Headless Auth](/docs/guides/authserver/headless-auth).
 
 ## What you implement
 
-Your app provides four things:
+You build:
 
-1. a `BuildUiUrl(...)` function so SqlOS knows where your custom page lives
-2. a custom authorize page
-3. a few `fetch` calls to the SqlOS headless endpoints
-4. an optional `OnHeadlessSignupAsync(...)` hook for app-specific signup data
+1. `BuildUiUrl(...)` — where your custom page lives
+2. That authorize page (your UI)
+3. `fetch` calls to SqlOS headless APIs
+4. Optional `OnHeadlessSignupAsync` for extra signup fields
 
-SqlOS still provides:
+SqlOS still does:
 
-- `/authorize`
-- `/token`
+- `/authorize`, `/token`
 - PKCE and `state`
-- auth request persistence
-- home realm discovery
-- SAML and OIDC redirects
-- callback handling
-- authorization code issuance
-- refresh/logout/session behavior
+- Saved auth requests
+- Home realm discovery
+- SAML / OIDC redirects and callbacks
+- Auth codes
+- Refresh, logout, sessions
 
-That is why headless mode works without a React SDK.
+No special React SDK required.
 
 ## The lifecycle
 
-This is the full lifecycle your app participates in.
+End-to-end:
 
-1. Your page starts a normal OAuth authorization request.
-2. SqlOS validates it and creates an authorization request record.
-3. SqlOS redirects the browser to your custom UI route.
-4. Your page loads the request state from `/headless/requests/{id}`.
-5. Your page posts user actions back to SqlOS:
-   - identify email
+1. Your app starts a normal OAuth authorize request.
+2. SqlOS validates it and stores an auth request.
+3. SqlOS redirects to your UI route.
+4. Your page loads state from `/headless/requests/{id}`.
+5. Your page posts actions to SqlOS:
+   - identify
    - password login
    - signup
-   - start provider login
-   - select organization
-6. SqlOS either:
-   - returns the next view model, or
-   - returns a redirect to SAML/OIDC, or
-   - finishes the flow and redirects to the OAuth client callback with a real code
+   - start provider
+   - pick org
+6. SqlOS responds with:
+   - another view model, or
+   - redirect to SAML/OIDC, or
+   - final redirect to the client with a code
 
-So the model is:
+Model:
 
-- **your page is the UI**
-- **SqlOS is the state machine**
+- **Your page** = UI
+- **SqlOS** = state machine
 
 ## Step 1: Tell SqlOS where your UI lives
 
-This is the most important part. In the Example app, the backend enables headless mode in [Program.cs](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Api/Program.cs#L86):
+Set `BuildUiUrl`. Example API: [Program.cs](/Users/employment/Dev/sqlos/examples/SqlOS.Example.Api/Program.cs#L86):
 
 ```csharp
 auth.UseHeadlessAuthPage(headless =>
@@ -80,13 +78,13 @@ auth.UseHeadlessAuthPage(headless =>
 });
 ```
 
-That means:
+Flow:
 
-- SqlOS still receives the real `GET /authorize`
-- but when UI is needed, SqlOS redirects to your app page
-- your page gets enough context to resume the flow
+- Browser still hits SqlOS `GET /authorize`.
+- SqlOS redirects to your page when it needs UI.
+- Query params carry enough state to continue.
 
-EasyCOI does the same thing, just with more app context in [Program.cs](/Users/employment/Dev/easycoi/api/Program.cs#L135):
+EasyCOI uses the same pattern with extra query context [here](/Users/employment/Dev/easycoi/api/Program.cs#L135):
 
 ```csharp
 auth.UseHeadlessAuthPage(headless =>

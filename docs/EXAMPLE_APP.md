@@ -1,6 +1,6 @@
 # Example App
 
-The shared example demonstrates the merged runtime end to end:
+One demo shows the full stack:
 
 - local password login
 - Google, Microsoft, Apple, and custom OIDC login

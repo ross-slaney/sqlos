@@ -5,16 +5,16 @@ order: 1.7
 section: authserver
 ---
 
-Headless mode keeps the authorization server in SqlOS while moving the login UI into your application. SqlOS still owns `/authorize`, `/token`, PKCE, sessions, OIDC, SAML, and code issuance. Your app owns the HTML.
+**Headless** = SqlOS runs OAuth (`/authorize`, `/token`, PKCE, sessions, OIDC, SAML, codes). **Your app** draws the HTML.
 
 ## When to use headless
 
-- The hosted auth page doesn't match your product's design
-- You need app-owned signup fields (referral source, company name, etc.)
-- You want to A/B test login and signup flows
-- You want the OAuth popup to look like your app
+- Hosted SqlOS pages do not match your product.
+- You need extra signup fields (referral, company, etc.).
+- You want to A/B test login.
+- You want the popup to feel like your app.
 
-If you're unsure, start with the [hosted auth page](/docs/guides/authserver/hosted-vs-headless). You can switch to headless later.
+Not sure? Start [hosted](/docs/guides/authserver/hosted-vs-headless). You can switch later.
 
 ## Configuration
 
@@ -28,6 +28,12 @@ builder.AddSqlOS<AppDbContext>(options =>
             headless.BuildUiUrl = ctx =>
                 $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
         });
+
+        auth.SeedAuthPage(page =>
+        {
+            page.PresentationMode = "headless";
+            page.PageTitle = "Sign in";
+        });
     });
 });
 
@@ -35,11 +41,37 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-When an OAuth client redirects to `/authorize`, SqlOS creates an authorization request and redirects to your `BuildUiUrl`. Your app takes over the UI from there.
+The browser hits `/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI.
+
+## Presentation mode
+
+SqlOS saves **hosted** or **headless** in the database. `/authorize` reads that value.
+
+Code alone is not enough. The DB must say **headless** too.
+
+**Do this for headless**
+
+- Call `UseHeadlessAuthPage` and set `BuildUiUrl`.
+- In `SeedAuthPage`, set `page.PresentationMode = "headless"`.
+
+If you skip `PresentationMode` but `BuildUiUrl` is set, startup seed still sets the DB to headless. Setting `"headless"` in seed is clearer.
+
+Do not set `PresentationMode = "hosted"` if you want headless. That forces hosted HTML.
+
+The admin dashboard can change this value. Seed runs again on each app start. Make seed match what you want in production.
+
+| You set in seed | `BuildUiUrl` in code | DB after seed |
+| --- | --- | --- |
+| omit `PresentationMode` | yes | headless |
+| omit `PresentationMode` | no | hosted |
+| `"headless"` | yes | headless |
+| `"hosted"` | yes | hosted |
+
+More context: [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless).
 
 ## Headless endpoints
 
-Your custom UI interacts with SqlOS through these endpoints:
+Your UI calls these SqlOS endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -52,7 +84,7 @@ Your custom UI interacts with SqlOS through these endpoints:
 
 ## Custom signup fields
 
-Capture app-specific data during signup with `customFields` and validate it in `OnHeadlessSignupAsync`:
+Pass extra signup data in `customFields`. Validate in `OnHeadlessSignupAsync`:
 
 ```csharp
 auth.UseHeadlessAuthPage(headless =>
@@ -82,7 +114,7 @@ auth.UseHeadlessAuthPage(headless =>
 
 ## Frontend implementation
 
-The example app ships a complete headless implementation. Key files:
+The example repo has a full headless UI. Main files:
 
 ```
 app/auth/authorize/page.tsx          → Custom authorize route
@@ -118,11 +150,11 @@ if (result.requiresOrganizationSelection) {
 
 ## What doesn't change
 
-Headless mode does not affect the OAuth wire protocol. External clients (including MCP clients) still see:
+OAuth on the wire is the same. MCP and other clients still use:
 
 - `/.well-known/oauth-authorization-server`
 - `/authorize`
 - `/token`
 - `/.well-known/jwks.json`
 
-The only difference is what the user sees in the browser during authorization.
+Only the **browser UI** during login changes.

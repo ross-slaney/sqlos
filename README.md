@@ -6,9 +6,9 @@
 [![NuGet](https://img.shields.io/nuget/v/SqlOS)](https://www.nuget.org/packages/SqlOS)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com)
 
-SqlOS gives your .NET app a complete auth stack — OAuth 2.0 endpoints, a branded login/signup UI, organization management, SAML SSO, OIDC social login, and hierarchical fine-grained authorization — all stored in your own SQL Server database, managed through an embedded admin dashboard.
+SqlOS adds auth and fine-grained authorization to your .NET app. OAuth, login UI, orgs, SAML, OIDC, and FGA live in **your** SQL Server. An embedded admin UI ships with the package.
 
-Think **WorkOS / AuthKit, but self-hosted and database-owned.**
+Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ## Why SqlOS?
 
@@ -55,10 +55,10 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
    ```
 
 2. **Use SQL Server for your EF `DbContext`**  
-   SqlOS stores its tables in the same database your context uses. Configure EF with the SQL Server provider and a connection string as you normally would.
+   SqlOS uses the same database as your context. Point EF at SQL Server like any other app.
 
 3. **Wire your `DbContext`**  
-   Implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, add the FGA `IsResourceAccessible` queryable, and call `UseSqlOS` in `OnModelCreating`:
+   Add the two SqlOS interfaces. Add the FGA `IsResourceAccessible` query. Call `UseSqlOS` in `OnModelCreating`:
 
    ```csharp
    public sealed class AppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
@@ -93,7 +93,7 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
    app.MapSqlOS();
    ```
 
-With defaults, SqlOS bootstraps its schema on host startup, serves the admin UI at `/sqlos`, and exposes OAuth and the hosted auth pages at `/sqlos/auth` (override with `DashboardBasePath` if needed).
+On startup, SqlOS updates its own schema. Default URLs: admin at `/sqlos`, OAuth at `/sqlos/auth`. Change the prefix with `DashboardBasePath` if you need to.
 
 ## Dashboard Access
 
@@ -119,7 +119,7 @@ The repo includes a full working example powered by .NET Aspire:
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-This starts SQL Server, an ASP.NET API with SqlOS, and a Next.js frontend demonstrating password login, social OIDC, SAML SSO, session management, and FGA-protected data.
+That starts SQL Server, the sample API, and a Next.js app. You get password login, OIDC, SAML, sessions, and FGA in the demo.
 
 | | URL |
 |---|---|

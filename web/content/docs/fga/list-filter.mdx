@@ -5,7 +5,7 @@ order: 9
 section: fga
 ---
 
-`GetAuthorizationFilterAsync` produces an `Expression<Func<T, bool>>` that restricts a query to only the resources the subject can access. This is the primary way to authorize list endpoints.
+`GetAuthorizationFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
 ## Basic usage
 

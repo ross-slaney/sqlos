@@ -11,7 +11,11 @@ public sealed class SqlOSAuthPageSeedOptions
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public List<string> EnabledCredentialTypes { get; set; } = ["password"];
-    public string PresentationMode { get; set; } = "hosted";
+
+    /// <summary>
+    /// When null, SqlOS infers <c>headless</c> if <see cref="SqlOSAuthServerOptions.Headless"/> has <c>BuildUiUrl</c> configured; otherwise <c>hosted</c>.
+    /// </summary>
+    public string? PresentationMode { get; set; }
 }
 
 public sealed class SqlOSClientSeedOptions

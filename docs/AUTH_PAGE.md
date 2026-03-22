@@ -1,8 +1,8 @@
 # SqlOS AuthPage
 
-`SqlOS AuthPage` is the branded browser surface for the embedded `AuthServer`.
+AuthPage is SqlOS’s **hosted** login and signup UI.
 
-V1 is intentionally narrow:
+V1 stays small on purpose:
 
 - `authorization_code` + `refresh_token`
 - PKCE public clients
@@ -25,7 +25,7 @@ When `BasePath = "/sqlos/auth"` the library exposes:
 
 ## Registration
 
-SqlOS is integrated as one product: register auth and FGA together, map routes after `Build()`, and implement both `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext` on your `DbContext`.
+Use one SqlOS registration. Include auth + FGA. Map routes after `Build()`. Your `DbContext` implements both SqlOS interfaces.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
@@ -49,28 +49,43 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
+## Presentation mode
+
+The DB stores **hosted** or **headless**. That controls `/authorize`: SqlOS page vs redirect to your app.
+
+In `SeedAuthPage`:
+
+- `page.PresentationMode = "headless"` — your UI (with `UseHeadlessAuthPage` + `BuildUiUrl`).
+- `page.PresentationMode = "hosted"` — SqlOS built-in pages.
+
+If you skip `PresentationMode` but set `BuildUiUrl`, seed sets headless. If you skip both, you get hosted.
+
+Dashboard can edit this. Seed reapplies on startup. Keep them in sync.
+
+Headless guide: site docs path `/docs/guides/authserver/headless-auth`.
+
 ## Browser Flow
 
-1. Your browser app generates PKCE and redirects to `/authorize`.
-2. SqlOS renders the AuthPage.
-3. Home realm discovery checks organization primary domains.
-4. Matching users are redirected to SAML.
-5. Everyone else can use password or an enabled OIDC provider.
-6. SqlOS issues the authorization code and later the access/refresh tokens.
+1. App builds PKCE. Sends user to `/authorize`.
+2. SqlOS shows AuthPage (hosted mode).
+3. Home realm discovery checks email / org domains.
+4. SAML org? Redirect to IdP.
+5. Else password or OIDC.
+6. SqlOS returns a code. App swaps code for tokens.
 
 ## Dashboard
 
-The auth dashboard now includes:
+Auth admin tabs:
 
-- `Clients`: preregistered PKCE apps, redirect URIs, scopes, audiences
-- `Auth Page`: title, subtitle, colors, layout, signup toggle, base64 logo upload
-- `Authorization Server`: standards-facing metadata and URL references
-- `Providers`: OIDC and SAML connection management
+- **Clients** — PKCE apps, redirects, scopes, audience
+- **Auth Page** — title, colors, layout, signup toggle, logo
+- **Authorization Server** — metadata URLs
+- **Providers** — OIDC and SAML
 
-Startup-seeded clients and auth-page settings are marked in the dashboard. They remain editable for inspection, but startup code reapplies them on restart.
+Seeded rows are labeled. You can edit them; seed runs again on restart.
 
 ## Notes
 
 - V1 auto-approves consent.
-- Password is the only credential type enabled out of the box.
-- CIMD, DCR, OTP, passkeys, revocation, and full OIDC provider metadata are intentionally deferred.
+- Default credential is password only.
+- CIMD, DCR, OTP, passkeys, revocation, full OIDC metadata: not in V1.

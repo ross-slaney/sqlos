@@ -53,12 +53,15 @@ public sealed class SqlOSSettingsService
             return;
         }
 
+        var initialPresentationMode = _options.Headless.BuildUiUrl != null ? "headless" : "hosted";
         _context.Set<SqlOSAuthPageSettings>().Add(new SqlOSAuthPageSettings
         {
             Id = "default",
+            PresentationMode = initialPresentationMode,
             UpdatedAt = DateTime.UtcNow,
         });
         await _context.SaveChangesAsync(cancellationToken);
+        _cachedPresentationMode = initialPresentationMode;
     }
 
     public async Task UpsertSeededAuthPageSettingsAsync(CancellationToken cancellationToken = default)
@@ -98,11 +101,24 @@ public sealed class SqlOSSettingsService
         settings.EnablePasswordSignup = _options.AuthPageSeed.EnablePasswordSignup;
         settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(enabledCredentialTypes);
 
-        var presentationMode = _options.AuthPageSeed.PresentationMode?.Trim().ToLowerInvariant() ?? "hosted";
-        if (presentationMode != "hosted" && presentationMode != "headless")
+        string presentationMode;
+        if (!string.IsNullOrWhiteSpace(_options.AuthPageSeed.PresentationMode))
         {
-            throw new InvalidOperationException($"Auth page PresentationMode must be either 'hosted' or 'headless', got '{_options.AuthPageSeed.PresentationMode}'.");
+            presentationMode = _options.AuthPageSeed.PresentationMode.Trim().ToLowerInvariant();
+            if (presentationMode != "hosted" && presentationMode != "headless")
+            {
+                throw new InvalidOperationException($"Auth page PresentationMode must be either 'hosted' or 'headless', got '{_options.AuthPageSeed.PresentationMode}'.");
+            }
         }
+        else if (_options.Headless.BuildUiUrl != null)
+        {
+            presentationMode = "headless";
+        }
+        else
+        {
+            presentationMode = "hosted";
+        }
+
         settings.PresentationMode = presentationMode;
 
         settings.UpdatedAt = DateTime.UtcNow;

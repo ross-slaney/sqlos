@@ -5,13 +5,13 @@ order: 1
 section: authserver
 ---
 
-The SqlOS dashboard is an embedded admin UI that runs inside your app. It provides a single control plane for both AuthServer and Fine-Grained Authorization.
+The dashboard is admin UI inside your app. It covers AuthServer and FGA.
 
 ## Accessing the dashboard
 
-The dashboard mounts under `DashboardBasePath` (default `/sqlos`) when you register SqlOS and call `app.MapSqlOS()` after `Build()`.
+Default path is `DashboardBasePath` (`/sqlos`). Register SqlOS. Call `app.MapSqlOS()` after `Build()`.
 
-Then open `http://localhost:5062/sqlos/` (or your app's URL). The dashboard is protected by a password configured in `appsettings.json`.
+Example: `http://localhost:5062/sqlos/`. Protect it with a password in `appsettings.json` (or env vars).
 
 ![Dashboard home](/docs/dashboard-home.png)
 
@@ -42,6 +42,6 @@ Then open `http://localhost:5062/sqlos/` (or your app's URL). The dashboard is p
 
 ## Sessions
 
-The Sessions page shows all active sessions with their authentication method, client, and expiration times.
+The Sessions page lists who is signed in, how, which client, and when it expires.
 
 ![Active sessions](/docs/dashboard-sessions.png)

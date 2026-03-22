@@ -5,7 +5,7 @@ order: 5
 section: fga
 ---
 
-Resources form a tree. Each resource has exactly one parent (except root). When checking access, FGA walks from the target resource up to the root, looking for matching grants.
+Resources are a tree. One parent per node (root has none). For access checks, FGA walks **up** from the target node to root and looks for grants.
 
 ## Tree structure
 

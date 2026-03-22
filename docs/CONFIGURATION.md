@@ -1,6 +1,6 @@
 # Configuration
 
-`SqlOS` is configured from one host registration call, one EF model call, and `app.MapSqlOS()` after `Build()`.
+Wire SqlOS in three places: host registration, EF model, then `app.MapSqlOS()` after `Build()`.
 
 ## Service registration
 
@@ -32,11 +32,20 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
+### Auth page: hosted vs headless
+
+The DB stores **hosted** or **headless**. `/authorize` uses it.
+
+- **Headless:** `UseHeadlessAuthPage` + `BuildUiUrl`. In `SeedAuthPage` use `page.PresentationMode = "headless"`. Or omit it; seed infers headless when `BuildUiUrl` exists.
+- **Hosted:** use hosted pages. You can set `page.PresentationMode = "hosted"` to be explicit.
+
+See `web/content/docs/authserver/headless-auth.mdx` in this repo (published as `/docs/guides/authserver/headless-auth`).
+
 ### Optional: Dashboard Password Login
 
-Use this when you want a standalone dashboard login without integrating host-app auth.
-Set the password from configuration (appsettings, user secrets, env vars), then pass it
-through `AddSqlOS(...)`:
+Use a dashboard-only password when you are not wiring your app’s own auth into the SqlOS admin UI.
+
+Read the secret from config (appsettings, user secrets, env). Pass it into `AddSqlOS`:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
@@ -74,17 +83,18 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-Bootstrap and dashboard middleware run automatically from host startup. If you need SqlOS tables to exist before your own EF migrations run, call `SqlOSBootstrapper.InitializeAsync()` once before migrating (see the example API).
+Bootstrap and dashboard middleware start with the host.
+
+Need SqlOS tables **before** your EF migrations? Call `SqlOSBootstrapper.InitializeAsync()` once first. Copy the pattern from the example API.
 
 ## Schema Ownership
 
-`SqlOS` manages its own schema through embedded SQL scripts.
+SqlOS ships SQL scripts. It updates its own tables.
 
-That means:
-- consumer EF migrations do not own `SqlOS` tables
-- host startup applies pending library schema changes (via SqlOS hosted bootstrap)
-- both `Fga` and `AuthServer` use the same library-managed bootstrap model
-- startup seeds are reapplied on boot for the records they manage
+- Your EF migrations do **not** own SqlOS tables.
+- The host runs SqlOS bootstrap on startup.
+- Auth and FGA share the same bootstrap.
+- Seed data you configure is reapplied on each boot for the rows SqlOS owns.
 
 ## Dashboard Paths
 

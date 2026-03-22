@@ -5,7 +5,7 @@ order: 1.75
 section: authserver
 ---
 
-SqlOS separates the OAuth protocol from the login UI. You choose how the user experiences authentication.
+SqlOS runs OAuth. You choose who draws the login screens.
 
 ## Hosted AuthPage
 
@@ -24,7 +24,7 @@ The default. SqlOS renders the sign-in, sign-up, and organization selection page
 - Password, OIDC, and SAML support
 - No frontend auth code to write
 
-**Tradeoff:** Less control over the authorize popup design.
+**Downside:** Less control over how the popup looks.
 
 ![Hosted sign-in page](/docs/auth-signin-page.png)
 
@@ -46,7 +46,7 @@ SqlOS owns the OAuth protocol. Your app owns the UI.
 - Same OAuth protocol underneath (PKCE, redirect validation, code issuance)
 - OIDC and SAML still handled by SqlOS
 
-**Tradeoff:** You write and maintain the authorize page.
+**Downside:** You build and host the authorize page.
 
 ```csharp
 options.UseAuthServer(auth =>
@@ -59,19 +59,21 @@ options.UseAuthServer(auth =>
 });
 ```
 
+Headless also needs the right value in the **database**. Use `SeedAuthPage` and `page.PresentationMode = "headless"`. Or leave `PresentationMode` unset if `BuildUiUrl` is set (seed infers headless). [Details](/docs/guides/authserver/headless-auth#presentation-mode).
+
 ## Don't rebuild the auth flow
 
-Some teams try to keep their own login page and "attach OAuth later." This usually turns into:
+A DIY “login page + bolt on OAuth” often grows into:
 
-- Custom bridge code for redirect validation
-- App-issued authorization codes
-- Awkward callback branches
-- Auth behavior drifting from the spec
+- Hand-rolled redirect checks
+- Home-grown auth codes
+- Messy callbacks
+- Behavior that drifts from the spec
 
-If you want to own the UI, use headless mode. Don't rebuild the authorization flow itself.
+Want your own UI? Use **headless**. Still let SqlOS own codes, tokens, and PKCE.
 
 ## Switching modes
 
-You can switch between hosted and headless at any time. The OAuth protocol, token format, sessions, and refresh behavior are identical in both modes. Only the user-facing login UI changes.
+You can flip hosted ↔ headless. OAuth, tokens, sessions, and refresh stay the same. Only the login UI changes.
 
-Read the implementation guide: [Headless Auth](/docs/guides/authserver/headless-auth)
+How-to: [Headless Auth](/docs/guides/authserver/headless-auth)

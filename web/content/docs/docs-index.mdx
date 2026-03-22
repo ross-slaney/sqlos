@@ -4,11 +4,11 @@ description: "Embedded auth and authorization for .NET apps. One package. Your d
 order: -1
 ---
 
-SqlOS is an embedded auth and authorization runtime for .NET. It adds identity, sessions, organizations, SSO, OIDC, and fine-grained authorization to your ASP.NET app with one NuGet package. Your data stays in your SQL Server database.
+SqlOS is auth and authorization for .NET in one package. Identity, SSO, OIDC, and FGA run in your app. Data stays in **your** SQL Server.
 
 ## Why SqlOS
 
-Most auth products force you to send user data to an external service and pay per-seat. SqlOS takes a different approach:
+Many auth products host your users and charge per seat. SqlOS does not:
 
 - **Your database** -- users, sessions, grants, and tokens live in your SQL Server instance
 - **Your app** -- SqlOS runs inside your ASP.NET process, not as a separate service
@@ -17,9 +17,9 @@ Most auth products force you to send user data to an external service and pay pe
 
 ## Two modules
 
-SqlOS ships two modules that work independently or together:
+You get two modules. Use both together or focus on one.
 
-**AuthServer** handles identity: organizations, users, password login, OIDC social login, SAML enterprise SSO, sessions, refresh tokens, and a hosted or headless auth UI.
+**AuthServer** — orgs, users, passwords, OIDC, SAML, sessions, tokens. Hosted or headless login UI.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
@@ -28,7 +28,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-**FGA** handles authorization: hierarchical resources, roles, permissions, grants, and EF Core query-time filtering that pushes access control into your SQL queries.
+**FGA** — resource tree, roles, permissions, grants. EF filters data in SQL so you do not load rows you should not see.
 
 ```csharp
 var chains = await dbContext.Chains
@@ -38,25 +38,25 @@ var chains = await dbContext.Chains
 
 ## What it looks like
 
-SqlOS ships with an embedded admin dashboard for managing organizations, users, sessions, resources, grants, and roles.
+There is a built-in admin UI for orgs, users, sessions, resources, grants, and roles.
 
 ![Dashboard home](/docs/dashboard-home.png)
 
-The same data that appears in the dashboard is available through the SDK and admin API.
+The SDK and admin API expose the same data.
 
 ## Example app
 
-The repo includes a complete retail management app (Next.js, Angular, and React Native) that demonstrates multi-tenant auth with fine-grained access control.
+The repo has a retail-style demo (Next.js, Angular, React Native). It shows multi-tenant auth and FGA.
 
-As **Company Admin**, the user sees all 5 chains and 3 stores:
+As **Company Admin**, you see every chain and store:
 
 ![Company Admin view](/docs/retail-app-admin-dashboard.png)
 
-As **Store Clerk**, the same app filters down to just the one store they have access to:
+As **Store Clerk**, you only see the stores you are allowed to see:
 
 ![Store Clerk view](/docs/retail-app-clerk-dashboard.png)
 
-No application code changes. The FGA filter handles it at query time.
+Same app code. FGA applies at query time.
 
 ## Next steps
 

@@ -7,7 +7,7 @@ section: authserver
 
 ## Refresh
 
-Each refresh consumes the current token and issues a new one. The session idle timeout is extended.
+Refresh uses the old refresh token. SqlOS returns a new pair. Idle timeout extends.
 
 ```csharp
 var tokens = await authService.RefreshAsync(

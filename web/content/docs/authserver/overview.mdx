@@ -5,7 +5,7 @@ order: 0
 section: authserver
 ---
 
-AuthServer is the identity module in SqlOS. It handles user authentication, organizations, sessions, token management, OIDC social login, and SAML enterprise SSO -- all embedded in your .NET app, all stored in your database.
+AuthServer is SqlOS’s identity piece. Users, orgs, sessions, tokens, OIDC, and SAML run inside your app. Data lives in your database.
 
 ## What you get
 
@@ -30,20 +30,20 @@ app.MapSqlOS();
 
 ## Auth flow
 
-The typical authentication flow works like this:
+Typical browser login:
 
-1. Frontend redirects to `/sqlos/auth/authorize` with PKCE
-2. User enters email -- AuthServer runs [home realm discovery](/docs/guides/authserver/password-login) to determine password vs SSO
-3. User authenticates (password, OIDC, or SAML)
-4. If the user belongs to multiple organizations, they select one
-5. AuthServer issues an authorization code
-6. Frontend exchanges the code for access + refresh tokens
+1. App sends the user to `/sqlos/auth/authorize` with PKCE.
+2. User enters email. [Home realm discovery](/docs/guides/authserver/password-login) picks password vs SSO.
+3. User signs in (password, OIDC, or SAML).
+4. Multiple orgs? User picks one.
+5. SqlOS returns an auth code.
+6. App trades the code for access and refresh tokens.
 
 ![Hosted sign-in page](/docs/auth-signin-page.png)
 
 ## Dashboard
 
-The auth admin UI at `/sqlos/admin/auth/` lets you manage organizations, users, memberships, clients, OIDC connections, SSO, security settings, and active sessions.
+Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, security, and sessions there.
 
 ![Dashboard users](/docs/dashboard-users.png)
 
@@ -61,9 +61,9 @@ The auth admin UI at `/sqlos/admin/auth/` lets you manage organizations, users, 
 
 ## Presentation modes
 
-SqlOS separates the auth protocol from the login UI:
+Protocol vs pixels:
 
-- **Hosted AuthPage** (default) -- SqlOS renders the sign-in and sign-up pages
-- **Headless Auth** -- SqlOS owns the OAuth protocol while your app renders the UI
+- **Hosted** — SqlOS draws login and signup (default).
+- **Headless** — SqlOS runs OAuth; your app draws the UI.
 
-Read more in [Headless Auth](/docs/guides/authserver/headless-auth) and [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless).
+[Headless Auth](/docs/guides/authserver/headless-auth) · [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless)

@@ -5,7 +5,7 @@ order: 0
 section: fga
 ---
 
-The FGA (Fine-Grained Authorization) module models your app's resources as a hierarchy. Grants assign roles to subjects on resources, and permissions inherit down the tree. Authorization integrates directly into EF Core queries, so filtered results come back from SQL Server -- not from application code.
+FGA models resources as a tree. You grant roles on a node. Child nodes inherit access. EF sends filters to SQL Server. You do not load everything and filter in memory.
 
 ## How it works
 
@@ -36,7 +36,7 @@ var chains = await dbContext.Chains
     .ToListAsync();
 ```
 
-The user only sees chains they have access to. The filter translates to a SQL Server table-valued function call at query time.
+Users only see rows they may access. Under the hood that becomes a SQL Server TVF call.
 
 **Company Admin sees 5 chains:**
 
@@ -48,7 +48,7 @@ The user only sees chains they have access to. The filter translates to a SQL Se
 
 ## Point checks
 
-For mutations, check a specific permission on a specific resource:
+For a single action on one resource, check permission explicitly:
 
 ```csharp
 var access = await authService.CheckAccessAsync(subjectId, "CHAIN_EDIT", resourceId);
@@ -71,7 +71,7 @@ app.MapSqlOS();
 
 ## Dashboard
 
-The FGA admin UI at `/sqlos/admin/fga/` lets you browse the resource hierarchy, manage grants, define roles and permissions, and test access decisions.
+`/sqlos/admin/fga/` — browse resources, grants, roles, permissions, and run the access tester.
 
 ![FGA Resources](/docs/dashboard-fga-resources.png)
 

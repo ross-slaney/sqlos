@@ -1,17 +1,15 @@
 # Web Deployment
 
-The `/web` marketing app deploys to Azure Container Apps through [`../.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml).
+Deploy `/web` to Azure Container Apps. Workflow file: [`../.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml).
 
 ## GitHub setup checklist
 
-Add these in GitHub at:
+Go to **Repository → Settings → Secrets and variables → Actions**.
 
-`Repository -> Settings -> Secrets and variables -> Actions`
-
-- Put the values in the `Variables` tab unless the table says `Secret`.
-- Put `AZURE_CLIENT_SECRET` in the `Secrets` tab.
+- Use **Variables** unless the table says **Secret**.
+- Put `AZURE_CLIENT_SECRET` under **Secrets**.
 - Do not wrap values in quotes.
-- Add them at the repository level. This workflow does not currently use a GitHub `environment:`, so environment-scoped secrets/variables will not be available to it.
+- Add at **repository** scope. This workflow does not use a GitHub Environment. Environment-scoped values will **not** work.
 
 ### Required GitHub Actions values
 
@@ -52,11 +50,11 @@ AZURE_DNS_ZONE_NAME=sqlos.dev
 
 ## What the service principal must be allowed to do
 
-The GitHub Actions service principal needs permission to:
+The GitHub Actions principal must be able to:
 
-- create or update the application resource group named by `AZURE_RESOURCE_GROUP`
-- create Azure resources inside that resource group
-- update DNS records in the existing DNS resource group that contains `sqlos.dev`
+- Create or update the app resource group (`AZURE_RESOURCE_GROUP`)
+- Create resources inside that group
+- Edit DNS in the zone’s resource group (e.g. `sqlos.dev`)
 
 The simplest option is `Contributor` on the subscription.
 

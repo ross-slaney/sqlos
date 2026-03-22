@@ -17,9 +17,9 @@ dotnet test SqlOS.sln
 
 ## Real SQL Coverage
 
-The integration suites use Aspire plus a real SQL Server container.
+Integration tests use Aspire and a real SQL Server container.
 
-That covers:
+They cover:
 - auth schema bootstrap
 - FGA schema bootstrap and TVF registration
 - auth flows

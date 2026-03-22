@@ -52,6 +52,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSSettingsService settingsService,
             CancellationToken cancellationToken) =>
         {
             try
@@ -60,6 +61,9 @@ public static class EndpointRouteBuilderExtensions
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
                 }
+
+                // Refresh presentation-mode cache from DB before branching (static cache defaults to hosted until loaded).
+                await settingsService.GetAuthPageSettingsAsync(cancellationToken);
 
                 var authorizationRequest = await authorizationServerService.CreateAuthorizationRequestAsync(
                     new SqlOSAuthorizeRequestInput(
