@@ -48,69 +48,52 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
 
 ## Quick Start
 
-### Install
+1. **Add the package**
 
-```bash
-dotnet add package SqlOS
-```
+   ```bash
+   dotnet add package SqlOS
+   ```
 
-### Register Services
+2. **Use SQL Server for your EF `DbContext`**  
+   SqlOS stores its tables in the same database your context uses. Configure EF with the SQL Server provider and a connection string as you normally would.
 
-```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseFGA();
-    options.UseAuthServer();
-});
-```
+3. **Wire your `DbContext`**  
+   Implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, add the FGA `IsResourceAccessible` queryable, and call `UseSqlOS` in `OnModelCreating`:
 
-### Configure Your DbContext
+   ```csharp
+   public sealed class AppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+   {
+       public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+           string subjectId,
+           string permissionKey)
+           => FromExpression(() => IsResourceAccessible(subjectId, permissionKey));
 
-```csharp
-public sealed class AppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
-{
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string subjectId,
-        string permissionKey)
-        => FromExpression(() => IsResourceAccessible(subjectId, permissionKey));
+       protected override void OnModelCreating(ModelBuilder modelBuilder)
+       {
+           base.OnModelCreating(modelBuilder);
+           modelBuilder.UseSqlOS(GetType());
+       }
+   }
+   ```
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.UseAuthServer();
-        modelBuilder.UseFGA(GetType());
-    }
-}
-```
+4. **Register SqlOS on the host**
 
-### Map Endpoints
+   ```csharp
+   builder.AddSqlOS<AppDbContext>(options =>
+   {
+       options.UseFGA();
+       options.UseAuthServer();
+   });
+   ```
 
-```csharp
-var app = builder.Build();
+5. **Map routes after `Build()`**
 
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");
-```
+   ```csharp
+   var app = builder.Build();
+   app.MapSqlOS();
+   ```
 
-That's it. SqlOS bootstraps its own schema, runs embedded migrations, and serves the dashboard — no external infrastructure required.
-
-## AuthServer-Only Mode
-
-Already have an authorization layer? Use just the auth server:
-
-```csharp
-builder.Services.AddSqlOSAuthServer<AppDbContext>(auth =>
-{
-    auth.BasePath = "/sqlos/auth";
-    auth.PublicOrigin = "https://api.example.com";
-    auth.Issuer = "https://api.example.com/sqlos/auth";
-});
-
-await app.UseSqlOSAuthServerAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSAuthServerDashboard("/sqlos/admin/auth");
-```
+With defaults, SqlOS bootstraps its schema on host startup, serves the admin UI at `/sqlos`, and exposes OAuth and the hosted auth pages at `/sqlos/auth` (override with `DashboardBasePath` if needed).
 
 ## Dashboard Access
 

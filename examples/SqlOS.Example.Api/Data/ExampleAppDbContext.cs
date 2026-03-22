@@ -29,13 +29,13 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UseAuthServer();
         if (Database.IsRelational())
         {
-            modelBuilder.UseFGA(GetType());
+            modelBuilder.UseSqlOS(GetType());
         }
         else
         {
+            modelBuilder.UseAuthServer();
             modelBuilder.UseFGA();
         }
 

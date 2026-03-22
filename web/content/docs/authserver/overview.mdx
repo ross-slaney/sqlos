@@ -19,14 +19,13 @@ AuthServer is the identity module in SqlOS. It handles user authentication, orga
 ## Setup
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer();
 });
 
 var app = builder.Build();
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
+app.MapSqlOS();
 ```
 
 ## Auth flow

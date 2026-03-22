@@ -19,7 +19,7 @@ If you're unsure, start with the [hosted auth page](/docs/guides/authserver/host
 ## Configuration
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer(auth =>
     {
@@ -30,6 +30,9 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
         });
     });
 });
+
+var app = builder.Build();
+app.MapSqlOS();
 ```
 
 When an OAuth client redirects to `/authorize`, SqlOS creates an authorization request and redirects to your `BuildUiUrl`. Your app takes over the UI from there.

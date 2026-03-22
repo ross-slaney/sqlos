@@ -15,7 +15,7 @@ dotnet add package SqlOS
 Register SqlOS with your EF Core `DbContext`. Enable one or both modules:
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer();
     options.UseFGA();
@@ -42,8 +42,7 @@ public sealed class AppDbContext : DbContext,
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UseAuthServer();
-        modelBuilder.UseFGA(GetType());
+        modelBuilder.UseSqlOS(GetType());
     }
 }
 ```
@@ -52,10 +51,7 @@ public sealed class AppDbContext : DbContext,
 
 ```csharp
 var app = builder.Build();
-
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");
+app.MapSqlOS();
 ```
 
 This gives you:
@@ -115,7 +111,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 ## Schema management
 
-SqlOS owns its own database schema. On startup, `UseSqlOSAsync()` runs embedded SQL scripts to create or update tables. Your app's EF Core migrations do not manage SqlOS tables.
+SqlOS owns its own database schema. On host startup, SqlOS runs embedded SQL scripts to create or update tables. Your app's EF Core migrations do not manage SqlOS tables. If you apply EF migrations before the host runs, call `SqlOSBootstrapper.InitializeAsync()` once beforehand (see the example API for a pattern when consumer tables reference SqlOS).
 
 ## Next steps
 

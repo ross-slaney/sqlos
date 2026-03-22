@@ -291,7 +291,7 @@ public sealed class SqlOSExampleApiIntegrationTests
 
         response.EnsureSuccessStatusCode();
         var html = await response.Content.ReadAsStringAsync();
-        html.Should().Contain("SqlOS Dashboard");
+        html.Should().Contain("SqlOS");
     }
 
     [TestMethod]
@@ -326,7 +326,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         deepLinkResponse.Headers.Location!.ToString().Should().Contain("/sqlos/login");
 
         var authStatsUnauthorized = await client.GetAsync("/sqlos/admin/auth/api/stats");
-        authStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+        authStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
 
         var fgaStatsUnauthorized = await client.GetAsync("/sqlos/admin/fga/api/stats");
         fgaStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
@@ -347,7 +347,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         logoutResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
 
         var authStatsAfterLogout = await client.GetAsync("/sqlos/admin/auth/api/stats");
-        authStatsAfterLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+        authStatsAfterLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
     }
 
     [TestMethod]

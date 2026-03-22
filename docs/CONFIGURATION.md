@@ -1,11 +1,11 @@
 # Configuration
 
-`SqlOS` is configured from one root registration call and two module hooks.
+`SqlOS` is configured from one host registration call, one EF model call, and `app.MapSqlOS()` after `Build()`.
 
-## Service Registration
+## Service registration
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseFGA(fga =>
     {
@@ -21,7 +21,6 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
 
     options.UseAuthServer(auth =>
     {
-        auth.BasePath = "/sqlos/auth";
         auth.Issuer = "https://localhost/sqlos/auth";
         auth.SeedAuthPage(page =>
         {
@@ -40,7 +39,7 @@ Set the password from configuration (appsettings, user secrets, env vars), then 
 through `AddSqlOS(...)`:
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
     options.Dashboard.Password = builder.Configuration["SqlOS:Dashboard:Password"]
@@ -58,25 +57,24 @@ if (sessionMinutes is > 0)
 }
 ```
 
-## EF Model Registration
+## EF model registration
 
 ```csharp
 protected override void OnModelCreating(ModelBuilder modelBuilder)
 {
     base.OnModelCreating(modelBuilder);
-
-    modelBuilder.UseAuthServer();
-    modelBuilder.UseFGA(GetType());
+    modelBuilder.UseSqlOS(GetType());
 }
 ```
 
-## Startup Bootstrap
+## Map routes
 
 ```csharp
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");
+var app = builder.Build();
+app.MapSqlOS();
 ```
+
+Bootstrap and dashboard middleware run automatically from host startup. If you need SqlOS tables to exist before your own EF migrations run, call `SqlOSBootstrapper.InitializeAsync()` once before migrating (see the example API).
 
 ## Schema Ownership
 
@@ -84,7 +82,7 @@ app.UseSqlOSDashboard("/sqlos");
 
 That means:
 - consumer EF migrations do not own `SqlOS` tables
-- `UseSqlOSAsync()` applies pending library schema changes at startup
+- host startup applies pending library schema changes (via SqlOS hosted bootstrap)
 - both `Fga` and `AuthServer` use the same library-managed bootstrap model
 - startup seeds are reapplied on boot for the records they manage
 

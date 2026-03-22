@@ -229,7 +229,7 @@ dotnet add package SqlOS
 ```
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseFGA(fga => fga.Seed(seed =>
     {
@@ -244,7 +244,8 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
     }));
 });
 
-await app.UseSqlOSAsync(); // Creates schema, registers TVF
+var app = builder.Build();
+app.MapSqlOS(); // Maps routes; schema + TVF run on host startup
 ```
 
 The [getting started guide](/docs/guides/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.

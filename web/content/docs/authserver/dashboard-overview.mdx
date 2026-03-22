@@ -9,11 +9,7 @@ The SqlOS dashboard is an embedded admin UI that runs inside your app. It provid
 
 ## Accessing the dashboard
 
-The dashboard mounts at the path you configure:
-
-```csharp
-app.UseSqlOSDashboard("/sqlos");
-```
+The dashboard mounts under `DashboardBasePath` (default `/sqlos`) when you register SqlOS and call `app.MapSqlOS()` after `Build()`.
 
 Then open `http://localhost:5062/sqlos/` (or your app's URL). The dashboard is protected by a password configured in `appsettings.json`.
 

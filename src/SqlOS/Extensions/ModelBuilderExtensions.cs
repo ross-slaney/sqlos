@@ -7,6 +7,16 @@ namespace SqlOS.Extensions;
 
 public static class ModelBuilderExtensions
 {
+    /// <summary>
+    /// Registers SqlOS auth server and FGA EF models for the given <paramref name="contextType"/>.
+    /// </summary>
+    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, Type contextType)
+    {
+        modelBuilder.UseAuthServer();
+        modelBuilder.UseFGA(contextType);
+        return modelBuilder;
+    }
+
     public static ModelBuilder UseAuthServer(
         this ModelBuilder modelBuilder,
         Action<SqlOSAuthServerOptions>? configure = null)

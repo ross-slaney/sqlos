@@ -22,7 +22,7 @@ SqlOS ships two modules that work independently or together:
 **AuthServer** handles identity: organizations, users, password login, OIDC social login, SAML enterprise SSO, sessions, refresh tokens, and a hosted or headless auth UI.
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer();
 });

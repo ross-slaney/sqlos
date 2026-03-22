@@ -1,14 +1,13 @@
 "use client";
 
-const setupCode = `builder.Services.AddSqlOS<AppDbContext>(opt =>
+const setupCode = `builder.AddSqlOS<AppDbContext>(opt =>
 {
     opt.UseAuthServer();
     opt.UseFGA();
 });
 
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");`;
+var app = builder.Build();
+app.MapSqlOS();`;
 
 function DashboardMockup() {
   return (

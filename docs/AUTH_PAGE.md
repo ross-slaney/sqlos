@@ -23,16 +23,15 @@ When `BasePath = "/sqlos/auth"` the library exposes:
 - `GET /sqlos/auth/signup`
 - `GET /sqlos/auth/logged-out`
 
-## Full Runtime
+## Registration
 
-Use the full runtime when you want both auth and FGA:
+SqlOS is integrated as one product: register auth and FGA together, map routes after `Build()`, and implement both `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext` on your `DbContext`.
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer(auth =>
     {
-        auth.BasePath = "/sqlos/auth";
         auth.PublicOrigin = "https://app.example.com";
         auth.Issuer = "https://app.example.com/sqlos/auth";
         auth.SeedAuthPage(page =>
@@ -46,33 +45,9 @@ builder.Services.AddSqlOS<AppDbContext>(options =>
     options.UseFGA();
 });
 
-await app.UseSqlOSAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSDashboard("/sqlos");
+var app = builder.Build();
+app.MapSqlOS();
 ```
-
-## AuthServer-Only Runtime
-
-Use the auth-server-only registration path when an existing app already has its own authorization/FGA layer and only wants the hosted OAuth/AuthPage surface:
-
-```csharp
-builder.Services.AddSqlOSAuthServer<AppDbContext>(auth =>
-{
-    auth.BasePath = "/sqlos/auth";
-    auth.PublicOrigin = "https://api.example.com";
-    auth.Issuer = "https://api.example.com/sqlos/auth";
-}, dashboard =>
-{
-    dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
-    dashboard.Password = builder.Configuration["SqlOSAuth:DashboardPassword"];
-});
-
-await app.UseSqlOSAuthServerAsync();
-app.MapAuthServer("/sqlos/auth");
-app.UseSqlOSAuthServerDashboard("/sqlos/admin/auth");
-```
-
-`AppDbContext` only needs `ISqlOSAuthServerDbContext` in this mode.
 
 ## Browser Flow
 

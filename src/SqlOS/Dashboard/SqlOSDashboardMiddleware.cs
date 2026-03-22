@@ -240,11 +240,15 @@ public sealed class SqlOSDashboardMiddleware
 
     private bool ShouldPassThrough(string relativePath, bool embedMode)
     {
+        if (relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (relativePath.StartsWith("auth/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/api/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/.well-known/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/auth/saml/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/fga/api/", StringComparison.OrdinalIgnoreCase))
+            || relativePath.StartsWith("admin/auth/saml/", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -286,8 +290,7 @@ public sealed class SqlOSDashboardMiddleware
             return true;
         }
 
-        if (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase))
+        if (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

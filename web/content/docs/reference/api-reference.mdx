@@ -7,7 +7,7 @@ section: reference
 
 ## OAuth Endpoints
 
-Mounted via `app.MapAuthServer("/sqlos/auth")`.
+OAuth routes are mounted when you call `app.MapSqlOS()`; the default issuer path is `{DashboardBasePath}/auth` (for example `/sqlos/auth`).
 
 | Method | Endpoint | Description |
 | --- | --- | --- |

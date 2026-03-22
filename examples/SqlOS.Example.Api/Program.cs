@@ -30,7 +30,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 builder.Services.AddDbContext<ExampleAppDbContext>(options =>
     options.UseSqlServer(connectionString));
 
-builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
+builder.AddSqlOS<ExampleAppDbContext>(options =>
 {
     options.DashboardBasePath = "/sqlos";
     var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
@@ -202,6 +202,7 @@ builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
 
 builder.Services.AddScoped<ExampleFgaService>();
 builder.Services.AddScoped<RetailSeedService>();
+builder.Services.AddHostedService<ExampleRetailSeedHostedService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("example-frontend", policy =>
@@ -229,19 +230,13 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+app.MapSqlOS();
 
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
     await EnsureLegacyEnsureCreatedDatabasesCanMigrateAsync(context);
     await context.Database.MigrateAsync();
-}
-
-await app.UseSqlOSAsync();
-
-using (var scope = app.Services.CreateScope())
-{
-    await scope.ServiceProvider.GetRequiredService<RetailSeedService>().SeedAsync();
 }
 
 app.UseSwagger();
@@ -269,8 +264,6 @@ app.UseExampleBearerTokenMiddleware();
 //         };
 //         options.RefreshInterval = TimeSpan.FromHours(1); // optional: more frequent background JWKS refresh
 //     });
-app.UseSqlOSDashboard("/sqlos");
-
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/sqlos/auth/authorize")
@@ -283,7 +276,6 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapAuthServer("/sqlos/auth");
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
 app.MapDemoEndpoints();

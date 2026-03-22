@@ -16,7 +16,7 @@ A client represents an application that authenticates users through SqlOS. Each 
 **Startup seeding** (recommended for first-party apps):
 
 ```csharp
-builder.Services.AddSqlOS<AppDbContext>(options =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
     options.UseAuthServer(auth =>
     {

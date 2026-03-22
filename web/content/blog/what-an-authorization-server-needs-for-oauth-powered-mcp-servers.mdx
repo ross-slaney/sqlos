@@ -131,36 +131,42 @@ SqlOS supports that through client records and startup seeding.
 For an Emcy integration, the minimum useful setup looks like this:
 
 ```csharp
-builder.Services.AddSqlOSAuthServer<AppDbContext>(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.BasePath = "/sqlos/auth";
-    auth.PublicOrigin = "https://api.example.com";
-    auth.Issuer = "https://api.example.com/sqlos/auth";
-
-    auth.SeedClient(client =>
+    options.UseFGA();
+    options.UseAuthServer(auth =>
     {
-        client.ClientId = "emcy-cloud";
-        client.Name = "Emcy Cloud";
-        client.RedirectUris = ["https://app.emcy.ai/oauth/callback"];
-        client.AllowedScopes = ["openid", "profile", "email"];
-        client.Audience = "https://mcp.example.com";
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = true;
-    });
+        auth.PublicOrigin = "https://api.example.com";
+        auth.Issuer = "https://api.example.com/sqlos/auth";
 
-    auth.SeedClient(client =>
-    {
-        client.ClientId = "emcy-localhost";
-        client.Name = "Emcy Local";
-        client.RedirectUris = ["http://localhost:3100/oauth/callback"];
-        client.AllowedScopes = ["openid", "profile", "email"];
-        client.Audience = "https://mcp.example.com";
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = true;
+        auth.SeedClient(client =>
+        {
+            client.ClientId = "emcy-cloud";
+            client.Name = "Emcy Cloud";
+            client.RedirectUris = ["https://app.emcy.ai/oauth/callback"];
+            client.AllowedScopes = ["openid", "profile", "email"];
+            client.Audience = "https://mcp.example.com";
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+        auth.SeedClient(client =>
+        {
+            client.ClientId = "emcy-localhost";
+            client.Name = "Emcy Local";
+            client.RedirectUris = ["http://localhost:3100/oauth/callback"];
+            client.AllowedScopes = ["openid", "profile", "email"];
+            client.Audience = "https://mcp.example.com";
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
     });
 });
+
+var app = builder.Build();
+app.MapSqlOS();
 ```
 
 That is enough for a real preregistered public-client flow.
