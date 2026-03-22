@@ -273,9 +273,12 @@ public sealed class SqlOSCryptoService
             claims.Add(new Claim("org_id", organizationId));
         }
 
+        var audience = string.IsNullOrWhiteSpace(session.EffectiveAudience)
+            ? client.Audience
+            : session.EffectiveAudience;
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,
-            audience: client.Audience,
+            audience: audience,
             claims: claims,
             notBefore: now,
             expires: now.Add(_options.AccessTokenLifetime),
@@ -285,6 +288,12 @@ public sealed class SqlOSCryptoService
     }
 
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken cancellationToken = default)
+        => await ValidateAccessTokenAsync(rawToken, expectedAudience: null, cancellationToken);
+
+    public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
+        string rawToken,
+        string? expectedAudience,
+        CancellationToken cancellationToken = default)
     {
         var keys = await GetValidationSigningKeysAsync(cancellationToken: cancellationToken);
         if (keys.Count == 0)
@@ -304,7 +313,8 @@ public sealed class SqlOSCryptoService
             {
                 ValidateIssuer = true,
                 ValidIssuer = _options.Issuer,
-                ValidateAudience = false,
+                ValidateAudience = !string.IsNullOrWhiteSpace(expectedAudience),
+                ValidAudience = expectedAudience,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKeys = securityKeys,
                 ValidateLifetime = true,
@@ -324,6 +334,15 @@ public sealed class SqlOSCryptoService
             }
 
             session.LastSeenAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(session.ClientApplicationId))
+            {
+                var client = await _context.Set<SqlOSClientApplication>()
+                    .FirstOrDefaultAsync(x => x.Id == session.ClientApplicationId, cancellationToken);
+                if (client != null)
+                {
+                    client.LastSeenAt = DateTime.UtcNow;
+                }
+            }
             await _context.SaveChangesAsync(cancellationToken);
 
             return new SqlOSValidatedToken(
@@ -331,7 +350,8 @@ public sealed class SqlOSCryptoService
                 session.Id,
                 principal.FindFirstValue(JwtRegisteredClaimNames.Sub),
                 principal.FindFirstValue("org_id"),
-                principal.FindFirstValue("client_id"));
+                principal.FindFirstValue("client_id"),
+                principal.FindFirstValue("aud"));
         }
         catch
         {

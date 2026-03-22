@@ -52,7 +52,8 @@ public sealed record SqlOSValidatedToken(
     string SessionId,
     string? UserId,
     string? OrganizationId,
-    string? ClientId);
+    string? ClientId,
+    string? Audience);
 
 public sealed record SqlOSSignupRequest(
     string DisplayName,
@@ -74,7 +75,8 @@ public sealed record SqlOSSelectOrganizationRequest(
 
 public sealed record SqlOSRefreshRequest(
     string RefreshToken,
-    string? OrganizationId);
+    string? OrganizationId,
+    string? Resource = null);
 
 public sealed record SqlOSExchangeCodeRequest(
     string Code,
@@ -106,6 +108,85 @@ public sealed record SqlOSCreateClientRequest(
     bool RequirePkce = true,
     bool IsFirstParty = false,
     string ClientType = "public_pkce");
+
+public sealed record SqlOSDynamicClientRegistrationRequest
+{
+    [JsonPropertyName("client_id")]
+    public string? ClientId { get; init; }
+
+    [JsonPropertyName("client_name")]
+    public string? ClientName { get; init; }
+
+    [JsonPropertyName("redirect_uris")]
+    public List<string> RedirectUris { get; init; } = [];
+
+    [JsonPropertyName("grant_types")]
+    public List<string>? GrantTypes { get; init; }
+
+    [JsonPropertyName("response_types")]
+    public List<string>? ResponseTypes { get; init; }
+
+    [JsonPropertyName("token_endpoint_auth_method")]
+    public string? TokenEndpointAuthMethod { get; init; }
+
+    [JsonPropertyName("client_secret")]
+    public string? ClientSecret { get; init; }
+
+    [JsonPropertyName("client_secret_expires_at")]
+    public long? ClientSecretExpiresAt { get; init; }
+
+    [JsonPropertyName("client_uri")]
+    public string? ClientUri { get; init; }
+
+    [JsonPropertyName("logo_uri")]
+    public string? LogoUri { get; init; }
+
+    [JsonPropertyName("software_id")]
+    public string? SoftwareId { get; init; }
+
+    [JsonPropertyName("software_version")]
+    public string? SoftwareVersion { get; init; }
+}
+
+public sealed record SqlOSDynamicClientRegistrationResponse
+{
+    [JsonPropertyName("client_id")]
+    public required string ClientId { get; init; }
+
+    [JsonPropertyName("client_id_issued_at")]
+    public required long ClientIdIssuedAt { get; init; }
+
+    [JsonPropertyName("client_name")]
+    public required string ClientName { get; init; }
+
+    [JsonPropertyName("redirect_uris")]
+    public required string[] RedirectUris { get; init; }
+
+    [JsonPropertyName("grant_types")]
+    public required string[] GrantTypes { get; init; }
+
+    [JsonPropertyName("response_types")]
+    public required string[] ResponseTypes { get; init; }
+
+    [JsonPropertyName("token_endpoint_auth_method")]
+    public required string TokenEndpointAuthMethod { get; init; }
+
+    [JsonPropertyName("client_uri")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClientUri { get; init; }
+
+    [JsonPropertyName("logo_uri")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogoUri { get; init; }
+
+    [JsonPropertyName("software_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SoftwareId { get; init; }
+
+    [JsonPropertyName("software_version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SoftwareVersion { get; init; }
+}
 
 public sealed record SqlOSCreateSsoConnectionRequest(
     string OrganizationId,
@@ -306,13 +387,44 @@ public sealed record SqlOSUpdateAuthPageSettingsRequest(
     bool EnablePasswordSignup,
     string[] EnabledCredentialTypes);
 
-public sealed record SqlOSAuthorizationServerMetadataDto(
-    string Issuer,
-    string AuthorizationEndpoint,
-    string TokenEndpoint,
-    string JwksUri,
-    string[] ResponseTypesSupported,
-    string[] GrantTypesSupported,
-    string[] CodeChallengeMethodsSupported,
-    string[] ScopesSupported,
-    string[] TokenEndpointAuthMethodsSupported);
+public sealed record SqlOSAuthorizationServerMetadataDto
+{
+    [JsonPropertyName("issuer")]
+    public required string Issuer { get; init; }
+
+    [JsonPropertyName("authorization_endpoint")]
+    public required string AuthorizationEndpoint { get; init; }
+
+    [JsonPropertyName("token_endpoint")]
+    public required string TokenEndpoint { get; init; }
+
+    [JsonPropertyName("jwks_uri")]
+    public required string JwksUri { get; init; }
+
+    [JsonPropertyName("response_types_supported")]
+    public required string[] ResponseTypesSupported { get; init; }
+
+    [JsonPropertyName("grant_types_supported")]
+    public required string[] GrantTypesSupported { get; init; }
+
+    [JsonPropertyName("code_challenge_methods_supported")]
+    public required string[] CodeChallengeMethodsSupported { get; init; }
+
+    [JsonPropertyName("scopes_supported")]
+    public required string[] ScopesSupported { get; init; }
+
+    [JsonPropertyName("token_endpoint_auth_methods_supported")]
+    public required string[] TokenEndpointAuthMethodsSupported { get; init; }
+
+    [JsonPropertyName("registration_endpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RegistrationEndpoint { get; init; }
+
+    [JsonPropertyName("client_id_metadata_document_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ClientIdMetadataDocumentSupported { get; init; }
+
+    [JsonPropertyName("resource_parameter_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ResourceParameterSupported { get; init; }
+}

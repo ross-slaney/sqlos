@@ -103,4 +103,32 @@ public sealed class SqlOSOptionsValidationTests
 
         act.Should().NotThrow();
     }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenCimdDefaultCacheTtlIsNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Cimd.DefaultCacheTtl = TimeSpan.Zero;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.ClientRegistration.Cimd.DefaultCacheTtl must be greater than zero.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenDcrRateLimitWindowIsNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Dcr.RateLimitWindow = TimeSpan.Zero;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.ClientRegistration.Dcr.RateLimitWindow must be greater than zero.*");
+    }
 }

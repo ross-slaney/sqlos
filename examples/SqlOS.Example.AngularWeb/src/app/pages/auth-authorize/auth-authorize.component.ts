@@ -11,7 +11,7 @@ interface ReferralOption { value: string; label: string; }
 
 const referralOptions: ReferralOption[] = [
   { value: 'docs', label: 'SqlOS docs or examples' },
-  { value: 'emcy', label: 'Emcy or MCP integration work' },
+  { value: 'mcp', label: 'MCP integration work' },
   { value: 'friend', label: 'Recommendation from a teammate' },
   { value: 'review', label: 'Build vs. buy auth evaluation' },
 ];

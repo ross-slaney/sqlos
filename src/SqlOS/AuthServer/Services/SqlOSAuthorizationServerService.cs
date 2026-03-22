@@ -56,16 +56,27 @@ public sealed class SqlOSAuthorizationServerService
         var origin = GetPublicOrigin(httpContext);
         var basePath = _options.BasePath.TrimEnd('/');
 
-        return new SqlOSAuthorizationServerMetadataDto(
-            _options.Issuer,
-            $"{origin}{basePath}/authorize",
-            $"{origin}{basePath}/token",
-            $"{origin}{basePath}/.well-known/jwks.json",
-            ["code"],
-            ["authorization_code", "refresh_token"],
-            ["S256"],
-            scopes,
-            ["none"]);
+        return new SqlOSAuthorizationServerMetadataDto
+        {
+            Issuer = _options.Issuer,
+            AuthorizationEndpoint = $"{origin}{basePath}/authorize",
+            TokenEndpoint = $"{origin}{basePath}/token",
+            JwksUri = $"{origin}{basePath}/.well-known/jwks.json",
+            ResponseTypesSupported = ["code"],
+            GrantTypesSupported = ["authorization_code", "refresh_token"],
+            CodeChallengeMethodsSupported = ["S256"],
+            ScopesSupported = scopes,
+            TokenEndpointAuthMethodsSupported = ["none"],
+            RegistrationEndpoint = _options.ClientRegistration.Dcr.Enabled
+                ? $"{origin}{basePath}/register"
+                : null,
+            ClientIdMetadataDocumentSupported = _options.ClientRegistration.Cimd.Enabled
+                ? true
+                : null,
+            ResourceParameterSupported = _options.ResourceIndicators.Enabled
+                ? true
+                : null
+        };
     }
 
     public async Task<SqlOSAuthorizationRequest> CreateAuthorizationRequestAsync(
@@ -105,6 +116,10 @@ public sealed class SqlOSAuthorizationServerService
                 .ToList();
         }
 
+        var normalizedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(input.Resource)
+            ? input.Resource.Trim()
+            : null;
+
         var authorizationRequest = new SqlOSAuthorizationRequest
         {
             Id = _cryptoService.GenerateId("req"),
@@ -115,7 +130,7 @@ public sealed class SqlOSAuthorizationServerService
             RedirectUri = input.RedirectUri,
             State = input.State,
             Scope = string.Join(' ', requestedScopes),
-            Resource = input.Resource,
+            Resource = normalizedResource,
             Nonce = input.Nonce,
             Prompt = input.Prompt,
             LoginHintEmail = input.LoginHint,
@@ -317,7 +332,10 @@ public sealed class SqlOSAuthorizationServerService
                 throw new InvalidOperationException("A refresh token is required.");
             }
 
-            var refreshed = await _authService.RefreshAsync(new SqlOSRefreshRequest(request.RefreshToken, null), cancellationToken);
+            var refreshResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
+                ? request.Resource.Trim()
+                : null;
+            var refreshed = await _authService.RefreshAsync(new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource), cancellationToken);
             return new SqlOSTokenEndpointResult(refreshed, null);
         }
 
@@ -354,6 +372,21 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Redirect URI does not match the authorization request.");
         }
 
+        var requestedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
+            ? request.Resource.Trim()
+            : null;
+        if (!string.IsNullOrWhiteSpace(authorizationCode.Resource))
+        {
+            if (!string.Equals(authorizationCode.Resource, requestedResource, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Resource does not match the authorization request.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(requestedResource))
+        {
+            throw new InvalidOperationException("Resource cannot be introduced during token exchange.");
+        }
+
         if (!_cryptoService.VerifyPkceCodeVerifier(request.CodeVerifier ?? string.Empty, authorizationCode.CodeChallenge, authorizationCode.CodeChallengeMethod))
         {
             throw new InvalidOperationException("PKCE verification failed.");
@@ -369,6 +402,7 @@ public sealed class SqlOSAuthorizationServerService
             authorizationCode.AuthenticationMethod,
             httpContext.Request.Headers.UserAgent.ToString(),
             httpContext.Connection.RemoteIpAddress?.ToString(),
+            authorizationCode.Resource,
             cancellationToken);
 
         return new SqlOSTokenEndpointResult(tokens, authorizationCode.Scope);
@@ -495,7 +529,8 @@ public sealed record SqlOSTokenRequest(
     string? RedirectUri,
     string? ClientId,
     string? CodeVerifier,
-    string? RefreshToken);
+    string? RefreshToken,
+    string? Resource);
 
 public sealed record SqlOSTokenEndpointResult(
     SqlOSTokenResponse Tokens,

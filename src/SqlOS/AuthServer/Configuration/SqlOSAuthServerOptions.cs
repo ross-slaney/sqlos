@@ -21,6 +21,8 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
+    public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
+    public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
@@ -48,6 +50,18 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigureClientRegistration(Action<SqlOSClientRegistrationOptions> configure)
+    {
+        configure(ClientRegistration);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureResourceIndicators(Action<SqlOSResourceIndicatorOptions> configure)
+    {
+        configure(ResourceIndicators);
+        return this;
+    }
+
     public SqlOSAuthServerOptions SeedBrowserClient(string clientId, string name, params string[] redirectUris)
     {
         SeedClient(client =>
@@ -64,6 +78,50 @@ public class SqlOSAuthServerOptions
             client.IsFirstParty = true;
         });
 
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedOwnedWebApp(string clientId, string name, params string[] redirectUris)
+        => SeedBrowserClient(clientId, name, redirectUris);
+
+    public SqlOSAuthServerOptions SeedOwnedNativeApp(string clientId, string name, params string[] redirectUris)
+        => SeedClient(client =>
+        {
+            client.ClientId = clientId;
+            client.Name = name;
+            client.RedirectUris = redirectUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+    public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Cimd.Enabled = true;
+        ResourceIndicators.Enabled = true;
+        ClientRegistration.Dcr.Enabled = false;
+        configure?.Invoke(ClientRegistration);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions EnableChatGptCompatibility(Action<SqlOSDynamicClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Dcr.Enabled = true;
+        ResourceIndicators.Enabled = true;
+        configure?.Invoke(ClientRegistration.Dcr);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions EnableVsCodeCompatibility(Action<SqlOSDynamicClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Dcr.Enabled = true;
+        ClientRegistration.Dcr.AllowLoopbackRedirectUris = true;
+        ResourceIndicators.Enabled = true;
+        configure?.Invoke(ClientRegistration.Dcr);
         return this;
     }
 }

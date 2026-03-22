@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddDataProtection();
         services.AddHttpClient();
         services.AddSingleton<SqlOSDashboardSessionService>();
+        services.AddSingleton<SqlOSDynamicClientRegistrationRateLimiter>();
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());
@@ -44,6 +45,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSBootstrapper>();
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<SqlOSSettingsService>();
+        services.AddScoped<SqlOSCimdClientService>();
+        services.AddScoped<SqlOSDynamicClientRegistrationService>();
+        services.AddScoped<SqlOSClientResolutionService>();
         services.AddScoped<SqlOSAdminService>();
         services.AddScoped<SqlOSAuthService>();
         services.AddScoped<SqlOSAuthPageSessionService>();

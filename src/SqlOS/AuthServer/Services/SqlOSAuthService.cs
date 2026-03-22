@@ -218,6 +218,16 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Session is no longer active.");
         }
 
+        if (_options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource))
+        {
+            var requestedResource = request.Resource.Trim();
+            if (string.IsNullOrWhiteSpace(session.Resource)
+                || !string.Equals(session.Resource, requestedResource, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Resource does not match the original authorization.");
+            }
+        }
+
         string? organizationId = request.OrganizationId;
         if (!string.IsNullOrWhiteSpace(organizationId) && !await _adminService.UserHasMembershipAsync(session.UserId, organizationId, cancellationToken))
         {
@@ -398,6 +408,12 @@ public sealed class SqlOSAuthService
     public Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken cancellationToken = default)
         => _cryptoService.ValidateAccessTokenAsync(rawToken, cancellationToken);
 
+    public Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
+        string rawToken,
+        string? expectedAudience,
+        CancellationToken cancellationToken = default)
+        => _cryptoService.ValidateAccessTokenAsync(rawToken, expectedAudience, cancellationToken);
+
     public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
         SqlOSUser user,
         SqlOSClientApplication client,
@@ -415,6 +431,30 @@ public sealed class SqlOSAuthService
             authenticationMethod,
             userAgent,
             ipAddress,
+            null,
+            securitySettings,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string? organizationId,
+        string authenticationMethod,
+        string? userAgent,
+        string? ipAddress,
+        string? resource,
+        CancellationToken cancellationToken = default)
+    {
+        var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
+        return await CreateSessionAndTokensAsync(
+            user,
+            client,
+            organizationId,
+            authenticationMethod,
+            userAgent,
+            ipAddress,
+            resource,
             securitySettings,
             cancellationToken);
     }
@@ -435,6 +475,7 @@ public sealed class SqlOSAuthService
             authenticationMethod,
             httpContext.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
+            null,
             securitySettings,
             cancellationToken);
     }
@@ -446,15 +487,19 @@ public sealed class SqlOSAuthService
         string authenticationMethod,
         string? userAgent,
         string? ipAddress,
+        string? resource,
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        var effectiveAudience = ResolveEffectiveAudience(client, resource);
         var session = new SqlOSSession
         {
             Id = _cryptoService.GenerateId("ses"),
             UserId = user.Id,
             ClientApplicationId = client.Id,
             AuthenticationMethod = authenticationMethod,
+            Resource = resource,
+            EffectiveAudience = effectiveAudience,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
             IdleExpiresAt = DateTime.UtcNow.Add(securitySettings.SessionIdleTimeout),
@@ -489,6 +534,11 @@ public sealed class SqlOSAuthService
     }
 
     private static string? GetIp(HttpContext httpContext) => httpContext.Connection.RemoteIpAddress?.ToString();
+
+    private static string ResolveEffectiveAudience(SqlOSClientApplication client, string? resource)
+        => string.IsNullOrWhiteSpace(resource)
+            ? client.Audience
+            : resource.Trim();
 
     private async Task RevokeRefreshTokenFamilyAsync(string sessionId, string familyId, string reason, CancellationToken cancellationToken)
     {

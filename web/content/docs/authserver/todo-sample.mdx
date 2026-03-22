@@ -1,0 +1,122 @@
+---
+title: "Todo Sample"
+description: "Run the narrow, MCP-oriented SqlOS sample with hosted auth, resource metadata, and public-client onboarding paths."
+order: 1.6
+section: authserver
+---
+
+The Todo sample is the canonical "make SqlOS work with MCP clients" walkthrough.
+
+It stays narrow on purpose:
+
+- hosted auth first
+- headless follow-on when you need custom UI
+- a protected resource with audience enforcement
+- protected-resource metadata for MCP clients
+- preregistered local development with `todo-local`
+- portable public-client onboarding with `CIMD` and optional `DCR`
+
+## Run it
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Open `http://localhost:5080/`.
+
+## What the sample includes
+
+### Hosted first
+
+The default path is a seeded browser client called `todo-web`.
+
+Use the landing page to:
+
+- start hosted sign in
+- start hosted sign up
+- land in a tiny Todo UI backed by the sample API
+
+This keeps the first experience simple. You do not have to write a custom auth UI to get a working OAuth flow.
+
+### Headless follow-on
+
+When you want app-owned auth screens, flip:
+
+```bash
+TodoSample__EnableHeadless=true
+```
+
+The sample then redirects `/sqlos/auth/authorize` into `headless.html`, which drives the same authorization request through the SqlOS headless APIs.
+
+That lets you compare:
+
+- hosted setup for the fastest first version
+- headless setup for custom branding and forms
+
+## Protected resource behavior
+
+The sample API protects `/api/todos` with audience-aware token validation.
+
+It also exposes:
+
+- `GET /.well-known/oauth-protected-resource`
+
+And when a caller presents no token or the wrong audience, the API returns:
+
+- `401 Unauthorized`
+- a `WWW-Authenticate` header with `resource_metadata`
+
+That means the sample demonstrates the resource-server side of MCP auth, not just the authorization server.
+
+## Local preregistered client
+
+For localhost development, use the seeded client:
+
+- `client_id`: `todo-local`
+- redirect URI: `http://localhost:8787/oauth/callback`
+- auth method: public PKCE only
+
+This is the easiest local loop before you publish the sample on a stable HTTPS origin.
+
+## Portable public clients
+
+Once the sample is reachable on public HTTPS, you can use both public-client onboarding paths.
+
+### CIMD
+
+The sample publishes a metadata document at:
+
+```text
+/clients/portable-client.json
+```
+
+That document is useful as:
+
+- a working reference for the shape of a `client_id` metadata document
+- a starter path when you want to point a portable client at a stable HTTPS URL
+
+### DCR
+
+`DCR` stays off by default. Enable it when you need compatibility clients:
+
+```bash
+TodoSample__EnableDcr=true
+```
+
+Then use:
+
+```text
+POST /sqlos/auth/register
+```
+
+This is the compatibility path for clients that still expect dynamic client registration.
+
+## Why this sample exists
+
+Use the Todo sample when your question is:
+
+> "How do I expose SqlOS for modern public clients and MCP-oriented OAuth?"
+
+Use the broader Example stack when your question is:
+
+> "How do I explore all of SqlOS, including OIDC, SAML, org workflows, and FGA?"

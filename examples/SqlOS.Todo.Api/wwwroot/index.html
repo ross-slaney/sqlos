@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SqlOS Todo Sample</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body data-page="index">
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">SqlOS Todo Sample</p>
+      <h1>Start hosted. Add headless later. Stay ready for portable clients.</h1>
+      <p class="lede">
+        This sample is the narrow MCP-oriented reference: hosted auth by default,
+        protected-resource metadata, and clear paths for preregistered, CIMD, and DCR clients.
+      </p>
+      <div class="button-row">
+        <button id="hosted-login-button" type="button">Hosted sign in</button>
+        <button id="hosted-signup-button" class="secondary" type="button">Hosted sign up</button>
+        <a class="link-button" href="/app.html">Open the Todo UI</a>
+      </div>
+    </section>
+
+    <section class="panel-grid">
+      <article class="panel">
+        <h2>Local development</h2>
+        <p>Use the seeded `todo-web` client for the browser UI and `todo-local` for preregistered local MCP development.</p>
+        <pre id="sample-config"></pre>
+      </article>
+
+      <article class="panel">
+        <h2>Public-client onboarding</h2>
+        <ul>
+          <li><strong>Portable client:</strong> publish the sample and point a `client_id` URL at the portable metadata document.</li>
+          <li><strong>Compatibility client:</strong> enable DCR when you need ChatGPT- or VS Code-style registration.</li>
+          <li><strong>Resource server:</strong> this sample exposes resource metadata and rejects wrong-audience tokens.</li>
+        </ul>
+        <div class="button-row">
+          <a class="link-button secondary-link" href="/clients/portable-client.json">View sample CIMD document</a>
+          <a class="link-button secondary-link" href="/.well-known/oauth-protected-resource">View protected-resource metadata</a>
+          <a class="link-button secondary-link" href="/headless.html">Headless follow-on</a>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script src="/sample.js" defer></script>
+</body>
+</html>

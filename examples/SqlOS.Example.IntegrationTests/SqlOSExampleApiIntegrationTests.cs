@@ -374,6 +374,72 @@ public sealed class SqlOSExampleApiIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task ClientAdminEndpoints_ReturnRichClientViews_AndSupportLifecycleActions()
+    {
+        var clientSuffix = Guid.NewGuid().ToString("N")[..10];
+        var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/clients", new
+        {
+            clientId = $"dashboard-client-{clientSuffix}",
+            name = $"Dashboard Client {clientSuffix}",
+            audience = "sqlos",
+            redirectUris = new[] { $"https://dashboard-{clientSuffix}.example.test/callback" },
+            description = "Created by admin integration test",
+            allowedScopes = new[] { "openid", "profile" },
+            requirePkce = true,
+            isFirstParty = true
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var clientId = createJson.RootElement.GetProperty("id").GetString();
+
+        var listResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?search={clientSuffix}&page=1&pageSize=10");
+        listResponse.EnsureSuccessStatusCode();
+        var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
+        var listItem = listJson.RootElement.GetProperty("data").EnumerateArray()
+            .First(item => item.GetProperty("clientId").GetString() == $"dashboard-client-{clientSuffix}");
+        listItem.GetProperty("sourceLabel").GetString().Should().Be("Manual");
+        listItem.GetProperty("lifecycleState").GetString().Should().Be("active");
+        listItem.GetProperty("redirectUris").GetArrayLength().Should().Be(1);
+        listItem.TryGetProperty("managedByStartupSeed", out _).Should().BeTrue();
+        listItem.TryGetProperty("coreMetadataEditable", out _).Should().BeTrue();
+
+        var detailResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients/{clientId}");
+        detailResponse.EnsureSuccessStatusCode();
+        var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        detailJson.RootElement.GetProperty("clientId").GetString().Should().Be($"dashboard-client-{clientSuffix}");
+        detailJson.RootElement.GetProperty("allowedScopes").GetArrayLength().Should().Be(2);
+        detailJson.RootElement.TryGetProperty("recentAuditEvents", out _).Should().BeTrue();
+
+        var disableResponse = await AdminPostAsync($"/sqlos/admin/auth/api/clients/{clientId}/disable", new
+        {
+            reason = "integration_test_disable"
+        });
+        disableResponse.EnsureSuccessStatusCode();
+        var disableJson = JsonDocument.Parse(await disableResponse.Content.ReadAsStringAsync());
+        disableJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeFalse();
+        disableJson.RootElement.GetProperty("disabledReason").GetString().Should().Be("integration_test_disable");
+
+        var disabledListResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?status=disabled&search={clientSuffix}&page=1&pageSize=10");
+        disabledListResponse.EnsureSuccessStatusCode();
+        var disabledListJson = JsonDocument.Parse(await disabledListResponse.Content.ReadAsStringAsync());
+        disabledListJson.RootElement.GetProperty("totalCount").GetInt32().Should().BeGreaterThan(0);
+
+        var enableResponse = await ExampleApiFixture.Client.PostAsync($"/sqlos/admin/auth/api/clients/{clientId}/enable", JsonContent.Create(new { }));
+        enableResponse.EnsureSuccessStatusCode();
+        var enableJson = JsonDocument.Parse(await enableResponse.Content.ReadAsStringAsync());
+        enableJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeTrue();
+
+        var revokeResponse = await AdminPostAsync($"/sqlos/admin/auth/api/clients/{clientId}/revoke", new
+        {
+            reason = "integration_test_revoke"
+        });
+        revokeResponse.EnsureSuccessStatusCode();
+        var revokeJson = JsonDocument.Parse(await revokeResponse.Content.ReadAsStringAsync());
+        revokeJson.RootElement.TryGetProperty("revokedSessions", out _).Should().BeTrue();
+    }
+
     private static async Task<HttpResponseMessage> AdminPostAsync(string path, object body)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path)

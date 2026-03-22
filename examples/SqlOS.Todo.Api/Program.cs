@@ -1,0 +1,403 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Configuration;
+using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Services;
+using SqlOS.Configuration;
+using SqlOS.Extensions;
+using SqlOS.Todo.Api.Configuration;
+using SqlOS.Todo.Api.Data;
+using SqlOS.Todo.Api.Models;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<TodoSampleOptions>(builder.Configuration.GetSection("TodoSample"));
+
+var connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? builder.Configuration["ConnectionStrings:DefaultConnection"]
+    ?? builder.Configuration["ConnectionStrings__DefaultConnection"];
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Connection string 'DefaultConnection' was not configured.");
+}
+
+builder.Services.AddDbContext<TodoSampleDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.Configure<JsonOptions>(options =>
+{
+    options.SerializerOptions.WriteIndented = true;
+});
+
+var sampleConfig = builder.Configuration.GetSection("TodoSample").Get<TodoSampleOptions>() ?? new TodoSampleOptions();
+var publicOrigin = sampleConfig.PublicOrigin.TrimEnd('/');
+var hostedCallbackUrl = $"{publicOrigin}/callback.html";
+var portableClientUrl = $"{publicOrigin}{sampleConfig.PortableClientPath}";
+var cimdTrustedHosts = sampleConfig.CimdTrustedHosts
+    .Concat([new Uri(publicOrigin).Host])
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToList();
+
+builder.AddSqlOS<TodoSampleDbContext>(options =>
+{
+    options.DashboardBasePath = "/sqlos";
+
+    var auth = options.AuthServer;
+    auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
+    auth.PublicOrigin = publicOrigin;
+    auth.DefaultAudience = sampleConfig.Resource;
+
+    auth.SeedAuthPage(page =>
+    {
+        page.PageTitle = "Ship the Todo app first.";
+        page.PageSubtitle = "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
+        page.PrimaryColor = "#0f172a";
+        page.AccentColor = "#2563eb";
+        page.BackgroundColor = "#f8fafc";
+        page.Layout = "split";
+        page.EnablePasswordSignup = true;
+        page.EnabledCredentialTypes = ["password"];
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = sampleConfig.HostedClientId;
+        client.Name = sampleConfig.HostedClientName;
+        client.Description = "Hosted-first web client for the SqlOS Todo sample.";
+        client.Audience = sampleConfig.Resource;
+        client.RedirectUris = [hostedCallbackUrl];
+        client.AllowedScopes = sampleConfig.AllowedScopes;
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = sampleConfig.LocalClientId;
+        client.Name = "Todo Local";
+        client.Description = "Local preregistered client for localhost MCP development against the Todo sample.";
+        client.Audience = sampleConfig.Resource;
+        client.RedirectUris = [sampleConfig.LocalRedirectUri];
+        client.AllowedScopes = sampleConfig.AllowedScopes;
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = false;
+    });
+
+    auth.EnablePortableMcpClients(registration =>
+    {
+        foreach (var host in cimdTrustedHosts)
+        {
+            registration.Cimd.TrustedHosts.Add(host);
+        }
+    });
+
+    if (sampleConfig.EnableDcr)
+    {
+        auth.ClientRegistration.Dcr.Enabled = true;
+        auth.ClientRegistration.Dcr.AllowHttpsRedirectUris = true;
+        auth.ClientRegistration.Dcr.AllowLoopbackRedirectUris = true;
+    }
+
+    if (sampleConfig.EnableHeadless)
+    {
+        auth.UseHeadlessAuthPage(headless =>
+        {
+            headless.BuildUiUrl = ctx => QueryHelpers.AddQueryString(
+                $"{publicOrigin}{sampleConfig.HeadlessUiPath}",
+                new Dictionary<string, string?>
+                {
+                    ["request"] = ctx.RequestId,
+                    ["view"] = ctx.View,
+                    ["error"] = ctx.Error,
+                    ["email"] = ctx.Email,
+                    ["pendingToken"] = ctx.PendingToken,
+                    ["displayName"] = ctx.DisplayName
+                });
+        });
+    }
+});
+
+var app = builder.Build();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.MapSqlOS();
+
+app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOptions<SqlOSAuthServerOptions> authOptions) =>
+{
+    var sample = sampleOptions.Value;
+    var sampleOrigin = sample.PublicOrigin.TrimEnd('/');
+    var hostedCallback = $"{sampleOrigin}/callback.html";
+    var protectedResourceMetadata = $"{sampleOrigin}/.well-known/oauth-protected-resource";
+    return Results.Ok(new
+    {
+        publicOrigin = sampleOrigin,
+        issuer = authOptions.Value.Issuer,
+        resource = sample.Resource,
+        protectedResourceMetadata,
+        hostedClient = new
+        {
+            clientId = sample.HostedClientId,
+            redirectUri = hostedCallback
+        },
+        localClient = new
+        {
+            clientId = sample.LocalClientId,
+            redirectUri = sample.LocalRedirectUri
+        },
+        portableClient = new
+        {
+            clientId = $"{sampleOrigin}{sample.PortableClientPath}",
+            redirectUri = sample.PortableClientRedirectUri
+        },
+        headlessEnabled = sample.EnableHeadless,
+        dcrEnabled = authOptions.Value.ClientRegistration.Dcr.Enabled,
+        cimdEnabled = authOptions.Value.ClientRegistration.Cimd.Enabled,
+        allowedScopes = sample.AllowedScopes
+    });
+});
+
+app.MapGet("/.well-known/oauth-protected-resource", (IOptions<TodoSampleOptions> sampleOptions, IOptions<SqlOSAuthServerOptions> authOptions) =>
+{
+    var sample = sampleOptions.Value;
+    var payload = new Dictionary<string, object?>
+    {
+        ["resource"] = sample.Resource,
+        ["authorization_servers"] = new[] { authOptions.Value.Issuer },
+        ["scopes_supported"] = sample.AllowedScopes,
+        ["bearer_methods_supported"] = new[] { "header" },
+        ["resource_documentation"] = $"{sample.PublicOrigin.TrimEnd('/')}/"
+    };
+
+    return Results.Text(JsonSerializer.Serialize(payload), "application/json");
+});
+
+app.MapGet(sampleConfig.PortableClientPath, (IOptions<TodoSampleOptions> sampleOptions) =>
+{
+    var sample = sampleOptions.Value;
+    var sampleOrigin = sample.PublicOrigin.TrimEnd('/');
+    var payload = new Dictionary<string, object?>
+    {
+        ["client_id"] = $"{sampleOrigin}{sample.PortableClientPath}",
+        ["client_name"] = sample.PortableClientName,
+        ["redirect_uris"] = new[] { sample.PortableClientRedirectUri },
+        ["grant_types"] = new[] { "authorization_code", "refresh_token" },
+        ["response_types"] = new[] { "code" },
+        ["token_endpoint_auth_method"] = "none",
+        ["scope"] = string.Join(' ', sample.AllowedScopes),
+        ["client_uri"] = sample.PortableClientUri,
+        ["software_id"] = sample.PortableSoftwareId,
+        ["software_version"] = sample.PortableSoftwareVersion
+    };
+
+    return Results.Text(JsonSerializer.Serialize(payload), "application/json");
+});
+
+app.MapGet("/api/todos", async (
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IOptions<TodoSampleOptions> sampleOptions,
+    TodoSampleDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
+    if (validated == null)
+    {
+        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+    }
+
+    var items = await dbContext.TodoItems
+        .Where(x => x.SqlOSUserId == validated.UserId)
+        .OrderBy(x => x.IsCompleted)
+        .ThenBy(x => x.CreatedAt)
+        .Select(x => new
+        {
+            x.Id,
+            x.Title,
+            x.IsCompleted,
+            x.CreatedAt,
+            x.CompletedAt
+        })
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(new
+    {
+        resource = sampleOptions.Value.Resource,
+        audience = validated.Audience,
+        userId = validated.UserId,
+        organizationId = validated.OrganizationId,
+        items
+    });
+});
+
+app.MapPost("/api/todos", async (
+    CreateTodoRequest request,
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IOptions<TodoSampleOptions> sampleOptions,
+    TodoSampleDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
+    if (validated == null)
+    {
+        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(new { error = "Title is required." });
+    }
+
+    var item = new TodoItem
+    {
+        Id = Guid.NewGuid(),
+        SqlOSUserId = validated.UserId ?? string.Empty,
+        Title = request.Title.Trim(),
+        CreatedAt = DateTime.UtcNow
+    };
+
+    dbContext.TodoItems.Add(item);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(new
+    {
+        item.Id,
+        item.Title,
+        item.IsCompleted,
+        item.CreatedAt
+    });
+});
+
+app.MapPost("/api/todos/{id:guid}/toggle", async (
+    Guid id,
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IOptions<TodoSampleOptions> sampleOptions,
+    TodoSampleDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
+    if (validated == null)
+    {
+        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+    }
+
+    var item = await dbContext.TodoItems
+        .FirstOrDefaultAsync(x => x.Id == id && x.SqlOSUserId == validated.UserId, cancellationToken);
+    if (item == null)
+    {
+        return Results.NotFound();
+    }
+
+    item.IsCompleted = !item.IsCompleted;
+    item.CompletedAt = item.IsCompleted ? DateTime.UtcNow : null;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(new
+    {
+        item.Id,
+        item.Title,
+        item.IsCompleted,
+        item.CompletedAt
+    });
+});
+
+app.MapDelete("/api/todos/{id:guid}", async (
+    Guid id,
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IOptions<TodoSampleOptions> sampleOptions,
+    TodoSampleDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
+    if (validated == null)
+    {
+        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+    }
+
+    var item = await dbContext.TodoItems
+        .FirstOrDefaultAsync(x => x.Id == id && x.SqlOSUserId == validated.UserId, cancellationToken);
+    if (item == null)
+    {
+        return Results.NotFound();
+    }
+
+    dbContext.TodoItems.Remove(item);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapGet("/api/me", async (
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IOptions<TodoSampleOptions> sampleOptions,
+    CancellationToken cancellationToken) =>
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
+    if (validated == null)
+    {
+        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+    }
+
+    return Results.Ok(new
+    {
+        validated.UserId,
+        validated.OrganizationId,
+        validated.ClientId,
+        audience = validated.Audience,
+        claims = validated.Principal.Claims.Select(x => new { x.Type, x.Value })
+    });
+});
+
+await EnsureDatabaseAsync(app);
+app.Run();
+
+static async Task EnsureDatabaseAsync(WebApplication app)
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<TodoSampleDbContext>();
+    await dbContext.Database.EnsureCreatedAsync();
+}
+
+static async Task<SqlOSValidatedToken?> TryValidateTodoTokenAsync(
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    TodoSampleOptions sampleOptions,
+    CancellationToken cancellationToken)
+{
+    var authorization = httpContext.Request.Headers.Authorization.ToString();
+    if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+    {
+        return null;
+    }
+
+    var rawToken = authorization["Bearer ".Length..].Trim();
+    if (string.IsNullOrWhiteSpace(rawToken))
+    {
+        return null;
+    }
+
+    return await authService.ValidateAccessTokenAsync(rawToken, sampleOptions.Resource, cancellationToken);
+}
+
+static IResult CreateTodoChallenge(HttpContext httpContext, TodoSampleOptions sampleOptions)
+{
+    var resourceMetadataUrl = $"{sampleOptions.PublicOrigin.TrimEnd('/')}/.well-known/oauth-protected-resource";
+    httpContext.Response.Headers.WWWAuthenticate = $"Bearer realm=\"SqlOS Todo API\", resource_metadata=\"{resourceMetadataUrl}\", scope=\"todos.read todos.write\"";
+    return Results.Json(new
+    {
+        error = "invalid_token",
+        error_description = "Present a bearer token minted for the Todo resource.",
+        resource_metadata = resourceMetadataUrl
+    }, statusCode: StatusCodes.Status401Unauthorized);
+}
+
+public sealed record CreateTodoRequest(string Title);
+public partial class Program { }

@@ -1,0 +1,103 @@
+---
+title: "Client ID Metadata Documents"
+description: "Use CIMD when a public client should identify itself with a stable HTTPS metadata document."
+order: 4.62
+section: authserver
+---
+
+`CIMD` is the portable-client path in SqlOS.
+
+Instead of creating a local client first, the client uses a stable HTTPS `client_id`. SqlOS fetches that URL, validates the JSON, and caches the metadata in the existing client store.
+
+## When to use it
+
+Use `CIMD` when:
+
+- a client should work across many auth-server deployments
+- the client already has a stable HTTPS home
+- you want the client to own its redirect URIs and display metadata
+
+Do **not** start here if you are just wiring your own first-party web app. Seed a client first and keep the first version simple.
+
+## Turn it on
+
+`CIMD` is enabled by default, but the helper below makes the intent obvious and also turns on resource indicators for portable-client flows:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnablePortableMcpClients(registration =>
+    {
+        registration.Cimd.TrustedHosts.Add("clients.example.com");
+    });
+});
+```
+
+You can also configure it directly:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+    options.AuthServer.ClientRegistration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
+});
+```
+
+## What SqlOS validates
+
+SqlOS expects:
+
+- an HTTPS `client_id` with a path
+- JSON whose `client_id` exactly matches the URL used
+- `client_name`
+- `redirect_uris`
+- `token_endpoint_auth_method=none` in v1
+
+SqlOS also:
+
+- validates redirect URIs from the document, not the dashboard
+- respects HTTP cache headers when possible
+- uses a fallback TTL when needed
+- records fetch and validation failures in audit events
+
+## Trust policy
+
+Use trust rules when you want more than the defaults.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Cimd.TrustPolicy = async (context, cancellationToken) =>
+    {
+        if (!context.ClientIdUri.Host.EndsWith(".example.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return SqlOSClientRegistrationPolicyDecision.Deny("Only example.com metadata hosts are allowed.");
+        }
+
+        return SqlOSClientRegistrationPolicyDecision.Allow();
+    };
+});
+```
+
+That is the right place for:
+
+- host allowlists
+- deny lists
+- environment-specific trust decisions
+
+## Dashboard behavior
+
+`CIMD` clients appear in the normal client list with source and cache details.
+
+Operators can:
+
+- inspect the cached metadata
+- disable the client
+- revoke active sessions
+- filter by source
+
+## Related guides
+
+- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
+- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
+- [Todo Sample](/docs/guides/authserver/todo-sample)

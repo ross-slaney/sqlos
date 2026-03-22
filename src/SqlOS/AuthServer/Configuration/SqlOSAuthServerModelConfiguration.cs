@@ -132,11 +132,24 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSClientApplications", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.ClientId).IsUnique();
-            entity.Property(x => x.ClientId).HasMaxLength(120);
-            entity.Property(x => x.Audience).HasMaxLength(200);
+            entity.HasIndex(x => x.RegistrationSource);
+            entity.HasIndex(x => new { x.IsActive, x.RegistrationSource });
+            entity.HasIndex(x => x.MetadataDocumentUrl);
+            entity.HasIndex(x => x.LastSeenAt);
+            entity.Property(x => x.ClientId).HasMaxLength(850);
+            entity.Property(x => x.Audience).HasMaxLength(850);
             entity.Property(x => x.Name).HasMaxLength(200);
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.ClientType).HasMaxLength(40);
+            entity.Property(x => x.RegistrationSource).HasMaxLength(20);
+            entity.Property(x => x.TokenEndpointAuthMethod).HasMaxLength(60);
+            entity.Property(x => x.MetadataDocumentUrl).HasMaxLength(850);
+            entity.Property(x => x.ClientUri).HasMaxLength(850);
+            entity.Property(x => x.LogoUri).HasMaxLength(850);
+            entity.Property(x => x.SoftwareId).HasMaxLength(200);
+            entity.Property(x => x.SoftwareVersion).HasMaxLength(120);
+            entity.Property(x => x.MetadataEtag).HasMaxLength(256);
+            entity.Property(x => x.DisabledReason).HasMaxLength(500);
         });
 
         modelBuilder.Entity<SqlOSSession>(entity =>
@@ -144,6 +157,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSSessions", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
+            entity.Property(x => x.Resource).HasMaxLength(2048);
+            entity.Property(x => x.EffectiveAudience).HasMaxLength(2048);
             entity.HasOne(x => x.User)
                 .WithMany(x => x.Sessions)
                 .HasForeignKey(x => x.UserId)

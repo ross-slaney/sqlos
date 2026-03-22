@@ -164,6 +164,7 @@ public static class ExampleDemoEndpoints
             ExampleFgaService fgaService,
             ExampleAppDbContext db,
             IOptions<ExampleWebOptions> webOptions,
+            IOptions<SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions> authOptions,
             HttpContext httpContext,
             CancellationToken cancellationToken) =>
         {
@@ -199,7 +200,10 @@ public static class ExampleDemoEndpoints
                 if (result.Tokens == null)
                     return Results.BadRequest(new { error = "Login did not produce tokens." });
 
-                var validated = await authService.ValidateAccessTokenAsync(result.Tokens.AccessToken, cancellationToken)
+                var validated = await authService.ValidateAccessTokenAsync(
+                        result.Tokens.AccessToken,
+                        authOptions.Value.DefaultAudience,
+                        cancellationToken)
                     ?? throw new InvalidOperationException("Token validation failed after login.");
 
                 await fgaService.EnsureUserAccessAsync(validated.UserId!, org.Id, cancellationToken);

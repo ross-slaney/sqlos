@@ -1,343 +1,202 @@
 ---
 title: "What an Authorization Server Needs for OAuth-Powered MCP Servers"
-description: "If you want an MCP server to work with Emcy and other modern OAuth clients, your authorization server needs more than a token endpoint. Here is the practical checklist and how SqlOS maps to it today."
+description: "If you want an MCP server to work with modern OAuth clients, your authorization server needs more than a token endpoint. Here is the practical checklist and how SqlOS maps to it today."
 date: "2026-03-15"
 author: "SqlOS Team"
 tags: ["MCP", "OAuth", "AuthServer", "SqlOS"]
 ---
 
-If you want your MCP server to work with a modern OAuth client like Emcy, the right question is not "do I have login?"
+If you want your MCP server to work with a modern OAuth client, the right question is not "do I have login?"
 
-It is: **does my authorization server expose the exact protocol surface that an MCP client and MCP resource server expect?**
+It is:
 
-That is a narrower question, and it is easier to answer precisely.
+> "Does my authorization server expose the exact protocol surface that a modern public client and protected resource expect?"
 
-The short version is this:
+That question is narrower, and it is much easier to answer precisely.
 
-- the **MCP server** is the OAuth **resource server**
-- your **authorization server** is the thing that authenticates the user and issues tokens
-- those are different responsibilities
+## The split: authorization server vs protected resource
 
-SqlOS now provides the full **authorization-server side** for preregistered public-client MCP flows. That means branded browser auth, `/sqlos/auth/authorize`, `/sqlos/auth/token`, metadata, JWKS, PKCE, redirect URI validation, sessions, refresh tokens, logout, OIDC, and SAML.
+For OAuth-powered MCP there are two protocol surfaces:
 
-What SqlOS does **not** do is turn your application into the MCP resource server automatically. Your MCP server still needs to expose protected-resource metadata and validate the bearer token it receives.
-
-If you generate your MCP server with Emcy's `openapi-to-mcp`, that resource-server side is already handled.
-
-## The Split: Authorization Server vs MCP Server
-
-For OAuth-powered MCP, there are two protocol surfaces:
-
-1. **Authorization server surface**
-   - browser login/consent flow
+1. **Authorization server**
+   - browser login and signup
    - authorization code + PKCE
    - token issuance
-   - authorization server metadata
+   - authorization-server metadata
    - JWKS
+   - client onboarding rules
 
-2. **MCP resource server surface**
+2. **Protected resource**
    - `/.well-known/oauth-protected-resource`
    - `WWW-Authenticate: Bearer resource_metadata="..."`
-   - bearer token validation
-   - audience/resource enforcement
+   - bearer-token validation
+   - audience enforcement
 
-That split matters because a lot of teams implement only the second half or only the first half, then wonder why modern MCP auth clients still do not work cleanly.
+That split matters because many teams only build half.
 
-The current MCP authorization spec and RFC 9728 make that split explicit:
+SqlOS covers the authorization-server side. Your application or MCP server still needs to expose protected-resource metadata and validate bearer tokens on the resource side.
 
-- the MCP server exposes protected-resource metadata
-- the authorization server exposes authorization-server metadata
-- the client discovers both and runs a browser PKCE flow
+## What an authorization server needs now
 
-If you want a concise mental model:
+If you want to support modern public clients cleanly, your auth server needs more than `/authorize` and `/token`.
 
-```text
-Emcy -> MCP server -> protected-resource metadata -> authorization server
-Emcy popup -> authorization server -> user login -> auth code -> token
-Emcy -> MCP server with bearer token
-```
+At minimum it should provide:
 
-## What the Authorization Server Must Do
+- authorization-server metadata
+- authorization code + PKCE for public clients
+- real redirect URI validation
+- signed JWTs and JWKS
+- refresh, revocation, and logout
+- a browser auth experience
+- a client onboarding story for both owned apps and public interoperability
+- resource indicators when the protected resource matters
 
-For an Emcy-compatible, modern OAuth-powered MCP server, the authorization server needs to provide at least the following.
+## What SqlOS ships today
 
-### 1. Publish authorization server metadata
-
-The client needs a standards-facing metadata endpoint so it can discover where to send the browser and where to exchange the code.
-
-That means exposing:
-
-```text
-GET /sqlos/auth/.well-known/oauth-authorization-server
-```
-
-with the important fields:
-
-- `issuer`
-- `authorization_endpoint`
-- `token_endpoint`
-- `jwks_uri`
-- supported grant types
-- supported PKCE methods
-
-SqlOS provides this today through:
-
-```text
-GET /sqlos/auth/.well-known/oauth-authorization-server
-```
-
-and
-
-```text
-GET /sqlos/auth/.well-known/jwks.json
-```
-
-## 2. Support authorization code + PKCE for public clients
-
-This is the browser-client happy path. For Emcy, it is the right path.
-
-The client needs to be able to:
-
-- redirect the user to `/sqlos/auth/authorize`
-- include `code_challenge`
-- use `code_challenge_method=S256`
-- exchange the code at `/sqlos/auth/token`
-- send no client secret for public-client flows
-
-SqlOS supports exactly that narrow V1 surface:
-
-- `authorization_code`
-- `refresh_token`
-- public PKCE clients
-- `token_endpoint_auth_method = none`
-
-This is intentional. It is the right scope for browser-first MCP auth.
-
-## 3. Validate preregistered client IDs and redirect URIs
-
-This is the part people skip when they say "we have OAuth."
-
-Emcy needs to appear to the authorization server as a real client. Today the cleanest way to do that is **preregistration**.
-
-That means the auth server must know:
-
-- `client_id`
-- allowed `redirect_uris`
-- whether PKCE is required
-- optionally allowed scopes and audience
-
-SqlOS supports that through client records and startup seeding.
-
-For an Emcy integration, the minimum useful setup looks like this:
-
-```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.PublicOrigin = "https://api.example.com";
-    options.AuthServer.Issuer = "https://api.example.com/sqlos/auth";
-
-    options.AuthServer.SeedClient(client =>
-    {
-        client.ClientId = "emcy-cloud";
-        client.Name = "Emcy Cloud";
-        client.RedirectUris = ["https://app.emcy.ai/oauth/callback"];
-        client.AllowedScopes = ["openid", "profile", "email"];
-        client.Audience = "https://mcp.example.com";
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = true;
-    });
-
-    options.AuthServer.SeedClient(client =>
-    {
-        client.ClientId = "emcy-localhost";
-        client.Name = "Emcy Local";
-        client.RedirectUris = ["http://localhost:3100/oauth/callback"];
-        client.AllowedScopes = ["openid", "profile", "email"];
-        client.Audience = "https://mcp.example.com";
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = true;
-    });
-});
-
-var app = builder.Build();
-app.MapSqlOS();
-```
-
-That is enough for a real preregistered public-client flow.
-
-## 4. Issue bearer tokens that the MCP server can validate
-
-Once the code is exchanged, the auth server must mint access tokens with:
-
-- a stable `iss`
-- a verifiable signature
-- a stable `kid`
-- a usable `aud`
-- user/session/client context in claims
-
-In SqlOS, access tokens are RS256-signed JWTs, and the public keys are published via JWKS.
-
-That gives the MCP resource server what it needs to validate:
-
-- signature
-- issuer
-- audience
-- expiry
-
-### Audience matters
-
-This is the part to be explicit about.
-
-SqlOS uses the client's configured `Audience` as the token audience. For an MCP server that validates bearer tokens against a resource URL, set that audience to the resource identifier the MCP server expects.
-
-In other words: the auth server and MCP server need to agree on the audience model.
-
-## 5. Support refresh, logout, and session revocation
-
-For human-authorized agents, login is not the whole story.
-
-You also need:
-
-- refresh token rotation
-- replay handling
-- session revocation
-- browser logout
-- logout-all
-
-SqlOS provides all of that today:
-
-- refresh token rotation
-- family revocation on replay
-- session-scoped logout
-- logout-all
-- hosted browser logout routes and auth-page session cleanup
-
-That matters because an embedded agent client like Emcy will keep using tokens across multiple tool calls and conversations. Without refresh and revocation, the system is technically usable but operationally weak.
-
-## 6. Provide a real browser auth experience
-
-Modern OAuth clients do not require a raw IdP page.
-
-They require a valid OAuth authorization flow.
-
-That means the browser entrypoint can absolutely be branded:
-
-- your own login page
-- your own signup page
-- your own email-first flow
-- your own SSO routing
-
-SqlOS AuthPage is built for exactly that shape:
-
-- `/sqlos/auth/login`
-- `/sqlos/auth/signup`
-- `/sqlos/auth/authorize`
-- home realm discovery by email domain
-- password
-- OIDC providers
-- SAML SSO
-
-So if you want your MCP server auth to feel like your application rather than a third-party broker, that is a browser UX problem, not a protocol problem.
-
-## What SqlOS Provides Today
-
-On the authorization-server side, SqlOS provides:
+On the authorization-server side, SqlOS now provides:
 
 - `GET /sqlos/auth/authorize`
 - `POST /sqlos/auth/token`
 - `GET /sqlos/auth/.well-known/oauth-authorization-server`
 - `GET /sqlos/auth/.well-known/jwks.json`
-- hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, `/sqlos/auth/logout`, and `/sqlos/auth/logged-out`
+- hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, and related auth-page routes
 - public PKCE clients
-- preregistered client records and startup seeding
-- redirect URI validation
-- RS256 signing keys with rotation
-- refresh token rotation and logout
-- password auth
-- OIDC upstream login
-- SAML SSO with home realm discovery
-- branded hosted AuthPage
+- seeded and manual client records for owned apps
+- `CIMD` for portable public clients
+- optional `DCR` for compatibility clients
+- resource-indicator binding through authorize, token, refresh, and JWT `aud`
+- redirect validation, rate limiting, audit logging, disable, revoke, and stale-client cleanup
+- password auth, upstream OIDC, and SAML behind the same browser flow
 
-That is enough to act as the authorization server for an Emcy-compatible MCP deployment today.
+That is enough to support the auth-server half of modern MCP-oriented OAuth, not just classic app login.
 
-## What SqlOS Does Not Claim Yet
+## The three-lane model
 
-Two things should be said clearly.
+The simplest way to reason about SqlOS is not "which RFC acronym do I pick?"
 
-### SqlOS is not the MCP resource server
+It is:
 
-Your MCP server still needs to:
+### 1. Owned apps
+
+Use seeded or manual clients when you control the app.
+
+Examples:
+
+- your web app
+- your mobile app
+- your desktop app
+- localhost tooling
+
+This should stay the easiest path:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedOwnedWebApp(
+        "todo-web",
+        "Todo Web",
+        "https://app.example.com/auth/callback");
+});
+```
+
+### 2. Portable public clients
+
+Use `CIMD` when the client should identify itself with a stable HTTPS `client_id` that points to metadata it owns.
+
+This is the better long-term public-client model because:
+
+- the client owns its metadata
+- the auth server can fetch and cache it
+- the same client can work across many deployments
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnablePortableMcpClients(registration =>
+    {
+        registration.Cimd.TrustedHosts.Add("clients.example.com");
+    });
+});
+```
+
+### 3. Compatibility clients
+
+Use `DCR` when a real client still expects runtime registration.
+
+This is practical compatibility, not the ideal first choice:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnableChatGptCompatibility();
+});
+```
+
+SqlOS keeps that path intentionally narrow:
+
+- public clients only
+- PKCE required
+- `token_endpoint_auth_method=none`
+- strict redirect validation
+- rate limiting and audit logging
+
+## Resource indicators matter
+
+Classic app OAuth often gets away with a client-scoped audience model.
+
+MCP-style flows are better when the client sends a `resource` and the resulting token is clearly bound to that protected resource.
+
+SqlOS now supports that end to end:
+
+- the authorization request can carry `resource`
+- the token exchange must match the original binding
+- refresh preserves the original binding
+- the JWT `aud` becomes the resolved resource when present
+
+That gives the protected resource a cleaner audience model and avoids vague "whatever the client was configured with" semantics for public interoperability.
+
+## What SqlOS still does not do for you
+
+SqlOS is not the protected resource.
+
+Your resource server still needs to:
 
 - expose `/.well-known/oauth-protected-resource`
-- advertise `resource_metadata` in `WWW-Authenticate`
-- validate bearer tokens against issuer, signature, expiry, and audience
+- return `WWW-Authenticate` challenges with `resource_metadata`
+- validate issuer, signature, expiry, and audience
 
-If you are using Emcy's `openapi-to-mcp` generator, that side can be generated for you.
+The Todo sample shows both halves working together.
 
-### SqlOS does not yet ship CIMD or DCR
+## Practical checklist
 
-Today, SqlOS is strongest in the **preregistered public-client** path.
+If you are evaluating an auth server for modern MCP-oriented OAuth, ask:
 
-That is enough for Emcy and similar controlled integrations where the client and server already have a relationship.
+1. Does it publish authorization-server metadata and JWKS?
+2. Does it support authorization code + PKCE for public clients?
+3. Can it onboard owned clients cleanly?
+4. Can it support portable clients with `CIMD`?
+5. Can it optionally support compatibility clients with `DCR`?
+6. Can it bind tokens to a protected resource through `resource` and `aud`?
+7. Does it have lifecycle controls such as disable, revoke, audit, and cleanup?
+8. Can the browser experience stay branded and app-owned?
 
-It is not the same as saying:
+SqlOS now answers yes to the auth-server side of that checklist.
 
-- zero-relationship generic clients are fully solved
-- CIMD is already implemented
-- DCR is necessary
+## Where to start
 
-The current MCP priority order is:
+If you are new to this space, keep the order simple:
 
-1. preregistration
-2. CIMD
-3. DCR
-4. user-entered client info
+1. ship hosted auth with a seeded client
+2. add protected-resource metadata and audience validation
+3. add `CIMD` when you need portable public clients
+4. add `DCR` only when a real client still depends on it
 
-SqlOS fits cleanly into step 1 today.
+That keeps the first version small without closing the door on real interoperability later.
 
-That is a strong place to be for real product integrations.
+## Next reading
 
-## The Practical Checklist
-
-If you are evaluating whether your auth server is ready for an Emcy-compatible MCP server, ask:
-
-1. Do I expose `/sqlos/auth/.well-known/oauth-authorization-server`?
-2. Do I expose JWKS?
-3. Do I support `authorization_code` + `refresh_token`?
-4. Do I require PKCE S256 for public clients?
-5. Can I preregister a client ID and exact redirect URIs?
-6. Can I issue JWTs with stable `iss`, `kid`, and `aud`?
-7. Do I support browser login, refresh, logout, and session revocation?
-8. Can I keep the whole experience branded and app-owned?
-
-If the answer is yes, you have the auth-server side.
-
-Then your MCP server still needs to do its own resource-server half.
-
-## Bottom Line
-
-For OAuth-powered MCP, the authorization server does not need to be magical. It needs to be correct.
-
-SqlOS now gives .NET applications an embedded authorization server that is correct in the ways that matter for Emcy-style MCP auth today:
-
-- standards-facing metadata
-- PKCE public clients
-- preregistered redirect URIs
-- signed JWTs and JWKS
-- refresh and logout
-- branded browser auth
-- OIDC and SAML behind the scenes
-
-That means if you are building an app-owned MCP stack, SqlOS can own the authorization-server side without forcing you into a separate hosted identity product.
-
-And if your MCP server is generated with `openapi-to-mcp`, you can cover the resource-server side too.
-
-The result is a clean split:
-
-- **SqlOS** for the authorization server
-- **your MCP server** for the protected resource
-- **Emcy** as the discovery-first browser client
-
-That is a much more practical architecture than "just add login" and hope MCP OAuth works.
+- [Todo Sample](/docs/guides/authserver/todo-sample)
+- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)

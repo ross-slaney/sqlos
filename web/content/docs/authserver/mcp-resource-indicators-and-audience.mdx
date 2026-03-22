@@ -1,0 +1,88 @@
+---
+title: "MCP Resource Indicators and Audience"
+description: "Bind tokens to a protected resource when you need MCP-style OAuth behavior."
+order: 4.64
+section: authserver
+---
+
+For normal owned-app flows, SqlOS can still fall back to the client's configured audience.
+
+For MCP-style flows, the better model is:
+
+- the client sends a `resource`
+- SqlOS persists that binding
+- the access token `aud` matches the resolved protected resource
+
+## Why it matters
+
+The authorization server and the protected resource need to agree on what the token is *for*.
+
+If a caller asks for:
+
+```text
+resource=https://todo.example.com
+```
+
+the resulting token should be usable for that resource and rejected by unrelated ones.
+
+## What SqlOS does
+
+SqlOS supports resource indicators end to end:
+
+- `/authorize` accepts and normalizes `resource`
+- `/token` checks that the exchange matches the original authorization request
+- refresh preserves the original binding
+- the JWT `aud` claim becomes the resolved resource when present
+- resource servers can validate the expected audience
+
+If no `resource` is supplied, SqlOS can preserve the client-audience fallback for non-MCP app flows.
+
+## Configuration
+
+Resource indicators are enabled by default.
+
+You can configure them directly:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureResourceIndicators(resource =>
+    {
+        resource.Enabled = true;
+        resource.PreserveClientAudienceFallback = true;
+        resource.EnforceOnTokenExchange = true;
+        resource.PreserveOriginalBindingOnRefresh = true;
+    });
+});
+```
+
+Or turn them on implicitly with portable and compatibility helpers:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnablePortableMcpClients();
+});
+```
+
+## Resource-server side
+
+Your protected resource should still:
+
+- expose `/.well-known/oauth-protected-resource`
+- return `WWW-Authenticate: Bearer resource_metadata="..."`
+- validate issuer, signature, expiry, and audience
+
+The Todo sample demonstrates that end to end.
+
+## Recommended rule of thumb
+
+Use this mental model:
+
+- **owned app**: seeded client first, audience fallback is fine
+- **portable or MCP-style flow**: send `resource` and validate `aud`
+
+## Related guides
+
+- [Todo Sample](/docs/guides/authserver/todo-sample)
+- [Token Validation](/docs/guides/authserver/token-validation)

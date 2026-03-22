@@ -5,7 +5,7 @@ order: 0
 section: authserver
 ---
 
-AuthServer is SqlOS’s identity piece. Users, orgs, sessions, tokens, OIDC, and SAML run inside your app. Data lives in your database.
+AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and SAML run inside your app. Data lives in your database.
 
 ## What you get
 
@@ -15,6 +15,7 @@ AuthServer is SqlOS’s identity piece. Users, orgs, sessions, tokens, OIDC, and
 - **OIDC** -- Google, Microsoft, Apple, and custom providers
 - **SAML SSO** -- enterprise SSO with auto-provisioning
 - **Hosted or Headless auth UI** -- use the built-in auth pages or render your own
+- **Client onboarding modes** -- seeded/manual clients for owned apps, `CIMD` for portable clients, optional `DCR` for compatibility clients
 
 ## Setup
 
@@ -35,6 +36,8 @@ Typical browser login:
 4. Multiple orgs? User picks one.
 5. SqlOS returns an auth code.
 6. App trades the code for access and refresh tokens.
+
+For most teams, this first flow should use a seeded or dashboard-created owned client. Add `CIMD`, `DCR`, and resource indicators only when you actually need portable or compatibility clients.
 
 ![Hosted sign-in page](/docs/auth-signin-page.png)
 
@@ -64,3 +67,11 @@ Protocol vs pixels:
 - **Headless** — SqlOS runs OAuth; your app draws the UI.
 
 [Headless Auth](/docs/guides/authserver/headless-auth) · [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless)
+
+## Client guides
+
+- [Clients](/docs/guides/authserver/clients)
+- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)

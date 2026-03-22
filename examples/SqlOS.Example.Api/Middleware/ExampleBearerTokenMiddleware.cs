@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Fga.Models;
@@ -14,7 +16,11 @@ public sealed class ExampleBearerTokenMiddleware
         _next = next;
     }
 
-    public async Task InvokeAsync(HttpContext context, SqlOSAuthService authService, ExampleAppDbContext dbContext)
+    public async Task InvokeAsync(
+        HttpContext context,
+        SqlOSAuthService authService,
+        IOptions<SqlOSAuthServerOptions> authOptions,
+        ExampleAppDbContext dbContext)
     {
         var path = context.Request.Path.Value ?? string.Empty;
         var requiresAuth = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
@@ -33,7 +39,10 @@ public sealed class ExampleBearerTokenMiddleware
         if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             var token = authorization["Bearer ".Length..].Trim();
-            var validated = await authService.ValidateAccessTokenAsync(token, context.RequestAborted);
+            var validated = await authService.ValidateAccessTokenAsync(
+                token,
+                authOptions.Value.DefaultAudience,
+                context.RequestAborted);
             if (validated == null)
             {
                 context.Response.StatusCode = 401;

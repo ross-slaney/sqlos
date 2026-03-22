@@ -69,6 +69,7 @@ internal static class SqlOSOptionsValidator
         }
 
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
+        ValidateClientRegistrationOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
         {
@@ -93,6 +94,39 @@ internal static class SqlOSOptionsValidator
         if (options.OnHeadlessSignupAsync != null && !headlessEnabled)
         {
             errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.BuildUiUrl.");
+        }
+    }
+
+    private static void ValidateClientRegistrationOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.ClientRegistration.Cimd.DefaultCacheTtl <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.ClientRegistration.Cimd.DefaultCacheTtl must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Cimd.HttpTimeout <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.ClientRegistration.Cimd.HttpTimeout must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Cimd.MaxMetadataBytes <= 0)
+        {
+            errors.Add("AuthServer.ClientRegistration.Cimd.MaxMetadataBytes must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Dcr.RateLimitWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.ClientRegistration.Dcr.RateLimitWindow must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Dcr.MaxRegistrationsPerWindow <= 0)
+        {
+            errors.Add("AuthServer.ClientRegistration.Dcr.MaxRegistrationsPerWindow must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Dcr.StaleClientRetention <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.ClientRegistration.Dcr.StaleClientRetention must be greater than zero.");
         }
     }
 

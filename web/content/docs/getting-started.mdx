@@ -66,12 +66,14 @@ Register your frontend as an OAuth client so users can sign in immediately:
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.AuthServer.SeedBrowserClient(
+    options.AuthServer.SeedOwnedWebApp(
         "my-app",
         "My Application",
         "http://localhost:3000/auth/callback");
 });
 ```
+
+That is the default story for most teams: an owned app, hosted auth, and a seeded client.
 
 ## Protect the dashboard
 
@@ -88,9 +90,24 @@ Set a dashboard password in `appsettings.json`:
 }
 ```
 
-## Run the example stack
+## Run the Todo sample first
 
-The repo includes a complete example with API, Next.js frontend, Angular frontend, and Expo mobile app:
+If your first goal is OAuth and public-client onboarding, start with the narrow Todo sample:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+That sample focuses on:
+
+- hosted auth first
+- headless follow-on
+- protected-resource metadata
+- preregistration, `CIMD`, and optional `DCR`
+
+## Run the broad Example stack
+
+The repo also includes a larger example with API, Next.js frontend, Angular frontend, and Expo mobile app:
 
 ```bash
 cd examples/SqlOS.Example.Web && npm install
@@ -114,5 +131,6 @@ If you migrate **before** the app has started SqlOS once, call `SqlOSBootstrappe
 ## Next steps
 
 - [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, and auth flows
+- [Todo Sample](/docs/guides/authserver/todo-sample) -- hosted-first OAuth and MCP-oriented flows
 - [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization and query filtering
 - [SDK Reference](/docs/guides/reference/sdk-reference) -- all services and methods

@@ -13,7 +13,7 @@ Many auth products host your users and charge per seat. SqlOS does not:
 - **Your database** -- users, sessions, grants, and tokens live in your SQL Server instance
 - **Your app** -- SqlOS runs inside your ASP.NET process, not as a separate service
 - **One package** -- `dotnet add package SqlOS` and you're done
-- **Standards-based** -- OAuth 2.0, PKCE, JWKS, SAML, OpenID Connect
+- **Standards-based** -- OAuth 2.0, PKCE, JWKS, SAML, OpenID Connect, `CIMD`, `DCR`, and resource indicators when you need them
 
 ## Two parts
 
@@ -44,9 +44,34 @@ There is a built-in admin UI for orgs, users, sessions, resources, grants, and r
 
 The SDK and admin API expose the same data.
 
-## Example app
+## Start with the right sample
 
-The repo has a retail-style demo (Next.js, Angular, React Native). It shows multi-tenant auth and FGA.
+### Todo sample
+
+Use the Todo sample first when your question is:
+
+> "How do I make SqlOS work with hosted auth, MCP-style public clients, resource metadata, and audience-aware APIs?"
+
+It focuses on:
+
+- hosted auth first
+- headless follow-on
+- protected-resource metadata
+- `WWW-Authenticate` challenge behavior
+- local preregistration
+- `CIMD` and optional `DCR`
+
+[Todo sample guide](/docs/guides/authserver/todo-sample)
+
+### Example stack
+
+Use the broader Example stack when you want the full-platform tour:
+
+- retail-style app
+- hosted and headless UI
+- OIDC and SAML
+- organizations and memberships
+- FGA dashboards and protected data flows
 
 As **Company Admin**, you see every chain and store:
 
@@ -56,10 +81,9 @@ As **Store Clerk**, you only see the stores you are allowed to see:
 
 ![Store Clerk view](/docs/retail-app-clerk-dashboard.png)
 
-Same app code. FGA applies at query time.
-
 ## Next steps
 
 - [Getting Started](/docs/guides/getting-started) -- install and run in 5 minutes
+- [Todo Sample](/docs/guides/authserver/todo-sample) -- the narrow OAuth/MCP sample
 - [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, SSO
 - [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization

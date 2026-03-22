@@ -25,6 +25,8 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 - **OAuth 2.0 with PKCE** — `/sqlos/auth/authorize`, `/sqlos/auth/token`, metadata, and JWKS
 - **Branded AuthPage** — hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, and `/sqlos/auth/logged-out`
+- **Client Onboarding Modes** — seeded/manual owned apps, `CIMD` discovered clients, and optional `DCR` compatibility clients
+- **Resource Indicators** — bind `resource` end to end and mint audience-aware access tokens
 - **Organizations & Users** — multi-tenant user management with memberships and roles
 - **Password Credentials** — secure local authentication with session management
 - **Social Login** — Google, Microsoft, Apple, and any custom OIDC provider
@@ -79,7 +81,13 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 4. **Register SqlOS on the host**
 
    ```csharp
-   builder.AddSqlOS<AppDbContext>();
+   builder.AddSqlOS<AppDbContext>(options =>
+   {
+       options.AuthServer.SeedOwnedWebApp(
+           "todo-web",
+           "Todo Web App",
+           "https://app.example.com/auth/callback");
+   });
    ```
 
 5. **Map routes after `Build()`**
@@ -107,6 +115,32 @@ SqlOS__Dashboard__AuthMode=Password
 SqlOS__Dashboard__Password=<strong-password>
 ```
 
+## Todo Sample
+
+If your goal is:
+
+> "I want SqlOS to work with hosted auth, resource metadata, and MCP-style public clients."
+
+Start with:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+That sample stays intentionally narrow:
+
+- hosted auth first
+- headless follow-on
+- protected-resource metadata
+- audience-aware token validation
+- local preregistration with `todo-local`
+- public-client onboarding with `CIMD` and optional `DCR`
+
+Read more:
+
+- [Todo sample README](examples/SqlOS.Todo.Api/README.md)
+- [Todo sample guide](web/content/docs/authserver/todo-sample.mdx)
+
 ## Example App
 
 The repo includes a full working example powered by .NET Aspire:
@@ -115,7 +149,7 @@ The repo includes a full working example powered by .NET Aspire:
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-That starts SQL Server, the sample API, and a Next.js app. You get password login, OIDC, SAML, sessions, and FGA in the demo.
+That starts SQL Server, the sample API, and a Next.js app. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, and FGA in one stack.
 
 | | URL |
 |---|---|
@@ -133,14 +167,10 @@ That starts SQL Server, the sample API, and a Next.js app. You get password logi
 ## Testing
 
 ```bash
-# Unit tests
-dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj
-
-# Integration tests (requires SQL Server)
-dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj
-
-# Full suite
-dotnet test SqlOS.sln
+dotnet build SqlOS.sln
+./scripts/unit-tests.sh
+./scripts/integration-tests.sh
+./scripts/docs-check.sh
 ```
 
 ## Repo Layout
@@ -150,6 +180,9 @@ src/SqlOS                                # The library
 tests/SqlOS.Tests                        # Unit tests
 tests/SqlOS.IntegrationTests             # Integration tests
 tests/SqlOS.Benchmarks                   # Performance benchmarks
+examples/SqlOS.Todo.Api                  # Canonical hosted-first Todo sample
+examples/SqlOS.Todo.AppHost              # Aspire runner for the Todo sample
+examples/SqlOS.Todo.IntegrationTests     # Todo sample end-to-end tests
 examples/SqlOS.Example.Api               # ASP.NET API example
 examples/SqlOS.Example.Web               # Next.js frontend example
 examples/SqlOS.Example.AppHost           # Aspire orchestration
@@ -159,6 +192,12 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
+- [Todo Sample](examples/SqlOS.Todo.Api/README.md) — the narrow MCP-oriented sample
+- [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
+- [Preregistration vs CIMD vs DCR](web/content/docs/authserver/preregistration-vs-cimd-vs-dcr.mdx) — choose the right client onboarding path
+- [Client ID Metadata Documents](web/content/docs/authserver/client-id-metadata-documents.mdx) — portable public clients with metadata URLs
+- [Dynamic Client Registration](web/content/docs/authserver/dynamic-client-registration.mdx) — compatibility-mode runtime registration
+- [MCP Resource Indicators and Audience](web/content/docs/authserver/mcp-resource-indicators-and-audience.mdx) — resource-bound tokens and audience validation
 - [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
 - [Google OIDC](docs/GOOGLE_OIDC.md) · [Microsoft OIDC](docs/MICROSOFT_OIDC.md) · [Apple OIDC](docs/APPLE_OIDC.md) · [Custom OIDC](docs/CUSTOM_OIDC.md)
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
