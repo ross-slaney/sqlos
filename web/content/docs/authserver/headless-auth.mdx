@@ -5,7 +5,7 @@ order: 1.7
 section: authserver
 ---
 
-**Headless** = SqlOS runs OAuth (`/authorize`, `/token`, PKCE, sessions, OIDC, SAML, codes). **Your app** draws the HTML.
+**Headless** = SqlOS runs OAuth (`/sqlos/auth/authorize`, `/sqlos/auth/token`, PKCE, sessions, OIDC, SAML, codes). **Your app** draws the HTML.
 
 ## When to use headless
 
@@ -21,19 +21,15 @@ Not sure? Start [hosted](/docs/guides/authserver/hosted-vs-headless). You can sw
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseAuthServer(auth =>
+    options.AuthServer.UseHeadlessAuthPage(headless =>
     {
-        auth.UseHeadlessAuthPage(headless =>
-        {
-            headless.BuildUiUrl = ctx =>
-                $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
-        });
+        headless.BuildUiUrl = ctx =>
+            $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
+    });
 
-        auth.SeedAuthPage(page =>
-        {
-            page.PresentationMode = "headless";
-            page.PageTitle = "Sign in";
-        });
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.PageTitle = "Sign in";
     });
 });
 
@@ -41,31 +37,16 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-The browser hits `/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI.
+The browser hits `/sqlos/auth/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI.
 
-## Presentation mode
+## How SqlOS picks the UI
 
-SqlOS saves **hosted** or **headless** in the database. `/authorize` reads that value.
+SqlOS uses one rule:
 
-Code alone is not enough. The DB must say **headless** too.
+- `BuildUiUrl` exists: headless.
+- `BuildUiUrl` does not exist: hosted.
 
-**Do this for headless**
-
-- Call `UseHeadlessAuthPage` and set `BuildUiUrl`.
-- In `SeedAuthPage`, set `page.PresentationMode = "headless"`.
-
-If you skip `PresentationMode` but `BuildUiUrl` is set, startup seed still sets the DB to headless. Setting `"headless"` in seed is clearer.
-
-Do not set `PresentationMode = "hosted"` if you want headless. That forces hosted HTML.
-
-The admin dashboard can change this value. Seed runs again on each app start. Make seed match what you want in production.
-
-| You set in seed | `BuildUiUrl` in code | DB after seed |
-| --- | --- | --- |
-| omit `PresentationMode` | yes | headless |
-| omit `PresentationMode` | no | hosted |
-| `"headless"` | yes | headless |
-| `"hosted"` | yes | hosted |
+There is no second seed or dashboard switch to keep in sync.
 
 More context: [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless).
 
@@ -75,19 +56,19 @@ Your UI calls these SqlOS endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /headless/requests/{requestId}` | Get the current authorization request state |
-| `POST /headless/identify` | Submit email for home realm discovery |
-| `POST /headless/password/login` | Submit email + password |
-| `POST /headless/signup` | Create account with optional custom fields |
-| `POST /headless/organization/select` | Select org for multi-org users |
-| `POST /headless/provider/start` | Start OIDC or SSO flow |
+| `GET /sqlos/auth/headless/requests/{requestId}` | Get the current authorization request state |
+| `POST /sqlos/auth/headless/identify` | Submit email for home realm discovery |
+| `POST /sqlos/auth/headless/password/login` | Submit email + password |
+| `POST /sqlos/auth/headless/signup` | Create account with optional custom fields |
+| `POST /sqlos/auth/headless/organization/select` | Select org for multi-org users |
+| `POST /sqlos/auth/headless/provider/start` | Start OIDC or SSO flow |
 
 ## Custom signup fields
 
 Pass extra signup data in `customFields`. Validate in `OnHeadlessSignupAsync`:
 
 ```csharp
-auth.UseHeadlessAuthPage(headless =>
+options.AuthServer.UseHeadlessAuthPage(headless =>
 {
     headless.BuildUiUrl = ctx =>
         $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
@@ -107,7 +88,7 @@ auth.UseHeadlessAuthPage(headless =>
         }
 
         // Persist to your own table
-        await SaveProfileAsync(ctx.UserId, referral);
+        await SaveProfileAsync(ctx.User.Id, referral);
     };
 });
 ```
@@ -152,9 +133,9 @@ if (result.requiresOrganizationSelection) {
 
 OAuth on the wire is the same. MCP and other clients still use:
 
-- `/.well-known/oauth-authorization-server`
-- `/authorize`
-- `/token`
-- `/.well-known/jwks.json`
+- `/sqlos/auth/.well-known/oauth-authorization-server`
+- `/sqlos/auth/authorize`
+- `/sqlos/auth/token`
+- `/sqlos/auth/.well-known/jwks.json`
 
 Only the **browser UI** during login changes.

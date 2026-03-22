@@ -37,7 +37,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ## Validation Flow
 
 1. Create an organization, user, and membership in the auth admin dashboard.
-2. Open the example web app and sign in through `/login`.
+2. Open the example web app and sign in through `/sqlos/auth/login`.
 3. Confirm `/app` shows session and token debug data.
 4. Optionally configure an OIDC connection and repeat the sign-in flow with the provider buttons.
 5. Create and list workspaces through the protected app flow.

@@ -90,7 +90,6 @@ public sealed class SqlOSAuthPageRendererTests
             PageSubtitle: "Use your work email to access the Example workspace.",
             EnablePasswordSignup: false,
             EnabledCredentialTypes: ["password"],
-            PresentationMode: "default",
             UpdatedAt: DateTime.UtcNow,
             ManagedByStartupSeed: false,
             HeadlessCapabilityRegistered: false);
@@ -124,7 +123,6 @@ public sealed class SqlOSAuthPageRendererTests
             PageSubtitle: "Test auth page",
             EnablePasswordSignup: false,
             EnabledCredentialTypes: ["password"],
-            PresentationMode: "default",
             UpdatedAt: DateTime.UtcNow,
             ManagedByStartupSeed: false,
             HeadlessCapabilityRegistered: false);
@@ -188,7 +186,6 @@ public sealed class SqlOSAuthPageRendererTests
                 PageSubtitle: "Test auth page",
                 EnablePasswordSignup: true,
                 EnabledCredentialTypes: ["password"],
-                PresentationMode: "default",
                 UpdatedAt: DateTime.UtcNow,
                 ManagedByStartupSeed: false,
                 HeadlessCapabilityRegistered: false),

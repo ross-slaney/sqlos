@@ -18,7 +18,6 @@ public sealed class SqlOSOidcBrowserAuthService
     private readonly SqlOSAuthorizationServerService _authorizationServerService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSOidcAuthService _oidcAuthService;
-    private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSAuthServerOptions _options;
 
     public SqlOSOidcBrowserAuthService(
@@ -28,7 +27,6 @@ public sealed class SqlOSOidcBrowserAuthService
         SqlOSAuthorizationServerService authorizationServerService,
         SqlOSCryptoService cryptoService,
         SqlOSOidcAuthService oidcAuthService,
-        SqlOSSettingsService settingsService,
         IOptions<SqlOSAuthServerOptions> options)
     {
         _context = context;
@@ -37,7 +35,6 @@ public sealed class SqlOSOidcBrowserAuthService
         _authorizationServerService = authorizationServerService;
         _cryptoService = cryptoService;
         _oidcAuthService = oidcAuthService;
-        _settingsService = settingsService;
         _options = options.Value;
     }
 
@@ -417,7 +414,7 @@ public sealed class SqlOSOidcBrowserAuthService
         string? displayName,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(_settingsService.CurrentPresentationMode, "headless", StringComparison.OrdinalIgnoreCase) || _options.Headless.BuildUiUrl == null)
+        if (_options.Headless.BuildUiUrl == null)
         {
             return null;
         }

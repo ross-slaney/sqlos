@@ -12,9 +12,6 @@ public sealed class SqlOSSettingsService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
-    private static volatile string _cachedPresentationMode = "hosted";
-
-    public string CurrentPresentationMode => _cachedPresentationMode;
 
     public SqlOSSettingsService(ISqlOSAuthServerDbContext context, IOptions<SqlOSAuthServerOptions> options)
     {
@@ -49,19 +46,15 @@ public sealed class SqlOSSettingsService
         var existing = await _context.Set<SqlOSAuthPageSettings>().FirstOrDefaultAsync(x => x.Id == "default", cancellationToken);
         if (existing != null)
         {
-            _cachedPresentationMode = existing.PresentationMode;
             return;
         }
 
-        var initialPresentationMode = _options.Headless.BuildUiUrl != null ? "headless" : "hosted";
         _context.Set<SqlOSAuthPageSettings>().Add(new SqlOSAuthPageSettings
         {
             Id = "default",
-            PresentationMode = initialPresentationMode,
             UpdatedAt = DateTime.UtcNow,
         });
         await _context.SaveChangesAsync(cancellationToken);
-        _cachedPresentationMode = initialPresentationMode;
     }
 
     public async Task UpsertSeededAuthPageSettingsAsync(CancellationToken cancellationToken = default)
@@ -101,29 +94,8 @@ public sealed class SqlOSSettingsService
         settings.EnablePasswordSignup = _options.AuthPageSeed.EnablePasswordSignup;
         settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(enabledCredentialTypes);
 
-        string presentationMode;
-        if (!string.IsNullOrWhiteSpace(_options.AuthPageSeed.PresentationMode))
-        {
-            presentationMode = _options.AuthPageSeed.PresentationMode.Trim().ToLowerInvariant();
-            if (presentationMode != "hosted" && presentationMode != "headless")
-            {
-                throw new InvalidOperationException($"Auth page PresentationMode must be either 'hosted' or 'headless', got '{_options.AuthPageSeed.PresentationMode}'.");
-            }
-        }
-        else if (_options.Headless.BuildUiUrl != null)
-        {
-            presentationMode = "headless";
-        }
-        else
-        {
-            presentationMode = "hosted";
-        }
-
-        settings.PresentationMode = presentationMode;
-
         settings.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
-        _cachedPresentationMode = settings.PresentationMode;
     }
 
     public async Task<SqlOSSecuritySettingsDto> GetSecuritySettingsAsync(CancellationToken cancellationToken = default)
@@ -201,7 +173,6 @@ public sealed class SqlOSSettingsService
     {
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
-        _cachedPresentationMode = settings.PresentationMode;
         return new SqlOSAuthPageSettingsDto(
             settings.LogoBase64,
             settings.PrimaryColor,
@@ -212,7 +183,6 @@ public sealed class SqlOSSettingsService
             settings.PageSubtitle,
             settings.EnablePasswordSignup,
             DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
-            settings.PresentationMode,
             settings.UpdatedAt,
             _options.AuthPageSeed != null,
             _options.Headless.BuildUiUrl != null);
@@ -250,16 +220,8 @@ public sealed class SqlOSSettingsService
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray());
 
-        var presentationMode = request.PresentationMode?.Trim().ToLowerInvariant() ?? "hosted";
-        if (presentationMode != "hosted" && presentationMode != "headless")
-        {
-            throw new InvalidOperationException("Auth page PresentationMode must be either 'hosted' or 'headless'.");
-        }
-        settings.PresentationMode = presentationMode;
-
         settings.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
-        _cachedPresentationMode = settings.PresentationMode;
 
         return await GetAuthPageSettingsAsync(cancellationToken);
     }

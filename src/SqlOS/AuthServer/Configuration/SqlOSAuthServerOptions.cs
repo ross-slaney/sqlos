@@ -21,7 +21,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
-    public SqlOSAuthServerDashboardOptions Dashboard { get; set; } = new();
+    public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
@@ -66,12 +66,4 @@ public class SqlOSAuthServerOptions
 
         return this;
     }
-}
-
-public class SqlOSAuthServerDashboardOptions
-{
-    public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
-    public string? Password { get; set; }
-    public TimeSpan SessionLifetime { get; set; } = SqlOSDashboardOptions.DefaultSessionLifetime;
-    public Func<HttpContext, Task<bool>>? AuthorizationCallback { get; set; }
 }

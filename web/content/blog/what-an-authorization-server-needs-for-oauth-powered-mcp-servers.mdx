@@ -18,7 +18,7 @@ The short version is this:
 - your **authorization server** is the thing that authenticates the user and issues tokens
 - those are different responsibilities
 
-SqlOS now provides the full **authorization-server side** for preregistered public-client MCP flows. That means branded browser auth, `/authorize`, `/token`, metadata, JWKS, PKCE, redirect URI validation, sessions, refresh tokens, logout, OIDC, and SAML.
+SqlOS now provides the full **authorization-server side** for preregistered public-client MCP flows. That means branded browser auth, `/sqlos/auth/authorize`, `/sqlos/auth/token`, metadata, JWKS, PKCE, redirect URI validation, sessions, refresh tokens, logout, OIDC, and SAML.
 
 What SqlOS does **not** do is turn your application into the MCP resource server automatically. Your MCP server still needs to expose protected-resource metadata and validate the bearer token it receives.
 
@@ -68,7 +68,7 @@ The client needs a standards-facing metadata endpoint so it can discover where t
 That means exposing:
 
 ```text
-GET /.well-known/oauth-authorization-server
+GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
 
 with the important fields:
@@ -98,10 +98,10 @@ This is the browser-client happy path. For Emcy, it is the right path.
 
 The client needs to be able to:
 
-- redirect the user to `/authorize`
+- redirect the user to `/sqlos/auth/authorize`
 - include `code_challenge`
 - use `code_challenge_method=S256`
-- exchange the code at `/token`
+- exchange the code at `/sqlos/auth/token`
 - send no client secret for public-client flows
 
 SqlOS supports exactly that narrow V1 surface:
@@ -133,35 +133,31 @@ For an Emcy integration, the minimum useful setup looks like this:
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseFGA();
-    options.UseAuthServer(auth =>
+    options.AuthServer.PublicOrigin = "https://api.example.com";
+    options.AuthServer.Issuer = "https://api.example.com/sqlos/auth";
+
+    options.AuthServer.SeedClient(client =>
     {
-        auth.PublicOrigin = "https://api.example.com";
-        auth.Issuer = "https://api.example.com/sqlos/auth";
+        client.ClientId = "emcy-cloud";
+        client.Name = "Emcy Cloud";
+        client.RedirectUris = ["https://app.emcy.ai/oauth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email"];
+        client.Audience = "https://mcp.example.com";
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
 
-        auth.SeedClient(client =>
-        {
-            client.ClientId = "emcy-cloud";
-            client.Name = "Emcy Cloud";
-            client.RedirectUris = ["https://app.emcy.ai/oauth/callback"];
-            client.AllowedScopes = ["openid", "profile", "email"];
-            client.Audience = "https://mcp.example.com";
-            client.ClientType = "public_pkce";
-            client.RequirePkce = true;
-            client.IsFirstParty = true;
-        });
-
-        auth.SeedClient(client =>
-        {
-            client.ClientId = "emcy-localhost";
-            client.Name = "Emcy Local";
-            client.RedirectUris = ["http://localhost:3100/oauth/callback"];
-            client.AllowedScopes = ["openid", "profile", "email"];
-            client.Audience = "https://mcp.example.com";
-            client.ClientType = "public_pkce";
-            client.RequirePkce = true;
-            client.IsFirstParty = true;
-        });
+    options.AuthServer.SeedClient(client =>
+    {
+        client.ClientId = "emcy-localhost";
+        client.Name = "Emcy Local";
+        client.RedirectUris = ["http://localhost:3100/oauth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email"];
+        client.Audience = "https://mcp.example.com";
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
     });
 });
 
@@ -235,9 +231,9 @@ That means the browser entrypoint can absolutely be branded:
 
 SqlOS AuthPage is built for exactly that shape:
 
-- `/login`
-- `/signup`
-- `/authorize`
+- `/sqlos/auth/login`
+- `/sqlos/auth/signup`
+- `/sqlos/auth/authorize`
 - home realm discovery by email domain
 - password
 - OIDC providers
@@ -249,11 +245,11 @@ So if you want your MCP server auth to feel like your application rather than a 
 
 On the authorization-server side, SqlOS provides:
 
-- `GET /authorize`
-- `POST /token`
-- `GET /.well-known/oauth-authorization-server`
-- `GET /.well-known/jwks.json`
-- hosted `/login`, `/signup`, `/logout`, and `/logged-out`
+- `GET /sqlos/auth/authorize`
+- `POST /sqlos/auth/token`
+- `GET /sqlos/auth/.well-known/oauth-authorization-server`
+- `GET /sqlos/auth/.well-known/jwks.json`
+- hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, `/sqlos/auth/logout`, and `/sqlos/auth/logged-out`
 - public PKCE clients
 - preregistered client records and startup seeding
 - redirect URI validation
@@ -307,7 +303,7 @@ That is a strong place to be for real product integrations.
 
 If you are evaluating whether your auth server is ready for an Emcy-compatible MCP server, ask:
 
-1. Do I expose `/.well-known/oauth-authorization-server`?
+1. Do I expose `/sqlos/auth/.well-known/oauth-authorization-server`?
 2. Do I expose JWKS?
 3. Do I support `authorization_code` + `refresh_token`?
 4. Do I require PKCE S256 for public clients?

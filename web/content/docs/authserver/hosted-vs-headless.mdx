@@ -1,6 +1,6 @@
 ---
 title: "Hosted vs Headless"
-description: "Choose the right auth presentation mode for your app."
+description: "Choose between hosted and headless auth UI."
 order: 1.75
 section: authserver
 ---
@@ -49,9 +49,9 @@ SqlOS owns the OAuth protocol. Your app owns the UI.
 **Downside:** You build and host the authorize page.
 
 ```csharp
-options.UseAuthServer(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.UseHeadlessAuthPage(headless =>
+    options.AuthServer.UseHeadlessAuthPage(headless =>
     {
         headless.BuildUiUrl = ctx =>
             $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
@@ -59,7 +59,7 @@ options.UseAuthServer(auth =>
 });
 ```
 
-Headless also needs the right value in the **database**. Use `SeedAuthPage` and `page.PresentationMode = "headless"`. Or leave `PresentationMode` unset if `BuildUiUrl` is set (seed infers headless). [Details](/docs/guides/authserver/headless-auth#presentation-mode).
+Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Details](/docs/guides/authserver/headless-auth#how-sqlos-picks-the-ui).
 
 ## Don't rebuild the auth flow
 

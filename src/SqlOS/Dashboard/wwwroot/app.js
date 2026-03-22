@@ -2009,14 +2009,9 @@
                                     <option value="stacked" ${settings.layout === "stacked" ? "selected" : ""}>Stacked</option>
                                 </select>
                             </div>
-                            <div>
-                                <label>Presentation Mode</label>
-                                <select name="presentationMode">
-                                    <option value="hosted" ${settings.presentationMode === "hosted" ? "selected" : ""}>Hosted (SqlOS renders auth page)</option>
-                                    <option value="headless" ${settings.presentationMode === "headless" ? "selected" : ""}>Headless (App renders auth UI)</option>
-                                </select>
-                                ${settings.presentationMode === "headless" && !settings.headlessCapabilityRegistered ? `<div class="callout" style="margin-top:8px"><strong>Warning:</strong> Headless mode requires <code>UseHeadlessAuthPage()</code> in application startup to register the UI callback.</div>` : ""}
-                            </div>
+                            ${settings.headlessCapabilityRegistered
+                                ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
+                                : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
                             <input name="enabledCredentialTypes" placeholder="Enabled credential types" value="${esc(enabledCredentialTypes || "password")}" required>
                             <label>Logo upload<input id="auth-page-logo-file" type="file" accept="image/*"></label>
@@ -2057,7 +2052,6 @@
                     backgroundColor: form.get("backgroundColor"),
                     layout: form.get("layout"),
                     enablePasswordSignup: form.get("enablePasswordSignup") === "on",
-                    presentationMode: form.get("presentationMode"),
                     enabledCredentialTypes: String(form.get("enabledCredentialTypes") || "password")
                         .split(/[,\s]+/)
                         .map(value => value.trim())

@@ -21,7 +21,6 @@ public sealed class TestSqlOSInMemoryDbContext : DbContext, ISqlOSAuthServerDbCo
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UseAuthServer();
-        modelBuilder.UseFGA();
+        modelBuilder.UseSqlOS();
     }
 }

@@ -23,12 +23,8 @@ public sealed class SqlOSBootstrapHostedService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         using var scope = _services.CreateScope();
-        var opts = _options.Value;
-        if (opts.EnableAuthServer || opts.EnableFga)
-        {
-            var bootstrapper = scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>();
-            await bootstrapper.InitializeAsync(cancellationToken);
-        }
+        var bootstrapper = scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>();
+        await bootstrapper.InitializeAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

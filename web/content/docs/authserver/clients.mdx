@@ -18,14 +18,11 @@ A **client** is an app that signs users in with SqlOS. It has an id, optional au
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseAuthServer(auth =>
-    {
-        auth.SeedBrowserClient(
-            "my-web-app",
-            "My Web Application",
-            "http://localhost:3000/auth/callback",
-            "https://app.example.com/auth/callback");
-    });
+    options.AuthServer.SeedBrowserClient(
+        "my-web-app",
+        "My Web Application",
+        "http://localhost:3000/auth/callback",
+        "https://app.example.com/auth/callback");
 });
 ```
 

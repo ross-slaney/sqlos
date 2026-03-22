@@ -60,10 +60,7 @@ if (!access.Allowed)
 ## Setup
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseFGA();
-});
+builder.AddSqlOS<AppDbContext>();
 
 var app = builder.Build();
 app.MapSqlOS();

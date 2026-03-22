@@ -12,14 +12,10 @@ dotnet add package SqlOS
 
 ## Configure services
 
-Register SqlOS on your `DbContext`. Turn on auth and FGA (both shown below; you can adjust):
+Register SqlOS on your `DbContext`:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer();
-    options.UseFGA();
-});
+builder.AddSqlOS<AppDbContext>();
 ```
 
 ## Set up your DbContext
@@ -68,9 +64,9 @@ This gives you:
 Register your frontend as an OAuth client so users can sign in immediately:
 
 ```csharp
-options.UseAuthServer(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.SeedBrowserClient(
+    options.AuthServer.SeedBrowserClient(
         "my-app",
         "My Application",
         "http://localhost:3000/auth/callback");

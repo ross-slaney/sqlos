@@ -23,8 +23,8 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ### AuthServer
 
-- **OAuth 2.0 with PKCE** — `/authorize`, `/token`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`
-- **Branded AuthPage** — hosted `/login`, `/signup`, and `/logged-out` with customizable branding
+- **OAuth 2.0 with PKCE** — `/sqlos/auth/authorize`, `/sqlos/auth/token`, metadata, and JWKS
+- **Branded AuthPage** — hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, and `/sqlos/auth/logged-out`
 - **Organizations & Users** — multi-tenant user management with memberships and roles
 - **Password Credentials** — secure local authentication with session management
 - **Social Login** — Google, Microsoft, Apple, and any custom OIDC provider
@@ -79,11 +79,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 4. **Register SqlOS on the host**
 
    ```csharp
-   builder.AddSqlOS<AppDbContext>(options =>
-   {
-       options.UseFGA();
-       options.UseAuthServer();
-   });
+   builder.AddSqlOS<AppDbContext>();
    ```
 
 5. **Map routes after `Build()`**
@@ -163,7 +159,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
-- [OIDC Auth](docs/OIDC_AUTH.md) — OpenID Connect provider support
+- [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
 - [Google OIDC](docs/GOOGLE_OIDC.md) · [Microsoft OIDC](docs/MICROSOFT_OIDC.md) · [Apple OIDC](docs/APPLE_OIDC.md) · [Custom OIDC](docs/CUSTOM_OIDC.md)
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack

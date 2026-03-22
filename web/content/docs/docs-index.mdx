@@ -15,20 +15,20 @@ Many auth products host your users and charge per seat. SqlOS does not:
 - **One package** -- `dotnet add package SqlOS` and you're done
 - **Standards-based** -- OAuth 2.0, PKCE, JWKS, SAML, OpenID Connect
 
-## Two modules
+## Two parts
 
-You get two modules. Use both together or focus on one.
+SqlOS ships two parts together:
 
-**AuthServer** — orgs, users, passwords, OIDC, SAML, sessions, tokens. Hosted or headless login UI.
+- **AuthServer** — orgs, users, passwords, OIDC, SAML, sessions, tokens, and hosted or headless login UI.
+- **FGA** — resource tree, roles, permissions, grants, and SQL-backed filtering.
+
+Setup stays the same:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer();
-});
+builder.AddSqlOS<AppDbContext>();
 ```
 
-**FGA** — resource tree, roles, permissions, grants. EF filters data in SQL so you do not load rows you should not see.
+FGA filters data in SQL so you do not load rows you should not see.
 
 ```csharp
 var chains = await dbContext.Chains

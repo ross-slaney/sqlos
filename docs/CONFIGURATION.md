@@ -7,37 +7,30 @@ Wire SqlOS in three places: host registration, EF model, then `app.MapSqlOS()` a
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseFGA(fga =>
+    options.Fga.Seed(seed =>
     {
-        fga.DashboardPathPrefix = "/sqlos/admin/fga";
-        fga.Seed(seed =>
-        {
-            seed.ResourceType("workspace", "Workspace");
-            seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
-            seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
-            seed.RolePermission("workspace_admin", "workspace.view");
-        });
+        seed.ResourceType("workspace", "Workspace");
+        seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
+        seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
+        seed.RolePermission("workspace_admin", "workspace.view");
     });
-
-    options.UseAuthServer(auth =>
+    
+    options.AuthServer.Issuer = "https://localhost/sqlos/auth";
+    options.AuthServer.SeedAuthPage(page =>
     {
-        auth.Issuer = "https://localhost/sqlos/auth";
-        auth.SeedAuthPage(page =>
-        {
-            page.PageTitle = "Sign in";
-            page.PageSubtitle = "Secure your app-owned AI and MCP experience.";
-        });
-        auth.SeedBrowserClient("web", "Main Web App", "https://app.example.com/auth/callback");
+        page.PageTitle = "Sign in";
+        page.PageSubtitle = "Secure your app-owned AI and MCP experience.";
     });
+    options.AuthServer.SeedBrowserClient("web", "Main Web App", "https://app.example.com/auth/callback");
 });
 ```
 
 ### Auth page: hosted vs headless
 
-The DB stores **hosted** or **headless**. `/authorize` uses it.
+`/sqlos/auth/authorize` uses one rule:
 
-- **Headless:** `UseHeadlessAuthPage` + `BuildUiUrl`. In `SeedAuthPage` use `page.PresentationMode = "headless"`. Or omit it; seed infers headless when `BuildUiUrl` exists.
-- **Hosted:** use hosted pages. You can set `page.PresentationMode = "hosted"` to be explicit.
+- **Headless:** `BuildUiUrl` exists.
+- **Hosted:** `BuildUiUrl` does not exist.
 
 See `web/content/docs/authserver/headless-auth.mdx` in this repo (published as `/docs/guides/authserver/headless-auth`).
 

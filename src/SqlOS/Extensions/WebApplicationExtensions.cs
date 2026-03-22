@@ -14,12 +14,8 @@ public static class WebApplicationExtensions
     /// </summary>
     public static WebApplication MapSqlOS(this WebApplication app)
     {
-        var hostOptions = app.Services.GetRequiredService<IOptions<SqlOSOptions>>().Value;
-        if (hostOptions.EnableAuthServer)
-        {
-            var authOptions = app.Services.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
-            app.MapAuthServer(authOptions.BasePath);
-        }
+        var authOptions = app.Services.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
+        app.MapAuthServer(authOptions.BasePath);
 
         return app;
     }

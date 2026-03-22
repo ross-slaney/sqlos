@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
@@ -17,7 +18,7 @@ public class SqlOSFgaDashboardMiddleware
     private readonly RequestDelegate _next;
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
-    private readonly SqlOSFgaDashboardOptions _dashboardOptions;
+    private readonly SqlOSDashboardOptions _dashboardOptions;
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
     private const int DefaultPageSize = 25;
@@ -32,7 +33,7 @@ public class SqlOSFgaDashboardMiddleware
         RequestDelegate next,
         string pathPrefix,
         IHostEnvironment environment,
-        SqlOSFgaDashboardOptions dashboardOptions,
+        SqlOSDashboardOptions dashboardOptions,
         SqlOSDashboardSessionService sessionService)
     {
         _next = next;
@@ -993,9 +994,11 @@ public class SqlOSFgaDashboardMiddleware
 
     private async Task ServeStaticFile(HttpContext context, string relativePath)
     {
+        var serveShell = false;
         if (string.IsNullOrEmpty(relativePath) || relativePath == "/")
         {
             relativePath = "index.html";
+            serveShell = true;
         }
 
         var fileInfo = _fileProvider.GetFileInfo(relativePath);
@@ -1004,6 +1007,7 @@ public class SqlOSFgaDashboardMiddleware
         {
             // SPA fallback
             fileInfo = _fileProvider.GetFileInfo("index.html");
+            serveShell = true;
         }
 
         if (!fileInfo.Exists)
@@ -1016,6 +1020,15 @@ public class SqlOSFgaDashboardMiddleware
         context.Response.ContentType = contentType;
 
         await using var stream = fileInfo.CreateReadStream();
+        if (serveShell)
+        {
+            using var reader = new StreamReader(stream);
+            var html = await reader.ReadToEndAsync();
+            html = html.Replace("__SQL_OS_BASE_PATH__", GetDashboardShellPrefix().TrimEnd('/'), StringComparison.Ordinal);
+            await context.Response.WriteAsync(html);
+            return;
+        }
+
         await stream.CopyToAsync(context.Response.Body);
     }
 

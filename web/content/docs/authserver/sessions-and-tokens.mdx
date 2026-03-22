@@ -102,9 +102,9 @@ Configured via the dashboard (Auth Server > Security) or the admin API:
 The access token lifetime is configured separately in startup:
 
 ```csharp
-options.UseAuthServer(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    options.AuthServer.AccessTokenLifetime = TimeSpan.FromMinutes(15);
 });
 ```
 

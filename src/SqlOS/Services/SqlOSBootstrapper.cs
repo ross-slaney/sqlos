@@ -44,36 +44,30 @@ public sealed class SqlOSBootstrapper
     {
         _logger.LogInformation("Initializing SqlOS...");
 
-        if (_options.EnableAuthServer)
+        await _authSchemaInitializer.EnsureSchemaAsync(cancellationToken);
+        await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
+        await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
+        await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
+        await _adminService.UpsertSeededClientsAsync(cancellationToken);
+        await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
+        await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
+
+        await _fgaSchemaInitializer.EnsureSchemaAsync(cancellationToken);
+
+        if (_options.Fga.InitializeFunctions)
         {
-            await _authSchemaInitializer.EnsureSchemaAsync(cancellationToken);
-            await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
-            await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
-            await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
-            await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
-            await _adminService.UpsertSeededClientsAsync(cancellationToken);
-            await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
-            await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
+            await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
         }
 
-        if (_options.EnableFga)
+        if (_options.Fga.SeedCoreData)
         {
-            await _fgaSchemaInitializer.EnsureSchemaAsync(cancellationToken);
+            await _fgaSeedService.SeedCoreAsync(cancellationToken);
+        }
 
-            if (_options.Fga.InitializeFunctions)
-            {
-                await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
-            }
-
-            if (_options.Fga.SeedCoreData)
-            {
-                await _fgaSeedService.SeedCoreAsync(cancellationToken);
-            }
-
-            if (_options.Fga.StartupSeedData != null)
-            {
-                await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
-            }
+        if (_options.Fga.StartupSeedData != null)
+        {
+            await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
         }
 
         _logger.LogInformation("SqlOS initialization complete.");

@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
-using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Dashboard;
 using RootDashboardMiddleware = SqlOS.Dashboard.SqlOSDashboardMiddleware;
 
@@ -26,15 +25,10 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         }
 
         var environment = services.GetRequiredService<IHostEnvironment>();
-        var fgaOptions = services.GetService<IOptions<SqlOSFgaOptions>>()?.Value;
         var prefix = hostOptions.DashboardBasePath.TrimEnd('/');
 
         app.UseMiddleware<RootDashboardMiddleware>(prefix, environment, hostOptions.Dashboard);
-
-        if (hostOptions.EnableFga && fgaOptions != null)
-        {
-            app.UseMiddleware<SqlOSFgaDashboardMiddleware>($"{prefix}/admin/fga", environment, fgaOptions.Dashboard);
-        }
+        app.UseMiddleware<SqlOSFgaDashboardMiddleware>($"{prefix}/admin/fga", environment, hostOptions.Dashboard);
 
         next(app);
     };

@@ -206,7 +206,6 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.Layout).HasMaxLength(32);
             entity.Property(x => x.PageTitle).HasMaxLength(200);
             entity.Property(x => x.PageSubtitle).HasMaxLength(500);
-            entity.Property(x => x.PresentationMode).HasMaxLength(32);
         });
 
         modelBuilder.Entity<SqlOSAuthorizationRequest>(entity =>

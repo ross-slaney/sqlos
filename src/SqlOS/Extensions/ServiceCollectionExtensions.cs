@@ -26,43 +26,9 @@ public static class ServiceCollectionExtensions
         configure?.Invoke(options);
 
         SqlOSPathDefaults.Apply(options);
-
-        if (options.Dashboard.AuthorizationCallback != null)
-        {
-            options.AuthServer.Dashboard.AuthorizationCallback ??= options.Dashboard.AuthorizationCallback;
-            options.Fga.Dashboard.AuthorizationCallback ??= options.Dashboard.AuthorizationCallback;
-        }
-
-        if (options.Dashboard.AuthMode != SqlOSDashboardAuthMode.DevelopmentOnly
-            && options.AuthServer.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly)
-        {
-            options.AuthServer.Dashboard.AuthMode = options.Dashboard.AuthMode;
-        }
-
-        if (options.Dashboard.AuthMode != SqlOSDashboardAuthMode.DevelopmentOnly
-            && options.Fga.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly)
-        {
-            options.Fga.Dashboard.AuthMode = options.Dashboard.AuthMode;
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Dashboard.Password))
-        {
-            options.AuthServer.Dashboard.Password ??= options.Dashboard.Password;
-            options.Fga.Dashboard.Password ??= options.Dashboard.Password;
-        }
-
-        if (options.Dashboard.SessionLifetime != SqlOSDashboardOptions.DefaultSessionLifetime)
-        {
-            if (options.AuthServer.Dashboard.SessionLifetime == SqlOSDashboardOptions.DefaultSessionLifetime)
-            {
-                options.AuthServer.Dashboard.SessionLifetime = options.Dashboard.SessionLifetime;
-            }
-
-            if (options.Fga.Dashboard.SessionLifetime == SqlOSDashboardOptions.DefaultSessionLifetime)
-            {
-                options.Fga.Dashboard.SessionLifetime = options.Dashboard.SessionLifetime;
-            }
-        }
+        options.AuthServer.Dashboard = options.Dashboard;
+        options.Fga.Dashboard = options.Dashboard;
+        SqlOSOptionsValidator.ValidateOrThrow(options);
 
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));

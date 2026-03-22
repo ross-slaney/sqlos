@@ -19,10 +19,7 @@ AuthServer is SqlOS’s identity piece. Users, orgs, sessions, tokens, OIDC, and
 ## Setup
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer();
-});
+builder.AddSqlOS<AppDbContext>();
 
 var app = builder.Build();
 app.MapSqlOS();
@@ -59,7 +56,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 | `SqlOSOidcAuthService` | Google, Microsoft, Apple, and custom OIDC |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
 
-## Presentation modes
+## Hosted and headless
 
 Protocol vs pixels:
 

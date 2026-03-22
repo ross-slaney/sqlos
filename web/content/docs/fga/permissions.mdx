@@ -10,18 +10,21 @@ A permission is a capability key scoped to a resource type. Permissions define w
 ## Define permissions in startup
 
 ```csharp
-options.UseFGA(fga =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    fga.SeedResourceType("chain", "Chain");
-    fga.SeedResourceType("location", "Location");
-    fga.SeedResourceType("inventory", "Inventory Item");
+    options.Fga.Seed(seed =>
+    {
+        seed.ResourceType("chain", "Chain");
+        seed.ResourceType("location", "Location");
+        seed.ResourceType("inventory", "Inventory Item");
 
-    fga.SeedPermission("CHAIN_VIEW", "View Chain", "chain");
-    fga.SeedPermission("CHAIN_EDIT", "Edit Chain", "chain");
-    fga.SeedPermission("LOCATION_VIEW", "View Location", "location");
-    fga.SeedPermission("LOCATION_EDIT", "Edit Location", "location");
-    fga.SeedPermission("INVENTORY_VIEW", "View Inventory", "inventory");
-    fga.SeedPermission("INVENTORY_EDIT", "Edit Inventory", "inventory");
+        seed.Permission("CHAIN_VIEW", "CHAIN_VIEW", "View Chain", "chain");
+        seed.Permission("CHAIN_EDIT", "CHAIN_EDIT", "Edit Chain", "chain");
+        seed.Permission("LOCATION_VIEW", "LOCATION_VIEW", "View Location", "location");
+        seed.Permission("LOCATION_EDIT", "LOCATION_EDIT", "Edit Location", "location");
+        seed.Permission("INVENTORY_VIEW", "INVENTORY_VIEW", "View Inventory", "inventory");
+        seed.Permission("INVENTORY_EDIT", "INVENTORY_EDIT", "Edit Inventory", "inventory");
+    });
 });
 ```
 
