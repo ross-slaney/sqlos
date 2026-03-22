@@ -4,12 +4,6 @@ using SqlOS.AuthServer.Models;
 
 namespace SqlOS.AuthServer.Configuration;
 
-public enum SqlOSAuthPageMode
-{
-    Hosted = 0,
-    Headless = 1
-}
-
 public sealed class SqlOSHeadlessAuthOptions
 {
     public string? HeadlessApiBasePath { get; set; }

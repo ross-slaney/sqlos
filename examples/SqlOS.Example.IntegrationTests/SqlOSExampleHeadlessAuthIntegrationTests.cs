@@ -51,7 +51,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var handoffLocation = authorizeResponse.Headers.Location;
         handoffLocation.Should().NotBeNull();
-        var handoffQuery = QueryHelpers.ParseQuery(handoffLocation.Query);
+        var handoffQuery = QueryHelpers.ParseQuery(handoffLocation!.Query);
         var requestId = handoffQuery["request"].ToString();
         requestId.Should().NotBeNullOrWhiteSpace();
 

@@ -8,7 +8,6 @@ public class SqlOSAuthServerOptions
     public string Schema { get; set; } = "dbo";
     public string BasePath { get; set; } = "/sqlos/auth";
     public string Issuer { get; set; } = "https://localhost/sqlos/auth";
-    public SqlOSAuthPageMode AuthPageMode { get; set; } = SqlOSAuthPageMode.Hosted;
     public string? PublicOrigin { get; set; }
     public string DefaultAudience { get; set; } = "sqlos";
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);

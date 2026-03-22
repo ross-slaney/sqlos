@@ -25,9 +25,6 @@ public static class EndpointRouteBuilderExtensions
         var adminPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
             ? $"{authPrefix[..^5]}/admin/auth"
             : $"{authPrefix}/admin";
-        var legacySamlPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
-            ? authPrefix[..^5]
-            : null;
 
         var auth = endpoints.MapGroup(authPrefix);
         auth.ExcludeFromDescription();
@@ -768,11 +765,6 @@ public static class EndpointRouteBuilderExtensions
         }
 
         auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);
-        if (!string.IsNullOrWhiteSpace(legacySamlPrefix))
-        {
-            endpoints.MapPost($"{legacySamlPrefix}/saml/acs/{{connectionId}}", HandleSamlAcsAsync)
-                .ExcludeFromDescription();
-        }
 
         adminApi.MapGet("/stats", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
