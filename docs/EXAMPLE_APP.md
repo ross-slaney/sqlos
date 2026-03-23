@@ -28,6 +28,7 @@ Start with the Todo sample first:
 - `examples/SqlOS.Example.Api`
 - `examples/SqlOS.Example.Web`
 - `examples/SqlOS.Example.AppHost`
+- `examples/SqlOS.Todo.Api`
 
 ## Run
 
@@ -46,6 +47,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 - FGA admin: `http://localhost:5062/sqlos/admin/fga/`
 - API swagger: `http://localhost:5062/swagger`
 - web app: `http://localhost:3010/`
+- todo app: `http://localhost:5080/`
 
 ## Validation flow
 

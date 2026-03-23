@@ -1024,6 +1024,7 @@ public class SqlOSFgaDashboardMiddleware
         {
             using var reader = new StreamReader(stream);
             var html = await reader.ReadToEndAsync();
+            html = html.Replace("__SQL_OS_FGA_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(GetDashboardShellPrefix().TrimEnd('/')), StringComparison.Ordinal);
             html = html.Replace("__SQL_OS_BASE_PATH__", GetDashboardShellPrefix().TrimEnd('/'), StringComparison.Ordinal);
             await context.Response.WriteAsync(html);
             return;

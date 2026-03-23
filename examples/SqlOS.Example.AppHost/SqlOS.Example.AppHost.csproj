@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <Sdk Name="Aspire.AppHost.Sdk" Version="9.0.0" />
 
   <PropertyGroup>
@@ -18,5 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SqlOS.Example.Api\SqlOS.Example.Api.csproj" />
+    <ProjectReference Include="..\SqlOS.Todo.Api\SqlOS.Todo.Api.csproj" />
   </ItemGroup>
 </Project>

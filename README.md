@@ -149,7 +149,7 @@ The repo includes a full working example powered by .NET Aspire:
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-That starts SQL Server, the sample API, and a Next.js app. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, and FGA in one stack.
+That starts SQL Server, the sample API, the Todo sample, and the web frontends in one stack. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, FGA, and the hosted-first MCP-oriented Todo flow side by side.
 
 | | URL |
 |---|---|
@@ -157,6 +157,7 @@ That starts SQL Server, the sample API, and a Next.js app. Use it when you want 
 | Auth Admin | `http://localhost:5062/sqlos/admin/auth/` |
 | FGA Admin | `http://localhost:5062/sqlos/admin/fga/` |
 | Web App | `http://localhost:3010/` |
+| Todo App | `http://localhost:5080/` |
 
 ## Requirements
 

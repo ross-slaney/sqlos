@@ -18,7 +18,6 @@ var database = sql.AddDatabase("sqlos-todo");
 builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")
     .WithReference(database)
     .WaitFor(database)
-    .WithHttpEndpoint(port: todoPort, isProxied: false)
     .WithEnvironment("ConnectionStrings__DefaultConnection", database.Resource.ConnectionStringExpression)
     .WithEnvironment("SqlOS__Issuer", todoIssuer)
     .WithEnvironment("TodoSample__PublicOrigin", todoOrigin)

@@ -19,6 +19,12 @@ Use the AppHost to get SQL Server plus the Todo sample on one command:
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
+Or run the broader Aspire stack and get the Todo app there too:
+
+```bash
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
 Open `http://localhost:5080/`.
 
 ## What to try
