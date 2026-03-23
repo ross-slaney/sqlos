@@ -336,6 +336,7 @@ public sealed class SqlOSDashboardMiddleware
         await using var stream = file.CreateReadStream();
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var html = await reader.ReadToEndAsync();
+        html = html.Replace("__SQL_OS_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(_pathPrefix), StringComparison.Ordinal);
         html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
         await context.Response.WriteAsync(html);
     }

@@ -68,6 +68,7 @@ public sealed class SqlOSAdminDashboardTests
                 Id = "cli_disabled",
                 ClientId = "manual-disabled",
                 Name = "Manual Disabled",
+                Description = "Legacy browser client",
                 Audience = "sqlos",
                 RedirectUrisJson = "[\"https://manual.example.test/callback\"]",
                 RegistrationSource = "manual",
@@ -87,6 +88,10 @@ public sealed class SqlOSAdminDashboardTests
 
         dcrResult.GetProperty("totalCount").GetInt32().Should().Be(2);
         dcrResult.GetProperty("page").GetInt32().Should().Be(1);
+        dcrResult.GetProperty("summary").GetProperty("activeCount").GetInt32().Should().Be(2);
+        dcrResult.GetProperty("summary").GetProperty("registeredCount").GetInt32().Should().Be(2);
+        dcrResult.GetProperty("summary").GetProperty("discoveredCount").GetInt32().Should().Be(0);
+        dcrResult.GetProperty("summary").GetProperty("disabledCount").GetInt32().Should().Be(0);
         var dcrItems = dcrResult.GetProperty("data");
         dcrItems.GetArrayLength().Should().Be(2);
         foreach (var item in dcrItems.EnumerateArray())
@@ -103,9 +108,20 @@ public sealed class SqlOSAdminDashboardTests
             pageSize: 10));
 
         cimdResult.GetProperty("totalCount").GetInt32().Should().Be(1);
+        cimdResult.GetProperty("summary").GetProperty("activeCount").GetInt32().Should().Be(1);
+        cimdResult.GetProperty("summary").GetProperty("discoveredCount").GetInt32().Should().Be(1);
         var cimdItem = cimdResult.GetProperty("data")[0];
         cimdItem.GetProperty("sourceLabel").GetString().Should().Be("Discovered");
         cimdItem.GetProperty("metadataCacheState").GetString().Should().Be("stale");
+
+        var descriptionSearchResult = SerializeForDashboard(await admin.ListClientsAsync(
+            status: "disabled",
+            search: "legacy browser",
+            page: 1,
+            pageSize: 10));
+
+        descriptionSearchResult.GetProperty("totalCount").GetInt32().Should().Be(1);
+        descriptionSearchResult.GetProperty("data")[0].GetProperty("clientId").GetString().Should().Be("manual-disabled");
     }
 
     [TestMethod]

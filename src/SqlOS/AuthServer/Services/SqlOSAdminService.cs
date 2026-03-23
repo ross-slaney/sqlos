@@ -739,6 +739,10 @@ public sealed class SqlOSAdminService
             .ToList();
 
         var totalCount = filtered.Count;
+        var activeCount = filtered.Count(item => item.IsActive && item.DisabledAt == null);
+        var discoveredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "cimd", StringComparison.OrdinalIgnoreCase));
+        var registeredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase));
+        var disabledCount = filtered.Count(item => !item.IsActive || item.DisabledAt != null);
         var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
         var currentPage = Math.Min(resolvedPage, totalPages);
         var data = filtered
@@ -753,7 +757,14 @@ public sealed class SqlOSAdminService
             Page = currentPage,
             PageSize = resolvedPageSize,
             TotalCount = totalCount,
-            TotalPages = totalPages
+            TotalPages = totalPages,
+            Summary = new
+            {
+                ActiveCount = activeCount,
+                DiscoveredCount = discoveredCount,
+                RegisteredCount = registeredCount,
+                DisabledCount = disabledCount
+            }
         };
     }
 
@@ -1591,7 +1602,10 @@ public sealed class SqlOSAdminService
         return (item.Name?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
             || item.ClientId.Contains(normalized, StringComparison.OrdinalIgnoreCase)
             || item.SourceLabel.Contains(normalized, StringComparison.OrdinalIgnoreCase)
+            || (item.Description?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || item.Audience.Contains(normalized, StringComparison.OrdinalIgnoreCase)
             || (item.SoftwareId?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (item.SoftwareVersion?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
             || (item.MetadataDocumentUrl?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
@@ -1638,9 +1652,18 @@ public sealed class SqlOSAdminService
     }
 
     private async Task<SqlOSClientApplication> GetRequiredClientByIdAsync(string clientApplicationId, CancellationToken cancellationToken)
-        => await _context.Set<SqlOSClientApplication>()
-            .FirstOrDefaultAsync(x => x.Id == clientApplicationId, cancellationToken)
-            ?? throw new InvalidOperationException("Client application was not found.");
+    {
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.Id == clientApplicationId, cancellationToken);
+        if (client != null)
+        {
+            return client;
+        }
+
+        client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.ClientId == clientApplicationId, cancellationToken);
+        return client ?? throw new InvalidOperationException("Client application was not found.");
+    }
 
     private async Task<int> RevokeClientSessionsInternalAsync(string clientApplicationId, string reason, CancellationToken cancellationToken)
     {

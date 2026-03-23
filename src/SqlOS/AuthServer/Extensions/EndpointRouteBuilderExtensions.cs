@@ -1011,17 +1011,24 @@ public static class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            var client = await adminService.CreateClientAsync(request, cancellationToken);
-            return Results.Ok(new
+            try
             {
-                client.Id,
-                client.ClientId,
-                client.Name,
-                client.Audience,
-                RedirectUris = client.RedirectUrisJson,
-                client.IsActive,
-                client.CreatedAt
-            });
+                var client = await adminService.CreateClientAsync(request, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.Name,
+                    client.Audience,
+                    RedirectUris = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson),
+                    client.IsActive,
+                    client.CreatedAt
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapPost("/clients/{clientId}/disable", async (HttpContext context, string clientId, ClientLifecycleRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

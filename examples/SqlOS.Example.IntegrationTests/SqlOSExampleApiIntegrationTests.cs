@@ -393,6 +393,21 @@ public sealed class SqlOSExampleApiIntegrationTests
         var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
         var clientId = createJson.RootElement.GetProperty("id").GetString();
 
+        var duplicateCreateResponse = await AdminPostAsync("/sqlos/admin/auth/api/clients", new
+        {
+            clientId = $"dashboard-client-{clientSuffix}",
+            name = $"Dashboard Client {clientSuffix}",
+            audience = "sqlos",
+            redirectUris = new[] { $"https://dashboard-{clientSuffix}.example.test/callback" },
+            description = "Created by admin integration test",
+            allowedScopes = new[] { "openid", "profile" },
+            requirePkce = true,
+            isFirstParty = true
+        });
+        duplicateCreateResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+        var duplicateCreateJson = JsonDocument.Parse(await duplicateCreateResponse.Content.ReadAsStringAsync());
+        duplicateCreateJson.RootElement.GetProperty("message").GetString().Should().Contain("already exists");
+
         var listResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?search={clientSuffix}&page=1&pageSize=10");
         listResponse.EnsureSuccessStatusCode();
         var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
@@ -411,6 +426,11 @@ public sealed class SqlOSExampleApiIntegrationTests
         detailJson.RootElement.GetProperty("clientId").GetString().Should().Be($"dashboard-client-{clientSuffix}");
         detailJson.RootElement.GetProperty("allowedScopes").GetArrayLength().Should().Be(2);
         detailJson.RootElement.TryGetProperty("recentAuditEvents", out _).Should().BeTrue();
+
+        var publicClientDetailResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients/dashboard-client-{clientSuffix}");
+        publicClientDetailResponse.EnsureSuccessStatusCode();
+        var publicClientDetailJson = JsonDocument.Parse(await publicClientDetailResponse.Content.ReadAsStringAsync());
+        publicClientDetailJson.RootElement.GetProperty("id").GetString().Should().Be(clientId);
 
         var disableResponse = await AdminPostAsync($"/sqlos/admin/auth/api/clients/{clientId}/disable", new
         {

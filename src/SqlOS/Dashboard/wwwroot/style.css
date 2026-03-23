@@ -413,6 +413,41 @@ nav a.active {
     border: 1px solid var(--amber-100);
 }
 
+.client-explainer {
+    margin-top: 14px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--zinc-200);
+    background: var(--zinc-50);
+}
+
+.client-explainer summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--zinc-800);
+}
+
+.client-explainer-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-top: 12px;
+}
+
+.client-explainer-card {
+    display: grid;
+    gap: 6px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--zinc-200);
+    background: #fff;
+}
+
+.client-explainer-card p {
+    margin: 0;
+    color: var(--zinc-600);
+}
+
 .client-preset-grid,
 .client-summary-grid {
     display: grid;
@@ -420,7 +455,7 @@ nav a.active {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.client-preset-card {
+.content-area .client-preset-card {
     display: grid;
     gap: 8px;
     text-align: left;
@@ -428,20 +463,32 @@ nav a.active {
     border: 1px solid var(--zinc-200);
     background: #fff;
     color: var(--zinc-900);
+    cursor: pointer;
 }
 
-.client-preset-card span {
+.content-area .client-preset-card span {
     color: var(--zinc-600);
     font-size: 14px;
     line-height: 1.5;
     font-weight: 500;
 }
 
-.client-preset-card:hover,
-.client-preset-card--active {
+.content-area .client-preset-card em {
+    color: var(--zinc-500);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+}
+
+.content-area .client-preset-card:hover,
+.content-area .client-preset-card--active {
     border-color: var(--amber-400);
     background: var(--amber-50);
     color: var(--zinc-900);
+}
+
+.client-form-help {
+    margin-top: 10px;
 }
 
 .client-summary-card {
@@ -478,6 +525,14 @@ nav a.active {
 .client-list-row {
     display: grid;
     gap: 10px;
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+}
+
+.client-list-row--selected {
+    border-color: var(--amber-300);
+    background: var(--amber-50);
 }
 
 .client-list-header,

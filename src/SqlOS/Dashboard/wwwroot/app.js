@@ -6,6 +6,7 @@
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const authApiBasePath = `${authDashboardPath}/api`;
     const fgaApiBasePath = `${fgaDashboardPath}/api`;
+    const clientOnboardingDocsUrl = "https://sqlos.dev/docs/guides/authserver/preregistration-vs-cimd-vs-dcr";
 
     const content = document.getElementById("content");
     const pageEyebrow = document.getElementById("page-eyebrow");
@@ -18,6 +19,9 @@
     let latestSsoDraft = null;
     const pagerState = new Map();
     let selectedClientId = null;
+    let clientDraftState = null;
+    let suppressClientDraftSync = false;
+    let focusClientFormAfterPreset = false;
     const clientViewState = {
         preset: "owned-web",
         source: "all",
@@ -272,9 +276,36 @@
             }
 
             if (!response.ok) {
-                const text = await response.text();
-                const error = new Error(text || `${response.status}`);
+                const contentType = response.headers.get("content-type") || "";
+                let payload = null;
+                let message = `${response.status}`;
+
+                if (contentType.includes("application/json")) {
+                    try {
+                        payload = await response.json();
+                    } catch {
+                        payload = null;
+                    }
+                } else {
+                    const text = await response.text();
+                    if (text) {
+                        try {
+                            payload = JSON.parse(text);
+                        } catch {
+                            payload = text;
+                        }
+                    }
+                }
+
+                if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+                    message = payload.message || payload.error_description || payload.error || JSON.stringify(payload);
+                } else if (typeof payload === "string" && payload.trim()) {
+                    message = payload;
+                }
+
+                const error = new Error(message || `${response.status}`);
                 error.status = response.status;
+                error.payload = payload;
                 throw error;
             }
 
@@ -368,6 +399,10 @@
         return `${authDashboardPath}/users/${encodeURIComponent(userId)}/${normalizedTab}`;
     }
 
+    function clientDetailPath(clientApplicationId) {
+        return `${authDashboardPath}/clients/${encodeURIComponent(clientApplicationId)}`;
+    }
+
     function decodeRouteSegment(value) {
         try {
             return decodeURIComponent(value);
@@ -421,6 +456,17 @@
                     userTab,
                     key: "auth-users",
                     canonicalPath: userDetailPath(userId, userTab)
+                };
+            }
+
+            if (view === "clients" && segments[3]) {
+                const clientApplicationId = decodeRouteSegment(segments[3]);
+                return {
+                    kind: "auth",
+                    view,
+                    clientApplicationId,
+                    key: "auth-clients",
+                    canonicalPath: clientDetailPath(clientApplicationId)
                 };
             }
 
@@ -556,9 +602,89 @@
         return clientPresetDefinitions[clientViewState.preset] || clientPresetDefinitions["owned-web"];
     }
 
-    function renderClientPresetOptions() {
-        return Object.entries(clientPresetDefinitions).map(([key, preset]) =>
-            `<option value="${esc(key)}" ${clientViewState.preset === key ? "selected" : ""}>${esc(preset.title)}</option>`).join("");
+    function createClientDraftFromPreset(presetKey = clientViewState.preset) {
+        const preset = clientPresetDefinitions[presetKey] || clientPresetDefinitions["owned-web"];
+        return {
+            clientId: "",
+            name: preset.name || "",
+            audience: preset.audience || "sqlos",
+            redirectUris: preset.redirectHint || "",
+            description: "",
+            allowedScopes: (preset.allowedScopes || []).join("\n"),
+            requirePkce: true,
+            isFirstParty: !!preset.isFirstParty
+        };
+    }
+
+    function ensureClientDraftState() {
+        if (!clientDraftState) {
+            clientDraftState = createClientDraftFromPreset();
+        }
+
+        return clientDraftState;
+    }
+
+    function syncClientDraftFromForm() {
+        const form = document.getElementById("create-client-form");
+        if (!form) {
+            return;
+        }
+
+        const data = new FormData(form);
+        const previousDraft = ensureClientDraftState();
+        clientDraftState = {
+            clientId: String(data.get("clientId") || "").trim(),
+            name: String(data.get("name") || "").trim(),
+            audience: String(data.get("audience") || "").trim(),
+            redirectUris: String(data.get("redirectUris") || ""),
+            description: String(data.get("description") || ""),
+            allowedScopes: String(data.get("allowedScopes") || ""),
+            requirePkce: data.get("requirePkce") === "on",
+            isFirstParty: previousDraft.isFirstParty
+        };
+    }
+
+    function applyClientPreset(presetKey) {
+        clientViewState.preset = clientPresetDefinitions[presetKey] ? presetKey : "owned-web";
+        clientDraftState = createClientDraftFromPreset(clientViewState.preset);
+        suppressClientDraftSync = true;
+        focusClientFormAfterPreset = true;
+    }
+
+    function describeFeatureStatus(value) {
+        if (value === true) {
+            return { label: "Enabled", tone: "success" };
+        }
+
+        if (value === false) {
+            return { label: "Disabled", tone: "muted" };
+        }
+
+        return { label: "Unavailable", tone: "warning" };
+    }
+
+    function describePresetOwnership(presetKey, preset) {
+        if (presetKey === "advanced") {
+            return {
+                label: "Custom manual client",
+                tone: "muted",
+                description: "Use this when you want to control the manual client fields yourself before saving."
+            };
+        }
+
+        if (preset.isFirstParty) {
+            return {
+                label: "First-party app client",
+                tone: "success",
+                description: "Use this for apps your team owns. These are usually seeded in AddSqlOS(...) or created here for local and dev use."
+            };
+        }
+
+        return {
+            label: "Manual third-party test client",
+            tone: "warning",
+            description: "Use this for local compatibility testing. Real third-party clients usually appear automatically as discovered or registered records."
+        };
     }
 
     function normalizeOidcProviderType(value) {
@@ -988,7 +1114,7 @@
         }
 
         if (view === "clients") {
-            await renderAuthClients();
+            await renderAuthClients(route);
             return;
         }
 
@@ -1679,14 +1805,38 @@
         });
     }
 
-    async function renderAuthClients() {
+    async function renderAuthClients(route) {
         const config = authViews.clients;
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading clients...");
 
+        if (!suppressClientDraftSync) {
+            syncClientDraftFromForm();
+        }
+        suppressClientDraftSync = false;
+        selectedClientId = route?.clientApplicationId || null;
+        const draft = ensureClientDraftState();
+        let clientRuntimeConfig = {
+            cimdEnabled: null,
+            dcrEnabled: null,
+            resourceIndicatorsEnabled: null,
+            registrationEndpoint: null
+        };
+        try {
+            const metadata = await fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`);
+            clientRuntimeConfig = {
+                cimdEnabled: metadata.client_id_metadata_document_supported === true,
+                dcrEnabled: !!metadata.registration_endpoint,
+                resourceIndicatorsEnabled: metadata.resource_parameter_supported === true,
+                registrationEndpoint: metadata.registration_endpoint || null
+            };
+        } catch {
+            // Keep the clients page usable even if runtime metadata is not available.
+        }
+        const pager = getPagerState("auth-clients", 25);
         const params = new URLSearchParams({
-            page: String(getPagerPage("auth-clients")),
-            pageSize: "25"
+            page: String(pager.page),
+            pageSize: String(pager.pageSize)
         });
         if (clientViewState.source !== "all") {
             params.set("source", clientViewState.source);
@@ -1704,28 +1854,89 @@
         if (selectedClientId) {
             try {
                 clientDetail = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(selectedClientId)}`);
+                selectedClientId = clientDetail.id;
             } catch {
+                if (route?.clientApplicationId) {
+                    history.replaceState({}, "", pathForRoute("auth-clients"));
+                }
                 selectedClientId = null;
             }
         }
 
         const preset = currentClientPreset();
-        const activeCount = clientItems.filter(item => item.isActive && !item.disabledAt).length;
-        const discoveredCount = clientItems.filter(item => item.registrationSource === "cimd").length;
-        const registeredCount = clientItems.filter(item => item.registrationSource === "dcr").length;
-        const disabledCount = clientItems.filter(item => !item.isActive || item.disabledAt).length;
+        const summary = clients.summary || {};
+        const activeCount = summary.activeCount ?? clientItems.filter(item => item.isActive && !item.disabledAt).length;
+        const discoveredCount = summary.discoveredCount ?? clientItems.filter(item => item.registrationSource === "cimd").length;
+        const registeredCount = summary.registeredCount ?? clientItems.filter(item => item.registrationSource === "dcr").length;
+        const disabledCount = summary.disabledCount ?? clientItems.filter(item => !item.isActive || item.disabledAt).length;
+        const selectedClientVisible = !!selectedClientId && clientItems.some(item => item.id === selectedClientId);
+        const cimdStatus = describeFeatureStatus(clientRuntimeConfig.cimdEnabled);
+        const dcrStatus = describeFeatureStatus(clientRuntimeConfig.dcrEnabled);
+        const resourceIndicatorStatus = describeFeatureStatus(clientRuntimeConfig.resourceIndicatorsEnabled);
+        const presetOwnership = describePresetOwnership(clientViewState.preset, preset);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
             <div class="panel-stack">
                 <section class="panel">
-                    <h2>Choose What You Are Building</h2>
-                    <p>Start from app intent first. Raw OAuth and registration knobs stay available in advanced fields and inspect views.</p>
+                    <div class="panel-actions">
+                        <div>
+                            <h2>Runtime Client Onboarding Settings</h2>
+                            <p>The dashboard reports these runtime settings, but you change them in <span class="inline-code">AddSqlOS(...)</span> startup code, not here.</p>
+                        </div>
+                        <a class="inline-link" href="${esc(clientOnboardingDocsUrl)}" target="_blank" rel="noreferrer">Open docs</a>
+                    </div>
+                    <div class="client-summary-grid">
+                        <div class="client-summary-card">
+                            <strong>CIMD</strong>
+                            <span>Portable client metadata documents</span>
+                            <div class="client-badge-row">${renderClientBadge(cimdStatus.label, cimdStatus.tone)}</div>
+                        </div>
+                        <div class="client-summary-card">
+                            <strong>DCR</strong>
+                            <span>Compatibility registration endpoint</span>
+                            <div class="client-badge-row">${renderClientBadge(dcrStatus.label, dcrStatus.tone)}</div>
+                        </div>
+                        <div class="client-summary-card">
+                            <strong>Resource indicators</strong>
+                            <span>Resource-bound token audience support</span>
+                            <div class="client-badge-row">${renderClientBadge(resourceIndicatorStatus.label, resourceIndicatorStatus.tone)}</div>
+                        </div>
+                    </div>
+                    <div class="callout">
+                        <strong>Change these in startup code:</strong>
+                        <div><span class="inline-code">options.AuthServer.EnablePortableMcpClients(...)</span> or <span class="inline-code">options.AuthServer.ClientRegistration.Cimd.Enabled</span> for CIMD.</div>
+                        <div><span class="inline-code">options.AuthServer.EnableChatGptCompatibility(...)</span> or <span class="inline-code">options.AuthServer.ClientRegistration.Dcr.Enabled = true</span> for DCR.</div>
+                        ${clientRuntimeConfig.registrationEndpoint ? `<div><strong>DCR endpoint:</strong> <span class="inline-code">${esc(clientRuntimeConfig.registrationEndpoint)}</span></div>` : ""}
+                        <div><strong>Repo doc:</strong> <span class="inline-code">docs/CONFIGURATION.md</span></div>
+                    </div>
+                    <details class="client-explainer">
+                        <summary>What are first-party and third-party clients?</summary>
+                        <div class="client-explainer-grid">
+                            <div class="client-explainer-card">
+                                <strong>First-party clients</strong>
+                                <p>Apps your team owns. They usually come from startup seeding in <span class="inline-code">AddSqlOS(...)</span> or are created here for local and development workflows.</p>
+                            </div>
+                            <div class="client-explainer-card">
+                                <strong>Third-party clients</strong>
+                                <p>External apps talking to your auth server. They usually appear automatically as <em>Discovered</em> (CIMD) or <em>Registered</em> (DCR) clients.</p>
+                            </div>
+                            <div class="client-explainer-card">
+                                <strong>Source labels</strong>
+                                <p><em>Seeded</em> comes from startup code. <em>Manual</em> comes from this dashboard. <em>Discovered</em> comes from CIMD. <em>Registered</em> comes from DCR.</p>
+                            </div>
+                        </div>
+                    </details>
+                </section>
+                <section class="panel">
+                    <h2>Choose a Starter Template</h2>
+                    <p>Click a template to populate the manual client form below. Nothing is created until you submit the form.</p>
                     <div class="client-preset-grid">
                         ${Object.entries(clientPresetDefinitions).map(([key, value]) => `
                             <button type="button" class="client-preset-card ${clientViewState.preset === key ? "client-preset-card--active" : ""}" data-client-preset="${esc(key)}">
                                 <strong>${esc(value.title)}</strong>
                                 <span>${esc(value.description)}</span>
+                                <em>${clientViewState.preset === key ? "Selected below" : "Click to fill form"}</em>
                             </button>
                         `).join("")}
                     </div>
@@ -1743,30 +1954,31 @@
                 <div class="panel-grid">
                     <section class="panel">
                         <h2>Create Manual Client</h2>
-                        <p>${esc(preset.description)}</p>
+                        <p>Use the selected template as a starting point, then edit any field you need before saving.</p>
+                        <div class="client-badge-row">
+                            ${renderClientBadge(`Preset: ${preset.title}`, "info")}
+                            ${renderClientBadge(presetOwnership.label, presetOwnership.tone)}
+                        </div>
+                        <p class="client-form-help">${esc(presetOwnership.description)}</p>
                         <form id="create-client-form">
-                            <label>Preset
-                                <select id="client-preset-select" name="presetSelect">
-                                    ${renderClientPresetOptions()}
-                                </select>
-                            </label>
-                            <input name="clientId" placeholder="${esc(preset.clientIdHint)}" required>
-                            <input name="name" placeholder="${esc(preset.name || "Display name")}" value="${esc(preset.name)}" required>
-                            <input name="audience" placeholder="Audience" value="${esc(preset.audience)}">
-                            <textarea name="redirectUris" placeholder="One redirect URI per line" required>${esc(preset.redirectHint)}</textarea>
+                            <input name="clientId" placeholder="${esc(preset.clientIdHint)}" value="${esc(draft.clientId)}" required>
+                            <input name="name" placeholder="${esc(preset.name || "Display name")}" value="${esc(draft.name)}" required>
+                            <input name="audience" placeholder="Audience" value="${esc(draft.audience)}">
+                            <textarea name="redirectUris" placeholder="One redirect URI per line" required>${esc(draft.redirectUris)}</textarea>
                             <details>
                                 <summary>Advanced fields</summary>
                                 <div class="client-advanced-grid">
-                                    <textarea name="description" placeholder="Optional description"></textarea>
-                                    <textarea name="allowedScopes" placeholder="Optional scopes, one per line">${esc((preset.allowedScopes || []).join("\n"))}</textarea>
-                                    <label class="checkbox-row"><input name="requirePkce" type="checkbox" checked> Require PKCE</label>
-                                    <label class="checkbox-row"><input name="isFirstParty" type="checkbox" ${preset.isFirstParty ? "checked" : ""}> Mark as first-party</label>
+                                    <textarea name="description" placeholder="Optional description">${esc(draft.description)}</textarea>
+                                    <textarea name="allowedScopes" placeholder="Optional scopes, one per line">${esc(draft.allowedScopes)}</textarea>
+                                    <label class="checkbox-row"><input name="requirePkce" type="checkbox" ${draft.requirePkce ? "checked" : ""}> Require PKCE</label>
                                 </div>
                             </details>
                             <button type="submit">Create manual client</button>
                         </form>
                         <div class="callout">
-                            <strong>Startup seed guidance:</strong> Seeded clients come from application code. Third-party MCP clients usually appear automatically as discovered or registered clients when CIMD or DCR is enabled.
+                            <strong>This form creates manual client records.</strong>
+                            <div>Use owned templates for first-party apps you control. Use portable or compatibility templates for manual local testing of third-party-style clients.</div>
+                            <div>Seeded clients come from application code. Discovered and registered clients usually appear automatically when CIMD or DCR is enabled.</div>
                         </div>
                     </section>
                     <section class="panel">
@@ -1779,19 +1991,32 @@
                                         <div class="client-badge-row">${renderClientSourceBadges(clientDetail)}</div>
                                     </div>
                                     <div class="client-action-row">
+                                        <a class="inline-link" href="${esc(pathForRoute("auth-clients"))}" data-dashboard-route="auth-clients">Close inspect</a>
                                         <button type="button" data-client-action="${clientDetail.isActive && !clientDetail.disabledAt ? "disable" : "enable"}" data-client-id="${esc(clientDetail.id)}">
                                             ${clientDetail.isActive && !clientDetail.disabledAt ? "Disable" : "Enable"}
                                         </button>
                                         <button type="button" data-client-action="revoke" data-client-id="${esc(clientDetail.id)}">Revoke sessions</button>
                                     </div>
                                 </div>
+                                ${!selectedClientVisible ? `
+                                    <div class="callout">
+                                        <strong>Selected client is outside the current list view.</strong>
+                                        Current filters or pagination may hide it from the list below.
+                                    </div>
+                                ` : ""}
                                 ${renderMetadataRows([
+                                    { label: "Internal ID", value: clientDetail.id },
                                     { label: "Client ID", value: clientDetail.clientId },
+                                    { label: "Description", value: clientDetail.description || "n/a" },
                                     { label: "Audience", value: clientDetail.audience },
                                     { label: "Source", value: clientDetail.sourceLabel },
                                     { label: "Lifecycle", value: clientDetail.lifecycleState },
+                                    { label: "Require PKCE", value: clientDetail.requirePkce ? "Yes" : "No" },
+                                    { label: "First-party", value: clientDetail.isFirstParty ? "Yes" : "No" },
                                     { label: "Token auth method", value: clientDetail.tokenEndpointAuthMethod },
+                                    { label: "Core metadata editable", value: clientDetail.coreMetadataEditable ? "Yes" : "No" },
                                     { label: "Last seen", value: formatDate(clientDetail.lastSeenAt) },
+                                    { label: "Disabled reason", value: clientDetail.disabledReason || "n/a" },
                                     { label: "Metadata document", value: clientDetail.metadataDocumentUrl || "n/a" },
                                     { label: "Metadata cache", value: clientDetail.metadataCacheState || "n/a" },
                                     { label: "Fetched", value: formatDate(clientDetail.metadataFetchedAt) },
@@ -1816,6 +2041,10 @@
                                     {
                                         label: "Response types",
                                         value: clientDetail.responseTypes.length ? clientDetail.responseTypes.join(", ") : "n/a"
+                                    },
+                                    {
+                                        label: "Allowed scopes",
+                                        value: clientDetail.allowedScopes.length ? clientDetail.allowedScopes.join(", ") : "n/a"
                                     }
                                 ])}
                                 <details>
@@ -1857,7 +2086,7 @@
                             <option value="active" ${clientViewState.status === "active" ? "selected" : ""}>Active</option>
                             <option value="disabled" ${clientViewState.status === "disabled" ? "selected" : ""}>Disabled</option>
                         </select>
-                        <input name="search" placeholder="Search name, client ID, software ID, or metadata URL" value="${esc(clientViewState.search)}">
+                        <input name="search" placeholder="Search name, client ID, audience, software, metadata URL, or description" value="${esc(clientViewState.search)}">
                         <button type="submit">Apply filters</button>
                         <button type="button" id="client-filter-reset">Reset</button>
                     </form>
@@ -1865,7 +2094,7 @@
                     ${renderList(
                         clientItems,
                         item => `
-                            <div class="client-list-row">
+                            <div class="client-list-row ${selectedClientId === item.id ? "client-list-row--selected" : ""}">
                                 <div class="client-list-header">
                                     <div>
                                         <strong>${esc(item.name)}</strong>
@@ -1905,14 +2134,9 @@
 
         document.querySelectorAll("[data-client-preset]").forEach(button => {
             button.addEventListener("click", async () => {
-                clientViewState.preset = button.getAttribute("data-client-preset") || "owned-web";
+                applyClientPreset(button.getAttribute("data-client-preset") || "owned-web");
                 await render();
             });
-        });
-
-        document.getElementById("client-preset-select")?.addEventListener("change", async event => {
-            clientViewState.preset = event.target.value || "owned-web";
-            await render();
         });
 
         document.getElementById("client-filter-reset")?.addEventListener("click", async () => {
@@ -1940,10 +2164,12 @@
                         .map(value => value.trim())
                         .filter(Boolean),
                     requirePkce: form.get("requirePkce") === "on",
-                    isFirstParty: form.get("isFirstParty") === "on"
+                    isFirstParty: draft.isFirstParty
                 })
             });
             setFlash("success", "Manual client created.");
+            clientDraftState = createClientDraftFromPreset(clientViewState.preset);
+            suppressClientDraftSync = true;
             setPagerPage("auth-clients", 1);
         });
 
@@ -1962,7 +2188,7 @@
 
                 try {
                     if (action === "inspect") {
-                        selectedClientId = clientId;
+                        history.pushState({}, "", clientDetailPath(clientId));
                     } else if (action === "disable") {
                         const reason = window.prompt("Why are you disabling this client?", "disabled_by_operator");
                         if (reason === null) {
@@ -1976,7 +2202,8 @@
                         setFlash("success", "Client disabled.");
                     } else if (action === "enable") {
                         await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/enable`, {
-                            method: "POST"
+                            method: "POST",
+                            body: JSON.stringify({})
                         });
                         setFlash("success", "Client enabled.");
                     } else if (action === "revoke") {
@@ -1998,6 +2225,13 @@
                 await render();
             });
         });
+
+        if (focusClientFormAfterPreset) {
+            focusClientFormAfterPreset = false;
+            const form = document.getElementById("create-client-form");
+            form?.scrollIntoView({ behavior: "smooth", block: "start" });
+            form?.querySelector("input[name=\"clientId\"]")?.focus();
+        }
     }
 
     async function renderAuthOidc() {
