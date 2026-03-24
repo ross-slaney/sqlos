@@ -27,6 +27,8 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 Open `http://localhost:5080/`.
 
+Swagger UI is available at `http://localhost:5080/swagger`, and the generated spec is served from `http://localhost:5080/swagger/v1/swagger.json`.
+
 ## What to try
 
 1. Start with `Hosted sign in`.

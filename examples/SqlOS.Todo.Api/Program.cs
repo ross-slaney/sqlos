@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi.Models;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Services;
@@ -30,6 +31,25 @@ builder.Services.AddDbContext<TodoSampleDbContext>(options => options.UseSqlServ
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.WriteIndented = true;
+});
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "SqlOS Todo API",
+        Version = "v1",
+        Description = "Hosted-first Todo sample with SqlOS auth, protected-resource metadata, and MCP-oriented client onboarding examples."
+    });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "Bearer token minted for the Todo resource. Use /sample/config and /.well-known/oauth-protected-resource to discover the audience and auth server.",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
 });
 
 var sampleConfig = builder.Configuration.GetSection("TodoSample").Get<TodoSampleOptions>() ?? new TodoSampleOptions();
@@ -124,6 +144,8 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
 
 var app = builder.Build();
 
+app.UseSwagger();
+app.UseSwaggerUI();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapSqlOS();
