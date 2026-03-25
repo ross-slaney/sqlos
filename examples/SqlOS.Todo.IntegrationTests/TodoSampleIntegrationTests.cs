@@ -43,6 +43,8 @@ public sealed class TodoSampleIntegrationTests
         createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         var createResponse = await client.SendAsync(createRequest);
         createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        createJson.RootElement.GetProperty("resourceId").GetString().Should().StartWith("todo::");
 
         var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/todos");
         listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
@@ -52,7 +54,9 @@ public sealed class TodoSampleIntegrationTests
         var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
         listJson.RootElement.GetProperty("resource").GetString().Should().Be(TodoResource);
         listJson.RootElement.GetProperty("items").EnumerateArray()
-            .Should().Contain(item => item.GetProperty("title").GetString() == "Ship hosted-first login");
+            .Should().Contain(item =>
+                item.GetProperty("title").GetString() == "Ship hosted-first login"
+                && item.GetProperty("resourceId").GetString()!.StartsWith("todo::", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -101,6 +105,8 @@ public sealed class TodoSampleIntegrationTests
         var configJson = JsonDocument.Parse(await configResponse.Content.ReadAsStringAsync());
         configJson.RootElement.GetProperty("headlessEnabled").GetBoolean().Should().BeFalse();
         configJson.RootElement.GetProperty("dcrEnabled").GetBoolean().Should().BeFalse();
+        configJson.RootElement.GetProperty("localClient").GetProperty("redirectUri").GetString()
+            .Should().Be("http://localhost:3100/oauth/callback");
 
         var metadataResponse = await TodoApiFixture.Client.GetAsync("/.well-known/oauth-protected-resource");
         metadataResponse.EnsureSuccessStatusCode();
@@ -116,7 +122,7 @@ public sealed class TodoSampleIntegrationTests
     [TestMethod]
     public async Task LocalPreregisteredClient_CanExchangeAuthorizationCode()
     {
-        const string redirectUri = "http://localhost:8787/oauth/callback";
+        const string redirectUri = "http://localhost:3100/oauth/callback";
 
         await using var factory = TodoApiFixture.CreateFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -134,6 +140,109 @@ public sealed class TodoSampleIntegrationTests
 
         ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
         tokens.ClientId.Should().Be("todo-local");
+    }
+
+    [TestMethod]
+    public async Task FgaDashboard_ShowsSeededRoles_AndTodoHierarchy()
+    {
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var initialStats = await GetJsonAsync(client, "/sqlos/admin/fga/api/stats");
+        var initialResources = initialStats.RootElement.GetProperty("resources").GetInt32();
+        var initialSubjects = initialStats.RootElement.GetProperty("subjects").GetInt32();
+        var initialUsers = initialStats.RootElement.GetProperty("users").GetInt32();
+        var initialGrants = initialStats.RootElement.GetProperty("grants").GetInt32();
+        initialStats.RootElement.GetProperty("roles").GetInt32().Should().Be(1);
+        initialStats.RootElement.GetProperty("permissions").GetInt32().Should().Be(3);
+
+        var signup = await ExecuteHostedSignupAsync(client, HostedClientId, HostedRedirectUri);
+        var tokens = await ExchangeAuthorizationCodeAsync(client, signup.Code, HostedClientId, HostedRedirectUri, signup.CodeVerifier);
+
+        var meRequest = new HttpRequestMessage(HttpMethod.Get, "/api/me");
+        meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var meResponse = await client.SendAsync(meRequest);
+        meResponse.EnsureSuccessStatusCode();
+        var meJson = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
+        var userId = meJson.RootElement.GetProperty("userId").GetString();
+        var tenantResourceId = meJson.RootElement.GetProperty("tenantResourceId").GetString();
+
+        tenantResourceId.Should().Be($"tenant::{userId}");
+
+        var createResponse = await CreateTodoAsync(client, tokens.AccessToken, "Trace FGA hierarchy");
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var todoId = createJson.RootElement.GetProperty("id").GetGuid();
+        var todoResourceId = createJson.RootElement.GetProperty("resourceId").GetString();
+
+        var syncedStats = await GetJsonAsync(client, "/sqlos/admin/fga/api/stats");
+        syncedStats.RootElement.GetProperty("resources").GetInt32().Should().Be(initialResources + 2);
+        syncedStats.RootElement.GetProperty("subjects").GetInt32().Should().Be(initialSubjects + 1);
+        syncedStats.RootElement.GetProperty("users").GetInt32().Should().Be(initialUsers + 1);
+        syncedStats.RootElement.GetProperty("grants").GetInt32().Should().Be(initialGrants + 1);
+
+        var tree = await GetJsonAsync(client, "/sqlos/admin/fga/api/resources/tree?maxDepth=3");
+        var nodeIds = tree.RootElement.GetProperty("nodes").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+
+        nodeIds.Should().Contain("root");
+        nodeIds.Should().Contain(tenantResourceId);
+        nodeIds.Should().Contain(todoResourceId);
+        todoResourceId.Should().Be($"todo::{todoId:D}");
+    }
+
+    [TestMethod]
+    public async Task TodoEndpoints_UseFgaFiltering_AndDenyCrossTenantMutations()
+    {
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var clientA = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        using var clientB = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var signupA = await ExecuteHostedSignupAsync(clientA, HostedClientId, HostedRedirectUri);
+        var tokensA = await ExchangeAuthorizationCodeAsync(clientA, signupA.Code, HostedClientId, HostedRedirectUri, signupA.CodeVerifier);
+        var signupB = await ExecuteHostedSignupAsync(clientB, HostedClientId, HostedRedirectUri);
+        var tokensB = await ExchangeAuthorizationCodeAsync(clientB, signupB.Code, HostedClientId, HostedRedirectUri, signupB.CodeVerifier);
+
+        var createA = await CreateTodoAsync(clientA, tokensA.AccessToken, "User A todo");
+        var createB = await CreateTodoAsync(clientB, tokensB.AccessToken, "User B todo");
+        var todoA = JsonDocument.Parse(await createA.Content.ReadAsStringAsync()).RootElement;
+        var todoB = JsonDocument.Parse(await createB.Content.ReadAsStringAsync()).RootElement;
+        var todoAId = todoA.GetProperty("id").GetGuid();
+        var todoBId = todoB.GetProperty("id").GetGuid();
+
+        var listA = await ListTodosAsync(clientA, tokensA.AccessToken);
+        var listB = await ListTodosAsync(clientB, tokensB.AccessToken);
+
+        listA.RootElement.GetProperty("items").EnumerateArray()
+            .Select(item => item.GetProperty("title").GetString())
+            .Should().BeEquivalentTo(["User A todo"]);
+        listB.RootElement.GetProperty("items").EnumerateArray()
+            .Select(item => item.GetProperty("title").GetString())
+            .Should().BeEquivalentTo(["User B todo"]);
+
+        var toggleForbidden = new HttpRequestMessage(HttpMethod.Post, $"/api/todos/{todoAId}/toggle");
+        toggleForbidden.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokensB.AccessToken);
+        var toggleResponse = await clientB.SendAsync(toggleForbidden);
+        toggleResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        var deleteForbidden = new HttpRequestMessage(HttpMethod.Delete, $"/api/todos/{todoAId}");
+        deleteForbidden.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokensB.AccessToken);
+        var deleteResponse = await clientB.SendAsync(deleteForbidden);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        var toggleAllowed = new HttpRequestMessage(HttpMethod.Post, $"/api/todos/{todoBId}/toggle");
+        toggleAllowed.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokensB.AccessToken);
+        var toggleAllowedResponse = await clientB.SendAsync(toggleAllowed);
+        toggleAllowedResponse.EnsureSuccessStatusCode();
     }
 
     [TestMethod]
@@ -310,6 +419,34 @@ public sealed class TodoSampleIntegrationTests
             tokenJson.RootElement.GetProperty("access_token").GetString()!,
             tokenJson.RootElement.GetProperty("refresh_token").GetString()!,
             clientId);
+    }
+
+    private static async Task<HttpResponseMessage> CreateTodoAsync(HttpClient client, string accessToken, string title)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/todos")
+        {
+            Content = JsonContent.Create(new { title })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return response;
+    }
+
+    private static async Task<JsonDocument> ListTodosAsync(HttpClient client, string accessToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/todos");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    private static async Task<JsonDocument> GetJsonAsync(HttpClient client, string path)
+    {
+        var response = await client.GetAsync(path);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     }
 
     private static string ReadAudience(string accessToken)

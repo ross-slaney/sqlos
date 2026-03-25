@@ -92,7 +92,7 @@ Set a dashboard password in `appsettings.json`:
 
 ## Run the Todo sample first
 
-If your first goal is OAuth and public-client onboarding, start with the narrow Todo sample:
+If your first goal is hosted auth, simple FGA, and public-client onboarding, start with the Todo sample:
 
 ```bash
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
@@ -101,6 +101,8 @@ dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 That sample focuses on:
 
 - hosted auth first
+- per-user tenant + todo resource hierarchy
+- SQL-backed FGA filtering and simple auth checks
 - headless follow-on
 - protected-resource metadata
 - preregistration, `CIMD`, and optional `DCR`
@@ -131,6 +133,6 @@ If you migrate **before** the app has started SqlOS once, call `SqlOSBootstrappe
 ## Next steps
 
 - [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, and auth flows
-- [Todo Sample](/docs/guides/authserver/todo-sample) -- hosted-first OAuth and MCP-oriented flows
+- [Todo Sample](/docs/guides/authserver/todo-sample) -- hosted auth, simple FGA, and MCP-oriented flows
 - [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization and query filtering
 - [SDK Reference](/docs/guides/reference/sdk-reference) -- all services and methods

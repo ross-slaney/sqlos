@@ -1820,7 +1820,11 @@
             cimdEnabled: null,
             dcrEnabled: null,
             resourceIndicatorsEnabled: null,
-            registrationEndpoint: null
+            registrationEndpoint: null,
+            issuer: null,
+            authorizationEndpoint: null,
+            tokenEndpoint: null,
+            metadataUrl: `${authServerBasePath}/.well-known/oauth-authorization-server`
         };
         try {
             const metadata = await fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`);
@@ -1828,7 +1832,11 @@
                 cimdEnabled: metadata.client_id_metadata_document_supported === true,
                 dcrEnabled: !!metadata.registration_endpoint,
                 resourceIndicatorsEnabled: metadata.resource_parameter_supported === true,
-                registrationEndpoint: metadata.registration_endpoint || null
+                registrationEndpoint: metadata.registration_endpoint || null,
+                issuer: metadata.issuer || null,
+                authorizationEndpoint: metadata.authorization_endpoint || null,
+                tokenEndpoint: metadata.token_endpoint || null,
+                metadataUrl: `${authServerBasePath}/.well-known/oauth-authorization-server`
             };
         } catch {
             // Keep the clients page usable even if runtime metadata is not available.
@@ -1903,8 +1911,21 @@
                             <div class="client-badge-row">${renderClientBadge(resourceIndicatorStatus.label, resourceIndicatorStatus.tone)}</div>
                         </div>
                     </div>
+                    ${renderMetadataRows([
+                        clientRuntimeConfig.issuer
+                            ? { label: "Authorization Server Issuer", html: `<span class="inline-code">${esc(clientRuntimeConfig.issuer)}</span>` }
+                            : null,
+                        { label: "Discovery URL", html: `<span class="inline-code">${esc(clientRuntimeConfig.metadataUrl)}</span>` },
+                        clientRuntimeConfig.authorizationEndpoint
+                            ? { label: "Authorization endpoint", html: `<span class="inline-code">${esc(clientRuntimeConfig.authorizationEndpoint)}</span>` }
+                            : null,
+                        clientRuntimeConfig.tokenEndpoint
+                            ? { label: "Token endpoint", html: `<span class="inline-code">${esc(clientRuntimeConfig.tokenEndpoint)}</span>` }
+                            : null
+                    ].filter(Boolean))}
                     <div class="callout">
                         <strong>Change these in startup code:</strong>
+                        <div><strong>For app integrations:</strong> Use the discovery URL above or copy the authorization server issuer directly into your client configuration.</div>
                         <div><span class="inline-code">options.AuthServer.EnablePortableMcpClients(...)</span> or <span class="inline-code">options.AuthServer.ClientRegistration.Cimd.Enabled</span> for CIMD.</div>
                         <div><span class="inline-code">options.AuthServer.EnableChatGptCompatibility(...)</span> or <span class="inline-code">options.AuthServer.ClientRegistration.Dcr.Enabled = true</span> for DCR.</div>
                         ${clientRuntimeConfig.registrationEndpoint ? `<div><strong>DCR endpoint:</strong> <span class="inline-code">${esc(clientRuntimeConfig.registrationEndpoint)}</span></div>` : ""}

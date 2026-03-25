@@ -1,15 +1,18 @@
 ---
 title: "Todo Sample"
-description: "Run the narrow, MCP-oriented SqlOS sample with hosted auth, resource metadata, and public-client onboarding paths."
+description: "Run the hosted-first SqlOS sample with simple FGA, protected-resource metadata, and public-client onboarding paths."
 order: 1.6
 section: authserver
 ---
 
-The Todo sample is the canonical "make SqlOS work with MCP clients" walkthrough.
+The Todo sample is the canonical "ship hosted auth plus simple FGA fast" walkthrough.
 
-It stays narrow on purpose:
+It keeps the model intentionally small:
 
 - hosted auth first
+- one user = one tenant boundary
+- one tenant resource with child todo resources
+- SQL-backed FGA list filtering and simple auth checks in minimal APIs
 - headless follow-on when you need custom UI
 - a protected resource with audience enforcement
 - protected-resource metadata for MCP clients
@@ -24,6 +27,8 @@ dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 
 Open `http://localhost:5080/`.
 
+If you already ran an older version of the Todo sample, reset the Todo sample SQL database or persistent volume once before rerunning. Existing rows are not backfilled into the FGA graph.
+
 ## What the sample includes
 
 ### Hosted first
@@ -37,6 +42,31 @@ Use the landing page to:
 - land in a tiny Todo UI backed by the sample API
 
 This keeps the first experience simple. You do not have to write a custom auth UI to get a working OAuth flow.
+
+### Simple FGA
+
+The Todo sample now models every todo as an FGA resource.
+
+Hierarchy:
+
+- `root`
+- `tenant::{userId}`
+- `todo::{todoId}`
+
+Role and permission matrix:
+
+- `tenant_owner`
+- `TENANT_CREATE_TODO`
+- `TODO_READ`
+- `TODO_WRITE`
+
+The app grants `tenant_owner` on the user tenant node. Child todo resources inherit access from that node, so the sample can:
+
+- list todos with `GetAuthorizationFilterAsync<TodoItem>(...)`
+- authorize create against the tenant node
+- authorize toggle/delete against the todo resource
+
+That keeps the controller code small while still populating the FGA dashboard with a real tree.
 
 ### Headless follow-on
 
@@ -66,14 +96,17 @@ And when a caller presents no token or the wrong audience, the API returns:
 - `401 Unauthorized`
 - a `WWW-Authenticate` header with `resource_metadata`
 
-That means the sample demonstrates the resource-server side of MCP auth, not just the authorization server.
+That means the sample demonstrates both sides at once:
+
+- protected-resource metadata for MCP/public-client flows
+- simple FGA subject sync, grants, hierarchy, and SQL-backed authorization
 
 ## Local preregistered client
 
 For localhost development, use the seeded client:
 
 - `client_id`: `todo-local`
-- redirect URI: `http://localhost:8787/oauth/callback`
+- redirect URI: `http://localhost:3100/oauth/callback`
 - auth method: public PKCE only
 
 This is the easiest local loop before you publish the sample on a stable HTTPS origin.
@@ -115,8 +148,8 @@ This is the compatibility path for clients that still expect dynamic client regi
 
 Use the Todo sample when your question is:
 
-> "How do I expose SqlOS for modern public clients and MCP-oriented OAuth?"
+> "How do I ship hosted auth, simple FGA, and protected-resource metadata with very little app code?"
 
 Use the broader Example stack when your question is:
 
-> "How do I explore all of SqlOS, including OIDC, SAML, org workflows, and FGA?"
+> "How do I explore all of SqlOS, including OIDC, SAML, org workflows, and richer multi-tenant FGA?"

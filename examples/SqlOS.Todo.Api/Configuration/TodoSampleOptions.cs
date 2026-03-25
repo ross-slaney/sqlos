@@ -10,7 +10,7 @@ public sealed class TodoSampleOptions
     public bool EnableDcr { get; set; }
     public string Resource { get; set; } = "http://localhost:5080/api/todos";
     public string LocalClientId { get; set; } = "todo-local";
-    public string LocalRedirectUri { get; set; } = "http://localhost:8787/oauth/callback";
+    public string LocalRedirectUri { get; set; } = "http://localhost:3100/oauth/callback";
     public string PortableClientPath { get; set; } = "/clients/portable-client.json";
     public string PortableClientName { get; set; } = "SqlOS Todo Portable Client";
     public string PortableClientRedirectUri { get; set; } = "https://portable.todo.example.com/auth/callback";

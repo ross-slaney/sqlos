@@ -9,9 +9,11 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
 using SqlOS.Todo.Api.Configuration;
 using SqlOS.Todo.Api.Data;
 using SqlOS.Todo.Api.Models;
+using SqlOS.Todo.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +30,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 builder.Services.AddDbContext<TodoSampleDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddScoped<TodoFgaService>();
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.WriteIndented = true;
@@ -55,6 +58,7 @@ builder.Services.AddSwaggerGen(c =>
 var sampleConfig = builder.Configuration.GetSection("TodoSample").Get<TodoSampleOptions>() ?? new TodoSampleOptions();
 var publicOrigin = sampleConfig.PublicOrigin.TrimEnd('/');
 var hostedCallbackUrl = $"{publicOrigin}/callback.html";
+var localClientRedirectUri = "http://localhost:3100/oauth/callback";
 var portableClientUrl = $"{publicOrigin}{sampleConfig.PortableClientPath}";
 var cimdTrustedHosts = sampleConfig.CimdTrustedHosts
     .Concat([new Uri(publicOrigin).Host])
@@ -101,11 +105,46 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         client.Name = "Todo Local";
         client.Description = "Local preregistered client for localhost MCP development against the Todo sample.";
         client.Audience = sampleConfig.Resource;
-        client.RedirectUris = [sampleConfig.LocalRedirectUri];
+        client.RedirectUris = [localClientRedirectUri];
         client.AllowedScopes = sampleConfig.AllowedScopes;
         client.ClientType = "public_pkce";
         client.RequirePkce = true;
         client.IsFirstParty = false;
+    });
+
+    options.Fga.Seed(seed =>
+    {
+        seed.ResourceType(
+            TodoFgaService.TenantResourceTypeId,
+            "Tenant",
+            "Per-user tenant root for the Todo sample.");
+        seed.ResourceType(
+            TodoFgaService.TodoResourceTypeId,
+            "Todo",
+            "Individual todo items in the Todo sample.");
+        seed.Permission(
+            "perm_tenant_create_todo",
+            TodoFgaService.TenantCreateTodoPermission,
+            "Create todos",
+            TodoFgaService.TenantResourceTypeId);
+        seed.Permission(
+            "perm_todo_read",
+            TodoFgaService.TodoReadPermission,
+            "Read todos",
+            TodoFgaService.TodoResourceTypeId);
+        seed.Permission(
+            "perm_todo_write",
+            TodoFgaService.TodoWritePermission,
+            "Write todos",
+            TodoFgaService.TodoResourceTypeId);
+        seed.Role(
+            "role_tenant_owner",
+            TodoFgaService.TenantOwnerRole,
+            "Tenant Owner",
+            "Single-user owner role for the Todo sample.");
+        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TenantCreateTodoPermission);
+        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoReadPermission);
+        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoWritePermission);
     });
 
     auth.EnablePortableMcpClients(registration =>
@@ -170,7 +209,7 @@ app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOption
         localClient = new
         {
             clientId = sample.LocalClientId,
-            redirectUri = sample.LocalRedirectUri
+            redirectUri = localClientRedirectUri
         },
         portableClient = new
         {
@@ -223,23 +262,32 @@ app.MapGet(sampleConfig.PortableClientPath, (IOptions<TodoSampleOptions> sampleO
 app.MapGet("/api/todos", async (
     HttpContext httpContext,
     SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
+    ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
-    if (validated == null)
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    if (authResult.Error is not null)
     {
-        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+        return authResult.Error;
     }
 
+    var todoContext = authResult.Context!;
+    var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+        todoContext.SubjectId,
+        TodoFgaService.TodoReadPermission);
+
     var items = await dbContext.TodoItems
-        .Where(x => x.SqlOSUserId == validated.UserId)
+        .AsNoTracking()
+        .Where(filter)
         .OrderBy(x => x.IsCompleted)
         .ThenBy(x => x.CreatedAt)
         .Select(x => new
         {
             x.Id,
+            x.ResourceId,
             x.Title,
             x.IsCompleted,
             x.CreatedAt,
@@ -250,9 +298,9 @@ app.MapGet("/api/todos", async (
     return Results.Ok(new
     {
         resource = sampleOptions.Value.Resource,
-        audience = validated.Audience,
-        userId = validated.UserId,
-        organizationId = validated.OrganizationId,
+        audience = todoContext.ValidatedToken.Audience,
+        userId = todoContext.ValidatedToken.UserId,
+        organizationId = todoContext.ValidatedToken.OrganizationId,
         items
     });
 });
@@ -261,14 +309,16 @@ app.MapPost("/api/todos", async (
     CreateTodoRequest request,
     HttpContext httpContext,
     SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
+    ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
-    if (validated == null)
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    if (authResult.Error is not null)
     {
-        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+        return authResult.Error;
     }
 
     if (string.IsNullOrWhiteSpace(request.Title))
@@ -276,13 +326,24 @@ app.MapPost("/api/todos", async (
         return Results.BadRequest(new { error = "Title is required." });
     }
 
+    var todoContext = authResult.Context!;
+    var access = await fgaAuthService.CheckAccessAsync(
+        todoContext.SubjectId,
+        TodoFgaService.TenantCreateTodoPermission,
+        todoContext.TenantResourceId);
+    if (!access.Allowed)
+    {
+        return CreatePermissionDenied();
+    }
+
     var item = new TodoItem
     {
         Id = Guid.NewGuid(),
-        SqlOSUserId = validated.UserId ?? string.Empty,
+        SqlOSUserId = todoContext.SubjectId,
         Title = request.Title.Trim(),
         CreatedAt = DateTime.UtcNow
     };
+    item.ResourceId = todoFgaService.CreateTodoResource(item, todoContext.TenantResourceId);
 
     dbContext.TodoItems.Add(item);
     await dbContext.SaveChangesAsync(cancellationToken);
@@ -290,6 +351,7 @@ app.MapPost("/api/todos", async (
     return Results.Ok(new
     {
         item.Id,
+        item.ResourceId,
         item.Title,
         item.IsCompleted,
         item.CreatedAt
@@ -300,21 +362,33 @@ app.MapPost("/api/todos/{id:guid}/toggle", async (
     Guid id,
     HttpContext httpContext,
     SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
+    ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
-    if (validated == null)
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    if (authResult.Error is not null)
     {
-        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+        return authResult.Error;
     }
 
     var item = await dbContext.TodoItems
-        .FirstOrDefaultAsync(x => x.Id == id && x.SqlOSUserId == validated.UserId, cancellationToken);
+        .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     if (item == null)
     {
         return Results.NotFound();
+    }
+
+    var todoContext = authResult.Context!;
+    var access = await fgaAuthService.CheckAccessAsync(
+        todoContext.SubjectId,
+        TodoFgaService.TodoWritePermission,
+        item.ResourceId);
+    if (!access.Allowed)
+    {
+        return CreatePermissionDenied();
     }
 
     item.IsCompleted = !item.IsCompleted;
@@ -324,6 +398,7 @@ app.MapPost("/api/todos/{id:guid}/toggle", async (
     return Results.Ok(new
     {
         item.Id,
+        item.ResourceId,
         item.Title,
         item.IsCompleted,
         item.CompletedAt
@@ -334,23 +409,36 @@ app.MapDelete("/api/todos/{id:guid}", async (
     Guid id,
     HttpContext httpContext,
     SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
+    ISqlOSFgaAuthService fgaAuthService,
     IOptions<TodoSampleOptions> sampleOptions,
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
-    if (validated == null)
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    if (authResult.Error is not null)
     {
-        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+        return authResult.Error;
     }
 
     var item = await dbContext.TodoItems
-        .FirstOrDefaultAsync(x => x.Id == id && x.SqlOSUserId == validated.UserId, cancellationToken);
+        .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     if (item == null)
     {
         return Results.NotFound();
     }
 
+    var todoContext = authResult.Context!;
+    var access = await fgaAuthService.CheckAccessAsync(
+        todoContext.SubjectId,
+        TodoFgaService.TodoWritePermission,
+        item.ResourceId);
+    if (!access.Allowed)
+    {
+        return CreatePermissionDenied();
+    }
+
+    await todoFgaService.RemoveTodoResourceAsync(item.ResourceId, cancellationToken);
     dbContext.TodoItems.Remove(item);
     await dbContext.SaveChangesAsync(cancellationToken);
     return Results.NoContent();
@@ -359,22 +447,25 @@ app.MapDelete("/api/todos/{id:guid}", async (
 app.MapGet("/api/me", async (
     HttpContext httpContext,
     SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
     IOptions<TodoSampleOptions> sampleOptions,
     CancellationToken cancellationToken) =>
 {
-    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions.Value, cancellationToken);
-    if (validated == null)
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    if (authResult.Error is not null)
     {
-        return CreateTodoChallenge(httpContext, sampleOptions.Value);
+        return authResult.Error;
     }
 
+    var todoContext = authResult.Context!;
     return Results.Ok(new
     {
-        validated.UserId,
-        validated.OrganizationId,
-        validated.ClientId,
-        audience = validated.Audience,
-        claims = validated.Principal.Claims.Select(x => new { x.Type, x.Value })
+        todoContext.ValidatedToken.UserId,
+        todoContext.ValidatedToken.OrganizationId,
+        todoContext.ValidatedToken.ClientId,
+        audience = todoContext.ValidatedToken.Audience,
+        tenantResourceId = todoContext.TenantResourceId,
+        claims = todoContext.ValidatedToken.Principal.Claims.Select(x => new { x.Type, x.Value })
     });
 });
 
@@ -409,6 +500,28 @@ static async Task<SqlOSValidatedToken?> TryValidateTodoTokenAsync(
     return await authService.ValidateAccessTokenAsync(rawToken, sampleOptions.Resource, cancellationToken);
 }
 
+static async Task<TodoRequestAuthResult> RequireTodoContextAsync(
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    TodoFgaService todoFgaService,
+    TodoSampleOptions sampleOptions,
+    CancellationToken cancellationToken)
+{
+    var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions, cancellationToken);
+    if (validated == null)
+    {
+        return TodoRequestAuthResult.Failure(CreateTodoChallenge(httpContext, sampleOptions));
+    }
+
+    if (string.IsNullOrWhiteSpace(validated.UserId))
+    {
+        return TodoRequestAuthResult.Failure(Results.BadRequest(new { error = "Token must include a user subject." }));
+    }
+
+    var fgaContext = await todoFgaService.EnsureUserTenantAccessAsync(validated, cancellationToken);
+    return TodoRequestAuthResult.Success(new TodoRequestContext(validated, fgaContext.SubjectId, fgaContext.TenantResourceId));
+}
+
 static IResult CreateTodoChallenge(HttpContext httpContext, TodoSampleOptions sampleOptions)
 {
     var resourceMetadataUrl = $"{sampleOptions.PublicOrigin.TrimEnd('/')}/.well-known/oauth-protected-resource";
@@ -421,5 +534,14 @@ static IResult CreateTodoChallenge(HttpContext httpContext, TodoSampleOptions sa
     }, statusCode: StatusCodes.Status401Unauthorized);
 }
 
+static IResult CreatePermissionDenied()
+    => Results.Json(new { error = "Permission denied" }, statusCode: StatusCodes.Status403Forbidden);
+
 public sealed record CreateTodoRequest(string Title);
+public sealed record TodoRequestContext(SqlOSValidatedToken ValidatedToken, string SubjectId, string TenantResourceId);
+public sealed record TodoRequestAuthResult(TodoRequestContext? Context, IResult? Error)
+{
+    public static TodoRequestAuthResult Success(TodoRequestContext context) => new(context, null);
+    public static TodoRequestAuthResult Failure(IResult error) => new(null, error);
+}
 public partial class Program { }
