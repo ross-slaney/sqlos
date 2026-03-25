@@ -3,6 +3,7 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.Models;
 using SqlOS.Extensions;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -52,7 +53,6 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
         modelBuilder.Entity<Chain>(entity =>
         {
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.ResourceId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
         });
@@ -60,7 +60,6 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
         modelBuilder.Entity<Location>(entity =>
         {
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.ResourceId);
             entity.HasIndex(x => x.ChainId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.ResourceId).HasMaxLength(100).IsRequired();
@@ -73,7 +72,6 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
         modelBuilder.Entity<InventoryItem>(entity =>
         {
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.ResourceId);
             entity.HasIndex(x => x.LocationId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Sku).HasMaxLength(50).IsRequired();
@@ -97,5 +95,9 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
             entity.HasIndex(x => x.SqlOSUserId).IsUnique();
             entity.HasIndex(x => x.OrganizationId);
         });
+
+        // Retail entities participate in FGA via IHasResourceId, so let SqlOS add
+        // the baseline ResourceId indexes unless the app overrides them explicitly.
+        modelBuilder.ApplySqlOSFgaConventions();
     }
 }
