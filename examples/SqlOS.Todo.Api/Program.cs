@@ -60,10 +60,30 @@ var publicOrigin = sampleConfig.PublicOrigin.TrimEnd('/');
 var hostedCallbackUrl = $"{publicOrigin}/callback.html";
 var localClientRedirectUri = "http://localhost:3100/oauth/callback";
 var portableClientUrl = $"{publicOrigin}{sampleConfig.PortableClientPath}";
+var emcyLocalOrigins = new[]
+{
+    new Uri(localClientRedirectUri).GetLeftPart(UriPartial.Authority),
+    "https://localhost:3100",
+    "http://localhost:3000",
+    "https://localhost:3000"
+}
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 var cimdTrustedHosts = sampleConfig.CimdTrustedHosts
     .Concat([new Uri(publicOrigin).Host])
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToList();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("todo-emcy-frontend", policy =>
+    {
+        policy.WithOrigins(emcyLocalOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 builder.AddSqlOS<TodoSampleDbContext>(options =>
 {
@@ -187,6 +207,7 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseCors("todo-emcy-frontend");
 app.MapSqlOS();
 
 app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOptions<SqlOSAuthServerOptions> authOptions) =>
