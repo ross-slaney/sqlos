@@ -111,6 +111,16 @@ For localhost development, use the seeded client:
 
 This is the easiest local loop before you publish the sample on a stable HTTPS origin.
 
+## Local Emcy broker client
+
+For the Emcy-hosted local Todo MCP flow, use the additional seeded client:
+
+- `client_id`: `todo-mcp-local`
+- redirect URI: `http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback`
+- auth method: public PKCE only
+
+This client exists so Emcy can broker the downstream Todo authorization flow while the Todo API itself keeps the same OAuth and audience behavior.
+
 ## Portable public clients
 
 Once the sample is reachable on public HTTPS, you can use both public-client onboarding paths.

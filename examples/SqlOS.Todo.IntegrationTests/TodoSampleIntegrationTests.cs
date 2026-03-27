@@ -107,6 +107,10 @@ public sealed class TodoSampleIntegrationTests
         configJson.RootElement.GetProperty("dcrEnabled").GetBoolean().Should().BeFalse();
         configJson.RootElement.GetProperty("localClient").GetProperty("redirectUri").GetString()
             .Should().Be("http://localhost:3100/oauth/callback");
+        configJson.RootElement.GetProperty("emcyClient").GetProperty("clientId").GetString()
+            .Should().Be("todo-mcp-local");
+        configJson.RootElement.GetProperty("emcyClient").GetProperty("redirectUri").GetString()
+            .Should().Be("http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback");
 
         var metadataResponse = await TodoApiFixture.Client.GetAsync("/.well-known/oauth-protected-resource");
         metadataResponse.EnsureSuccessStatusCode();

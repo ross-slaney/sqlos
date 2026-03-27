@@ -10,6 +10,7 @@ It shows:
 - a protected resource with audience enforcement
 - protected-resource metadata at `/.well-known/oauth-protected-resource`
 - preregistered local development for `todo-local`
+- an Emcy-hosted MCP broker client for local Todo demos: `todo-mcp-local`
 - portable public-client onboarding paths for `CIMD` and optional `DCR`
 
 ## Run locally
@@ -55,8 +56,9 @@ Each authenticated user gets one tenant root resource under `root`. Every todo i
 4. Open `/sqlos/admin/fga/resources` and confirm the tree shows your tenant plus child todo resources.
 5. Inspect `/.well-known/oauth-protected-resource`.
 6. Try `headless.html` after enabling `TodoSample__EnableHeadless=true`.
-7. Use `todo-local` for preregistered localhost development.
-8. Publish the sample on HTTPS, then use:
+7. Use `todo-local` for preregistered localhost direct-client development.
+8. Use `todo-mcp-local` when Emcy is brokering Todo auth through a hosted MCP server.
+9. Publish the sample on HTTPS, then use:
    - `GET /clients/portable-client.json` as a sample `client_id` metadata document
    - `POST /sqlos/auth/register` after enabling `TodoSample__EnableDcr=true`
 
@@ -70,3 +72,14 @@ Use:
 - token auth method: `none`
 
 This keeps local development simple before you switch to public `CIMD` or `DCR`.
+
+## Local Emcy broker client
+
+Use:
+
+- `client_id`: `todo-mcp-local`
+- redirect URI: `http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback`
+- PKCE: required
+- token auth method: `none`
+
+This is the local downstream client for the Emcy-hosted Todo MCP demo. The Todo API still validates the same Todo audience; Emcy just brokers the auth flow and holds the downstream grant server-side.

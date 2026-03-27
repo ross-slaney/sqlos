@@ -58,11 +58,13 @@ builder.Services.AddSwaggerGen(c =>
 var sampleConfig = builder.Configuration.GetSection("TodoSample").Get<TodoSampleOptions>() ?? new TodoSampleOptions();
 var publicOrigin = sampleConfig.PublicOrigin.TrimEnd('/');
 var hostedCallbackUrl = $"{publicOrigin}/callback.html";
-var localClientRedirectUri = "http://localhost:3100/oauth/callback";
+var localClientRedirectUri = sampleConfig.LocalRedirectUri;
+var emcyClientRedirectUri = sampleConfig.EmcyRedirectUri;
 var portableClientUrl = $"{publicOrigin}{sampleConfig.PortableClientPath}";
 var emcyLocalOrigins = new[]
 {
     new Uri(localClientRedirectUri).GetLeftPart(UriPartial.Authority),
+    new Uri(emcyClientRedirectUri).GetLeftPart(UriPartial.Authority),
     "https://localhost:3100",
     "http://localhost:3000",
     "https://localhost:3000"
@@ -126,6 +128,19 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         client.Description = "Local preregistered client for localhost MCP development against the Todo sample.";
         client.Audience = sampleConfig.Resource;
         client.RedirectUris = [localClientRedirectUri];
+        client.AllowedScopes = sampleConfig.AllowedScopes;
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = false;
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = sampleConfig.EmcyClientId;
+        client.Name = "Todo Emcy MCP";
+        client.Description = "Local downstream client for the Emcy-hosted MCP Todo demo.";
+        client.Audience = sampleConfig.Resource;
+        client.RedirectUris = [emcyClientRedirectUri];
         client.AllowedScopes = sampleConfig.AllowedScopes;
         client.ClientType = "public_pkce";
         client.RequirePkce = true;
@@ -231,6 +246,11 @@ app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOption
         {
             clientId = sample.LocalClientId,
             redirectUri = localClientRedirectUri
+        },
+        emcyClient = new
+        {
+            clientId = sample.EmcyClientId,
+            redirectUri = sample.EmcyRedirectUri
         },
         portableClient = new
         {
