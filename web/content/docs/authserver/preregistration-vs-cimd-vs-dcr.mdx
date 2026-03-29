@@ -1,0 +1,124 @@
+---
+title: "Preregistration vs CIMD vs DCR"
+description: "Pick the right client onboarding path without memorizing OAuth acronyms first."
+order: 4.61
+section: authserver
+---
+
+SqlOS supports three client onboarding paths.
+
+You do **not** need all three on day one.
+
+## The short answer
+
+Start here:
+
+- **Preregistration** for your own apps
+- **CIMD** for portable public clients
+- **DCR** only when a real client still expects runtime registration
+
+That gives SqlOS a simple default and a practical compatibility story.
+
+## 1. Preregistration
+
+Use preregistration when you already know the client.
+
+Examples:
+
+- your main web app
+- your mobile app
+- your desktop app
+- localhost development clients
+
+The client record lives in SqlOS and you seed it at startup or create it in the dashboard.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedOwnedWebApp(
+        "todo-web",
+        "Todo Web",
+        "https://app.example.com/auth/callback");
+});
+```
+
+This is still the best first step for most product teams.
+
+## 2. CIMD
+
+`CIMD` means the `client_id` is a stable HTTPS URL, and SqlOS fetches the client's metadata document from that URL.
+
+Use it when:
+
+- the client should work across many servers
+- the client owns its own metadata
+- you want a better long-term public-client story than hand-entry everywhere
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnablePortableMcpClients(registration =>
+    {
+        registration.Cimd.TrustedHosts.Add("clients.example.com");
+    });
+});
+```
+
+That helper turns on:
+
+- `CIMD`
+- resource indicators
+- a portable-client mental model
+
+## 3. DCR
+
+`DCR` means the client calls `POST /register` and SqlOS creates a client record at runtime.
+
+Use it when:
+
+- a real client still expects dynamic registration
+- you need compatibility with a DCR-first ecosystem client
+- you want SqlOS to accept new public clients without a prior local record
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnableChatGptCompatibility(dcr =>
+    {
+        dcr.MaxRegistrationsPerWindow = 25;
+    });
+});
+```
+
+Keep it narrow:
+
+- public clients only
+- PKCE required
+- `token_endpoint_auth_method=none`
+- rate limits and audit logging on
+
+## Which one should I choose?
+
+| Your situation | Best starting point |
+| --- | --- |
+| "I am building my own browser app." | Preregistration |
+| "I am building my own mobile or native app." | Preregistration |
+| "I want a portable public client with a stable HTTPS identity." | `CIMD` |
+| "A client still expects `POST /register`." | `DCR` |
+| "I am just trying to get SqlOS running quickly." | Preregistration |
+
+## Recommended order
+
+For most teams:
+
+1. ship hosted auth with a seeded owned client
+2. move to headless if you want custom UI
+3. add `CIMD` for portable public clients
+4. add `DCR` only when a real client still needs it
+
+## Related guides
+
+- [Clients](/docs/guides/authserver/clients)
+- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)

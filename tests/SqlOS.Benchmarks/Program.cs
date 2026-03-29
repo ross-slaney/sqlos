@@ -914,17 +914,6 @@ string BuildProductQuery(string principalIds, int pageSize, int? cursorId = null
         ORDER BY p.Id";
 }
 
-string BuildStoreQuery(string principalIds, int pageSize, string permission = "store_view")
-{
-    return $@"
-        SELECT TOP {pageSize + 1} s.Id, s.Name, s.Address, s.ResourceId
-        FROM Stores s
-        WHERE EXISTS (
-            SELECT 1 FROM dbo.fn_IsResourceAccessible(s.ResourceId, '{principalIds}', '{permission}')
-        )
-        ORDER BY s.Id";
-}
-
 // =============================================================================
 // Benchmarks 8-13: Resource-Scale Tests with Real Domain Tables
 // =============================================================================

@@ -4,7 +4,7 @@
         document.body.classList.add('embed-mode');
     }
 
-    const dashboardBasePath = window.location.pathname.split('/admin/fga')[0] || '/sqlos';
+    const dashboardBasePath = window.__SQL_OS_BASE_PATH__ || '/sqlos';
     const basePath = window.location.pathname.replace(/\/$/, '');
     function redirectToLogin() {
         const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);

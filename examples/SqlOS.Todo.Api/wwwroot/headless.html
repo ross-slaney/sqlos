@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Headless follow-on</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body data-page="headless">
+  <main class="shell">
+    <section class="hero compact">
+      <p class="eyebrow">Headless follow-on</p>
+      <h1>Keep the same authorization server. Swap in your own UI.</h1>
+      <p class="lede">
+        Hosted auth is the default. When you want custom UI, enable headless mode
+        and let this page drive the same authorization request.
+      </p>
+      <div class="button-row">
+        <button id="headless-start-login" type="button">Start headless login</button>
+        <button id="headless-start-signup" class="secondary" type="button">Start headless sign up</button>
+        <a class="link-button secondary-link" href="/">Back to hosted-first flow</a>
+      </div>
+    </section>
+
+    <section class="panel-grid">
+      <article class="panel">
+        <h2>Request</h2>
+        <pre id="headless-request-info">Open this page from a headless authorization redirect to inspect the request.</pre>
+      </article>
+
+      <article class="panel">
+        <h2>Login</h2>
+        <form id="headless-login-form">
+          <input name="email" type="email" placeholder="you@example.com" required>
+          <input name="password" type="password" placeholder="Password" required>
+          <button type="submit">Headless login</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Signup</h2>
+      <form id="headless-signup-form" class="stack-form">
+        <input name="displayName" placeholder="Display name" required>
+        <input name="email" type="email" placeholder="you@example.com" required>
+        <input name="password" type="password" placeholder="Password" required>
+        <input name="organizationName" placeholder="Organization name">
+        <button type="submit">Headless sign up</button>
+      </form>
+      <p id="headless-message" class="status-text"></p>
+    </section>
+  </main>
+  <script src="/sample.js" defer></script>
+</body>
+</html>

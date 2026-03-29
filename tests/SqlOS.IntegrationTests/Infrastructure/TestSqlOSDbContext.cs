@@ -21,7 +21,6 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.UseAuthServer();
-        modelBuilder.UseFGA(GetType());
+        modelBuilder.UseSqlOS(GetType());
     }
 }

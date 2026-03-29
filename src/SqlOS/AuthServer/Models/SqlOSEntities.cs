@@ -146,6 +146,8 @@ public sealed class SqlOSSession
     public string UserId { get; set; } = string.Empty;
     public string? AuthenticationMethod { get; set; }
     public string? ClientApplicationId { get; set; }
+    public string? Resource { get; set; }
+    public string? EffectiveAudience { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime LastSeenAt { get; set; }
     public DateTime IdleExpiresAt { get; set; }
@@ -183,11 +185,28 @@ public sealed class SqlOSClientApplication
     public string? Description { get; set; }
     public string Audience { get; set; } = "sqlos";
     public string ClientType { get; set; } = "public_pkce";
+    public string RegistrationSource { get; set; } = "manual";
+    public string TokenEndpointAuthMethod { get; set; } = "none";
+    public string GrantTypesJson { get; set; } = "[\"authorization_code\",\"refresh_token\"]";
+    public string ResponseTypesJson { get; set; } = "[\"code\"]";
     public bool RequirePkce { get; set; } = true;
     public string AllowedScopesJson { get; set; } = "[]";
     public bool IsFirstParty { get; set; }
     public string RedirectUrisJson { get; set; } = "[]";
+    public string? MetadataDocumentUrl { get; set; }
+    public string? ClientUri { get; set; }
+    public string? LogoUri { get; set; }
+    public string? SoftwareId { get; set; }
+    public string? SoftwareVersion { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTime? MetadataFetchedAt { get; set; }
+    public DateTime? MetadataExpiresAt { get; set; }
+    public string? MetadataEtag { get; set; }
+    public DateTime? MetadataLastModifiedAt { get; set; }
+    public DateTime? LastSeenAt { get; set; }
     public bool IsActive { get; set; } = true;
+    public DateTime? DisabledAt { get; set; }
+    public string? DisabledReason { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -255,7 +274,6 @@ public sealed class SqlOSAuthPageSettings
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public string EnabledCredentialTypesJson { get; set; } = "[\"password\"]";
-    public string PresentationMode { get; set; } = "hosted";
     public DateTime UpdatedAt { get; set; }
 }
 

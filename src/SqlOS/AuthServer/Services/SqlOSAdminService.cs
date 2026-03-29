@@ -1,6 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Xml;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -15,15 +16,26 @@ public sealed class SqlOSAdminService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSCryptoService _cryptoService;
+    private readonly SqlOSClientResolutionService _clientResolutionService;
 
     public SqlOSAdminService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSCryptoService cryptoService)
+        : this(context, options, cryptoService, new SqlOSClientResolutionService(context, options))
+    {
+    }
+
+    public SqlOSAdminService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSCryptoService cryptoService,
+        SqlOSClientResolutionService clientResolutionService)
     {
         _context = context;
         _options = options.Value;
         _cryptoService = cryptoService;
+        _clientResolutionService = clientResolutionService;
     }
 
     public async Task CleanupExpiredTemporaryTokensAsync(CancellationToken cancellationToken = default)
@@ -77,6 +89,10 @@ public sealed class SqlOSAdminService
                     Description = normalized.Description,
                     Audience = normalized.Audience,
                     ClientType = normalized.ClientType,
+                    RegistrationSource = "seeded",
+                    TokenEndpointAuthMethod = "none",
+                    GrantTypesJson = JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" }),
+                    ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
                     AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
                     RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
@@ -91,11 +107,26 @@ public sealed class SqlOSAdminService
             existing.Description = normalized.Description;
             existing.Audience = normalized.Audience;
             existing.ClientType = normalized.ClientType;
+            existing.RegistrationSource = "seeded";
+            existing.TokenEndpointAuthMethod = string.IsNullOrWhiteSpace(existing.TokenEndpointAuthMethod) ? "none" : existing.TokenEndpointAuthMethod;
+            existing.GrantTypesJson = string.IsNullOrWhiteSpace(existing.GrantTypesJson)
+                ? JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" })
+                : existing.GrantTypesJson;
+            existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
+                ? JsonSerializer.Serialize(new[] { "code" })
+                : existing.ResponseTypesJson;
             existing.RequirePkce = normalized.RequirePkce;
             existing.AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes);
             existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
             existing.IsFirstParty = normalized.IsFirstParty;
-            existing.IsActive = normalized.IsActive;
+            if (existing.DisabledAt != null)
+            {
+                existing.IsActive = false;
+            }
+            else
+            {
+                existing.IsActive = normalized.IsActive;
+            }
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -238,6 +269,10 @@ public sealed class SqlOSAdminService
             Description = normalized.Description,
             Audience = normalized.Audience,
             ClientType = normalized.ClientType,
+            RegistrationSource = "manual",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" }),
+            ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
             RequirePkce = normalized.RequirePkce,
             AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
             IsFirstParty = normalized.IsFirstParty,
@@ -476,31 +511,19 @@ public sealed class SqlOSAdminService
         return connection;
     }
 
-    public async Task<SqlOSClientApplication> RequireClientAsync(string? clientId, string? redirectUri, CancellationToken cancellationToken = default)
+    public async Task<SqlOSClientApplication> RequireClientAsync(
+        string? clientId,
+        string? redirectUri,
+        CancellationToken cancellationToken = default,
+        HttpContext? httpContext = null)
     {
         if (string.IsNullOrWhiteSpace(clientId))
         {
             throw new InvalidOperationException("Client application is required.");
         }
 
-        var client = await _context.Set<SqlOSClientApplication>()
-            .FirstOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
-
-        if (client == null || !client.IsActive)
-        {
-            throw new InvalidOperationException("Client application not found or inactive.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(redirectUri))
-        {
-            var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
-            if (!redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Redirect URI is not allowed for this client.");
-            }
-        }
-
-        return client;
+        var resolved = await _clientResolutionService.ResolveRequiredClientAsync(clientId, redirectUri, httpContext, cancellationToken);
+        return resolved.Client;
     }
 
     public async Task<List<SqlOSOrganizationOption>> GetUserOrganizationsAsync(string userId, CancellationToken cancellationToken = default)
@@ -677,35 +700,263 @@ public sealed class SqlOSAdminService
         return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
     }
 
-    public async Task<List<object>> ListClientsAsync(CancellationToken cancellationToken = default)
+    public async Task<object> ListClientsAsync(
+        string? source = null,
+        string? status = null,
+        string? search = null,
+        int? page = null,
+        int? pageSize = null,
+        CancellationToken cancellationToken = default)
     {
+        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
         var managedClientIds = _options.ClientSeeds
             .Select(static seed => seed.ClientId)
             .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
             .ToHashSet(StringComparer.Ordinal);
 
         var clients = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
 
-        return clients
+        var duplicateFingerprints = clients
+            .Where(x => string.Equals(x.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
+            .Select(CalculateDuplicateFingerprint)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .GroupBy(static value => value!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        var filtered = clients
+            .Select(x => FormatClientListItem(
+                x,
+                managedClientIds.Contains(x.ClientId),
+                duplicateFingerprints.TryGetValue(CalculateDuplicateFingerprint(x) ?? string.Empty, out var duplicateCount)
+                    ? duplicateCount
+                    : 0))
+            .Where(item => MatchesSourceFilter(item.RegistrationSource, source))
+            .Where(item => MatchesStatusFilter(item.IsActive, item.DisabledAt, status))
+            .Where(item => MatchesClientSearch(item, search))
+            .ToList();
+
+        var totalCount = filtered.Count;
+        var activeCount = filtered.Count(item => item.IsActive && item.DisabledAt == null);
+        var discoveredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "cimd", StringComparison.OrdinalIgnoreCase));
+        var registeredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase));
+        var disabledCount = filtered.Count(item => !item.IsActive || item.DisabledAt != null);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
+        var currentPage = Math.Min(resolvedPage, totalPages);
+        var data = filtered
+            .Skip((currentPage - 1) * resolvedPageSize)
+            .Take(resolvedPageSize)
+            .Cast<object>()
+            .ToList();
+
+        return new
+        {
+            Data = data,
+            Page = currentPage,
+            PageSize = resolvedPageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages,
+            Summary = new
+            {
+                ActiveCount = activeCount,
+                DiscoveredCount = discoveredCount,
+                RegisteredCount = registeredCount,
+                DisabledCount = disabledCount
+            }
+        };
+    }
+
+    public async Task<object> GetClientDetailAsync(string clientApplicationId, CancellationToken cancellationToken = default)
+    {
+        var managedClientIds = _options.ClientSeeds
+            .Select(static seed => seed.ClientId)
+            .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
+            .ToHashSet(StringComparer.Ordinal);
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var duplicateFingerprint = CalculateDuplicateFingerprint(client);
+        var duplicateCount = 0;
+        if (!string.IsNullOrWhiteSpace(duplicateFingerprint))
+        {
+            var dcrClients = await _context.Set<SqlOSClientApplication>()
+                .AsNoTracking()
+                .Where(x => x.RegistrationSource == "dcr")
+                .ToListAsync(cancellationToken);
+            duplicateCount = dcrClients
+                .Select(CalculateDuplicateFingerprint)
+                .Count(value => string.Equals(value, duplicateFingerprint, StringComparison.Ordinal));
+        }
+
+        var recentAuditEvents = await _context.Set<SqlOSAuditEvent>()
+            .AsNoTracking()
+            .Where(x => x.ActorId == client.Id || (x.DataJson != null && x.DataJson.Contains(client.ClientId)))
+            .OrderByDescending(x => x.OccurredAt)
+            .Take(20)
             .Select(x => new
             {
                 x.Id,
-                x.ClientId,
-                x.Name,
-                x.Description,
-                x.Audience,
-                x.ClientType,
-                x.RequirePkce,
-                AllowedScopes = x.AllowedScopesJson,
-                x.IsFirstParty,
-                RedirectUris = x.RedirectUrisJson,
-                x.IsActive,
-                ManagedByStartupSeed = managedClientIds.Contains(x.ClientId)
+                x.EventType,
+                x.ActorType,
+                x.ActorId,
+                x.OccurredAt,
+                x.DataJson
             })
-            .Cast<object>()
-            .ToList();
+            .ToListAsync(cancellationToken);
+
+        var item = FormatClientListItem(client, managedClientIds.Contains(client.ClientId), duplicateCount);
+        return new
+        {
+            item.Id,
+            item.ClientId,
+            item.Name,
+            item.Description,
+            item.Audience,
+            item.ClientType,
+            item.RegistrationSource,
+            item.SourceLabel,
+            item.TokenEndpointAuthMethod,
+            item.RequirePkce,
+            item.IsFirstParty,
+            item.RedirectUris,
+            item.GrantTypes,
+            item.ResponseTypes,
+            item.AllowedScopes,
+            item.MetadataDocumentUrl,
+            item.ClientUri,
+            item.LogoUri,
+            item.SoftwareId,
+            item.SoftwareVersion,
+            item.MetadataFetchedAt,
+            item.MetadataExpiresAt,
+            item.MetadataCacheState,
+            item.LastSeenAt,
+            item.IsActive,
+            item.DisabledAt,
+            item.DisabledReason,
+            item.ManagedByStartupSeed,
+            item.CoreMetadataEditable,
+            item.DuplicateFingerprint,
+            item.DuplicateCount,
+            item.LifecycleState,
+            client.MetadataJson,
+            RecentAuditEvents = recentAuditEvents
+        };
+    }
+
+    public async Task<SqlOSClientApplication> DisableClientAsync(string clientApplicationId, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        if (!client.IsActive && client.DisabledAt != null)
+        {
+            return client;
+        }
+
+        client.IsActive = false;
+        client.DisabledAt = DateTime.UtcNow;
+        client.DisabledReason = string.IsNullOrWhiteSpace(reason) ? "disabled_by_operator" : reason.Trim();
+        await RevokeClientSessionsInternalAsync(client.Id, "client_disabled", cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "client.disabled",
+            "client",
+            client.Id,
+            ipAddress: null,
+            data: new
+            {
+                client_id = client.ClientId,
+                source = client.RegistrationSource,
+                reason = client.DisabledReason
+            },
+            cancellationToken: cancellationToken);
+        return client;
+    }
+
+    public async Task<SqlOSClientApplication> EnableClientAsync(string clientApplicationId, CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        client.IsActive = true;
+        client.DisabledAt = null;
+        client.DisabledReason = null;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "client.enabled",
+            "client",
+            client.Id,
+            data: new
+            {
+                client_id = client.ClientId,
+                source = client.RegistrationSource
+            },
+            cancellationToken: cancellationToken);
+        return client;
+    }
+
+    public async Task<int> RevokeClientSessionsAsync(string clientApplicationId, string reason = "client_revoked", CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var revokedCount = await RevokeClientSessionsInternalAsync(client.Id, reason, cancellationToken);
+        if (revokedCount > 0)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        await RecordAuditAsync(
+            "client.sessions-revoked",
+            "client",
+            client.Id,
+            data: new
+            {
+                client_id = client.ClientId,
+                source = client.RegistrationSource,
+                revoked_sessions = revokedCount,
+                reason
+            },
+            cancellationToken: cancellationToken);
+        return revokedCount;
+    }
+
+    public async Task<int> CleanupStaleDynamicClientsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_options.ClientRegistration.Dcr.EnableAutomaticCleanup)
+        {
+            return 0;
+        }
+
+        var cutoff = DateTime.UtcNow - _options.ClientRegistration.Dcr.StaleClientRetention;
+        var candidates = await _context.Set<SqlOSClientApplication>()
+            .Where(x => x.RegistrationSource == "dcr"
+                && (x.LastSeenAt == null || x.LastSeenAt < cutoff)
+                && x.CreatedAt < cutoff)
+            .ToListAsync(cancellationToken);
+
+        var removed = 0;
+        foreach (var client in candidates)
+        {
+            var hasAnySessions = await _context.Set<SqlOSSession>()
+                .AnyAsync(x => x.ClientApplicationId == client.Id, cancellationToken);
+            if (hasAnySessions)
+            {
+                continue;
+            }
+
+            _context.Set<SqlOSClientApplication>().Remove(client);
+            await _context.SaveChangesAsync(cancellationToken);
+            removed++;
+
+            await RecordAuditAsync(
+                "client.cleanup.removed",
+                "client",
+                client.Id,
+                data: new
+                {
+                    client_id = client.ClientId,
+                    source = client.RegistrationSource
+                },
+                cancellationToken: cancellationToken);
+        }
+
+        return removed;
     }
 
     public async Task<List<object>> ListOidcConnectionsAsync(CancellationToken cancellationToken = default)
@@ -1271,6 +1522,180 @@ public sealed class SqlOSAdminService
             seed.ClientType,
             seed.IsActive);
 
+    private static ClientAdminView FormatClientListItem(SqlOSClientApplication client, bool managedByStartupSeed, int duplicateCount)
+    {
+        var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
+        var grantTypes = DeserializeJsonList(client.GrantTypesJson);
+        var responseTypes = DeserializeJsonList(client.ResponseTypesJson);
+        var allowedScopes = DeserializeJsonList(client.AllowedScopesJson);
+        var duplicateFingerprint = CalculateDuplicateFingerprint(client);
+
+        return new ClientAdminView(
+            client.Id,
+            client.ClientId,
+            client.Name,
+            client.Description,
+            client.Audience,
+            client.ClientType,
+            client.RegistrationSource,
+            GetSourceLabel(client.RegistrationSource),
+            client.TokenEndpointAuthMethod,
+            client.RequirePkce,
+            client.IsFirstParty,
+            redirectUris,
+            grantTypes,
+            responseTypes,
+            allowedScopes,
+            client.MetadataDocumentUrl,
+            client.ClientUri,
+            client.LogoUri,
+            client.SoftwareId,
+            client.SoftwareVersion,
+            client.MetadataFetchedAt,
+            client.MetadataExpiresAt,
+            GetMetadataCacheState(client),
+            client.LastSeenAt,
+            client.IsActive,
+            client.DisabledAt,
+            client.DisabledReason,
+            managedByStartupSeed,
+            string.Equals(client.RegistrationSource, "manual", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(client.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase),
+            duplicateFingerprint,
+            duplicateCount,
+            client.DisabledAt != null || !client.IsActive ? "disabled" : "active");
+    }
+
+    private static bool MatchesSourceFilter(string registrationSource, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || string.Equals(filter, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(registrationSource, filter.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesStatusFilter(bool isActive, DateTime? disabledAt, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || string.Equals(filter, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return filter.Trim().ToLowerInvariant() switch
+        {
+            "active" => isActive && disabledAt == null,
+            "disabled" => !isActive || disabledAt != null,
+            _ => true
+        };
+    }
+
+    private static bool MatchesClientSearch(ClientAdminView item, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return true;
+        }
+
+        var normalized = search.Trim();
+        return (item.Name?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || item.ClientId.Contains(normalized, StringComparison.OrdinalIgnoreCase)
+            || item.SourceLabel.Contains(normalized, StringComparison.OrdinalIgnoreCase)
+            || (item.Description?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || item.Audience.Contains(normalized, StringComparison.OrdinalIgnoreCase)
+            || (item.SoftwareId?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (item.SoftwareVersion?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (item.MetadataDocumentUrl?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string GetSourceLabel(string registrationSource)
+        => registrationSource?.Trim().ToLowerInvariant() switch
+        {
+            "seeded" => "Seeded",
+            "manual" => "Manual",
+            "cimd" => "Discovered",
+            "dcr" => "Registered",
+            _ => "Unknown"
+        };
+
+    private static string? GetMetadataCacheState(SqlOSClientApplication client)
+    {
+        if (!string.Equals(client.RegistrationSource, "cimd", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (client.MetadataExpiresAt == null)
+        {
+            return "unknown";
+        }
+
+        return client.MetadataExpiresAt <= DateTime.UtcNow
+            ? "stale"
+            : "fresh";
+    }
+
+    private static string? CalculateDuplicateFingerprint(SqlOSClientApplication client)
+    {
+        if (!string.Equals(client.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
+        var softwareId = client.SoftwareId ?? string.Empty;
+        var softwareVersion = client.SoftwareVersion ?? string.Empty;
+        var clientUri = client.ClientUri ?? string.Empty;
+        return string.Join("|", redirectUris.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+            + $"|{softwareId}|{softwareVersion}|{clientUri}";
+    }
+
+    private async Task<SqlOSClientApplication> GetRequiredClientByIdAsync(string clientApplicationId, CancellationToken cancellationToken)
+    {
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.Id == clientApplicationId, cancellationToken);
+        if (client != null)
+        {
+            return client;
+        }
+
+        client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.ClientId == clientApplicationId, cancellationToken);
+        return client ?? throw new InvalidOperationException("Client application was not found.");
+    }
+
+    private async Task<int> RevokeClientSessionsInternalAsync(string clientApplicationId, string reason, CancellationToken cancellationToken)
+    {
+        var sessions = await _context.Set<SqlOSSession>()
+            .Where(x => x.ClientApplicationId == clientApplicationId && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+
+        if (sessions.Count == 0)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+        var sessionIds = sessions.Select(x => x.Id).ToList();
+        var refreshTokens = await _context.Set<SqlOSRefreshToken>()
+            .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var session in sessions)
+        {
+            session.RevokedAt = now;
+            session.RevocationReason = reason;
+        }
+
+        foreach (var refreshToken in refreshTokens)
+        {
+            refreshToken.RevokedAt = now;
+        }
+
+        return sessions.Count;
+    }
+
     private NormalizedClientDefinition NormalizeClientRequest(SqlOSCreateClientRequest request)
         => NormalizeClientDefinition(
             request.ClientId,
@@ -1344,7 +1769,7 @@ public sealed class SqlOSAdminService
         return value.Trim();
     }
 
-    private static List<string> DeserializeJsonList(string? json)
+    internal static List<string> DeserializeJsonList(string? json)
     {
         try
         {
@@ -1355,6 +1780,40 @@ public sealed class SqlOSAdminService
             return [];
         }
     }
+
+    private sealed record ClientAdminView(
+        string Id,
+        string ClientId,
+        string Name,
+        string? Description,
+        string Audience,
+        string ClientType,
+        string RegistrationSource,
+        string SourceLabel,
+        string TokenEndpointAuthMethod,
+        bool RequirePkce,
+        bool IsFirstParty,
+        List<string> RedirectUris,
+        List<string> GrantTypes,
+        List<string> ResponseTypes,
+        List<string> AllowedScopes,
+        string? MetadataDocumentUrl,
+        string? ClientUri,
+        string? LogoUri,
+        string? SoftwareId,
+        string? SoftwareVersion,
+        DateTime? MetadataFetchedAt,
+        DateTime? MetadataExpiresAt,
+        string? MetadataCacheState,
+        DateTime? LastSeenAt,
+        bool IsActive,
+        DateTime? DisabledAt,
+        string? DisabledReason,
+        bool ManagedByStartupSeed,
+        bool CoreMetadataEditable,
+        string? DuplicateFingerprint,
+        int DuplicateCount,
+        string LifecycleState);
 
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,

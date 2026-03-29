@@ -1,12 +1,12 @@
 # SqlOS Marketing Site
 
-This folder contains the public docs and marketing site for `SqlOS`.
+Public docs and marketing for SqlOS. Next.js app.
 
-It is a small Next.js app that covers:
-- the merged `AuthServer` and `Fga` modules
-- the shared example stack
-- integration and testing docs
-- background blog posts
+It includes:
+- AuthServer and FGA guides
+- Example stack notes
+- Integration and testing docs
+- Blog posts
 
 ## Local Development
 
@@ -25,4 +25,4 @@ npm run build
 
 ## Deployment
 
-The production deployment targets Azure Container Apps and is documented in [DEPLOYMENT.md](./DEPLOYMENT.md), including the exact GitHub Actions variables, secret names, and Azure service principal setup steps.
+Production uses Azure Container Apps. Steps, GitHub vars, and service principal setup: [DEPLOYMENT.md](./DEPLOYMENT.md).

@@ -1,17 +1,21 @@
 # SqlOS AuthPage
 
-`SqlOS AuthPage` is the branded browser surface for the embedded `AuthServer`.
+AuthPage is SqlOS's hosted browser UI for sign in, sign up, organization selection, and the rest of the authorization-code flow.
 
-V1 is intentionally narrow:
+Start here when you want the fastest path for an owned app.
 
-- `authorization_code` + `refresh_token`
-- PKCE public clients
-- preregistered clients
-- hosted `/authorize`, `/token`, metadata, and JWKS
-- branded `/login`, `/signup`, and `/logged-out` pages
-- local password, OIDC, and SAML behind the scenes
+AuthPage now sits inside a larger client-onboarding story:
 
-## Default Endpoints
+- **Owned apps** use seeded or manual clients and hosted or headless UI
+- **Portable MCP clients** can arrive through `CIMD`
+- **Compatibility clients** can arrive through optional `DCR`
+
+The UI is still just one switch:
+
+- **Hosted**: SqlOS renders the browser pages
+- **Headless**: your app renders the pages and SqlOS still owns OAuth, PKCE, codes, and tokens
+
+## Default endpoints
 
 When `BasePath = "/sqlos/auth"` the library exposes:
 
@@ -23,54 +27,81 @@ When `BasePath = "/sqlos/auth"` the library exposes:
 - `GET /sqlos/auth/signup`
 - `GET /sqlos/auth/logged-out`
 
-## Registration
+When enabled, SqlOS can also expose:
 
-SqlOS is integrated as one product: register auth and FGA together, map routes after `Build()`, and implement both `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext` on your `DbContext`.
+- `POST /sqlos/auth/register` for dynamic client registration
+- `GET /sqlos/auth/headless/*` and `POST /sqlos/auth/headless/*` for headless UI flows
+
+## Fastest hosted setup
+
+Use one SqlOS registration. Include auth and FGA on the same `DbContext`. Map routes after `Build()`.
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseAuthServer(auth =>
+    options.AuthServer.PublicOrigin = "https://app.example.com";
+    options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+    options.AuthServer.SeedAuthPage(page =>
     {
-        auth.PublicOrigin = "https://app.example.com";
-        auth.Issuer = "https://app.example.com/sqlos/auth";
-        auth.SeedAuthPage(page =>
-        {
-            page.PageTitle = "Sign in";
-            page.PageSubtitle = "Use the hosted SqlOS auth page for your first-party browser app.";
-        });
-        auth.SeedBrowserClient("web", "Main Web App", "https://app.example.com/auth/callback");
+        page.PageTitle = "Sign in";
+        page.PageSubtitle = "Use the hosted SqlOS auth page for your owned web app.";
     });
-
-    options.UseFGA();
+    options.AuthServer.SeedOwnedWebApp(
+        "web",
+        "Main Web App",
+        "https://app.example.com/auth/callback");
 });
 
 var app = builder.Build();
 app.MapSqlOS();
 ```
 
-## Browser Flow
+That gives you the simplest path:
 
-1. Your browser app generates PKCE and redirects to `/authorize`.
-2. SqlOS renders the AuthPage.
-3. Home realm discovery checks organization primary domains.
-4. Matching users are redirected to SAML.
-5. Everyone else can use password or an enabled OIDC provider.
-6. SqlOS issues the authorization code and later the access/refresh tokens.
+1. Seed or create a client.
+2. Send the browser to `/sqlos/auth/authorize` with PKCE.
+3. Let SqlOS render the hosted pages.
+4. Exchange the code at `/sqlos/auth/token`.
+
+## Hosted vs headless
+
+`/sqlos/auth/authorize` follows one rule:
+
+- `BuildUiUrl` exists: your app renders the auth UI
+- `BuildUiUrl` does not exist: SqlOS renders AuthPage
+
+Read more:
+
+- site docs: `/docs/guides/authserver/hosted-vs-headless`
+- site docs: `/docs/guides/authserver/headless-auth`
+
+## Clients and AuthPage
+
+AuthPage is not limited to one client-registration mode.
+
+You can use it with:
+
+- seeded or dashboard-created owned clients
+- discovered `CIMD` clients
+- registered `DCR` clients
+
+For most teams, the best order is:
+
+1. start with a hosted first-party client
+2. switch to headless only when you want custom UI
+3. add `CIMD` or `DCR` only when you need portable or compatibility clients
 
 ## Dashboard
 
-The auth dashboard now includes:
+The auth dashboard now keeps client onboarding in one place:
 
-- `Clients`: preregistered PKCE apps, redirect URIs, scopes, audiences
-- `Auth Page`: title, subtitle, colors, layout, signup toggle, base64 logo upload
-- `Authorization Server`: standards-facing metadata and URL references
-- `Providers`: OIDC and SAML connection management
-
-Startup-seeded clients and auth-page settings are marked in the dashboard. They remain editable for inspection, but startup code reapplies them on restart.
+- **Clients** — owned, discovered, and registered clients with filters, inspect views, and lifecycle actions
+- **Auth Page** — title, colors, layout, signup toggle, logo
+- **Security** — session and refresh settings
+- **Providers** — OIDC and SAML
 
 ## Notes
 
-- V1 auto-approves consent.
-- Password is the only credential type enabled out of the box.
-- CIMD, DCR, OTP, passkeys, revocation, and full OIDC provider metadata are intentionally deferred.
+- SqlOS still keeps consent simple by default.
+- Password is still the default local credential path.
+- `CIMD`, `DCR`, and resource indicators are now supported. Use them when you need portable or compatibility clients, not for the very first hosted setup.

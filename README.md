@@ -6,9 +6,9 @@
 [![NuGet](https://img.shields.io/nuget/v/SqlOS)](https://www.nuget.org/packages/SqlOS)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com)
 
-SqlOS gives your .NET app a complete auth stack — OAuth 2.0 endpoints, a branded login/signup UI, organization management, SAML SSO, OIDC social login, and hierarchical fine-grained authorization — all stored in your own SQL Server database, managed through an embedded admin dashboard.
+SqlOS adds auth and fine-grained authorization to your .NET app. OAuth, login UI, orgs, SAML, OIDC, and FGA live in **your** SQL Server. An embedded admin UI ships with the package.
 
-Think **WorkOS / AuthKit, but self-hosted and database-owned.**
+Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ## Why SqlOS?
 
@@ -23,8 +23,10 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
 
 ### AuthServer
 
-- **OAuth 2.0 with PKCE** — `/authorize`, `/token`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`
-- **Branded AuthPage** — hosted `/login`, `/signup`, and `/logged-out` with customizable branding
+- **OAuth 2.0 with PKCE** — `/sqlos/auth/authorize`, `/sqlos/auth/token`, metadata, and JWKS
+- **Branded AuthPage** — hosted `/sqlos/auth/login`, `/sqlos/auth/signup`, and `/sqlos/auth/logged-out`
+- **Client Onboarding Modes** — seeded/manual owned apps, `CIMD` discovered clients, and optional `DCR` compatibility clients
+- **Resource Indicators** — bind `resource` end to end and mint audience-aware access tokens
 - **Organizations & Users** — multi-tenant user management with memberships and roles
 - **Password Credentials** — secure local authentication with session management
 - **Social Login** — Google, Microsoft, Apple, and any custom OIDC provider
@@ -55,10 +57,10 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
    ```
 
 2. **Use SQL Server for your EF `DbContext`**  
-   SqlOS stores its tables in the same database your context uses. Configure EF with the SQL Server provider and a connection string as you normally would.
+   SqlOS uses the same database as your context. Point EF at SQL Server like any other app.
 
 3. **Wire your `DbContext`**  
-   Implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, add the FGA `IsResourceAccessible` queryable, and call `UseSqlOS` in `OnModelCreating`:
+   Add the two SqlOS interfaces. Add the FGA `IsResourceAccessible` query. Call `UseSqlOS` in `OnModelCreating`:
 
    ```csharp
    public sealed class AppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
@@ -81,8 +83,10 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
    ```csharp
    builder.AddSqlOS<AppDbContext>(options =>
    {
-       options.UseFGA();
-       options.UseAuthServer();
+       options.AuthServer.SeedOwnedWebApp(
+           "todo-web",
+           "Todo Web App",
+           "https://app.example.com/auth/callback");
    });
    ```
 
@@ -93,7 +97,7 @@ Think **WorkOS / AuthKit, but self-hosted and database-owned.**
    app.MapSqlOS();
    ```
 
-With defaults, SqlOS bootstraps its schema on host startup, serves the admin UI at `/sqlos`, and exposes OAuth and the hosted auth pages at `/sqlos/auth` (override with `DashboardBasePath` if needed).
+On startup, SqlOS updates its own schema. Default URLs: admin at `/sqlos`, OAuth at `/sqlos/auth`. Change the prefix with `DashboardBasePath` if you need to.
 
 ## Dashboard Access
 
@@ -111,6 +115,32 @@ SqlOS__Dashboard__AuthMode=Password
 SqlOS__Dashboard__Password=<strong-password>
 ```
 
+## Todo Sample
+
+If your goal is:
+
+> "I want SqlOS to work with hosted auth, resource metadata, and MCP-style public clients."
+
+Start with:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+That sample stays intentionally narrow:
+
+- hosted auth first
+- headless follow-on
+- protected-resource metadata
+- audience-aware token validation
+- local preregistration with `todo-local`
+- public-client onboarding with `CIMD` and optional `DCR`
+
+Read more:
+
+- [Todo sample README](examples/SqlOS.Todo.Api/README.md)
+- [Todo sample guide](web/content/docs/authserver/todo-sample.mdx)
+
 ## Example App
 
 The repo includes a full working example powered by .NET Aspire:
@@ -119,7 +149,7 @@ The repo includes a full working example powered by .NET Aspire:
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```
 
-This starts SQL Server, an ASP.NET API with SqlOS, and a Next.js frontend demonstrating password login, social OIDC, SAML SSO, session management, and FGA-protected data.
+That starts SQL Server, the sample API, the Todo sample, and the web frontends in one stack. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, FGA, and the hosted-first MCP-oriented Todo flow side by side.
 
 | | URL |
 |---|---|
@@ -127,6 +157,7 @@ This starts SQL Server, an ASP.NET API with SqlOS, and a Next.js frontend demons
 | Auth Admin | `http://localhost:5062/sqlos/admin/auth/` |
 | FGA Admin | `http://localhost:5062/sqlos/admin/fga/` |
 | Web App | `http://localhost:3010/` |
+| Todo App | `http://localhost:5080/` |
 
 ## Requirements
 
@@ -137,14 +168,10 @@ This starts SQL Server, an ASP.NET API with SqlOS, and a Next.js frontend demons
 ## Testing
 
 ```bash
-# Unit tests
-dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj
-
-# Integration tests (requires SQL Server)
-dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj
-
-# Full suite
-dotnet test SqlOS.sln
+dotnet build SqlOS.sln
+./scripts/unit-tests.sh
+./scripts/integration-tests.sh
+./scripts/docs-check.sh
 ```
 
 ## Repo Layout
@@ -154,6 +181,9 @@ src/SqlOS                                # The library
 tests/SqlOS.Tests                        # Unit tests
 tests/SqlOS.IntegrationTests             # Integration tests
 tests/SqlOS.Benchmarks                   # Performance benchmarks
+examples/SqlOS.Todo.Api                  # Canonical hosted-first Todo sample
+examples/SqlOS.Todo.AppHost              # Aspire runner for the Todo sample
+examples/SqlOS.Todo.IntegrationTests     # Todo sample end-to-end tests
 examples/SqlOS.Example.Api               # ASP.NET API example
 examples/SqlOS.Example.Web               # Next.js frontend example
 examples/SqlOS.Example.AppHost           # Aspire orchestration
@@ -163,7 +193,13 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
-- [OIDC Auth](docs/OIDC_AUTH.md) — OpenID Connect provider support
+- [Todo Sample](examples/SqlOS.Todo.Api/README.md) — hosted auth, simple FGA, and MCP-oriented protected-resource flows
+- [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
+- [Preregistration vs CIMD vs DCR](web/content/docs/authserver/preregistration-vs-cimd-vs-dcr.mdx) — choose the right client onboarding path
+- [Client ID Metadata Documents](web/content/docs/authserver/client-id-metadata-documents.mdx) — portable public clients with metadata URLs
+- [Dynamic Client Registration](web/content/docs/authserver/dynamic-client-registration.mdx) — compatibility-mode runtime registration
+- [MCP Resource Indicators and Audience](web/content/docs/authserver/mcp-resource-indicators-and-audience.mdx) — resource-bound tokens and audience validation
+- [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
 - [Google OIDC](docs/GOOGLE_OIDC.md) · [Microsoft OIDC](docs/MICROSOFT_OIDC.md) · [Apple OIDC](docs/APPLE_OIDC.md) · [Custom OIDC](docs/CUSTOM_OIDC.md)
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack

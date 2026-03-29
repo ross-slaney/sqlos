@@ -20,7 +20,6 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
     {
         using var factory = ExampleApiFixture.CreateFactory(builder =>
         {
-            builder.UseSetting("SqlOS:AuthMode", "Headless");
             builder.UseSetting("SqlOS:HeadlessFrontendUrl", "http://localhost:3000");
             builder.UseSetting("ExampleFrontend:ClientId", "example-web");
             builder.UseSetting("ExampleFrontend:CallbackUrl", "http://localhost:3000/auth/callback");
@@ -51,7 +50,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var handoffLocation = authorizeResponse.Headers.Location;
         handoffLocation.Should().NotBeNull();
-        var handoffQuery = QueryHelpers.ParseQuery(handoffLocation.Query);
+        var handoffQuery = QueryHelpers.ParseQuery(handoffLocation!.Query);
         var requestId = handoffQuery["request"].ToString();
         requestId.Should().NotBeNullOrWhiteSpace();
 

@@ -8,7 +8,6 @@ public class SqlOSAuthServerOptions
     public string Schema { get; set; } = "dbo";
     public string BasePath { get; set; } = "/sqlos/auth";
     public string Issuer { get; set; } = "https://localhost/sqlos/auth";
-    public SqlOSAuthPageMode AuthPageMode { get; set; } = SqlOSAuthPageMode.Hosted;
     public string? PublicOrigin { get; set; }
     public string DefaultAudience { get; set; } = "sqlos";
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
@@ -22,7 +21,9 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
-    public SqlOSAuthServerDashboardOptions Dashboard { get; set; } = new();
+    public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
+    public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
+    public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
@@ -49,6 +50,18 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigureClientRegistration(Action<SqlOSClientRegistrationOptions> configure)
+    {
+        configure(ClientRegistration);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureResourceIndicators(Action<SqlOSResourceIndicatorOptions> configure)
+    {
+        configure(ResourceIndicators);
+        return this;
+    }
+
     public SqlOSAuthServerOptions SeedBrowserClient(string clientId, string name, params string[] redirectUris)
     {
         SeedClient(client =>
@@ -67,12 +80,48 @@ public class SqlOSAuthServerOptions
 
         return this;
     }
-}
 
-public class SqlOSAuthServerDashboardOptions
-{
-    public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
-    public string? Password { get; set; }
-    public TimeSpan SessionLifetime { get; set; } = SqlOSDashboardOptions.DefaultSessionLifetime;
-    public Func<HttpContext, Task<bool>>? AuthorizationCallback { get; set; }
+    public SqlOSAuthServerOptions SeedOwnedWebApp(string clientId, string name, params string[] redirectUris)
+        => SeedBrowserClient(clientId, name, redirectUris);
+
+    public SqlOSAuthServerOptions SeedOwnedNativeApp(string clientId, string name, params string[] redirectUris)
+        => SeedClient(client =>
+        {
+            client.ClientId = clientId;
+            client.Name = name;
+            client.RedirectUris = redirectUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+    public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Cimd.Enabled = true;
+        ResourceIndicators.Enabled = true;
+        ClientRegistration.Dcr.Enabled = false;
+        configure?.Invoke(ClientRegistration);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions EnableChatGptCompatibility(Action<SqlOSDynamicClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Dcr.Enabled = true;
+        ResourceIndicators.Enabled = true;
+        configure?.Invoke(ClientRegistration.Dcr);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions EnableVsCodeCompatibility(Action<SqlOSDynamicClientRegistrationOptions>? configure = null)
+    {
+        ClientRegistration.Dcr.Enabled = true;
+        ClientRegistration.Dcr.AllowLoopbackRedirectUris = true;
+        ResourceIndicators.Enabled = true;
+        configure?.Invoke(ClientRegistration.Dcr);
+        return this;
+    }
 }

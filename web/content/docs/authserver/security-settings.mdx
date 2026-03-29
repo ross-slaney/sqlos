@@ -40,9 +40,9 @@ curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
 The access token lifetime is configured separately in startup code since it affects JWT generation:
 
 ```csharp
-options.UseAuthServer(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.AccessTokenLifetime = TimeSpan.FromMinutes(15);
+    options.AuthServer.AccessTokenLifetime = TimeSpan.FromMinutes(15);
 });
 ```
 

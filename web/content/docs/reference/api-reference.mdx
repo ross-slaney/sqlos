@@ -7,20 +7,20 @@ section: reference
 
 ## OAuth Endpoints
 
-OAuth routes are mounted when you call `app.MapSqlOS()`; the default issuer path is `{DashboardBasePath}/auth` (for example `/sqlos/auth`).
+Call `app.MapSqlOS()` to mount OAuth. Default base: `{DashboardBasePath}/auth` (e.g. `/sqlos/auth`).
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/.well-known/oauth-authorization-server` | OAuth metadata |
-| GET | `/.well-known/jwks.json` | Public keys for JWT validation |
-| GET | `/authorize` | OAuth authorize (PKCE) |
-| POST | `/token` | Token exchange (code or refresh) |
-| GET | `/login` | Hosted login page |
-| GET | `/signup` | Hosted signup page |
+| GET | `/sqlos/auth/.well-known/oauth-authorization-server` | OAuth metadata |
+| GET | `/sqlos/auth/.well-known/jwks.json` | Public keys for JWT validation |
+| GET | `/sqlos/auth/authorize` | OAuth authorize (PKCE) |
+| POST | `/sqlos/auth/token` | Token exchange (code or refresh) |
+| GET | `/sqlos/auth/login` | Hosted login page |
+| GET | `/sqlos/auth/signup` | Hosted signup page |
 
 ## Auth API (Example)
 
-The example API wraps SqlOS services into REST endpoints. Copy or adapt these patterns.
+The sample API exposes REST helpers around SqlOS. Copy the shape you need.
 
 ### Discover
 

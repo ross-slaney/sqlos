@@ -1,10 +1,6 @@
 "use client";
 
-const setupCode = `builder.AddSqlOS<AppDbContext>(opt =>
-{
-    opt.UseAuthServer();
-    opt.UseFGA();
-});
+const setupCode = `builder.AddSqlOS<AppDbContext>();
 
 var app = builder.Build();
 app.MapSqlOS();`;

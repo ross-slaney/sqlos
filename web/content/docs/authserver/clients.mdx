@@ -1,35 +1,53 @@
 ---
 title: "Clients"
-description: "Register OAuth client applications with redirect URIs."
+description: "Choose the right client onboarding path for owned apps, portable clients, and compatibility clients."
 order: 4.6
 section: authserver
 ---
 
-A client represents an application that authenticates users through SqlOS. Each client has a unique ID, an audience, and a list of allowed redirect URIs for OAuth PKCE flows.
+A **client** is the app that sends a user into SqlOS sign in and later exchanges the auth code for tokens.
 
-## Register a client
+SqlOS now supports three client onboarding paths:
 
-**Dashboard**: Auth Server > Clients
+- **Owned apps** -- seeded or dashboard-created clients for your own web, mobile, desktop, or SPA apps
+- **Portable clients** -- `CIMD` when the `client_id` is a stable HTTPS metadata document
+- **Compatibility clients** -- optional `DCR` for public clients that still expect runtime registration
+
+If you are unsure, start with the first path.
+
+## Fastest path: owned app
+
+This is the default path for most teams.
+
+Use it for:
+
+- your own browser app
+- your own mobile app
+- your own desktop or local native app
+- the first version of a hosted SqlOS setup
+
+### Dashboard
+
+Open **Auth Server > Clients**.
 
 ![Clients page](/docs/dashboard-clients.png)
 
-**Startup seeding** (recommended for first-party apps):
+### Startup seeding
+
+Recommended for first-party apps:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseAuthServer(auth =>
-    {
-        auth.SeedBrowserClient(
-            "my-web-app",
-            "My Web Application",
-            "http://localhost:3000/auth/callback",
-            "https://app.example.com/auth/callback");
-    });
+    options.AuthServer.SeedOwnedWebApp(
+        "my-web-app",
+        "My Web Application",
+        "http://localhost:3000/auth/callback",
+        "https://app.example.com/auth/callback");
 });
 ```
 
-**Admin API**:
+### Admin API
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
@@ -55,12 +73,60 @@ Clients seeded in startup code are marked as **startup managed**. Their configur
 
 Dashboard-created clients are fully editable and persist across restarts.
 
+## Portable clients with CIMD
+
+Use `CIMD` when a public client uses a stable HTTPS `client_id` that points to its own metadata document.
+
+This is the better long-term public-client story because the client keeps its own metadata and SqlOS can fetch and cache it.
+
+Enable it with:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+});
+```
+
+That path is especially useful for:
+
+- portable MCP clients
+- public clients shared across many servers
+- clients that should not be hand-entered into every SqlOS deployment
+
+## Compatibility clients with DCR
+
+Use `DCR` only when a real client still expects runtime registration.
+
+Enable it with:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Dcr.Enabled = true;
+});
+```
+
+SqlOS keeps this path intentionally narrow in v1:
+
+- public PKCE clients only
+- `token_endpoint_auth_method=none`
+- strict redirect validation
+- rate limiting and audit logging
+
 ## Multiple clients
 
 Register separate clients for each frontend. The example stack seeds three:
 
 ```csharp
-auth.SeedBrowserClient("example-web", "Example Web", "http://localhost:3010/auth/callback");
-auth.SeedBrowserClient("example-angular", "Example Angular", "http://localhost:4200/auth/callback");
-auth.SeedBrowserClient("example-expo", "Example Expo", "sqlos-expo://auth-callback");
+auth.SeedOwnedWebApp("example-web", "Example Web", "http://localhost:3010/auth/callback");
+auth.SeedOwnedWebApp("example-angular", "Example Angular", "http://localhost:4200/auth/callback");
+auth.SeedOwnedNativeApp("example-expo", "Example Expo", "sqlos-expo://auth-callback");
 ```
+
+## Next client guides
+
+- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)

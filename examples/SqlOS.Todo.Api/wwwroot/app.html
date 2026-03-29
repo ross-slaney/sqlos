@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todo UI</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body data-page="app">
+  <main class="shell">
+    <section class="hero compact">
+      <p class="eyebrow">Todo UI</p>
+      <h1>Your token should match the Todo resource.</h1>
+      <p class="lede">Create a few items, then try the same API with the wrong audience to see the MCP-oriented challenge behavior.</p>
+      <div class="button-row">
+        <a class="link-button secondary-link" href="/">Back to sample</a>
+        <button id="logout-button" class="secondary" type="button">Clear local tokens</button>
+      </div>
+    </section>
+
+    <section class="panel-grid">
+      <article class="panel">
+        <h2>Session</h2>
+        <pre id="session-info">Loading session...</pre>
+      </article>
+
+      <article class="panel">
+        <h2>Create todo</h2>
+        <form id="todo-form">
+          <input id="todo-title" name="title" placeholder="Ship the Azure guide" required>
+          <button type="submit">Add todo</button>
+        </form>
+        <p id="todo-message" class="status-text"></p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Items</h2>
+        <button id="refresh-todos-button" class="secondary" type="button">Refresh</button>
+      </div>
+      <div id="todo-list" class="todo-list"></div>
+    </section>
+  </main>
+  <script src="/sample.js" defer></script>
+</body>
+</html>

@@ -4,31 +4,31 @@ description: "Embedded auth and authorization for .NET apps. One package. Your d
 order: -1
 ---
 
-SqlOS is an embedded auth and authorization runtime for .NET. It adds identity, sessions, organizations, SSO, OIDC, and fine-grained authorization to your ASP.NET app with one NuGet package. Your data stays in your SQL Server database.
+SqlOS is auth and authorization for .NET in one package. Identity, SSO, OIDC, and FGA run in your app. Data stays in **your** SQL Server.
 
 ## Why SqlOS
 
-Most auth products force you to send user data to an external service and pay per-seat. SqlOS takes a different approach:
+Many auth products host your users and charge per seat. SqlOS does not:
 
 - **Your database** -- users, sessions, grants, and tokens live in your SQL Server instance
 - **Your app** -- SqlOS runs inside your ASP.NET process, not as a separate service
 - **One package** -- `dotnet add package SqlOS` and you're done
-- **Standards-based** -- OAuth 2.0, PKCE, JWKS, SAML, OpenID Connect
+- **Standards-based** -- OAuth 2.0, PKCE, JWKS, SAML, OpenID Connect, `CIMD`, `DCR`, and resource indicators when you need them
 
-## Two modules
+## Two parts
 
-SqlOS ships two modules that work independently or together:
+SqlOS ships two parts together:
 
-**AuthServer** handles identity: organizations, users, password login, OIDC social login, SAML enterprise SSO, sessions, refresh tokens, and a hosted or headless auth UI.
+- **AuthServer** — orgs, users, passwords, OIDC, SAML, sessions, tokens, and hosted or headless login UI.
+- **FGA** — resource tree, roles, permissions, grants, and SQL-backed filtering.
+
+Setup stays the same:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer();
-});
+builder.AddSqlOS<AppDbContext>();
 ```
 
-**FGA** handles authorization: hierarchical resources, roles, permissions, grants, and EF Core query-time filtering that pushes access control into your SQL queries.
+FGA filters data in SQL so you do not load rows you should not see.
 
 ```csharp
 var chains = await dbContext.Chains
@@ -38,28 +38,54 @@ var chains = await dbContext.Chains
 
 ## What it looks like
 
-SqlOS ships with an embedded admin dashboard for managing organizations, users, sessions, resources, grants, and roles.
+There is a built-in admin UI for orgs, users, sessions, resources, grants, and roles.
 
 ![Dashboard home](/docs/dashboard-home.png)
 
-The same data that appears in the dashboard is available through the SDK and admin API.
+The SDK and admin API expose the same data.
 
-## Example app
+## Start with the right sample
 
-The repo includes a complete retail management app (Next.js, Angular, and React Native) that demonstrates multi-tenant auth with fine-grained access control.
+### Todo sample
 
-As **Company Admin**, the user sees all 5 chains and 3 stores:
+Use the Todo sample first when your question is:
+
+> "How do I make SqlOS work with hosted auth, simple FGA, MCP-style public clients, resource metadata, and audience-aware APIs?"
+
+It focuses on:
+
+- hosted auth first
+- per-user tenant + todo resource hierarchy
+- SQL-backed FGA filtering and simple auth checks
+- headless follow-on
+- protected-resource metadata
+- `WWW-Authenticate` challenge behavior
+- local preregistration
+- `CIMD` and optional `DCR`
+
+[Todo sample guide](/docs/guides/authserver/todo-sample)
+
+### Example stack
+
+Use the broader Example stack when you want the full-platform tour:
+
+- retail-style app
+- hosted and headless UI
+- OIDC and SAML
+- organizations and memberships
+- FGA dashboards and protected data flows
+
+As **Company Admin**, you see every chain and store:
 
 ![Company Admin view](/docs/retail-app-admin-dashboard.png)
 
-As **Store Clerk**, the same app filters down to just the one store they have access to:
+As **Store Clerk**, you only see the stores you are allowed to see:
 
 ![Store Clerk view](/docs/retail-app-clerk-dashboard.png)
-
-No application code changes. The FGA filter handles it at query time.
 
 ## Next steps
 
 - [Getting Started](/docs/guides/getting-started) -- install and run in 5 minutes
+- [Todo Sample](/docs/guides/authserver/todo-sample) -- the narrow OAuth/MCP sample
 - [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, SSO
 - [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization

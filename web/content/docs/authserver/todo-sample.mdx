@@ -1,0 +1,165 @@
+---
+title: "Todo Sample"
+description: "Run the hosted-first SqlOS sample with simple FGA, protected-resource metadata, and public-client onboarding paths."
+order: 1.6
+section: authserver
+---
+
+The Todo sample is the canonical "ship hosted auth plus simple FGA fast" walkthrough.
+
+It keeps the model intentionally small:
+
+- hosted auth first
+- one user = one tenant boundary
+- one tenant resource with child todo resources
+- SQL-backed FGA list filtering and simple auth checks in minimal APIs
+- headless follow-on when you need custom UI
+- a protected resource with audience enforcement
+- protected-resource metadata for MCP clients
+- preregistered local development with `todo-local`
+- portable public-client onboarding with `CIMD` and optional `DCR`
+
+## Run it
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Open `http://localhost:5080/`.
+
+If you already ran an older version of the Todo sample, reset the Todo sample SQL database or persistent volume once before rerunning. Existing rows are not backfilled into the FGA graph.
+
+## What the sample includes
+
+### Hosted first
+
+The default path is a seeded browser client called `todo-web`.
+
+Use the landing page to:
+
+- start hosted sign in
+- start hosted sign up
+- land in a tiny Todo UI backed by the sample API
+
+This keeps the first experience simple. You do not have to write a custom auth UI to get a working OAuth flow.
+
+### Simple FGA
+
+The Todo sample now models every todo as an FGA resource.
+
+Hierarchy:
+
+- `root`
+- `tenant::{userId}`
+- `todo::{todoId}`
+
+Role and permission matrix:
+
+- `tenant_owner`
+- `TENANT_CREATE_TODO`
+- `TODO_READ`
+- `TODO_WRITE`
+
+The app grants `tenant_owner` on the user tenant node. Child todo resources inherit access from that node, so the sample can:
+
+- list todos with `GetAuthorizationFilterAsync<TodoItem>(...)`
+- authorize create against the tenant node
+- authorize toggle/delete against the todo resource
+
+That keeps the controller code small while still populating the FGA dashboard with a real tree.
+
+### Headless follow-on
+
+When you want app-owned auth screens, flip:
+
+```bash
+TodoSample__EnableHeadless=true
+```
+
+The sample then redirects `/sqlos/auth/authorize` into `headless.html`, which drives the same authorization request through the SqlOS headless APIs.
+
+That lets you compare:
+
+- hosted setup for the fastest first version
+- headless setup for custom branding and forms
+
+## Protected resource behavior
+
+The sample API protects `/api/todos` with audience-aware token validation.
+
+It also exposes:
+
+- `GET /.well-known/oauth-protected-resource`
+
+And when a caller presents no token or the wrong audience, the API returns:
+
+- `401 Unauthorized`
+- a `WWW-Authenticate` header with `resource_metadata`
+
+That means the sample demonstrates both sides at once:
+
+- protected-resource metadata for MCP/public-client flows
+- simple FGA subject sync, grants, hierarchy, and SQL-backed authorization
+
+## Local preregistered client
+
+For localhost development, use the seeded client:
+
+- `client_id`: `todo-local`
+- redirect URI: `http://localhost:3100/oauth/callback`
+- auth method: public PKCE only
+
+This is the easiest local loop before you publish the sample on a stable HTTPS origin.
+
+## Local Emcy broker client
+
+For the Emcy-hosted local Todo MCP flow, use the additional seeded client:
+
+- `client_id`: `todo-mcp-local`
+- redirect URI: `http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback`
+- auth method: public PKCE only
+
+This client exists so Emcy can broker the downstream Todo authorization flow while the Todo API itself keeps the same OAuth and audience behavior.
+
+## Portable public clients
+
+Once the sample is reachable on public HTTPS, you can use both public-client onboarding paths.
+
+### CIMD
+
+The sample publishes a metadata document at:
+
+```text
+/clients/portable-client.json
+```
+
+That document is useful as:
+
+- a working reference for the shape of a `client_id` metadata document
+- a starter path when you want to point a portable client at a stable HTTPS URL
+
+### DCR
+
+`DCR` stays off by default. Enable it when you need compatibility clients:
+
+```bash
+TodoSample__EnableDcr=true
+```
+
+Then use:
+
+```text
+POST /sqlos/auth/register
+```
+
+This is the compatibility path for clients that still expect dynamic client registration.
+
+## Why this sample exists
+
+Use the Todo sample when your question is:
+
+> "How do I ship hosted auth, simple FGA, and protected-resource metadata with very little app code?"
+
+Use the broader Example stack when your question is:
+
+> "How do I explore all of SqlOS, including OIDC, SAML, org workflows, and richer multi-tenant FGA?"

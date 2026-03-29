@@ -5,7 +5,7 @@ order: 1
 section: fga
 ---
 
-FGA has five building blocks. Understanding how they fit together is the key to modeling authorization in your app.
+FGA has five pieces. Learn how they connect. Then model your app.
 
 ## Resources
 
@@ -21,7 +21,7 @@ A resource is a node in a tree. Every resource has a type, a parent (except root
 }
 ```
 
-Resources form a hierarchy. Grants on parent resources inherit to all descendants. See [Resource Hierarchy](/docs/guides/fga/resource-hierarchy).
+Resources form a tree. Grants on a parent apply below it. [Resource hierarchy](/docs/guides/fga/resource-hierarchy).
 
 ## Subjects
 
@@ -38,7 +38,7 @@ See [Subject Types](/docs/guides/fga/subject-types).
 
 ## Roles
 
-A role is a named set of permissions. Define roles that map to your app's access patterns:
+A role bundles permissions. Name them to match how your app works:
 
 | Role | Permissions |
 | --- | --- |
@@ -50,7 +50,7 @@ See [Roles](/docs/guides/fga/roles).
 
 ## Permissions
 
-A permission is a capability key scoped to a resource type. Convention: `RESOURCETYPE_ACTION` in uppercase.
+A permission is a string key for one resource type. Common style: `RESOURCETYPE_ACTION` in caps.
 
 | Permission | Resource type | Action |
 | --- | --- | --- |
@@ -63,7 +63,7 @@ See [Permissions](/docs/guides/fga/permissions).
 
 ## Grants
 
-A grant links a subject, a role, and a resource. Because resources form a tree, a grant on a parent gives the subject that role on all descendants.
+A grant = subject + role + resource. Parent grant flows down the tree to children.
 
 ```
 Subject: "jane"
@@ -79,11 +79,11 @@ See [Grants](/docs/guides/fga/grants).
 
 ## How authorization works
 
-When checking `CHAIN_VIEW` on `chain_walmart`:
+Example: check `CHAIN_VIEW` on `chain_walmart`.
 
-1. Find all grants for the subject
-2. For each grant, check if the role includes `CHAIN_VIEW`
-3. Walk up from `chain_walmart` → `org::acme` → `root`
-4. If any ancestor has a matching grant, access is allowed
+1. Load grants for the subject.
+2. See if any role on the path includes `CHAIN_VIEW`.
+3. Walk up: `chain_walmart` → `org::acme` → `root`.
+4. Match on any ancestor? Allow.
 
-This tree walk is performed by a SQL Server table-valued function, so it works inside EF Core queries without loading data into memory.
+SQL Server runs this as a **TVF**. EF uses it in `Where`. No giant loads into memory.

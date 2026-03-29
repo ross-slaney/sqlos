@@ -41,8 +41,7 @@ public sealed class SqlOSHeadlessAuthService
         _options = options.Value;
     }
 
-    public bool IsEnabled => string.Equals(_settingsService.CurrentPresentationMode, "headless", StringComparison.OrdinalIgnoreCase)
-        && _options.Headless.BuildUiUrl != null;
+    public bool IsEnabled => _options.Headless.BuildUiUrl != null;
 
     public string GetHeadlessApiBasePath() => _options.Headless.ResolveApiBasePath(_options.BasePath);
 

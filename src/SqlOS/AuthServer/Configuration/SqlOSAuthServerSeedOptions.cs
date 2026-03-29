@@ -11,7 +11,6 @@ public sealed class SqlOSAuthPageSeedOptions
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public List<string> EnabledCredentialTypes { get; set; } = ["password"];
-    public string PresentationMode { get; set; } = "hosted";
 }
 
 public sealed class SqlOSClientSeedOptions

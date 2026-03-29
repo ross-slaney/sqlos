@@ -11,7 +11,6 @@ BEGIN
         [PageSubtitle] NVARCHAR(500) NOT NULL,
         [EnablePasswordSignup] BIT NOT NULL,
         [EnabledCredentialTypesJson] NVARCHAR(MAX) NOT NULL,
-        [PresentationMode] NVARCHAR(32) NOT NULL DEFAULT 'hosted',
         [UpdatedAt] DATETIME2 NOT NULL
     );
 END

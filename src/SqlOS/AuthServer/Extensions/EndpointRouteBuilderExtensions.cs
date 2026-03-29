@@ -25,9 +25,6 @@ public static class EndpointRouteBuilderExtensions
         var adminPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
             ? $"{authPrefix[..^5]}/admin/auth"
             : $"{authPrefix}/admin";
-        var legacySamlPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)
-            ? authPrefix[..^5]
-            : null;
 
         var auth = endpoints.MapGroup(authPrefix);
         auth.ExcludeFromDescription();
@@ -636,7 +633,8 @@ public static class EndpointRouteBuilderExtensions
                         form["redirect_uri"].ToString(),
                         form["client_id"].ToString(),
                         form["code_verifier"].ToString(),
-                        form["refresh_token"].ToString()),
+                        form["refresh_token"].ToString(),
+                        form["resource"].ToString()),
                     context,
                     cancellationToken);
 
@@ -658,6 +656,30 @@ public static class EndpointRouteBuilderExtensions
                 });
             }
         });
+
+        if (authOptions.ClientRegistration.Dcr.Enabled)
+        {
+            auth.MapPost("/register", async (
+                SqlOSDynamicClientRegistrationRequest request,
+                SqlOSDynamicClientRegistrationService registrationService,
+                HttpContext context,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var result = await registrationService.RegisterAsync(request, context, cancellationToken);
+                    return Results.Json(result, statusCode: StatusCodes.Status201Created);
+                }
+                catch (SqlOSClientRegistrationException ex)
+                {
+                    return Results.Json(new
+                    {
+                        error = ex.Error,
+                        error_description = ex.Message
+                    }, statusCode: ex.StatusCode);
+                }
+            });
+        }
 
         auth.MapPost("/signup", async (SqlOSSignupRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.SignUpAsync(request, httpContext, cancellationToken)));
@@ -764,11 +786,6 @@ public static class EndpointRouteBuilderExtensions
         }
 
         auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);
-        if (!string.IsNullOrWhiteSpace(legacySamlPrefix))
-        {
-            endpoints.MapPost($"{legacySamlPrefix}/saml/acs/{{connectionId}}", HandleSamlAcsAsync)
-                .ExcludeFromDescription();
-        }
 
         adminApi.MapGet("/stats", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
@@ -960,14 +977,31 @@ public static class EndpointRouteBuilderExtensions
             });
         });
 
-        api.MapGet("/clients", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/clients", async (HttpContext context, string? source, string? status, string? search, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListClientsAsync(cancellationToken));
+            return Results.Ok(await adminService.ListClientsAsync(source, status, search, page, pageSize, cancellationToken));
+        });
+
+        api.MapGet("/clients/{clientId}", async (HttpContext context, string clientId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await adminService.GetClientDetailAsync(clientId, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapPost("/clients", async (HttpContext context, SqlOSCreateClientRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -977,17 +1011,92 @@ public static class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            var client = await adminService.CreateClientAsync(request, cancellationToken);
-            return Results.Ok(new
+            try
             {
-                client.Id,
-                client.ClientId,
-                client.Name,
-                client.Audience,
-                RedirectUris = client.RedirectUrisJson,
-                client.IsActive,
-                client.CreatedAt
-            });
+                var client = await adminService.CreateClientAsync(request, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.Name,
+                    client.Audience,
+                    RedirectUris = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson),
+                    client.IsActive,
+                    client.CreatedAt
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/clients/{clientId}/disable", async (HttpContext context, string clientId, ClientLifecycleRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var client = await adminService.DisableClientAsync(clientId, request.Reason, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.IsActive,
+                    client.DisabledAt,
+                    client.DisabledReason
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/clients/{clientId}/enable", async (HttpContext context, string clientId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var client = await adminService.EnableClientAsync(clientId, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.IsActive,
+                    client.DisabledAt,
+                    client.DisabledReason
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/clients/{clientId}/revoke", async (HttpContext context, string clientId, ClientLifecycleRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var revokedSessions = await adminService.RevokeClientSessionsAsync(clientId, string.IsNullOrWhiteSpace(request.Reason) ? "client_revoked" : request.Reason.Trim(), cancellationToken);
+                return Results.Ok(new { revokedSessions });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapGet("/oidc-connections", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -1460,4 +1569,6 @@ public static class EndpointRouteBuilderExtensions
         string? AppleKeyId,
         string? ApplePrivateKeyPem,
         string? LogoDataUrl);
+
+    private sealed record ClientLifecycleRequest(string? Reason);
 }

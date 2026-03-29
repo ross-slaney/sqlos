@@ -231,7 +231,7 @@ dotnet add package SqlOS
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.UseFGA(fga => fga.Seed(seed =>
+    options.Fga.Seed(seed =>
     {
         seed.ResourceType("document", "Document");
         seed.Permission("documents.read", "Read documents", "document");
@@ -241,7 +241,7 @@ builder.AddSqlOS<AppDbContext>(options =>
         seed.RolePermission("viewer", "documents.read");
         seed.RolePermission("editor", "documents.read");
         seed.RolePermission("editor", "documents.edit");
-    }));
+    });
 });
 
 var app = builder.Build();

@@ -8,46 +8,12 @@ namespace SqlOS.Extensions;
 public static class ModelBuilderExtensions
 {
     /// <summary>
-    /// Registers SqlOS auth server and FGA EF models for the given <paramref name="contextType"/>.
+    /// Registers SqlOS auth server and FGA EF models.
     /// </summary>
-    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, Type contextType)
+    public static ModelBuilder UseSqlOS(this ModelBuilder modelBuilder, Type? contextType = null)
     {
-        modelBuilder.UseAuthServer();
-        modelBuilder.UseFGA(contextType);
-        return modelBuilder;
-    }
-
-    public static ModelBuilder UseAuthServer(
-        this ModelBuilder modelBuilder,
-        Action<SqlOSAuthServerOptions>? configure = null)
-    {
-        var options = new SqlOSAuthServerOptions();
-        configure?.Invoke(options);
-
-        SqlOSAuthServerModelConfiguration.Configure(modelBuilder, options);
-        return modelBuilder;
-    }
-
-    public static ModelBuilder UseFGA(
-        this ModelBuilder modelBuilder,
-        Type contextType,
-        Action<SqlOSFgaOptions>? configure = null)
-    {
-        var options = new SqlOSFgaOptions();
-        configure?.Invoke(options);
-
-        SqlOSFgaModelConfiguration.Configure(modelBuilder, options, contextType);
-        return modelBuilder;
-    }
-
-    public static ModelBuilder UseFGA(
-        this ModelBuilder modelBuilder,
-        Action<SqlOSFgaOptions>? configure = null)
-    {
-        var options = new SqlOSFgaOptions();
-        configure?.Invoke(options);
-
-        SqlOSFgaModelConfiguration.Configure(modelBuilder, options, contextType: null);
+        SqlOSAuthServerModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions());
+        SqlOSFgaModelConfiguration.Configure(modelBuilder, new SqlOSFgaOptions(), contextType);
         return modelBuilder;
     }
 }

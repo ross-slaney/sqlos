@@ -104,7 +104,7 @@ public sealed class SqlOSSamlService
         var requestPayload = _cryptoService.DeserializePayload<SsoRequestPayload>(requestToken)
             ?? throw new InvalidOperationException("SSO request payload is invalid.");
 
-        return await HandleLegacyAcsAsync(connection, requestToken, requestPayload, principal, cancellationToken);
+        return await HandleRequestTokenAcsAsync(connection, requestToken, requestPayload, principal, cancellationToken);
     }
 
     private async Task<string> HandleAuthorizationRequestAcsAsync(
@@ -158,7 +158,7 @@ public sealed class SqlOSSamlService
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
     }
 
-    private async Task<string> HandleLegacyAcsAsync(
+    private async Task<string> HandleRequestTokenAcsAsync(
         SqlOSSsoConnection connection,
         SqlOSTemporaryToken requestToken,
         SsoRequestPayload requestPayload,

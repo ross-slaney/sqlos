@@ -216,59 +216,6 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
-    public async Task LegacySamlAcsRoute_StillWorks()
-    {
-        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
-        {
-            name = $"Legacy Saml Org {Guid.NewGuid():N}"
-        });
-        orgResponse.EnsureSuccessStatusCode();
-        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
-        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
-
-        using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest("CN=SqlOSLegacyIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
-
-        var connectionResponse = await AdminPostAsync("/sqlos/admin/auth/api/sso-connections", new
-        {
-            organizationId,
-            displayName = "Legacy Example SSO",
-            identityProviderEntityId = "urn:legacy:idp",
-            singleSignOnUrl = "https://idp.example.local/sso",
-            x509CertificatePem = certificate.ExportCertificatePem(),
-            autoProvisionUsers = true,
-            autoLinkByEmail = false
-        });
-        connectionResponse.EnsureSuccessStatusCode();
-        var connectionJson = JsonDocument.Parse(await connectionResponse.Content.ReadAsStringAsync());
-        var connectionId = connectionJson.RootElement.GetProperty("id").GetString();
-
-        var authUrlResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
-        {
-            connectionId,
-            clientId = "example-web",
-            redirectUri = "https://client.example.local/callback"
-        });
-        authUrlResponse.EnsureSuccessStatusCode();
-        var authUrlJson = JsonDocument.Parse(await authUrlResponse.Content.ReadAsStringAsync());
-        var authUrl = authUrlJson.RootElement.GetProperty("authorizationUrl").GetString()!;
-        var relayState = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
-
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:legacy:idp", "legacy-user@example.com", "Legacy", "User");
-        var acsResponse = await ExampleApiFixture.Client.PostAsync(
-            $"/sqlos/saml/acs/{connectionId}",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["SAMLResponse"] = samlResponse,
-                ["RelayState"] = relayState
-            }));
-
-        acsResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
-        acsResponse.Headers.Location!.ToString().Should().Contain("code=");
-    }
-
-    [TestMethod]
     public async Task DashboardStats_AreAvailableInDevelopment()
     {
         var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/stats");
@@ -425,6 +372,92 @@ public sealed class SqlOSExampleApiIntegrationTests
             firstSession.TryGetProperty("idleExpiresAt", out _).Should().BeTrue();
             firstSession.TryGetProperty("absoluteExpiresAt", out _).Should().BeTrue();
         }
+    }
+
+    [TestMethod]
+    public async Task ClientAdminEndpoints_ReturnRichClientViews_AndSupportLifecycleActions()
+    {
+        var clientSuffix = Guid.NewGuid().ToString("N")[..10];
+        var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/clients", new
+        {
+            clientId = $"dashboard-client-{clientSuffix}",
+            name = $"Dashboard Client {clientSuffix}",
+            audience = "sqlos",
+            redirectUris = new[] { $"https://dashboard-{clientSuffix}.example.test/callback" },
+            description = "Created by admin integration test",
+            allowedScopes = new[] { "openid", "profile" },
+            requirePkce = true,
+            isFirstParty = true
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var clientId = createJson.RootElement.GetProperty("id").GetString();
+
+        var duplicateCreateResponse = await AdminPostAsync("/sqlos/admin/auth/api/clients", new
+        {
+            clientId = $"dashboard-client-{clientSuffix}",
+            name = $"Dashboard Client {clientSuffix}",
+            audience = "sqlos",
+            redirectUris = new[] { $"https://dashboard-{clientSuffix}.example.test/callback" },
+            description = "Created by admin integration test",
+            allowedScopes = new[] { "openid", "profile" },
+            requirePkce = true,
+            isFirstParty = true
+        });
+        duplicateCreateResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+        var duplicateCreateJson = JsonDocument.Parse(await duplicateCreateResponse.Content.ReadAsStringAsync());
+        duplicateCreateJson.RootElement.GetProperty("message").GetString().Should().Contain("already exists");
+
+        var listResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?search={clientSuffix}&page=1&pageSize=10");
+        listResponse.EnsureSuccessStatusCode();
+        var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
+        var listItem = listJson.RootElement.GetProperty("data").EnumerateArray()
+            .First(item => item.GetProperty("clientId").GetString() == $"dashboard-client-{clientSuffix}");
+        listItem.GetProperty("sourceLabel").GetString().Should().Be("Manual");
+        listItem.GetProperty("lifecycleState").GetString().Should().Be("active");
+        listItem.GetProperty("redirectUris").GetArrayLength().Should().Be(1);
+        listItem.TryGetProperty("managedByStartupSeed", out _).Should().BeTrue();
+        listItem.TryGetProperty("coreMetadataEditable", out _).Should().BeTrue();
+
+        var detailResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients/{clientId}");
+        detailResponse.EnsureSuccessStatusCode();
+        var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        detailJson.RootElement.GetProperty("clientId").GetString().Should().Be($"dashboard-client-{clientSuffix}");
+        detailJson.RootElement.GetProperty("allowedScopes").GetArrayLength().Should().Be(2);
+        detailJson.RootElement.TryGetProperty("recentAuditEvents", out _).Should().BeTrue();
+
+        var publicClientDetailResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients/dashboard-client-{clientSuffix}");
+        publicClientDetailResponse.EnsureSuccessStatusCode();
+        var publicClientDetailJson = JsonDocument.Parse(await publicClientDetailResponse.Content.ReadAsStringAsync());
+        publicClientDetailJson.RootElement.GetProperty("id").GetString().Should().Be(clientId);
+
+        var disableResponse = await AdminPostAsync($"/sqlos/admin/auth/api/clients/{clientId}/disable", new
+        {
+            reason = "integration_test_disable"
+        });
+        disableResponse.EnsureSuccessStatusCode();
+        var disableJson = JsonDocument.Parse(await disableResponse.Content.ReadAsStringAsync());
+        disableJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeFalse();
+        disableJson.RootElement.GetProperty("disabledReason").GetString().Should().Be("integration_test_disable");
+
+        var disabledListResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?status=disabled&search={clientSuffix}&page=1&pageSize=10");
+        disabledListResponse.EnsureSuccessStatusCode();
+        var disabledListJson = JsonDocument.Parse(await disabledListResponse.Content.ReadAsStringAsync());
+        disabledListJson.RootElement.GetProperty("totalCount").GetInt32().Should().BeGreaterThan(0);
+
+        var enableResponse = await ExampleApiFixture.Client.PostAsync($"/sqlos/admin/auth/api/clients/{clientId}/enable", JsonContent.Create(new { }));
+        enableResponse.EnsureSuccessStatusCode();
+        var enableJson = JsonDocument.Parse(await enableResponse.Content.ReadAsStringAsync());
+        enableJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeTrue();
+
+        var revokeResponse = await AdminPostAsync($"/sqlos/admin/auth/api/clients/{clientId}/revoke", new
+        {
+            reason = "integration_test_revoke"
+        });
+        revokeResponse.EnsureSuccessStatusCode();
+        var revokeJson = JsonDocument.Parse(await revokeResponse.Content.ReadAsStringAsync());
+        revokeJson.RootElement.TryGetProperty("revokedSessions", out _).Should().BeTrue();
     }
 
     private static async Task<HttpResponseMessage> AdminPostAsync(string path, object body)

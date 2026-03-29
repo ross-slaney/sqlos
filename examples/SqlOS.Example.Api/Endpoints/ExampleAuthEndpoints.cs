@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
@@ -36,7 +37,7 @@ public static class ExampleAuthEndpoints
         auth.MapGet("/oidc/providers", (SqlOSOidcAuthService oidcAuthService, CancellationToken cancellationToken) =>
             TryAsync(async () => Results.Ok(await oidcAuthService.ListEnabledProvidersAsync(cancellationToken))));
 
-        auth.MapPost("/login", (ExamplePasswordLoginRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<ExampleWebOptions> webOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapPost("/login", (ExamplePasswordLoginRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<ExampleWebOptions> webOptions, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var result = await authService.LoginWithPasswordAsync(
@@ -44,10 +45,10 @@ public static class ExampleAuthEndpoints
                     httpContext,
                     cancellationToken);
 
-                return Results.Ok(await ToLoginResponseAsync(result, request.Email, context, authService, fgaService, cancellationToken));
+                return Results.Ok(await ToLoginResponseAsync(result, request.Email, context, authService, fgaService, authOptions.Value.DefaultAudience, cancellationToken));
             }));
 
-        auth.MapPost("/select-organization", (ExampleSelectOrganizationRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapPost("/select-organization", (ExampleSelectOrganizationRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var tokens = await authService.SelectOrganizationAsync(
@@ -55,7 +56,7 @@ public static class ExampleAuthEndpoints
                     httpContext,
                     cancellationToken);
 
-                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, cancellationToken));
+                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, authOptions.Value.DefaultAudience, cancellationToken));
             }));
 
         auth.MapPost("/sso/start", (ExampleSsoStartRequest request, SqlOSSsoAuthorizationService ssoAuthorizationService, SqlOSCryptoService cryptoService, IOptions<ExampleWebOptions> webOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
@@ -72,7 +73,7 @@ public static class ExampleAuthEndpoints
                 return Results.Ok(result);
             }));
 
-        auth.MapPost("/sso/exchange", (ExampleSsoExchangeRequest request, SqlOSSsoAuthorizationService ssoAuthorizationService, ExampleFgaService fgaService, ExampleAppDbContext context, SqlOSAuthService authService, IOptions<ExampleWebOptions> webOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapPost("/sso/exchange", (ExampleSsoExchangeRequest request, SqlOSSsoAuthorizationService ssoAuthorizationService, ExampleFgaService fgaService, ExampleAppDbContext context, SqlOSAuthService authService, IOptions<ExampleWebOptions> webOptions, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var storedState = httpContext.Request.Cookies[SsoStateCookie];
@@ -96,7 +97,7 @@ public static class ExampleAuthEndpoints
                     cancellationToken);
 
                 ClearSsoCookies(httpContext.Response, httpContext);
-                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, cancellationToken));
+                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, authOptions.Value.DefaultAudience, cancellationToken));
             }));
 
         auth.MapPost("/oidc/start", (ExampleOidcStartRequest request, SqlOSHomeRealmDiscoveryService discoveryService, SqlOSOidcAuthService oidcAuthService, SqlOSCryptoService cryptoService, IOptions<ExampleWebOptions> webOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
@@ -235,7 +236,7 @@ public static class ExampleAuthEndpoints
                 }
             }));
 
-        auth.MapPost("/oidc/complete", (ExampleOidcCompleteRequest request, SqlOSCryptoService cryptoService, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapPost("/oidc/complete", (ExampleOidcCompleteRequest request, SqlOSCryptoService cryptoService, SqlOSAuthService authService, SqlOSClientResolutionService clientResolutionService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var token = await cryptoService.ConsumeTemporaryTokenAsync("oidc_handoff", request.Handoff, cancellationToken)
@@ -245,7 +246,7 @@ public static class ExampleAuthEndpoints
                     ?? throw new InvalidOperationException("The OIDC handoff payload is invalid.");
 
                 var user = await context.Set<SqlOSUser>().FirstAsync(x => x.Id == payload.UserId, cancellationToken);
-                var client = await context.Set<SqlOSClientApplication>().FirstAsync(x => x.ClientId == payload.ClientId, cancellationToken);
+                var client = (await clientResolutionService.ResolveRequiredClientAsync(payload.ClientId, null, httpContext, cancellationToken)).Client;
                 var tokens = await authService.CreateSessionTokensForUserAsync(
                     user,
                     client,
@@ -255,14 +256,14 @@ public static class ExampleAuthEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     cancellationToken);
 
-                return Results.Ok(await ToTokenResponseAsync(tokens, user, authService, fgaService, cancellationToken));
+                return Results.Ok(await ToTokenResponseAsync(tokens, user, authService, fgaService, authOptions.Value.DefaultAudience, cancellationToken));
             }));
 
-        auth.MapPost("/refresh", (ExampleRefreshRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, CancellationToken cancellationToken) =>
+        auth.MapPost("/refresh", (ExampleRefreshRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<SqlOSAuthServerOptions> authOptions, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var tokens = await authService.RefreshAsync(new SqlOSRefreshRequest(request.RefreshToken, request.OrganizationId), cancellationToken);
-                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, cancellationToken));
+                return Results.Ok(await ToTokenResponseAsync(tokens, context, authService, fgaService, authOptions.Value.DefaultAudience, cancellationToken));
             }));
 
         auth.MapPost("/logout", (ExampleLogoutRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
@@ -272,7 +273,7 @@ public static class ExampleAuthEndpoints
                 return Results.NoContent();
             }));
 
-        auth.MapGet("/session", async (HttpContext httpContext, SqlOSAuthService authService, ExampleAppDbContext context, CancellationToken cancellationToken) =>
+        auth.MapGet("/session", async (HttpContext httpContext, SqlOSAuthService authService, IOptions<SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions> authOptions, ExampleAppDbContext context, CancellationToken cancellationToken) =>
         {
             var bearerToken = httpContext.Request.Headers.Authorization.ToString();
             if (!bearerToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
@@ -280,7 +281,10 @@ public static class ExampleAuthEndpoints
                 return Results.Unauthorized();
             }
 
-            var validated = await authService.ValidateAccessTokenAsync(bearerToken["Bearer ".Length..].Trim(), cancellationToken);
+            var validated = await authService.ValidateAccessTokenAsync(
+                bearerToken["Bearer ".Length..].Trim(),
+                authOptions.Value.DefaultAudience,
+                cancellationToken);
             if (validated == null)
             {
                 return Results.Unauthorized();
@@ -327,6 +331,7 @@ public static class ExampleAuthEndpoints
         ExampleAppDbContext context,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
+        string? expectedAudience,
         CancellationToken cancellationToken)
     {
         if (result.Tokens == null)
@@ -346,7 +351,7 @@ public static class ExampleAuthEndpoints
             .Select(x => x.User!)
             .FirstAsync(cancellationToken);
 
-        return await ToTokenResponseAsync(result.Tokens, user, authService, fgaService, cancellationToken);
+        return await ToTokenResponseAsync(result.Tokens, user, authService, fgaService, expectedAudience, cancellationToken);
     }
 
     private static async Task<object> ToTokenResponseAsync(
@@ -354,13 +359,14 @@ public static class ExampleAuthEndpoints
         ExampleAppDbContext context,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
+        string? expectedAudience,
         CancellationToken cancellationToken)
     {
-        var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, cancellationToken)
+        var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, expectedAudience, cancellationToken)
             ?? throw new InvalidOperationException("Access token validation failed.");
 
         var user = await context.Set<SqlOSUser>().FirstAsync(x => x.Id == validated.UserId, cancellationToken);
-        return await ToTokenResponseAsync(tokens, user, authService, fgaService, cancellationToken);
+        return await ToTokenResponseAsync(tokens, user, authService, fgaService, expectedAudience, cancellationToken);
     }
 
     private static async Task<object> ToTokenResponseAsync(
@@ -368,9 +374,10 @@ public static class ExampleAuthEndpoints
         SqlOSUser user,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
+        string? expectedAudience,
         CancellationToken cancellationToken)
     {
-        var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, cancellationToken)
+        var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, expectedAudience, cancellationToken)
             ?? throw new InvalidOperationException("Access token validation failed.");
 
         if (!string.IsNullOrWhiteSpace(tokens.OrganizationId))

@@ -1,0 +1,105 @@
+---
+title: "Dynamic Client Registration"
+description: "Enable DCR only when you need runtime registration for compatibility clients."
+order: 4.63
+section: authserver
+---
+
+`DCR` is the compatibility path in SqlOS.
+
+It exists for real clients that still expect runtime registration at `POST /register`.
+
+## When to use it
+
+Enable `DCR` when:
+
+- a client expects to register itself before starting OAuth
+- you need compatibility with a DCR-first client
+- preregistration would be too manual for that client's flow
+
+Keep it off when:
+
+- your own app already has a known client id
+- `CIMD` is available and fits the client
+
+## Turn it on
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnableChatGptCompatibility(dcr =>
+    {
+        dcr.MaxRegistrationsPerWindow = 25;
+    });
+});
+```
+
+Or enable it directly:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Dcr.Enabled = true;
+});
+```
+
+SqlOS then advertises `registration_endpoint` in auth-server metadata.
+
+## What SqlOS accepts in v1
+
+SqlOS intentionally keeps `DCR` narrow:
+
+- public clients only
+- `authorization_code`
+- `response_types=code`
+- PKCE required
+- `token_endpoint_auth_method=none`
+- HTTPS redirects or loopback localhost redirects
+
+SqlOS does **not** use `DCR` for:
+
+- confidential client secrets
+- RFC 7592 self-service management APIs
+
+## Operational controls
+
+`DCR` creates real client rows in the existing store, so lifecycle controls matter.
+
+SqlOS includes:
+
+- rate limiting
+- audit logs for accepted and rejected attempts
+- disable and re-enable actions
+- revoke active sessions
+- automatic cleanup for stale registered clients
+
+## Policy hook
+
+Use a policy hook when redirect rules alone are not enough:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ClientRegistration.Dcr.Policy = async (context, cancellationToken) =>
+    {
+        if (context.RedirectUris.Count == 0)
+        {
+            return SqlOSClientRegistrationPolicyDecision.Deny("At least one redirect URI is required.");
+        }
+
+        return SqlOSClientRegistrationPolicyDecision.Allow();
+    };
+});
+```
+
+This is the right place for:
+
+- extra redirect checks
+- network or environment restrictions
+- known-client compatibility rules
+
+## Related guides
+
+- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
+- [Todo Sample](/docs/guides/authserver/todo-sample)

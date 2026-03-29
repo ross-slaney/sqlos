@@ -12,19 +12,15 @@ dotnet add package SqlOS
 
 ## Configure services
 
-Register SqlOS with your EF Core `DbContext`. Enable one or both modules:
+Register SqlOS on your `DbContext`:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.UseAuthServer();
-    options.UseFGA();
-});
+builder.AddSqlOS<AppDbContext>();
 ```
 
 ## Set up your DbContext
 
-Your context implements both module interfaces and registers their models:
+Your context implements the SqlOS interfaces. This sample includes both auth and FGA:
 
 ```csharp
 public sealed class AppDbContext : DbContext,
@@ -68,14 +64,16 @@ This gives you:
 Register your frontend as an OAuth client so users can sign in immediately:
 
 ```csharp
-options.UseAuthServer(auth =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    auth.SeedBrowserClient(
+    options.AuthServer.SeedOwnedWebApp(
         "my-app",
         "My Application",
         "http://localhost:3000/auth/callback");
 });
 ```
+
+That is the default story for most teams: an owned app, hosted auth, and a seeded client.
 
 ## Protect the dashboard
 
@@ -92,9 +90,26 @@ Set a dashboard password in `appsettings.json`:
 }
 ```
 
-## Run the example stack
+## Run the Todo sample first
 
-The repo includes a complete example with API, Next.js frontend, Angular frontend, and Expo mobile app:
+If your first goal is hosted auth, simple FGA, and public-client onboarding, start with the Todo sample:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+That sample focuses on:
+
+- hosted auth first
+- per-user tenant + todo resource hierarchy
+- SQL-backed FGA filtering and simple auth checks
+- headless follow-on
+- protected-resource metadata
+- preregistration, `CIMD`, and optional `DCR`
+
+## Run the broad Example stack
+
+The repo also includes a larger example with API, Next.js frontend, Angular frontend, and Expo mobile app:
 
 ```bash
 cd examples/SqlOS.Example.Web && npm install
@@ -111,10 +126,13 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 ## Schema management
 
-SqlOS owns its own database schema. On host startup, SqlOS runs embedded SQL scripts to create or update tables. Your app's EF Core migrations do not manage SqlOS tables. If you apply EF migrations before the host runs, call `SqlOSBootstrapper.InitializeAsync()` once beforehand (see the example API for a pattern when consumer tables reference SqlOS).
+SqlOS manages its own tables. It runs SQL scripts on host startup. Your EF migrations do **not** own those tables.
+
+If you migrate **before** the app has started SqlOS once, call `SqlOSBootstrapper.InitializeAsync()` first. The example API shows that pattern when your tables reference SqlOS.
 
 ## Next steps
 
 - [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, and auth flows
+- [Todo Sample](/docs/guides/authserver/todo-sample) -- hosted auth, simple FGA, and MCP-oriented flows
 - [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization and query filtering
 - [SDK Reference](/docs/guides/reference/sdk-reference) -- all services and methods

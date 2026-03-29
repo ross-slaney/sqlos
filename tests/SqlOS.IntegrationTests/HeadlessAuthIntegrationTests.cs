@@ -269,7 +269,6 @@ public sealed class HeadlessAuthIntegrationTests
             authorizationServerService,
             crypto,
             oidcAuthService,
-            settings,
             options);
         var headlessAuthService = new SqlOSHeadlessAuthService(
             context,

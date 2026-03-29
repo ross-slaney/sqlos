@@ -10,18 +10,20 @@ A role is a named set of permissions. When you grant a role to a subject on a re
 ## Define roles in startup
 
 ```csharp
-options.UseFGA(fga =>
+builder.AddSqlOS<AppDbContext>(options =>
 {
-    fga.SeedRole("CompanyAdmin", "Company Admin", new[]
+    options.Fga.Seed(seed =>
     {
-        "CHAIN_VIEW", "CHAIN_EDIT",
-        "LOCATION_VIEW", "LOCATION_EDIT",
-        "INVENTORY_VIEW", "INVENTORY_EDIT"
-    });
+        seed.Role("company_admin", "CompanyAdmin", "Company Admin");
+        seed.Role("store_clerk", "StoreClerk", "Store Clerk");
 
-    fga.SeedRole("StoreClerk", "Store Clerk", new[]
-    {
-        "INVENTORY_VIEW"
+        seed.RolePermission("CompanyAdmin", "CHAIN_VIEW");
+        seed.RolePermission("CompanyAdmin", "CHAIN_EDIT");
+        seed.RolePermission("CompanyAdmin", "LOCATION_VIEW");
+        seed.RolePermission("CompanyAdmin", "LOCATION_EDIT");
+        seed.RolePermission("CompanyAdmin", "INVENTORY_VIEW");
+        seed.RolePermission("CompanyAdmin", "INVENTORY_EDIT");
+        seed.RolePermission("StoreClerk", "INVENTORY_VIEW");
     });
 });
 ```
