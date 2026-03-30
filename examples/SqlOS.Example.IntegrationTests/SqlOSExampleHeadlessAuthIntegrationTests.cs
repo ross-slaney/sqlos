@@ -105,6 +105,123 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         profileJson.RootElement.GetProperty("email").GetString().Should().Be(email);
     }
 
+    [TestMethod]
+    public async Task PromptNone_WithoutSession_ReturnsLoginRequiredRedirect()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:HeadlessFrontendUrl", "http://localhost:3000");
+            builder.UseSetting("ExampleFrontend:ClientId", "example-web");
+            builder.UseSetting("ExampleFrontend:CallbackUrl", "http://localhost:3000/auth/callback");
+        });
+
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        const string verifier = "silent-test-verifier-123456789";
+        var challenge = CreateCodeChallenge(verifier);
+
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = "silent-state",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["prompt"] = "none"
+        }));
+
+        authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        authorizeResponse.Headers.Location.Should().NotBeNull();
+        authorizeResponse.Headers.Location!.ToString().Should().StartWith("http://localhost:3000/auth/callback?");
+        var query = QueryHelpers.ParseQuery(authorizeResponse.Headers.Location.Query);
+        query["error"].ToString().Should().Be("login_required");
+        query["state"].ToString().Should().Be("silent-state");
+    }
+
+    [TestMethod]
+    public async Task HeadlessSignup_EstablishesSession_ForPromptNoneAuthorize()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:HeadlessFrontendUrl", "http://localhost:3000");
+            builder.UseSetting("ExampleFrontend:ClientId", "example-web");
+            builder.UseSetting("ExampleFrontend:CallbackUrl", "http://localhost:3000/auth/callback");
+        });
+
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var email = $"silent-{Guid.NewGuid():N}@example.com";
+        const string firstVerifier = "headless-session-verifier-123456789";
+        var firstChallenge = CreateCodeChallenge(firstVerifier);
+
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = "headless-state",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = firstChallenge,
+            ["code_challenge_method"] = "S256",
+            ["view"] = "signup"
+        }));
+
+        authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var handoffQuery = QueryHelpers.ParseQuery(authorizeResponse.Headers.Location!.Query);
+        var requestId = handoffQuery["request"].ToString();
+        requestId.Should().NotBeNullOrWhiteSpace();
+
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup", new
+        {
+            requestId,
+            displayName = "Taylor Silent",
+            email,
+            password = "P@ssword123!",
+            organizationName = "Northwind Retail",
+            customFields = new
+            {
+                referralSource = "docs",
+                firstName = "Taylor",
+                lastName = "Silent"
+            }
+        });
+
+        signupResponse.EnsureSuccessStatusCode();
+        var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
+        signupJson.RootElement.GetProperty("type").GetString().Should().Be("redirect");
+
+        const string secondVerifier = "prompt-none-verifier-987654321";
+        var secondChallenge = CreateCodeChallenge(secondVerifier);
+        var silentAuthorize = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = "silent-success-state",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = secondChallenge,
+            ["code_challenge_method"] = "S256",
+            ["prompt"] = "none",
+            ["login_hint"] = email
+        }));
+
+        silentAuthorize.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        silentAuthorize.Headers.Location.Should().NotBeNull();
+        silentAuthorize.Headers.Location!.ToString().Should().StartWith("http://localhost:3000/auth/callback?");
+        var silentQuery = QueryHelpers.ParseQuery(silentAuthorize.Headers.Location.Query);
+        silentQuery.ContainsKey("error").Should().BeFalse();
+        silentQuery["code"].ToString().Should().NotBeNullOrWhiteSpace();
+        silentQuery["state"].ToString().Should().Be("silent-success-state");
+    }
+
     private static string CreateCodeChallenge(string verifier)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(verifier));

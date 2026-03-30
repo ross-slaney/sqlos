@@ -52,6 +52,7 @@ export type HeadlessActionResult = {
 async function headlessPost(path: string, body: unknown): Promise<HeadlessActionResult> {
   const res = await fetch(`${headlessBase()}${path}`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -79,7 +80,9 @@ export async function getHeadlessRequest(
   if (email) url.searchParams.set("email", email);
   if (displayName) url.searchParams.set("displayName", displayName);
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    credentials: "include",
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Failed to load request: ${res.status}`);

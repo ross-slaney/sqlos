@@ -221,6 +221,52 @@ public sealed class HeadlessAuthIntegrationTests
         (await fixture.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName)).Should().Be(0);
     }
 
+    [TestMethod]
+    public async Task SignUpAsync_EstablishesReusableAuthPageSession()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-session",
+                "openid profile email",
+                "challenge-session",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                """{"lng":"en"}"""));
+
+        var email = $"session-{Guid.NewGuid():N}@example.com";
+        var httpContext = CreateHttpContext();
+        var result = await fixture.HeadlessAuthService.SignUpAsync(
+            httpContext,
+            new SqlOSHeadlessSignupRequest(
+                authorizationRequest.Id,
+                "Session User",
+                email,
+                "P@ssword123!",
+                "Session Org",
+                new JsonObject()));
+
+        result.Type.Should().Be("redirect");
+        var authPageCookie = ExtractCookieValue(httpContext.Response.Headers.SetCookie.ToString(), "sqlos_auth_page");
+        authPageCookie.Should().NotBeNullOrWhiteSpace();
+
+        var followOnContext = CreateHttpContext();
+        followOnContext.Request.Headers.Cookie = $"sqlos_auth_page={authPageCookie}";
+
+        var session = await fixture.AuthPageSessionService.TryGetSessionAsync(followOnContext);
+        session.Should().NotBeNull();
+        session!.User.Id.Should().NotBeNullOrWhiteSpace();
+        session.AuthenticationMethod.Should().Be("password");
+    }
+
     private static async Task<HeadlessFixture> CreateFixtureAsync(Action<SqlOSHeadlessAuthOptions>? configureHeadless = null)
     {
         var context = CreateContext();
@@ -284,7 +330,7 @@ public sealed class HeadlessAuthIntegrationTests
         await admin.UpsertSeededClientsAsync();
         await settings.EnsureDefaultAuthPageSettingsAsync();
 
-        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService);
+        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService);
     }
 
     private static TestSqlOSDbContext CreateContext()
@@ -303,13 +349,33 @@ public sealed class HeadlessAuthIntegrationTests
         return context;
     }
 
+    private static string? ExtractCookieValue(string setCookieHeader, string cookieName)
+    {
+        var marker = $"{cookieName}=";
+        var start = setCookieHeader.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        start += marker.Length;
+        var end = setCookieHeader.IndexOf(';', start);
+        if (end < 0)
+        {
+            end = setCookieHeader.Length;
+        }
+
+        return setCookieHeader[start..end];
+    }
+
     private sealed record HeadlessFixture(
         TestSqlOSDbContext Context,
         string ClientId,
         string RedirectUri,
         SqlOSAdminService AdminService,
         SqlOSAuthorizationServerService AuthorizationServerService,
-        SqlOSHeadlessAuthService HeadlessAuthService) : IAsyncDisposable
+        SqlOSHeadlessAuthService HeadlessAuthService,
+        SqlOSAuthPageSessionService AuthPageSessionService) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {

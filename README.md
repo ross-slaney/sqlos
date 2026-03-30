@@ -151,6 +151,8 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 That starts SQL Server, the sample API, the Todo sample, and the web frontends in one stack. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, FGA, and the hosted-first MCP-oriented Todo flow side by side.
 
+If you build headless auth on a different browser origin than the SqlOS host, make those browser requests credentialed so SqlOS can persist and reuse its auth-page session cookie. Follow-up `/sqlos/auth/authorize?prompt=none` requests should then silently succeed when that session exists, or return `login_required` when it does not.
+
 | | URL |
 |---|---|
 | Dashboard | `http://localhost:5062/sqlos/` |
