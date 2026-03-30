@@ -98,6 +98,56 @@ public sealed class TodoSampleIntegrationTests
     }
 
     [TestMethod]
+    public async Task HeadlessFollowOn_EstablishesSession_ForPromptNoneAuthorize()
+    {
+        await using var factory = TodoApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("TodoSample:EnableHeadless", "true");
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var authorize = await StartAuthorizationAsync(client, HostedClientId, HostedRedirectUri);
+        authorize.HeadlessRedirect.Should().NotBeNull();
+
+        var email = $"silent-todo-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup", new
+        {
+            requestId = authorize.RequestId,
+            displayName = "Silent Todo User",
+            email,
+            password = "P@ssword123!",
+            organizationName = "Todo Org"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+
+        var promptNoneVerifier = CreateCodeVerifier();
+        var promptNoneChallenge = CreateCodeChallenge(promptNoneVerifier);
+        var silentAuthorize = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = HostedClientId,
+            ["redirect_uri"] = HostedRedirectUri,
+            ["state"] = $"silent-{Guid.NewGuid():N}",
+            ["scope"] = "openid profile email offline_access todos.read todos.write",
+            ["code_challenge"] = promptNoneChallenge,
+            ["code_challenge_method"] = "S256",
+            ["resource"] = TodoResource,
+            ["prompt"] = "none",
+            ["login_hint"] = email
+        }));
+
+        silentAuthorize.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        silentAuthorize.Headers.Location.Should().NotBeNull();
+        silentAuthorize.Headers.Location!.ToString().Should().StartWith($"{HostedRedirectUri}?");
+        var query = QueryHelpers.ParseQuery(silentAuthorize.Headers.Location.Query);
+        query.ContainsKey("error").Should().BeFalse();
+        query["code"].ToString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
     public async Task ProtectedResourceMetadata_AndChallengeBehavior_AreExposed()
     {
         var configResponse = await TodoApiFixture.Client.GetAsync("/sample/config");

@@ -83,3 +83,7 @@ Use:
 - token auth method: `none`
 
 This is the local downstream client for the Emcy-hosted Todo MCP demo. The Todo API still validates the same Todo audience; Emcy just brokers the auth flow and holds the downstream grant server-side.
+
+## Headless session reuse
+
+If your headless frontend runs on a different origin than the SqlOS host, use credentialed browser requests to the SqlOS headless endpoints so SqlOS can persist its reusable auth-page session cookie. Follow-up `/sqlos/auth/authorize?prompt=none` requests should then silently complete when that session exists, or return `login_required` when it does not.

@@ -53,7 +53,8 @@ public static class EndpointRouteBuilderExtensions
         {
             try
             {
-                if (string.Equals(context.Request.Query["prompt"], "login", StringComparison.Ordinal))
+                var prompt = context.Request.Query["prompt"].ToString();
+                if (string.Equals(prompt, "login", StringComparison.Ordinal))
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
                 }
@@ -69,7 +70,7 @@ public static class EndpointRouteBuilderExtensions
                         context.Request.Query["code_challenge_method"].ToString(),
                         context.Request.Query["resource"].ToString(),
                         context.Request.Query["login_hint"].ToString(),
-                        context.Request.Query["prompt"].ToString(),
+                        prompt,
                         context.Request.Query["nonce"].ToString(),
                         headlessAuthService.IsEnabled ? "headless" : "hosted",
                         context.Request.Query["ui_context"].ToString()),
@@ -79,7 +80,7 @@ public static class EndpointRouteBuilderExtensions
                     : "login";
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
-                if (existingSession != null && !string.Equals(context.Request.Query["prompt"], "login", StringComparison.Ordinal))
+                if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
                 {
                     var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
                         authorizationRequest,
@@ -89,6 +90,15 @@ public static class EndpointRouteBuilderExtensions
                         context,
                         cancellationToken);
                     return Results.Redirect(redirectUrl);
+                }
+
+                if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                {
+                    return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                        authorizationRequest,
+                        "login_required",
+                        "The user is not signed in.",
+                        cancellationToken));
                 }
 
                 if (headlessAuthService.IsEnabled)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -166,6 +167,32 @@ public sealed class SqlOSAuthorizationServerService
     public async Task<SqlOSAuthorizationRequest> GetRequiredAuthorizationRequestAsync(string authorizationRequestId, CancellationToken cancellationToken = default)
         => await TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken)
             ?? throw new InvalidOperationException("Authorization request is invalid or expired.");
+
+    public async Task<string> BuildAuthorizationErrorRedirectAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        string error,
+        string? errorDescription,
+        CancellationToken cancellationToken = default)
+    {
+        if (authorizationRequest.CompletedAt == null && authorizationRequest.CancelledAt == null)
+        {
+            authorizationRequest.CancelledAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        var query = new Dictionary<string, string?>
+        {
+            ["error"] = error,
+            ["state"] = authorizationRequest.State
+        };
+
+        if (!string.IsNullOrWhiteSpace(errorDescription))
+        {
+            query["error_description"] = errorDescription;
+        }
+
+        return QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
 
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
