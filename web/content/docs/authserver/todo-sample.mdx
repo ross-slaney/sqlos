@@ -83,6 +83,8 @@ That lets you compare:
 - hosted setup for the fastest first version
 - headless setup for custom branding and forms
 
+If your headless UI runs on a different origin than the SqlOS host, send credentialed browser requests to the headless endpoints so SqlOS can persist its reusable auth-page session cookie. Then follow-up `/sqlos/auth/authorize?prompt=none` requests can silently complete when that session exists, or return `login_required` when it does not.
+
 ## Protected resource behavior
 
 The sample API protects `/api/todos` with audience-aware token validation.
