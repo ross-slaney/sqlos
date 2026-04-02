@@ -33,7 +33,7 @@ export default async function GuidesRoutePage({ params }: PageProps) {
         entry={resolved.entry}
         navigation={docsSource.getNavigation()}
         title="SqlOS documentation"
-        description="AuthServer for identity and sessions, FGA for hierarchical authorization, and a shared example stack."
+        description="Embedded identity, sessions, OAuth/OIDC, and hierarchical authorization for .NET apps that want one package and one database."
       />
     );
   }

@@ -5,38 +5,77 @@ order: 0
 section: fga
 ---
 
+<Banner
+  eyebrow="Hierarchical authorization"
+  title="Model access as a tree and push the filtering work into SQL"
+  href="../getting-started"
+  actionLabel="Start building"
+>
+  FGA is the authorization half of SqlOS. Roles and grants live on resources, child resources inherit access, and EF queries get translated into SQL-backed authorization filters instead of post-processing rows in memory.
+</Banner>
+
 FGA models resources as a tree. You grant roles on a node. Child nodes inherit access. EF sends filters to SQL Server. You do not load everything and filter in memory.
 
 ## How it works
 
 Define resources (projects, chains, stores), roles (admin, viewer), and permissions (VIEW, EDIT). Grant a role to a user on a resource. Every descendant of that resource inherits the grant.
 
-```
-root
-├── Acme Corp (Organization)          ← grant: jane / admin
-│   ├── Walmart (Chain)               ← jane inherits CHAIN_VIEW, CHAIN_EDIT
-│   │   ├── Store #001 (Location)     ← jane inherits LOCATION_VIEW
-│   │   └── Store #002 (Location)     ← jane inherits LOCATION_VIEW
-│   └── Target (Chain)                ← jane inherits CHAIN_VIEW, CHAIN_EDIT
-└── Globex (Organization)
-    └── Costco (Chain)                ← jane has NO access
-```
+<Files title="Resource hierarchy">
+  <Folder name="Acme Corp (Organization)">
+    <Folder name="Walmart (Chain)">
+      <File name="Store #001 (Location)" meta="inherits LOCATION_VIEW" />
+      <File name="Store #002 (Location)" meta="inherits LOCATION_VIEW" />
+    </Folder>
+    <Folder name="Target (Chain)">
+      <File name="chain grant" meta="inherits CHAIN_VIEW + CHAIN_EDIT" />
+    </Folder>
+  </Folder>
+  <Folder name="Globex (Organization)">
+    <File name="Costco (Chain)" meta="no access for jane" />
+  </Folder>
+</Files>
+
+<CardGrid cols={3}>
+  <Card title="Resources" description="Organizations, projects, chains, stores, or any hierarchy you define." />
+  <Card title="Roles and permissions" description="Attach reusable permission bundles to a resource and inherit them downward." />
+  <Card title="Query filters" description="Push auth checks into SQL Server instead of loading data and trimming it in memory." />
+</CardGrid>
 
 ## Query-time filtering
 
-The core feature. Instead of loading all records and filtering in memory, FGA pushes authorization into the SQL query:
+<Tabs defaultValue="filters">
+  <TabsList>
+    <TabsTrigger value="filters">Query filters</TabsTrigger>
+    <TabsTrigger value="checks">Point checks</TabsTrigger>
+  </TabsList>
 
-```csharp
-var filter = await authService
-    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+  <TabsContent value="filters">
+    The core feature. Instead of loading all records and filtering in memory, FGA pushes authorization into the SQL query:
 
-var chains = await dbContext.Chains
-    .Where(filter)
-    .OrderBy(c => c.Name)
-    .ToListAsync();
-```
+    ```csharp
+    var filter = await authService
+        .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 
-Users only see rows they may access. Under the hood that becomes a SQL Server TVF call.
+    var chains = await dbContext.Chains
+        .Where(filter)
+        .OrderBy(c => c.Name)
+        .ToListAsync();
+    ```
+
+    Users only see rows they may access. Under the hood that becomes a SQL Server TVF call.
+  </TabsContent>
+
+  <TabsContent value="checks">
+    For a single action on one resource, do an explicit point check:
+
+    ```csharp
+    var access = await authService.CheckAccessAsync(subjectId, "CHAIN_EDIT", resourceId);
+
+    if (!access.Allowed)
+        return Results.Json(new { error = "Permission denied" }, statusCode: 403);
+    ```
+  </TabsContent>
+</Tabs>
 
 **Company Admin sees 5 chains:**
 
@@ -45,17 +84,6 @@ Users only see rows they may access. Under the hood that becomes a SQL Server TV
 **Store Clerk sees 0 chains (only their store):**
 
 ![Clerk view](/docs/retail-app-clerk-dashboard.png)
-
-## Point checks
-
-For a single action on one resource, check permission explicitly:
-
-```csharp
-var access = await authService.CheckAccessAsync(subjectId, "CHAIN_EDIT", resourceId);
-
-if (!access.Allowed)
-    return Results.Json(new { error = "Permission denied" }, statusCode: 403);
-```
 
 ## Setup
 
@@ -71,6 +99,10 @@ app.MapSqlOS();
 `/sqlos/admin/fga/` — browse resources, grants, roles, permissions, and run the access tester.
 
 ![FGA Resources](/docs/dashboard-fga-resources.png)
+
+<Callout type="info" title="FGA stays close to your data">
+  The value proposition is not just expressive permissions. It is that the same authorization model can drive list filtering, detail checks, dashboard inspection, and SQL-native enforcement from one runtime.
+</Callout>
 
 ## Key concepts
 
