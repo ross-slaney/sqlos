@@ -59,7 +59,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Details](/docs/guides/authserver/headless-auth#how-sqlos-picks-the-ui).
+Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Details](/docs/authserver/headless-auth#how-sqlos-picks-the-ui).
 
 ## Don't rebuild the auth flow
 
@@ -76,4 +76,4 @@ Want your own UI? Use **headless**. Still let SqlOS own codes, tokens, and PKCE.
 
 You can flip hosted ↔ headless. OAuth, tokens, sessions, and refresh stay the same. Only the login UI changes.
 
-How-to: [Headless Auth](/docs/guides/authserver/headless-auth)
+How-to: [Headless Auth](/docs/authserver/headless-auth)

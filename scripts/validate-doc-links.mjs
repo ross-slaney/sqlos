@@ -57,13 +57,13 @@ function toPosixPath(filePath) {
 }
 
 function buildDocRoutes() {
-  const routes = new Set(["/docs", "/docs/guides"]);
+  const routes = new Set(["/docs"]);
   const files = walkFiles(docsContentRoot, (fullPath) => path.extname(fullPath) === ".mdx");
 
   for (const fullPath of files) {
     const relativePath = toPosixPath(path.relative(docsContentRoot, fullPath));
     const slug = relativePath.replace(/\.mdx$/, "");
-    routes.add(`/docs/guides/${slug}`);
+    routes.add(`/docs/${slug}`);
   }
 
   return routes;

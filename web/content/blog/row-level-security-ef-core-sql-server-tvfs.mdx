@@ -248,6 +248,6 @@ var app = builder.Build();
 app.MapSqlOS(); // Maps routes; schema + TVF run on host startup
 ```
 
-The [getting started guide](/docs/guides/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.
+The [getting started guide](/docs/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.
 
 Row-level security isn't a feature you bolt on. It's a property of how your authorization model composes with your data queries. When authorization lives in the database as a TVF, every query is automatically secure — not because every developer remembered to add the filter, but because the filter is the query.

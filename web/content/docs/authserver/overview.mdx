@@ -5,17 +5,27 @@ order: 0
 section: authserver
 ---
 
+<Banner
+  eyebrow="Identity inside your app"
+  title="Users, sessions, SSO, OAuth/OIDC, and hosted or headless auth from one embedded module"
+  href="../getting-started"
+  actionLabel="Install SqlOS"
+>
+  AuthServer is the identity half of SqlOS. It keeps your users, clients, sessions, and login flows in your app and in your database instead of splitting them into another hosted dependency.
+</Banner>
+
 AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and SAML run inside your app. Data lives in your database.
 
 ## What you get
 
-- **Organizations** -- multi-tenant with memberships and roles
-- **Users** -- email/password, SSO-provisioned, or OIDC-linked
-- **Sessions** -- access tokens (JWT), refresh token rotation, replay detection
-- **OIDC** -- Google, Microsoft, Apple, and custom providers
-- **SAML SSO** -- enterprise SSO with auto-provisioning
-- **Hosted or Headless auth UI** -- use the built-in auth pages or render your own
-- **Client onboarding modes** -- seeded/manual clients for owned apps, `CIMD` for portable clients, optional `DCR` for compatibility clients
+<CardGrid cols={3}>
+  <Card title="Organizations" description="Multi-tenant orgs, memberships, and roles." />
+  <Card title="Users" description="Email/password, SSO-provisioned, or OIDC-linked identities." />
+  <Card title="Sessions" description="JWT access tokens, refresh token rotation, and replay detection." />
+  <Card title="OIDC" description="Google, Microsoft, Apple, and custom providers." />
+  <Card title="SAML SSO" description="Enterprise SSO with provisioning and hosted flows." />
+  <Card title="Hosted or headless" description="Use the built-in pages or render your own UI on top of the same runtime." />
+</CardGrid>
 
 ## Setup
 
@@ -31,13 +41,15 @@ app.MapSqlOS();
 Typical browser login:
 
 1. App sends the user to `/sqlos/auth/authorize` with PKCE.
-2. User enters email. [Home realm discovery](/docs/guides/authserver/password-login) picks password vs SSO.
+2. User enters email. [Home realm discovery](/docs/authserver/password-login) picks password vs SSO.
 3. User signs in (password, OIDC, or SAML).
 4. Multiple orgs? User picks one.
 5. SqlOS returns an auth code.
 6. App trades the code for access and refresh tokens.
 
-For most teams, this first flow should use a seeded or dashboard-created owned client. Add `CIMD`, `DCR`, and resource indicators only when you actually need portable or compatibility clients.
+<Callout type="tip" title="Start with owned clients first">
+  For most teams, the first production flow should use a seeded or dashboard-created owned client. Add `CIMD`, `DCR`, and resource indicators only when you actually need portable or compatibility clients.
+</Callout>
 
 ![Hosted sign-in page](/docs/auth-signin-page.png)
 
@@ -61,17 +73,24 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 
 ## Hosted and headless
 
-Protocol vs pixels:
+<Accordion>
+  <AccordionItem title="Hosted auth" defaultOpen>
+    SqlOS renders the login, signup, and recovery pages for you. This is the fastest path for internal tools and most first-party apps.
+  </AccordionItem>
+  <AccordionItem title="Headless auth">
+    SqlOS still runs OAuth/OIDC, sessions, and token issuance. Your application takes ownership of the login UI and interaction flow.
+  </AccordionItem>
+  <AccordionItem title="Client onboarding modes">
+    Use seeded or dashboard-created owned clients for the normal path. Reach for `CIMD` and optional `DCR` only when you need portable or compatibility-oriented clients.
+  </AccordionItem>
+</Accordion>
 
-- **Hosted** — SqlOS draws login and signup (default).
-- **Headless** — SqlOS runs OAuth; your app draws the UI.
-
-[Headless Auth](/docs/guides/authserver/headless-auth) · [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 
-- [Clients](/docs/guides/authserver/clients)
-- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
-- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
-- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
-- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)
+- [Clients](/docs/authserver/clients)
+- [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)

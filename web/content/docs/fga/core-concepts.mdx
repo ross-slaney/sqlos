@@ -21,7 +21,7 @@ A resource is a node in a tree. Every resource has a type, a parent (except root
 }
 ```
 
-Resources form a tree. Grants on a parent apply below it. [Resource hierarchy](/docs/guides/fga/resource-hierarchy).
+Resources form a tree. Grants on a parent apply below it. [Resource hierarchy](/docs/fga/resource-hierarchy).
 
 ## Subjects
 
@@ -34,7 +34,7 @@ A subject is the entity being authorized. SqlOS supports four subject types:
 | `service_account` | Service-to-service access with API keys |
 | `user_group` | Groups of users sharing permissions |
 
-See [Subject Types](/docs/guides/fga/subject-types).
+See [Subject Types](/docs/fga/subject-types).
 
 ## Roles
 
@@ -46,7 +46,7 @@ A role bundles permissions. Name them to match how your app works:
 | Store Manager | LOCATION_VIEW, LOCATION_EDIT, INVENTORY_VIEW, INVENTORY_EDIT |
 | Store Clerk | INVENTORY_VIEW |
 
-See [Roles](/docs/guides/fga/roles).
+See [Roles](/docs/fga/roles).
 
 ## Permissions
 
@@ -59,7 +59,7 @@ A permission is a string key for one resource type. Common style: `RESOURCETYPE_
 | `LOCATION_VIEW` | location | Read |
 | `INVENTORY_EDIT` | inventory | Write |
 
-See [Permissions](/docs/guides/fga/permissions).
+See [Permissions](/docs/fga/permissions).
 
 ## Grants
 
@@ -75,7 +75,7 @@ Resource: "org::acme"
 → jane can INVENTORY_VIEW, INVENTORY_EDIT on all inventory items
 ```
 
-See [Grants](/docs/guides/fga/grants).
+See [Grants](/docs/fga/grants).
 
 ## How authorization works
 

@@ -74,7 +74,7 @@ The connection is now active. Users with `@acme.com` emails will be routed to En
 ## SSO login flow
 
 1. User enters email on the login page
-2. [Home realm discovery](/docs/guides/authserver/password-login) detects the `@acme.com` domain matches an SSO connection
+2. [Home realm discovery](/docs/authserver/password-login) detects the `@acme.com` domain matches an SSO connection
 3. AuthServer generates a SAML AuthnRequest and redirects to the IdP
 4. User authenticates at the IdP
 5. IdP POSTs a SAML Response to the ACS URL

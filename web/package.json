@@ -9,13 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@emcy/docs": "^0.1.0",
     "@mdx-js/loader": "^3.1.1",
     "@mdx-js/react": "^3.1.1",
     "@next/mdx": "^16.1.6",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
     "@tailwindcss/typography": "^0.5.19",
     "gray-matter": "^4.0.3",
+    "lucide-react": "^0.542.0",
     "next": "16.1.6",
     "next-mdx-remote": "^6.0.0",
+    "next-themes": "^0.4.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "rehype-highlight": "^7.0.2",

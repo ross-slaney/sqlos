@@ -40,7 +40,7 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/organizations \
 
 ## Primary domain
 
-When you set a primary domain, AuthServer uses it for [home realm discovery](/docs/guides/authserver/password-login). Users with matching email domains are automatically routed to SSO instead of password login.
+When you set a primary domain, AuthServer uses it for [home realm discovery](/docs/authserver/password-login). Users with matching email domains are automatically routed to SSO instead of password login.
 
 ## Create a membership
 
@@ -73,4 +73,4 @@ if (result.RequiresOrganizationSelection)
 
 ## Organization switching
 
-Users can switch organizations without re-authenticating by passing a different `organizationId` during [token refresh](/docs/guides/authserver/sessions-and-tokens).
+Users can switch organizations without re-authenticating by passing a different `organizationId` during [token refresh](/docs/authserver/sessions-and-tokens).

@@ -4,6 +4,29 @@ description: "Install SqlOS and run the example stack in five minutes."
 order: 0
 ---
 
+<Banner
+  eyebrow="Quick start"
+  title="Install SqlOS, map the routes, and get auth plus FGA in one pass"
+  href="#install"
+  actionLabel="Jump to install"
+>
+  The fastest path is still the same: add the package, register it on your `DbContext`, and map `app.MapSqlOS()`. The difference now is that the docs surface is also showing the same shared EmcyDocs components.
+</Banner>
+
+<InlineToc items='[{"href":"#install","label":"Install"},{"href":"#configure-services","label":"Configure services"},{"href":"#set-up-your-dbcontext","label":"Set up your DbContext"},{"href":"#map-routes","label":"Map routes"},{"href":"#run-the-right-sample","label":"Run the right sample"},{"href":"#schema-management","label":"Schema management"}]' />
+
+<Steps>
+  <Step title="Install the package">
+    Add `SqlOS` to your app and keep your auth plus authorization runtime inside the same ASP.NET process.
+  </Step>
+  <Step title="Register the DbContext integration">
+    Point SqlOS at your EF Core context so it can wire auth and FGA tables into the host application.
+  </Step>
+  <Step title="Map the routes">
+    Expose the dashboard, OAuth/OIDC endpoints, hosted auth UI, and FGA admin screens through `app.MapSqlOS()`.
+  </Step>
+</Steps>
+
 ## Install
 
 ```bash
@@ -17,6 +40,12 @@ Register SqlOS on your `DbContext`:
 ```csharp
 builder.AddSqlOS<AppDbContext>();
 ```
+
+<Files title="Minimal host setup">
+  <File name="Program.cs" meta="service registration + route mapping" />
+  <File name="AppDbContext.cs" meta="auth + FGA interfaces" />
+  <File name="appsettings.json" meta="dashboard auth settings" />
+</Files>
 
 ## Set up your DbContext
 
@@ -90,49 +119,60 @@ Set a dashboard password in `appsettings.json`:
 }
 ```
 
-## Run the Todo sample first
+## Run the right sample
 
-If your first goal is hosted auth, simple FGA, and public-client onboarding, start with the Todo sample:
+<Tabs defaultValue="todo">
+  <TabsList>
+    <TabsTrigger value="todo">Todo sample</TabsTrigger>
+    <TabsTrigger value="example">Example stack</TabsTrigger>
+  </TabsList>
 
-```bash
-dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
-```
+  <TabsContent value="todo">
+    If your first goal is hosted auth, simple FGA, and public-client onboarding, start with the Todo sample:
 
-That sample focuses on:
+    ```bash
+    dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+    ```
 
-- hosted auth first
-- per-user tenant + todo resource hierarchy
-- SQL-backed FGA filtering and simple auth checks
-- headless follow-on
-- protected-resource metadata
-- preregistration, `CIMD`, and optional `DCR`
+    That sample focuses on:
 
-## Run the broad Example stack
+    - hosted auth first
+    - per-user tenant + todo resource hierarchy
+    - SQL-backed FGA filtering and simple auth checks
+    - headless follow-on
+    - protected-resource metadata
+    - preregistration, `CIMD`, and optional `DCR`
+  </TabsContent>
 
-The repo also includes a larger example with API, Next.js frontend, Angular frontend, and Expo mobile app:
+  <TabsContent value="example">
+    The repo also includes a larger example with API, Next.js frontend, Angular frontend, and Expo mobile app:
 
-```bash
-cd examples/SqlOS.Example.Web && npm install
-cd /path/to/SqlOS
-dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
-```
+    ```bash
+    cd examples/SqlOS.Example.Web && npm install
+    cd /path/to/SqlOS
+    dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+    ```
 
-| URL | App |
-| --- | --- |
-| `http://localhost:5062/sqlos/` | Dashboard |
-| `http://localhost:5062/swagger` | Swagger UI |
-| `http://localhost:3010/` | Next.js app |
-| `http://localhost:4200/` | Angular app |
+    | URL | App |
+    | --- | --- |
+    | `http://localhost:5062/sqlos/` | Dashboard |
+    | `http://localhost:5062/swagger` | Swagger UI |
+    | `http://localhost:3010/` | Next.js app |
+    | `http://localhost:4200/` | Angular app |
+  </TabsContent>
+</Tabs>
 
 ## Schema management
 
-SqlOS manages its own tables. It runs SQL scripts on host startup. Your EF migrations do **not** own those tables.
+<Callout type="warning" title="SqlOS owns its own tables">
+  SqlOS runs its own SQL scripts on host startup. Your EF migrations do **not** own those tables.
+</Callout>
 
 If you migrate **before** the app has started SqlOS once, call `SqlOSBootstrapper.InitializeAsync()` first. The example API shows that pattern when your tables reference SqlOS.
 
 ## Next steps
 
-- [AuthServer Overview](/docs/guides/authserver/overview) -- identity, sessions, and auth flows
-- [Todo Sample](/docs/guides/authserver/todo-sample) -- hosted auth, simple FGA, and MCP-oriented flows
-- [FGA Overview](/docs/guides/fga/overview) -- hierarchical authorization and query filtering
-- [SDK Reference](/docs/guides/reference/sdk-reference) -- all services and methods
+- [AuthServer Overview](/docs/authserver/overview) -- identity, sessions, and auth flows
+- [Todo Sample](/docs/authserver/todo-sample) -- hosted auth, simple FGA, and MCP-oriented flows
+- [FGA Overview](/docs/fga/overview) -- hierarchical authorization and query filtering
+- [SDK Reference](/docs/reference/sdk-reference) -- all services and methods

@@ -7,5 +7,5 @@ export const metadata = {
 };
 
 export default function DocsPage() {
-  redirect("/docs/guides");
+  redirect("/docs/getting-started");
 }
