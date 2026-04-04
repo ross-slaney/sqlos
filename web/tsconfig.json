@@ -19,11 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@emcy/docs": ["../../emcydocs/src/index.ts"],
-      "@emcy/docs/theme": ["../../emcydocs/src/theme.ts"],
-      "@emcy/docs/types": ["../../emcydocs/src/types.ts"],
-      "@emcy/docs/styles.css": ["../../emcydocs/src/styles.css"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [

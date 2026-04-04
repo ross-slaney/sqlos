@@ -6,7 +6,7 @@
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const authApiBasePath = `${authDashboardPath}/api`;
     const fgaApiBasePath = `${fgaDashboardPath}/api`;
-    const clientOnboardingDocsUrl = "https://sqlos.dev/docs/guides/authserver/preregistration-vs-cimd-vs-dcr";
+    const clientOnboardingDocsUrl = "https://sqlos.dev/docs/authserver/preregistration-vs-cimd-vs-dcr";
 
     const content = document.getElementById("content");
     const pageEyebrow = document.getElementById("page-eyebrow");

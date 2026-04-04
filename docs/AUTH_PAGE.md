@@ -72,8 +72,8 @@ That gives you the simplest path:
 
 Read more:
 
-- site docs: `/docs/guides/authserver/hosted-vs-headless`
-- site docs: `/docs/guides/authserver/headless-auth`
+- site docs: `/docs/authserver/hosted-vs-headless`
+- site docs: `/docs/authserver/headless-auth`
 
 ## Clients and AuthPage
 

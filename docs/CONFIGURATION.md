@@ -99,7 +99,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 See:
 
 - repo site source: `web/content/docs/authserver/headless-auth.mdx`
-- published guide: `/docs/guides/authserver/headless-auth`
+- published guide: `/docs/authserver/headless-auth`
 
 ## Optional: dashboard password login
 
