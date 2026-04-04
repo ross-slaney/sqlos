@@ -27,19 +27,18 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
   const nextPage = currentPage < totalPages ? currentPage + 1 : null;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-16">
-      <h1 className="text-4xl font-bold text-zinc-900 dark:text-white">Blog</h1>
-      <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
+    <div className="mx-auto max-w-[1400px] px-6 py-16">
+      <h1 className="text-4xl font-bold text-foreground">Blog</h1>
+      <p className="mt-4 text-lg text-muted-foreground">
         Notes on auth, hierarchical authorization, EF Core, and practical .NET
         application security.
       </p>
 
-      {/* Pagination controls - always at top, always visible */}
       <nav
-        className="mt-8 flex items-center justify-between border-b border-zinc-200 pb-6 dark:border-zinc-700"
+        className="mt-8 flex items-center justify-between border-b pb-6"
         aria-label="Blog pagination"
       >
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-muted-foreground">
           {total === 0
             ? "No posts"
             : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, total)} of ${total} posts`}
@@ -48,34 +47,28 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
           {prevPage ? (
             <Link
               href={prevPage === 1 ? "/blog" : `/blog?page=${prevPage}`}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              className="rounded-md border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
-              ← Previous
+              &larr; Previous
             </Link>
           ) : (
-            <span
-              className="cursor-not-allowed rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500"
-              aria-disabled="true"
-            >
-              ← Previous
+            <span className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
+              &larr; Previous
             </span>
           )}
-          <span className="text-sm text-zinc-600 dark:text-zinc-400">
+          <span className="text-sm text-muted-foreground">
             Page {currentPage} of {totalPages}
           </span>
           {nextPage ? (
             <Link
               href={`/blog?page=${nextPage}`}
-              className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              className="rounded-md border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
-              Next →
+              Next &rarr;
             </Link>
           ) : (
-            <span
-              className="cursor-not-allowed rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-500"
-              aria-disabled="true"
-            >
-              Next →
+            <span className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
+              Next &rarr;
             </span>
           )}
         </div>
@@ -83,33 +76,29 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
 
       <div className="mt-12 space-y-12">
         {posts.length === 0 ? (
-          <p className="text-zinc-500 dark:text-zinc-400">
-            No posts yet. Check back soon!
-          </p>
+          <p className="text-muted-foreground">No posts yet. Check back soon!</p>
         ) : (
           posts.map((post) => (
             <article key={post.slug} className="group">
               <Link href={`/blog/${post.slug}`}>
                 <div className="flex flex-col gap-2">
-                  <time className="text-sm text-zinc-500 dark:text-zinc-500">
+                  <time className="text-sm text-muted-foreground">
                     {new Date(post.date).toLocaleDateString("en-US", {
                       year: "numeric",
                       month: "long",
                       day: "numeric",
                     })}
                   </time>
-                  <h2 className="text-2xl font-semibold text-zinc-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400 transition-colors">
+                  <h2 className="text-2xl font-semibold text-foreground transition-colors group-hover:text-muted-foreground">
                     {post.title}
                   </h2>
-                  <p className="text-zinc-600 dark:text-zinc-400">
-                    {post.description}
-                  </p>
+                  <p className="text-muted-foreground">{post.description}</p>
                   {post.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       {post.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400"
+                          className="inline-flex items-center rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
                         >
                           {tag}
                         </span>

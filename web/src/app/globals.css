@@ -1,95 +1,106 @@
 @import "tailwindcss";
-@import "@emcy/docs/styles.css";
 @plugin "@tailwindcss/typography";
 
-:root {
-  --background: #fafaf9;
-  --foreground: #1c1917;
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --font-sans: var(--font-sans-ui), system-ui, sans-serif;
+  --font-mono: var(--font-mono-ui), ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans-ui);
-  --font-mono: var(--font-mono-ui);
+:root {
+  --radius: 0.625rem;
+
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+}
+
+* {
+  border-color: hsl(var(--border));
 }
 
 html {
-  background: var(--background);
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   min-height: 100vh;
-  color: var(--foreground);
-  font-family: var(--font-sans-ui), system-ui, sans-serif;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans), system-ui, sans-serif;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
-  background: rgba(28, 25, 23, 0.1);
+  background: hsl(var(--primary) / 0.2);
 }
 
 pre code {
-  font-family: var(--font-mono-ui), ui-monospace, monospace;
-}
-
-/* Docs code blocks should feel like tiny, friendly editor windows. */
-.docs-prose pre {
-  position: relative;
-  overflow-x: auto;
-  border-radius: 1rem;
-  border: 1px solid #2d2d30;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 3.15rem 1.125rem 1rem;
-  box-shadow:
-    inset 0 2.55rem 0 #252526,
-    0 12px 28px rgba(28, 25, 23, 0.12);
-}
-
-.docs-prose pre::before {
-  content: "";
-  position: absolute;
-  top: 0.92rem;
-  left: 1rem;
-  width: 0.72rem;
-  height: 0.72rem;
-  border-radius: 9999px;
-  background: #ff5f57;
-  box-shadow:
-    1.15rem 0 0 #febc2e,
-    2.3rem 0 0 #28c840;
-}
-
-.docs-prose pre code {
-  display: block;
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  font-size: 0.95em;
-  line-height: 1.7;
-}
-
-.docs-prose :not(pre) > code {
-  border-radius: 0.45rem;
-  background: rgba(148, 163, 184, 0.14);
-  padding: 0.15rem 0.38rem;
-}
-
-/* Landing page animations */
-@keyframes fadeSlideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px) translateY(-50%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) translateY(-50%);
-  }
-}
-
-.animate-fadeSlideIn {
-  animation: fadeSlideIn 0.35s ease-out forwards;
+  font-family: var(--font-mono), ui-monospace, monospace;
 }
 
 @keyframes grantSlideDown {
@@ -98,6 +109,7 @@ pre code {
     transform: translateY(-6px);
     max-height: 0;
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -106,21 +118,72 @@ pre code {
 }
 
 @keyframes grantFadeIn {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes searchPanelIn {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.985);
+    transform: scale(0.8);
   }
+
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1);
   }
 }
 
-.animate-searchPanelIn {
-  animation: searchPanelIn 0.18s ease-out forwards;
+/* Docs shell overrides — align sidebar with site header */
+@media (min-width: 1024px) {
+  .sqlos-docs-shell .emcydocs-frame {
+    padding-left: 0;
+  }
+
+  .sqlos-docs-shell .emcydocs-desktop-nav {
+    padding-left: 1.5rem;
+  }
+}
+
+.sqlos-docs-shell .emcydocs-page-header h1 {
+  letter-spacing: -0.04em;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock,
+.sqlos-docs-shell .emcydocs-prose pre {
+  border-color: hsl(222 18% 24%) !important;
+  background: hsl(222 27% 11%) !important;
+  box-shadow: none !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-header {
+  background: hsl(222 23% 14%) !important;
+  border-bottom-color: hsl(222 18% 24%) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-title {
+  color: hsl(214 20% 78%) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-copy {
+  border-color: hsl(217 19% 27%) !important;
+  background: hsl(222 23% 16%) !important;
+  color: hsl(210 20% 92%) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-copy:hover {
+  border-color: hsl(215 20% 34%) !important;
+  background: hsl(222 20% 20%) !important;
+  color: hsl(210 20% 96%) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-body {
+  color: hsl(210 20% 92%) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-body code,
+.sqlos-docs-shell .emcydocs-codeblock-body code span,
+.sqlos-docs-shell .emcydocs-prose pre code,
+.sqlos-docs-shell .emcydocs-prose pre code span {
+  color: var(--shiki-dark) !important;
+}
+
+.sqlos-docs-shell .emcydocs-codeblock-body [data-line],
+.sqlos-docs-shell .emcydocs-prose pre [data-line] {
+  min-height: 1.72em;
 }

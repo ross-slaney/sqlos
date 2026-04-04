@@ -3,7 +3,8 @@ import { createDocsSource } from "@emcy/docs";
 
 export const docsSource = createDocsSource({
   contentDir: path.join(process.cwd(), "content/docs"),
-  basePath: "/docs/guides",
+  basePath: "/docs",
+  homeRedirect: "getting-started",
   siteTitle: "SqlOS Docs",
   titleSuffix: "SqlOS Docs",
   sectionLabels: {

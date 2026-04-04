@@ -41,7 +41,7 @@ app.MapSqlOS();
 Typical browser login:
 
 1. App sends the user to `/sqlos/auth/authorize` with PKCE.
-2. User enters email. [Home realm discovery](/docs/guides/authserver/password-login) picks password vs SSO.
+2. User enters email. [Home realm discovery](/docs/authserver/password-login) picks password vs SSO.
 3. User signs in (password, OIDC, or SAML).
 4. Multiple orgs? User picks one.
 5. SqlOS returns an auth code.
@@ -85,12 +85,12 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/guides/authserver/headless-auth) · [Hosted vs Headless](/docs/guides/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 
-- [Clients](/docs/guides/authserver/clients)
-- [Preregistration vs CIMD vs DCR](/docs/guides/authserver/preregistration-vs-cimd-vs-dcr)
-- [Client ID Metadata Documents](/docs/guides/authserver/client-id-metadata-documents)
-- [Dynamic Client Registration](/docs/guides/authserver/dynamic-client-registration)
-- [MCP Resource Indicators and Audience](/docs/guides/authserver/mcp-resource-indicators-and-audience)
+- [Clients](/docs/authserver/clients)
+- [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
+- [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
+- [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
+- [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)
