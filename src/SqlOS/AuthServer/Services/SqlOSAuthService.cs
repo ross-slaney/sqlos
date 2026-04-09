@@ -233,15 +233,23 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("User is not a member of the selected organization.");
         }
 
-        // Atomic consumption: mark the row as consumed and persist BEFORE
-        // doing any expensive work (access token creation). EF Core
-        // optimistic concurrency on `ConsumedAt` (configured via
-        // `IsConcurrencyToken` in the model builder) ensures only one
-        // concurrent refresh wins the rotation race — the loser(s) get
-        // DbUpdateConcurrencyException, which we catch below and route
-        // to the grace window path. This makes refresh-token rotation
-        // strictly atomic across any number of app instances behind a
-        // load balancer, with no in-process coordination required.
+        // Mint the access token, build the new refresh token row, and
+        // populate the grace-window cache fields all BEFORE the single
+        // SaveChangesAsync. This avoids a visibility window where
+        // ConsumedAt is set but ReplacementAccessToken is still null
+        // (which would cause concurrent callers to fail the grace
+        // window check and trigger false-positive replay detection).
+        //
+        // Atomicity is enforced by EF Core optimistic concurrency on
+        // ConsumedAt (configured via IsConcurrencyToken in the model
+        // builder). Only one concurrent refresh wins the UPDATE; the
+        // loser(s) get DbUpdateConcurrencyException and route to the
+        // grace window path on retry. This makes rotation strictly
+        // atomic across any number of app instances behind a load
+        // balancer, with no in-process coordination required.
+        var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
+        var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);
+
         refreshToken.ConsumedAt = DateTime.UtcNow;
         var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
         var nextRefreshToken = new SqlOSRefreshToken
@@ -254,14 +262,19 @@ public sealed class SqlOSAuthService
             ExpiresAt = DateTime.UtcNow.Add(securitySettings.RefreshTokenLifetime)
         };
         refreshToken.ReplacedByTokenId = nextRefreshToken.Id;
+
+        // Cache the issued access token on the consumed row, encrypted
+        // at rest, alongside the org id and expiry, so concurrent
+        // refresh attempts within the grace window can return the SAME
+        // access token instead of getting a divergent fresh one.
+        refreshToken.ReplacementAccessToken = _cryptoService.ProtectSecret(accessToken);
+        refreshToken.ReplacementOrganizationId = organizationId;
+        refreshToken.ReplacementAccessTokenExpiresAt = accessTokenExpiresAt;
+
         session.LastSeenAt = DateTime.UtcNow;
         session.IdleExpiresAt = DateTime.UtcNow.Add(securitySettings.SessionIdleTimeout);
         _context.Set<SqlOSRefreshToken>().Add(nextRefreshToken);
 
-        // First commit: rotation is now visible to other concurrent refreshes.
-        // Any concurrent caller that loses the race will get a
-        // DbUpdateConcurrencyException and route to the grace window path
-        // on retry. The winner proceeds to mint the access token below.
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
@@ -269,11 +282,13 @@ public sealed class SqlOSAuthService
         catch (DbUpdateConcurrencyException)
         {
             // Lost the rotation race to a concurrent refresh on this or
-            // another instance. The winner has already marked ConsumedAt
-            // and inserted its replacement. We need to:
+            // another instance. The winner has already committed the
+            // entire rotation (ConsumedAt + ReplacementAccessToken cache
+            // + new refresh token row) atomically, so a fresh re-read
+            // will see a fully populated grace-window cache. We need to:
             //   1) Discard our failed-rotation change tracker state (the
-            //      stale ConsumedAt UPDATE and the sibling INSERT) so it
-            //      doesn't get re-flushed by the next SaveChanges.
+            //      stale ConsumedAt UPDATE and the orphan sibling INSERT)
+            //      so it doesn't get re-flushed by the next SaveChanges.
             //   2) Re-fetch the row from the database showing the
             //      winner's state.
             //   3) Route to the grace window path so this caller gets the
@@ -297,20 +312,6 @@ public sealed class SqlOSAuthService
 
             return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
         }
-
-        var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
-        var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);
-
-        // Cache the issued access token on the consumed row, encrypted at
-        // rest, so concurrent refresh attempts within the grace window can
-        // return the SAME access token instead of getting a divergent fresh
-        // one. We also persist `ReplacementOrganizationId` and
-        // `ReplacementAccessTokenExpiresAt` so the grace window response
-        // metadata stays consistent with the cached JWT.
-        refreshToken.ReplacementAccessToken = _cryptoService.ProtectSecret(accessToken);
-        refreshToken.ReplacementOrganizationId = organizationId;
-        refreshToken.ReplacementAccessTokenExpiresAt = accessTokenExpiresAt;
-        await _context.SaveChangesAsync(cancellationToken);
 
         return new SqlOSTokenResponse(
             accessToken,
