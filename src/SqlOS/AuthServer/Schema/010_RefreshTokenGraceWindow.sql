@@ -1,4 +1,4 @@
-IF COL_LENGTH('{Schema}.SqlOSSettings', 'RefreshTokenGraceWindowSeconds') IS NULL
+IF COL_LENGTH('[{Schema}].[SqlOSSettings]', 'RefreshTokenGraceWindowSeconds') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[SqlOSSettings]
     ADD [RefreshTokenGraceWindowSeconds] INT NOT NULL CONSTRAINT [DF_SqlOSSettings_RefreshTokenGraceWindowSeconds] DEFAULT 30;
@@ -6,7 +6,7 @@ END
 
 GO
 
-IF COL_LENGTH('{Schema}.SqlOSRefreshTokens', 'ReplacementAccessToken') IS NULL
+IF COL_LENGTH('[{Schema}].[SqlOSRefreshTokens]', 'ReplacementAccessToken') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[SqlOSRefreshTokens]
     ADD [ReplacementAccessToken] NVARCHAR(MAX) NULL;
@@ -14,7 +14,7 @@ END
 
 GO
 
-IF COL_LENGTH('{Schema}.SqlOSRefreshTokens', 'ReplacementOrganizationId') IS NULL
+IF COL_LENGTH('[{Schema}].[SqlOSRefreshTokens]', 'ReplacementOrganizationId') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[SqlOSRefreshTokens]
     ADD [ReplacementOrganizationId] NVARCHAR(64) NULL;
@@ -22,7 +22,7 @@ END
 
 GO
 
-IF COL_LENGTH('{Schema}.SqlOSRefreshTokens', 'ReplacementAccessTokenExpiresAt') IS NULL
+IF COL_LENGTH('[{Schema}].[SqlOSRefreshTokens]', 'ReplacementAccessTokenExpiresAt') IS NULL
 BEGIN
     ALTER TABLE [{Schema}].[SqlOSRefreshTokens]
     ADD [ReplacementAccessTokenExpiresAt] DATETIME2 NULL;

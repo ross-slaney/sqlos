@@ -167,7 +167,7 @@ public sealed class SqlOSAuthServiceTests
     public async Task Refresh_NegativeGraceWindow_Rejected()
     {
         using var context = CreateContext();
-        var options = Microsoft.Extensions.Options.Options.Create(new SqlOSAuthServerOptions());
+        var options = Options.Create(new SqlOSAuthServerOptions());
         var settingsService = new SqlOSSettingsService(context, options);
 
         var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
@@ -194,7 +194,7 @@ public sealed class SqlOSAuthServiceTests
         {
             AccessTokenLifetime = TimeSpan.FromMinutes(10) // 600 seconds
         };
-        var options = Microsoft.Extensions.Options.Options.Create(authOptions);
+        var options = Options.Create(authOptions);
         var settingsService = new SqlOSSettingsService(context, options);
 
         var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
