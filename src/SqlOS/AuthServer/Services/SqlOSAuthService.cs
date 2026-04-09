@@ -235,11 +235,13 @@ public sealed class SqlOSAuthService
 
         // Atomic consumption: mark the row as consumed and persist BEFORE
         // doing any expensive work (access token creation). EF Core
-        // optimistic concurrency on `ConsumedAt` ensures only one
-        // concurrent refresh wins the rotation race; the other(s) will
-        // see the row already consumed on retry and fall through to the
-        // grace window path. This closes a race window where two
-        // concurrent refreshes could both rotate before either committed.
+        // optimistic concurrency on `ConsumedAt` (configured via
+        // `IsConcurrencyToken` in the model builder) ensures only one
+        // concurrent refresh wins the rotation race — the loser(s) get
+        // DbUpdateConcurrencyException, which we catch below and route
+        // to the grace window path. This makes refresh-token rotation
+        // strictly atomic across any number of app instances behind a
+        // load balancer, with no in-process coordination required.
         refreshToken.ConsumedAt = DateTime.UtcNow;
         var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
         var nextRefreshToken = new SqlOSRefreshToken
@@ -257,9 +259,44 @@ public sealed class SqlOSAuthService
         _context.Set<SqlOSRefreshToken>().Add(nextRefreshToken);
 
         // First commit: rotation is now visible to other concurrent refreshes.
-        // Any concurrent caller will see ConsumedAt != null and route to the
-        // grace window path. This prevents two refreshes from both rotating.
-        await _context.SaveChangesAsync(cancellationToken);
+        // Any concurrent caller that loses the race will get a
+        // DbUpdateConcurrencyException and route to the grace window path
+        // on retry. The winner proceeds to mint the access token below.
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Lost the rotation race to a concurrent refresh on this or
+            // another instance. The winner has already marked ConsumedAt
+            // and inserted its replacement. We need to:
+            //   1) Discard our failed-rotation change tracker state (the
+            //      stale ConsumedAt UPDATE and the sibling INSERT) so it
+            //      doesn't get re-flushed by the next SaveChanges.
+            //   2) Re-fetch the row from the database showing the
+            //      winner's state.
+            //   3) Route to the grace window path so this caller gets the
+            //      same cached access token the winner produced.
+            //
+            // The interface ISqlOSAuthServerDbContext doesn't expose the
+            // change tracker, but every concrete implementation is a
+            // DbContext subclass — cast and reset.
+            if (_context is DbContext dbContext)
+            {
+                dbContext.ChangeTracker.Clear();
+            }
+
+            var fresh = await _context.Set<SqlOSRefreshToken>()
+                .Include(x => x.Session)
+                .ThenInclude(x => x!.User)
+                .Include(x => x.Session)
+                .ThenInclude(x => x!.ClientApplication)
+                .FirstOrDefaultAsync(x => x.Id == refreshToken.Id, cancellationToken)
+                ?? throw new InvalidOperationException("Refresh token vanished after concurrency conflict.");
+
+            return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
+        }
 
         var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
         var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);

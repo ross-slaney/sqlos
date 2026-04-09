@@ -174,6 +174,16 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSRefreshTokens", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.TokenHash).IsUnique();
+            // ConsumedAt is the rotation lock. Marking it as a concurrency
+            // token forces EF Core to include it in the WHERE clause of
+            // the UPDATE statement. If two concurrent refresh requests
+            // (potentially on different instances behind a load balancer)
+            // try to rotate the same token at the same instant, only one
+            // UPDATE will affect a row — the other(s) get a
+            // DbUpdateConcurrencyException, which RefreshAsync catches and
+            // routes to the grace window path. This makes refresh-token
+            // rotation strictly atomic across any number of app instances.
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
             entity.HasOne(x => x.Session)
                 .WithMany(x => x.RefreshTokens)
                 .HasForeignKey(x => x.SessionId)
