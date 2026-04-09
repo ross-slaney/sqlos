@@ -14,5 +14,21 @@ END
 
 GO
 
+IF COL_LENGTH('{Schema}.SqlOSRefreshTokens', 'ReplacementOrganizationId') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSRefreshTokens]
+    ADD [ReplacementOrganizationId] NVARCHAR(64) NULL;
+END
+
+GO
+
+IF COL_LENGTH('{Schema}.SqlOSRefreshTokens', 'ReplacementAccessTokenExpiresAt') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSRefreshTokens]
+    ADD [ReplacementAccessTokenExpiresAt] DATETIME2 NULL;
+END
+
+GO
+
 DELETE FROM [{Schema}].[SqlOSSchema];
 INSERT INTO [{Schema}].[SqlOSSchema] ([Version]) VALUES (10);

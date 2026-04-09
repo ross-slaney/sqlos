@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -166,7 +167,7 @@ public sealed class SqlOSAuthServiceTests
     public async Task Refresh_NegativeGraceWindow_Rejected()
     {
         using var context = CreateContext();
-        var options = Options.Create(new SqlOSAuthServerOptions());
+        var options = Microsoft.Extensions.Options.Options.Create(new SqlOSAuthServerOptions());
         var settingsService = new SqlOSSettingsService(context, options);
 
         var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
@@ -180,6 +181,136 @@ public sealed class SqlOSAuthServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Refresh token grace window must be 0 or greater.");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindowExceedingAccessTokenLifetime_Rejected()
+    {
+        // Issue #19 review fix #5: a grace window larger than the access token
+        // lifetime would let the cached JWT expire while still inside the
+        // window, returning unusable cached responses. Validation must reject.
+        using var context = CreateContext();
+        var authOptions = new SqlOSAuthServerOptions
+        {
+            AccessTokenLifetime = TimeSpan.FromMinutes(10) // 600 seconds
+        };
+        var options = Microsoft.Extensions.Options.Options.Create(authOptions);
+        var settingsService = new SqlOSSettingsService(context, options);
+
+        var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
+            RefreshTokenLifetimeMinutes: 60,
+            SessionIdleTimeoutMinutes: 60,
+            SessionAbsoluteLifetimeMinutes: 1440,
+            SigningKeyRotationIntervalDays: 90,
+            SigningKeyGraceWindowDays: 7,
+            SigningKeyRetiredCleanupDays: 30,
+            RefreshTokenGraceWindowSeconds: 700)); // > 600 seconds
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must not exceed the access token lifetime*");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindow_CachedAccessTokenIsEncryptedAtRest()
+    {
+        // Issue #19 review fix #6: the ReplacementAccessToken column must
+        // store an encrypted value, not the raw JWT. We assert by checking
+        // that the persisted column does NOT contain the raw access token
+        // string AND that the grace window path can still successfully
+        // round-trip the value back to the original JWT.
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("encrypt");
+
+        var firstRefresh = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        // Read the persisted row directly and verify the cached value is
+        // NOT the raw access token JWT.
+        var consumed = await harness.Context.Set<SqlOSRefreshToken>()
+            .FirstAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+
+        consumed.ReplacementAccessToken.Should().NotBeNullOrEmpty();
+        consumed.ReplacementAccessToken.Should().NotBe(firstRefresh.AccessToken,
+            "the cached access token must be encrypted at rest, not stored as plaintext");
+
+        // And the grace window path must still recover the original JWT.
+        var graceHit = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        graceHit.AccessToken.Should().Be(firstRefresh.AccessToken,
+            "decryption must round-trip back to the original JWT");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindow_ResponseExpiryMatchesCachedJwt()
+    {
+        // Issue #19 review fix #1: the AccessTokenExpiresAt in the grace
+        // window response must match the expiry that was cached at rotation
+        // time, NOT a new computation from DateTime.UtcNow.
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("expiry");
+
+        var firstRefresh = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        // Wait briefly so DateTime.UtcNow has visibly drifted from the
+        // cached expiry. If the grace window path used UtcNow, the second
+        // response's expiry would be visibly later than the first's.
+        await Task.Delay(50);
+
+        var graceHit = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        graceHit.AccessTokenExpiresAt.Should().Be(firstRefresh.AccessTokenExpiresAt,
+            "the grace window response must echo the cached expiry, not recompute from UtcNow");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindow_RejectsOrganizationSwitch()
+    {
+        // Issue #19 review fix #1: a caller within the grace window must
+        // not be able to switch the organization the cached JWT was minted
+        // for. Allowing this would skip the membership check.
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("org");
+
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        // Same refresh token, different org id → must throw, not silently
+        // return the cached JWT for the original org.
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, OrganizationId: "org-id-the-caller-does-not-have-membership-in"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Organization does not match the original refresh.");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindow_RejectedWhenCachedJwtIsExpired()
+    {
+        // Issue #19 review fix #1+#5: even if we're inside the grace window
+        // by elapsed time, if the cached JWT has expired, we must NOT
+        // return it. Backdate ReplacementAccessTokenExpiresAt to simulate.
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("expired");
+
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        // Backdate the cached JWT expiry past now (the grace window itself
+        // is still open by ConsumedAt + 30s).
+        var consumed = await harness.Context.Set<SqlOSRefreshToken>()
+            .FirstAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        consumed.ReplacementAccessTokenExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        await harness.Context.SaveChangesAsync();
+
+        // Caller must not get an expired token; falls through to replay
+        // detection.
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()
@@ -217,7 +348,9 @@ public sealed class SqlOSAuthServiceTests
             authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
             var options = Microsoft.Extensions.Options.Options.Create(authOptions);
 
-            var crypto = new SqlOSCryptoService(context, options);
+            // Inject a real ephemeral data protection provider so the
+            // ReplacementAccessToken cache is encrypted at rest as in production.
+            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options);
             var auth = new SqlOSAuthService(context, options, admin, crypto, settings);

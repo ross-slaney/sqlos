@@ -176,12 +176,30 @@ public sealed class SqlOSRefreshToken
 
     /// <summary>
     /// The access token JWT that was issued at the same time this refresh
-    /// token was rotated. Used by the refresh token grace window so that
-    /// concurrent refresh attempts within the window receive the SAME
-    /// access token (instead of getting a new one with a later expiry).
-    /// Only populated when this token is consumed; null otherwise.
+    /// token was rotated, encrypted at rest via ASP.NET Data Protection
+    /// (<see cref="Services.SqlOSCryptoService.ProtectSecret"/>). Used by
+    /// the refresh token grace window so that concurrent refresh attempts
+    /// within the window receive the SAME access token (instead of
+    /// getting a new one with a later expiry). Only populated when this
+    /// token is consumed; null otherwise.
     /// </summary>
     public string? ReplacementAccessToken { get; set; }
+
+    /// <summary>
+    /// The organization ID the cached <see cref="ReplacementAccessToken"/>
+    /// was minted for. Stored alongside the cached token so the grace
+    /// window response metadata stays consistent with the cached JWT and
+    /// callers can't switch organizations on the grace window path.
+    /// </summary>
+    public string? ReplacementOrganizationId { get; set; }
+
+    /// <summary>
+    /// The expiry timestamp of the cached <see cref="ReplacementAccessToken"/>.
+    /// Stored explicitly so the grace window response can return the same
+    /// expiry that's encoded in the cached JWT, rather than recomputing
+    /// from <see cref="DateTime.UtcNow"/> which would drift.
+    /// </summary>
+    public DateTime? ReplacementAccessTokenExpiresAt { get; set; }
 
     public SqlOSSession? Session { get; set; }
 }

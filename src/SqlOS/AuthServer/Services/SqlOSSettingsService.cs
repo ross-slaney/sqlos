@@ -156,6 +156,18 @@ public sealed class SqlOSSettingsService
             throw new InvalidOperationException("Refresh token grace window must be 0 or greater.");
         }
 
+        // The grace window must not exceed the access token lifetime,
+        // otherwise a grace window hit could legitimately return an
+        // already-expired cached access token. The cached JWT inherits
+        // the original access token expiry — once that expiry passes,
+        // the cached token is useless to the caller.
+        var accessTokenLifetimeSeconds = (int)_options.AccessTokenLifetime.TotalSeconds;
+        if (request.RefreshTokenGraceWindowSeconds > accessTokenLifetimeSeconds)
+        {
+            throw new InvalidOperationException(
+                $"Refresh token grace window must not exceed the access token lifetime ({accessTokenLifetimeSeconds} seconds).");
+        }
+
         await EnsureDefaultSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
         settings.RefreshTokenLifetimeMinutes = request.RefreshTokenLifetimeMinutes;

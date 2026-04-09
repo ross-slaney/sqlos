@@ -2589,12 +2589,19 @@
         `;
 
         bindForm("security-settings-form", async form => {
+            // Include the signing-key fields from the loaded settings even
+            // though the form doesn't expose them. The PUT endpoint requires
+            // all fields and would otherwise reject the request as missing
+            // positive integers for the signing-key rotation values.
             await fetchJson(`${authApiBasePath}/settings/security`, {
                 method: "PUT",
                 body: JSON.stringify({
                     refreshTokenLifetimeMinutes: Number(form.get("refreshTokenLifetimeMinutes")),
                     sessionIdleTimeoutMinutes: Number(form.get("sessionIdleTimeoutMinutes")),
                     sessionAbsoluteLifetimeMinutes: Number(form.get("sessionAbsoluteLifetimeMinutes")),
+                    signingKeyRotationIntervalDays: settings.signingKeyRotationIntervalDays,
+                    signingKeyGraceWindowDays: settings.signingKeyGraceWindowDays,
+                    signingKeyRetiredCleanupDays: settings.signingKeyRetiredCleanupDays,
                     refreshTokenGraceWindowSeconds: Number(form.get("refreshTokenGraceWindowSeconds"))
                 })
             });
