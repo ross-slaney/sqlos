@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>SqlOS</PackageId>
-    <Version>3.1.0</Version>
+    <Version>3.2.0</Version>
     <Authors>Ross Slaney</Authors>
     <Description>Embedded auth server and fine-grained authorization runtime for .NET + SQL Server + EF Core.</Description>
     <PackageTags>authentication;authorization;fga;saml;jwt;sessions;efcore;sqlserver</PackageTags>
