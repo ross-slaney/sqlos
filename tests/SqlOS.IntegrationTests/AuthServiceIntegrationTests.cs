@@ -41,6 +41,44 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task Refresh_WithSameTokenTwiceWithinGraceWindow_ReturnsSameAccessToken()
+    {
+        // Issue #18 — proves the grace window survives a real DB round trip.
+        // Two refresh calls with the same consumed refresh token, both
+        // happening within the default 30s grace window, must return the
+        // SAME access token and must NOT revoke the token family.
+        var auth = BuildAuthService();
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "GraceWindowIntegrationTest";
+
+        var signup = await auth.SignUpAsync(new SqlOSSignupRequest(
+            "Carol",
+            $"carol-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Acme Corp",
+            "test-client",
+            null), http);
+
+        var firstRefresh = await auth.RefreshAsync(
+            new SqlOSRefreshRequest(signup.Tokens!.RefreshToken, signup.Tokens.OrganizationId));
+
+        // Replay the SAME original refresh token immediately. This is the
+        // canonical "two parallel SSR calls hit refresh at the same instant"
+        // scenario the grace window is designed to fix.
+        var secondRefresh = await auth.RefreshAsync(
+            new SqlOSRefreshRequest(signup.Tokens.RefreshToken, signup.Tokens.OrganizationId));
+
+        secondRefresh.AccessToken.Should().Be(firstRefresh.AccessToken,
+            "the grace window should hand back the cached access token");
+
+        // The forward refresh token from the first call should still be
+        // valid — proving the family was NOT revoked by the replay.
+        var thirdRefresh = await auth.RefreshAsync(
+            new SqlOSRefreshRequest(firstRefresh.RefreshToken, firstRefresh.OrganizationId));
+        thirdRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
     public async Task Login_WithMultipleOrganizations_ReturnsPendingAuthToken()
     {
         var admin = BuildAdminService();

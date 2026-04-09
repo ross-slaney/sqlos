@@ -174,6 +174,15 @@ public sealed class SqlOSRefreshToken
     public DateTime? RevokedAt { get; set; }
     public string? ReplacedByTokenId { get; set; }
 
+    /// <summary>
+    /// The access token JWT that was issued at the same time this refresh
+    /// token was rotated. Used by the refresh token grace window so that
+    /// concurrent refresh attempts within the window receive the SAME
+    /// access token (instead of getting a new one with a later expiry).
+    /// Only populated when this token is consumed; null otherwise.
+    /// </summary>
+    public string? ReplacementAccessToken { get; set; }
+
     public SqlOSSession? Session { get; set; }
 }
 
@@ -259,6 +268,12 @@ public sealed class SqlOSSettings
     public int SigningKeyRotationIntervalDays { get; set; } = 90;
     public int SigningKeyGraceWindowDays { get; set; } = 7;
     public int SigningKeyRetiredCleanupDays { get; set; } = 30;
+    /// <summary>
+    /// Grace window after a refresh token has been rotated during which the
+    /// previous refresh token can still be exchanged. See
+    /// <see cref="Configuration.SqlOSAuthServerOptions.RefreshTokenGraceWindowSeconds"/>.
+    /// </summary>
+    public int RefreshTokenGraceWindowSeconds { get; set; } = 30;
     public DateTime UpdatedAt { get; set; }
 }
 

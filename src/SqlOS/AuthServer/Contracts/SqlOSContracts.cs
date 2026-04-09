@@ -352,6 +352,7 @@ public sealed record SqlOSSecuritySettingsDto(
     int SigningKeyRotationIntervalDays,
     int SigningKeyGraceWindowDays,
     int SigningKeyRetiredCleanupDays,
+    int RefreshTokenGraceWindowSeconds,
     DateTime UpdatedAt);
 
 public sealed record SqlOSUpdateSecuritySettingsRequest(
@@ -360,7 +361,8 @@ public sealed record SqlOSUpdateSecuritySettingsRequest(
     int SessionAbsoluteLifetimeMinutes,
     int SigningKeyRotationIntervalDays,
     int SigningKeyGraceWindowDays,
-    int SigningKeyRetiredCleanupDays);
+    int SigningKeyRetiredCleanupDays,
+    int RefreshTokenGraceWindowSeconds = 30);
 
 public sealed record SqlOSAuthPageSettingsDto(
     string? LogoBase64,

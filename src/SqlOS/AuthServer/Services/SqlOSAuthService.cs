@@ -209,6 +209,47 @@ public sealed class SqlOSAuthService
 
         if (refreshToken.ConsumedAt != null)
         {
+            // Grace window check: if the token was consumed recently AND a
+            // replacement was issued, return the same cached token pair
+            // instead of triggering replay detection. This prevents
+            // legitimate concurrent refresh requests (multiple tabs,
+            // parallel SSR calls, mobile retries, multi-instance load-
+            // balanced deployments) from being false-flagged as token theft.
+            var graceWindow = securitySettings.RefreshTokenGraceWindow;
+            var withinGraceWindow = graceWindow > TimeSpan.Zero
+                && refreshToken.ConsumedAt.Value.Add(graceWindow) > DateTime.UtcNow
+                && !string.IsNullOrEmpty(refreshToken.ReplacedByTokenId)
+                && !string.IsNullOrEmpty(refreshToken.ReplacementAccessToken);
+
+            if (withinGraceWindow)
+            {
+                var replacement = await _context.Set<SqlOSRefreshToken>()
+                    .FirstOrDefaultAsync(x => x.Id == refreshToken.ReplacedByTokenId, cancellationToken);
+
+                if (replacement != null && replacement.RevokedAt == null)
+                {
+                    // Reissue the previously stored access token + a fresh
+                    // copy of the new opaque refresh token. We can't recover
+                    // the raw replacement refresh token from its hash, so we
+                    // mint a new sibling that points at the same replacement
+                    // row, marking the original consumed token's lineage.
+                    //
+                    // Practically: callers within the grace window get the
+                    // SAME access token (same JWT, same expiry) as the
+                    // first call, which is the important property for
+                    // concurrent SSR / multi-tab scenarios. They also get a
+                    // valid refresh token they can continue to use.
+                    return new SqlOSTokenResponse(
+                        refreshToken.ReplacementAccessToken!,
+                        await ReissueGraceWindowRefreshTokenAsync(replacement, cancellationToken),
+                        session.Id,
+                        session.ClientApplication!.ClientId,
+                        request.OrganizationId,
+                        DateTime.UtcNow.Add(_options.AccessTokenLifetime),
+                        replacement.ExpiresAt);
+                }
+            }
+
             await RevokeRefreshTokenFamilyAsync(session.Id, refreshToken.FamilyId, "refresh_token_reuse", cancellationToken);
             throw new InvalidOperationException("Refresh token has already been used.");
         }
@@ -249,9 +290,16 @@ public sealed class SqlOSAuthService
         session.LastSeenAt = DateTime.UtcNow;
         session.IdleExpiresAt = DateTime.UtcNow.Add(securitySettings.SessionIdleTimeout);
         _context.Set<SqlOSRefreshToken>().Add(nextRefreshToken);
-        await _context.SaveChangesAsync(cancellationToken);
 
         var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
+
+        // Cache the issued access token on the consumed row so concurrent
+        // refresh attempts within the grace window can return the SAME
+        // access token instead of getting a divergent fresh one.
+        refreshToken.ReplacementAccessToken = accessToken;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
         return new SqlOSTokenResponse(
             accessToken,
             newRawRefreshToken,
@@ -260,6 +308,30 @@ public sealed class SqlOSAuthService
             organizationId,
             DateTime.UtcNow.Add(_options.AccessTokenLifetime),
             nextRefreshToken.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Issues a sibling refresh token within the same family as the given
+    /// replacement, used to satisfy a refresh request that hit the grace
+    /// window. The sibling shares lifetime, family, and session with the
+    /// replacement. We mint a fresh raw token because we can only store
+    /// the hash of the original replacement.
+    /// </summary>
+    private async Task<string> ReissueGraceWindowRefreshTokenAsync(SqlOSRefreshToken replacement, CancellationToken cancellationToken)
+    {
+        var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
+        var sibling = new SqlOSRefreshToken
+        {
+            Id = _cryptoService.GenerateId("rfr"),
+            SessionId = replacement.SessionId,
+            FamilyId = replacement.FamilyId,
+            TokenHash = _cryptoService.HashToken(newRawRefreshToken),
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = replacement.ExpiresAt
+        };
+        _context.Set<SqlOSRefreshToken>().Add(sibling);
+        await _context.SaveChangesAsync(cancellationToken);
+        return newRawRefreshToken;
     }
 
     public async Task LogoutAsync(string? refreshToken, string? sessionId, CancellationToken cancellationToken = default)
