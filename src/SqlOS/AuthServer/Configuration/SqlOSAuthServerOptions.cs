@@ -15,6 +15,19 @@ public class SqlOSAuthServerOptions
     public TimeSpan TemporaryTokenLifetime { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan SessionIdleTimeout { get; set; } = TimeSpan.FromDays(7);
     public TimeSpan SessionAbsoluteLifetime { get; set; } = TimeSpan.FromDays(30);
+    /// <summary>
+    /// Grace window after a refresh token has been rotated during which the
+    /// previous refresh token can still be exchanged. Concurrent and near-
+    /// concurrent calls within the window receive the SAME new token pair
+    /// that was issued at rotation time, instead of triggering replay
+    /// detection. This prevents legitimate concurrent refresh requests
+    /// (multiple tabs, parallel SSR calls, mobile retries, multi-instance
+    /// load-balanced deployments) from being false-flagged as token theft.
+    /// Default 30 seconds matches Okta's default. Set to 0 to disable the
+    /// grace window for high-security clients (immediate replay detection
+    /// on second use).
+    /// </summary>
+    public int RefreshTokenGraceWindowSeconds { get; set; } = 30;
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;

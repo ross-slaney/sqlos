@@ -1169,7 +1169,8 @@
                         ${renderMetadataRows([
                             { label: "Refresh token lifetime", value: `${settings.refreshTokenLifetimeMinutes} minutes` },
                             { label: "Idle timeout", value: `${settings.sessionIdleTimeoutMinutes} minutes` },
-                            { label: "Absolute lifetime", value: `${settings.sessionAbsoluteLifetimeMinutes} minutes` }
+                            { label: "Absolute lifetime", value: `${settings.sessionAbsoluteLifetimeMinutes} minutes` },
+                            { label: "Refresh grace window", value: settings.refreshTokenGraceWindowSeconds === 0 ? "Disabled" : `${settings.refreshTokenGraceWindowSeconds} seconds` }
                         ])}
                     </section>
                     <section class="panel">
@@ -2570,6 +2571,8 @@
                         <input name="refreshTokenLifetimeMinutes" type="number" min="1" placeholder="Refresh token lifetime (minutes)" value="${esc(settings.refreshTokenLifetimeMinutes)}" required>
                         <input name="sessionIdleTimeoutMinutes" type="number" min="1" placeholder="Session idle timeout (minutes)" value="${esc(settings.sessionIdleTimeoutMinutes)}" required>
                         <input name="sessionAbsoluteLifetimeMinutes" type="number" min="1" placeholder="Session absolute lifetime (minutes)" value="${esc(settings.sessionAbsoluteLifetimeMinutes)}" required>
+                        <input name="refreshTokenGraceWindowSeconds" type="number" min="0" placeholder="Refresh token grace window (seconds, 0 to disable)" value="${esc(settings.refreshTokenGraceWindowSeconds)}" required>
+                        <small style="display:block;margin-top:-8px;margin-bottom:12px;color:#64748b;">Window after a refresh token is rotated during which the previous token is still accepted. Prevents legitimate concurrent refreshes (multi-tab, parallel SSR, mobile retries) from being false-flagged as token theft. Default 30s. Set 0 to disable.</small>
                         <button type="submit">Save settings</button>
                     </form>
                 </section>
@@ -2578,19 +2581,28 @@
                     ${renderMetadataRows([
                         { label: "Refresh token lifetime", value: `${settings.refreshTokenLifetimeMinutes} minutes` },
                         { label: "Idle timeout", value: `${settings.sessionIdleTimeoutMinutes} minutes` },
-                        { label: "Absolute lifetime", value: `${settings.sessionAbsoluteLifetimeMinutes} minutes` }
+                        { label: "Absolute lifetime", value: `${settings.sessionAbsoluteLifetimeMinutes} minutes` },
+                        { label: "Refresh grace window", value: settings.refreshTokenGraceWindowSeconds === 0 ? "Disabled" : `${settings.refreshTokenGraceWindowSeconds} seconds` }
                     ])}
                 </section>
             </div>
         `;
 
         bindForm("security-settings-form", async form => {
+            // Include the signing-key fields from the loaded settings even
+            // though the form doesn't expose them. The PUT endpoint requires
+            // all fields and would otherwise reject the request as missing
+            // positive integers for the signing-key rotation values.
             await fetchJson(`${authApiBasePath}/settings/security`, {
                 method: "PUT",
                 body: JSON.stringify({
                     refreshTokenLifetimeMinutes: Number(form.get("refreshTokenLifetimeMinutes")),
                     sessionIdleTimeoutMinutes: Number(form.get("sessionIdleTimeoutMinutes")),
-                    sessionAbsoluteLifetimeMinutes: Number(form.get("sessionAbsoluteLifetimeMinutes"))
+                    sessionAbsoluteLifetimeMinutes: Number(form.get("sessionAbsoluteLifetimeMinutes")),
+                    signingKeyRotationIntervalDays: settings.signingKeyRotationIntervalDays,
+                    signingKeyGraceWindowDays: settings.signingKeyGraceWindowDays,
+                    signingKeyRetiredCleanupDays: settings.signingKeyRetiredCleanupDays,
+                    refreshTokenGraceWindowSeconds: Number(form.get("refreshTokenGraceWindowSeconds"))
                 })
             });
             setFlash("success", "Security settings saved.");
