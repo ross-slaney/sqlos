@@ -95,6 +95,7 @@ public sealed class SqlOSAdminService
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
                     AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
+                    AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth,
                     RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
                     CreatedAt = DateTime.UtcNow,
                     IsFirstParty = normalized.IsFirstParty,
@@ -117,6 +118,7 @@ public sealed class SqlOSAdminService
                 : existing.ResponseTypesJson;
             existing.RequirePkce = normalized.RequirePkce;
             existing.AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes);
+            existing.AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth;
             existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
             existing.IsFirstParty = normalized.IsFirstParty;
             if (existing.DisabledAt != null)
@@ -276,6 +278,7 @@ public sealed class SqlOSAdminService
             RequirePkce = normalized.RequirePkce,
             AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
             IsFirstParty = normalized.IsFirstParty,
+            AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth,
             RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
             CreatedAt = DateTime.UtcNow,
             IsActive = true
@@ -818,6 +821,7 @@ public sealed class SqlOSAdminService
             item.TokenEndpointAuthMethod,
             item.RequirePkce,
             item.IsFirstParty,
+            item.AllowNativeHeadlessAuth,
             item.RedirectUris,
             item.GrantTypes,
             item.ResponseTypes,
@@ -1519,6 +1523,7 @@ public sealed class SqlOSAdminService
             seed.AllowedScopes,
             seed.RequirePkce,
             seed.IsFirstParty,
+            seed.AllowNativeHeadlessAuth,
             seed.ClientType,
             seed.IsActive);
 
@@ -1542,6 +1547,7 @@ public sealed class SqlOSAdminService
             client.TokenEndpointAuthMethod,
             client.RequirePkce,
             client.IsFirstParty,
+            client.AllowNativeHeadlessAuth,
             redirectUris,
             grantTypes,
             responseTypes,
@@ -1706,6 +1712,7 @@ public sealed class SqlOSAdminService
             request.AllowedScopes,
             request.RequirePkce,
             request.IsFirstParty,
+            request.AllowNativeHeadlessAuth,
             request.ClientType,
             true);
 
@@ -1718,6 +1725,7 @@ public sealed class SqlOSAdminService
         IEnumerable<string>? allowedScopes,
         bool requirePkce,
         bool isFirstParty,
+        bool allowNativeHeadlessAuth,
         string? clientType,
         bool isActive)
     {
@@ -1756,6 +1764,7 @@ public sealed class SqlOSAdminService
             normalizedClientType,
             requirePkce,
             isFirstParty,
+            allowNativeHeadlessAuth,
             isActive);
     }
 
@@ -1793,6 +1802,7 @@ public sealed class SqlOSAdminService
         string TokenEndpointAuthMethod,
         bool RequirePkce,
         bool IsFirstParty,
+        bool AllowNativeHeadlessAuth,
         List<string> RedirectUris,
         List<string> GrantTypes,
         List<string> ResponseTypes,
@@ -1846,5 +1856,6 @@ public sealed class SqlOSAdminService
         string ClientType,
         bool RequirePkce,
         bool IsFirstParty,
+        bool AllowNativeHeadlessAuth,
         bool IsActive);
 }

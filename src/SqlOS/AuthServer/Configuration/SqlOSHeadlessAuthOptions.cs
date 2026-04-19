@@ -6,6 +6,7 @@ namespace SqlOS.AuthServer.Configuration;
 
 public sealed class SqlOSHeadlessAuthOptions
 {
+    public bool EnableApi { get; set; } = true;
     public string? HeadlessApiBasePath { get; set; }
     public Func<SqlOSHeadlessUiRouteContext, string>? BuildUiUrl { get; set; }
     public Func<SqlOSHeadlessSignupHookContext, CancellationToken, Task>? OnHeadlessSignupAsync { get; set; }
