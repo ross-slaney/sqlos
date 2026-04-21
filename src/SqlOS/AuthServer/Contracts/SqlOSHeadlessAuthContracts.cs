@@ -31,6 +31,21 @@ public sealed record SqlOSHeadlessActionResult(
     string? RedirectUrl,
     SqlOSHeadlessViewModel? ViewModel);
 
+public sealed record SqlOSHeadlessStartRequest(
+    string ResponseType,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string? Scope,
+    string? CodeChallenge,
+    string? CodeChallengeMethod,
+    string? Resource,
+    string? LoginHint,
+    string? Prompt,
+    string? Nonce,
+    string? View,
+    JsonObject? UiContext);
+
 public sealed record SqlOSHeadlessIdentifyRequest(
     string RequestId,
     string Email);

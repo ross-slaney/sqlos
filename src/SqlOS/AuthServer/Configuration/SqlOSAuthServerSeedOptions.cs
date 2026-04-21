@@ -24,5 +24,6 @@ public sealed class SqlOSClientSeedOptions
     public List<string> AllowedScopes { get; set; } = [];
     public List<string> RedirectUris { get; set; } = [];
     public bool IsFirstParty { get; set; }
+    public bool AllowNativeHeadlessAuth { get; set; }
     public bool IsActive { get; set; } = true;
 }

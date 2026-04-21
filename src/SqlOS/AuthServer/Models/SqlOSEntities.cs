@@ -219,6 +219,7 @@ public sealed class SqlOSClientApplication
     public bool RequirePkce { get; set; } = true;
     public string AllowedScopesJson { get; set; } = "[]";
     public bool IsFirstParty { get; set; }
+    public bool AllowNativeHeadlessAuth { get; set; }
     public string RedirectUrisJson { get; set; } = "[]";
     public string? MetadataDocumentUrl { get; set; }
     public string? ClientUri { get; set; }

@@ -107,6 +107,7 @@ public sealed record SqlOSCreateClientRequest(
     List<string>? AllowedScopes = null,
     bool RequirePkce = true,
     bool IsFirstParty = false,
+    bool AllowNativeHeadlessAuth = false,
     string ClientType = "public_pkce");
 
 public sealed record SqlOSDynamicClientRegistrationRequest

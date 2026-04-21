@@ -97,7 +97,7 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions SeedOwnedWebApp(string clientId, string name, params string[] redirectUris)
         => SeedBrowserClient(clientId, name, redirectUris);
 
-    public SqlOSAuthServerOptions SeedOwnedNativeApp(string clientId, string name, params string[] redirectUris)
+    public SqlOSAuthServerOptions SeedOwnedNativeApp(string clientId, string name, bool allowNativeHeadlessAuth = false, params string[] redirectUris)
         => SeedClient(client =>
         {
             client.ClientId = clientId;
@@ -110,6 +110,7 @@ public class SqlOSAuthServerOptions
             client.ClientType = "public_pkce";
             client.RequirePkce = true;
             client.IsFirstParty = true;
+            client.AllowNativeHeadlessAuth = allowNativeHeadlessAuth;
         });
 
     public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)

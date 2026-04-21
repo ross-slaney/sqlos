@@ -56,7 +56,7 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
-    public void AddSqlOS_Throws_WhenHeadlessApiBasePathIsSetWithoutBuildUiUrl()
+    public void AddSqlOS_AllowsHeadlessApiBasePathWithoutBuildUiUrl()
     {
         var services = new ServiceCollection();
 
@@ -65,8 +65,22 @@ public sealed class SqlOSOptionsValidationTests
             options.AuthServer.Headless.HeadlessApiBasePath = "/sqlos/auth/custom-headless";
         });
 
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenHeadlessApiBasePathIsSetButHeadlessApiIsDisabled()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.Headless.EnableApi = false;
+            options.AuthServer.Headless.HeadlessApiBasePath = "/sqlos/auth/custom-headless";
+        });
+
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*AuthServer.Headless.HeadlessApiBasePath requires AuthServer.Headless.BuildUiUrl.*");
+            .WithMessage("*AuthServer.Headless.HeadlessApiBasePath requires AuthServer.Headless.EnableApi.*");
     }
 
     [TestMethod]

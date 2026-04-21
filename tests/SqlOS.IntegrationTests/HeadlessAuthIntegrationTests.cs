@@ -267,7 +267,34 @@ public sealed class HeadlessAuthIntegrationTests
         session.AuthenticationMethod.Should().Be("password");
     }
 
-    private static async Task<HeadlessFixture> CreateFixtureAsync(Action<SqlOSHeadlessAuthOptions>? configureHeadless = null)
+    [TestMethod]
+    public async Task EnsureNativeHeadlessClientAllowedAsync_RejectsClientWithoutOptIn()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var act = async () => await fixture.HeadlessAuthService.EnsureNativeHeadlessClientAllowedAsync(
+            fixture.ClientId,
+            fixture.RedirectUri);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("This client is not allowed to start native headless auth.");
+    }
+
+    [TestMethod]
+    public async Task EnsureNativeHeadlessClientAllowedAsync_AllowsFirstPartyOptedInClient()
+    {
+        await using var fixture = await CreateFixtureAsync(allowNativeHeadlessAuth: true);
+
+        var act = async () => await fixture.HeadlessAuthService.EnsureNativeHeadlessClientAllowedAsync(
+            fixture.ClientId,
+            fixture.RedirectUri);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    private static async Task<HeadlessFixture> CreateFixtureAsync(
+        Action<SqlOSHeadlessAuthOptions>? configureHeadless = null,
+        bool allowNativeHeadlessAuth = false)
     {
         var context = CreateContext();
         var clientId = $"headless-{Guid.NewGuid():N}";
@@ -279,6 +306,7 @@ public sealed class HeadlessAuthIntegrationTests
             BasePath = AspireFixture.Options.BasePath
         };
         optionsValue.SeedBrowserClient(clientId, $"Headless Test {clientId}", redirectUri);
+        optionsValue.ClientSeeds[0].AllowNativeHeadlessAuth = allowNativeHeadlessAuth;
         optionsValue.UseHeadlessAuthPage(headless =>
         {
             headless.BuildUiUrl = ctx =>

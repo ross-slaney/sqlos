@@ -72,7 +72,7 @@ public static class EndpointRouteBuilderExtensions
                         context.Request.Query["login_hint"].ToString(),
                         prompt,
                         context.Request.Query["nonce"].ToString(),
-                        headlessAuthService.IsEnabled ? "headless" : "hosted",
+                        headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
                         context.Request.Query["ui_context"].ToString()),
                     cancellationToken);
                 var requestedView = string.Equals(context.Request.Query["view"], "signup", StringComparison.OrdinalIgnoreCase)
@@ -101,7 +101,7 @@ public static class EndpointRouteBuilderExtensions
                         cancellationToken));
                 }
 
-                if (headlessAuthService.IsEnabled)
+                if (headlessAuthService.IsBrowserUiEnabled)
                 {
                     return Results.Redirect(headlessAuthService.BuildUiUrl(
                         context,
@@ -129,7 +129,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                if (headlessAuthService.IsEnabled)
+                if (headlessAuthService.IsBrowserUiEnabled)
                 {
                     return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
                         context,
@@ -160,7 +160,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (headlessAuthService.IsEnabled)
+            if (headlessAuthService.IsBrowserUiEnabled)
             {
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
                     context,
@@ -367,7 +367,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (headlessAuthService.IsEnabled)
+            if (headlessAuthService.IsBrowserUiEnabled)
             {
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
                     context,
@@ -447,6 +447,72 @@ public static class EndpointRouteBuilderExtensions
         var headless = endpoints.MapGroup(resolvedHeadlessPath);
         headless.ExcludeFromDescription();
 
+        headless.MapPost("/start", async (
+            SqlOSHeadlessStartRequest request,
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                await headlessAuthService.EnsureNativeHeadlessClientAllowedAsync(
+                    request.ClientId,
+                    request.RedirectUri,
+                    cancellationToken);
+
+                var authorizationRequest = await authorizationServerService.CreateAuthorizationRequestAsync(
+                    new SqlOSAuthorizeRequestInput(
+                        request.ResponseType,
+                        request.ClientId,
+                        request.RedirectUri,
+                        request.State,
+                        request.Scope,
+                        request.CodeChallenge,
+                        request.CodeChallengeMethod,
+                        request.Resource,
+                        request.LoginHint,
+                        request.Prompt,
+                        request.Nonce,
+                        "headless",
+                        SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext)),
+                    cancellationToken);
+
+                if (string.Equals(request.Prompt, "none", StringComparison.Ordinal))
+                {
+                    return Results.Ok(new SqlOSHeadlessActionResult(
+                        "redirect",
+                        await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                            authorizationRequest,
+                            "login_required",
+                            "The user is not signed in.",
+                            cancellationToken),
+                        null));
+                }
+
+                return Results.Ok(new SqlOSHeadlessActionResult(
+                    "view",
+                    null,
+                    await headlessAuthService.GetRequestAsync(
+                        authorizationRequest.Id,
+                        request.View,
+                        error: null,
+                        pendingToken: null,
+                        email: authorizationRequest.LoginHintEmail,
+                        displayName: null,
+                        cancellationToken)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         headless.MapGet("/requests/{requestId}", async (
             string requestId,
             string? view,
@@ -457,7 +523,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -484,7 +550,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -505,7 +571,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -526,7 +592,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -547,7 +613,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -568,7 +634,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
-            if (!headlessAuthService.IsEnabled)
+            if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
             }
@@ -1030,6 +1096,7 @@ public static class EndpointRouteBuilderExtensions
                     client.ClientId,
                     client.Name,
                     client.Audience,
+                    client.AllowNativeHeadlessAuth,
                     RedirectUris = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson),
                     client.IsActive,
                     client.CreatedAt

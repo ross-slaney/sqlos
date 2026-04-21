@@ -41,7 +41,9 @@ public sealed class SqlOSHeadlessAuthService
         _options = options.Value;
     }
 
-    public bool IsEnabled => _options.Headless.BuildUiUrl != null;
+    public bool IsApiEnabled => _options.Headless.EnableApi;
+    public bool IsBrowserUiEnabled => _options.Headless.BuildUiUrl != null;
+    public bool IsEnabled => IsBrowserUiEnabled;
 
     public string GetHeadlessApiBasePath() => _options.Headless.ResolveApiBasePath(_options.BasePath);
 
@@ -71,9 +73,9 @@ public sealed class SqlOSHeadlessAuthService
         string? displayName,
         JsonObject? uiContext)
     {
-        if (!IsEnabled)
+        if (!IsBrowserUiEnabled)
         {
-            throw new InvalidOperationException("Headless auth mode is not enabled.");
+            throw new InvalidOperationException("Headless browser handoff is not enabled.");
         }
 
         if (_options.Headless.BuildUiUrl == null)
@@ -104,7 +106,7 @@ public sealed class SqlOSHeadlessAuthService
         CancellationToken cancellationToken = default)
     {
         var authorizationRequest = await _authorizationServerService.TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
-        if (authorizationRequest == null || !IsHeadlessRequest(authorizationRequest))
+        if (authorizationRequest == null || !IsHeadlessRequest(authorizationRequest) || !IsBrowserUiEnabled)
         {
             return null;
         }
@@ -420,6 +422,37 @@ public sealed class SqlOSHeadlessAuthService
 
     public static bool IsHeadlessRequest(SqlOSAuthorizationRequest authorizationRequest)
         => string.Equals(authorizationRequest.PresentationMode, "headless", StringComparison.OrdinalIgnoreCase);
+
+    public static string? NormalizeUiContext(JsonObject? uiContext)
+        => uiContext?.ToJsonString();
+
+    public async Task EnsureNativeHeadlessClientAllowedAsync(
+        string clientId,
+        string redirectUri,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await _adminService.RequireClientAsync(clientId, redirectUri, cancellationToken);
+
+        if (!IsApiEnabled)
+        {
+            throw new InvalidOperationException("Native headless auth is not enabled.");
+        }
+
+        if (!client.IsFirstParty)
+        {
+            throw new InvalidOperationException("Native headless auth is only available to first-party clients.");
+        }
+
+        if (!client.RequirePkce || !string.Equals(client.ClientType, "public_pkce", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Native headless auth requires a PKCE public client.");
+        }
+
+        if (!client.AllowNativeHeadlessAuth)
+        {
+            throw new InvalidOperationException("This client is not allowed to start native headless auth.");
+        }
+    }
 
     public static JsonObject? ParseUiContext(string? json)
     {

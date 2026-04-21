@@ -80,20 +80,18 @@ internal static class SqlOSOptionsValidator
 
     private static void ValidateHeadlessOptions(SqlOSHeadlessAuthOptions options, List<string> errors)
     {
-        var headlessEnabled = options.BuildUiUrl != null;
-
         if (!string.IsNullOrWhiteSpace(options.HeadlessApiBasePath))
         {
             ValidateRootPath(options.HeadlessApiBasePath, "AuthServer.Headless.HeadlessApiBasePath", errors);
-            if (!headlessEnabled)
+            if (!options.EnableApi)
             {
-                errors.Add("AuthServer.Headless.HeadlessApiBasePath requires AuthServer.Headless.BuildUiUrl.");
+                errors.Add("AuthServer.Headless.HeadlessApiBasePath requires AuthServer.Headless.EnableApi.");
             }
         }
 
-        if (options.OnHeadlessSignupAsync != null && !headlessEnabled)
+        if (options.OnHeadlessSignupAsync != null && !options.EnableApi)
         {
-            errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.BuildUiUrl.");
+            errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.EnableApi.");
         }
     }
 
