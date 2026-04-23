@@ -27,7 +27,6 @@ public class RetailDbContext : DbContext, ISqlOSFgaDbContext
         modelBuilder.Entity<Chain>(e =>
         {
             e.HasKey(c => c.Id);
-            e.HasIndex(c => c.ResourceId);
             e.Property(c => c.Name).HasMaxLength(200).IsRequired();
             e.Property(c => c.ResourceId).HasMaxLength(100).IsRequired();
         });
@@ -36,7 +35,6 @@ public class RetailDbContext : DbContext, ISqlOSFgaDbContext
         modelBuilder.Entity<Location>(e =>
         {
             e.HasKey(l => l.Id);
-            e.HasIndex(l => l.ResourceId);
             e.HasIndex(l => l.ChainId);
             e.Property(l => l.Name).HasMaxLength(200).IsRequired();
             e.Property(l => l.ResourceId).HasMaxLength(100).IsRequired();
@@ -50,7 +48,6 @@ public class RetailDbContext : DbContext, ISqlOSFgaDbContext
         modelBuilder.Entity<InventoryItem>(e =>
         {
             e.HasKey(i => i.Id);
-            e.HasIndex(i => i.ResourceId);
             e.HasIndex(i => i.LocationId);
             e.Property(i => i.Name).HasMaxLength(200).IsRequired();
             e.Property(i => i.Sku).HasMaxLength(50).IsRequired();
@@ -61,5 +58,7 @@ public class RetailDbContext : DbContext, ISqlOSFgaDbContext
                 .HasForeignKey(i => i.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.ApplySqlOSFgaConventions();
     }
 }

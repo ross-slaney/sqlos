@@ -18,6 +18,12 @@ public class SqlOSFgaOptions
     public SqlOSFgaTableNames TableNames { get; set; } = new();
     public SqlOSFgaSeedData? StartupSeedData { get; private set; }
 
+    /// <summary>
+    /// Controls automatic index conventions and startup validation for consumer entities
+    /// that implement <see cref="SqlOS.Fga.Interfaces.IHasResourceId"/>.
+    /// </summary>
+    public SqlOSFgaConventionsOptions Conventions { get; set; } = new();
+
     public SqlOSFgaOptions Seed(Action<SqlOSFgaSeedBuilder> configure)
     {
         var builder = StartupSeedData == null
