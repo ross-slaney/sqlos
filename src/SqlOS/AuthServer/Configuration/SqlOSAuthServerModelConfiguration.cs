@@ -233,6 +233,38 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.PageSubtitle).HasMaxLength(500);
         });
 
+        modelBuilder.Entity<SqlOSEmailOtpChallenge>(entity =>
+        {
+            entity.ToTable("SqlOSEmailOtpChallenges", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ChallengeTokenHash).IsUnique();
+            entity.HasIndex(x => new { x.NormalizedEmail, x.CreatedAt });
+            entity.Property(x => x.ChallengeTokenHash).HasMaxLength(128);
+            entity.Property(x => x.CodeHash).HasMaxLength(128);
+            entity.Property(x => x.Email).HasMaxLength(320);
+            entity.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            entity.Property(x => x.InvalidatedReason).HasMaxLength(120);
+            entity.Property(x => x.IpAddress).HasMaxLength(128);
+            entity.Property(x => x.UserAgent).HasMaxLength(512);
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.UserEmail)
+                .WithMany()
+                .HasForeignKey(x => x.UserEmailId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AuthorizationRequest)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorizationRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany()
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSAuthorizationRequest>(entity =>
         {
             entity.ToTable("SqlOSAuthorizationRequests", schema, t => t.ExcludeFromMigrations());

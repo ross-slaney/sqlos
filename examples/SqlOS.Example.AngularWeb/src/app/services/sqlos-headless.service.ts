@@ -57,6 +57,14 @@ export class SqlosHeadlessService {
     return this.headlessPost('/password/login', { requestId, email, password });
   }
 
+  requestEmailOtp(requestId: string, email: string): Promise<HeadlessActionResult> {
+    return this.headlessPost('/email-otp/start', { requestId, email });
+  }
+
+  verifyEmailOtp(requestId: string, challengeToken: string, code: string): Promise<HeadlessActionResult> {
+    return this.headlessPost('/email-otp/verify', { requestId, challengeToken, code });
+  }
+
   signup(
     requestId: string,
     displayName: string,

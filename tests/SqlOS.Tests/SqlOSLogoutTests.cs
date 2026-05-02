@@ -22,9 +22,11 @@ public sealed class SqlOSLogoutTests
         var options = Options.Create(authOptions);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
-        var authService = new SqlOSAuthService(context, options, admin, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,
@@ -57,9 +59,11 @@ public sealed class SqlOSLogoutTests
         var options = Options.Create(authOptions);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
-        var authService = new SqlOSAuthService(context, options, admin, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,
@@ -90,7 +94,8 @@ public sealed class SqlOSLogoutTests
         var options = Options.Create(new SqlOSAuthServerOptions());
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
 
         await crypto.EnsureActiveSigningKeyAsync();

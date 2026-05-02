@@ -2650,8 +2650,12 @@
                             ${settings.headlessCapabilityRegistered
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
+                            ${settings.emailOtpRuntimeConfigured
+                                ? `<div class="callout"><strong>Email OTP delivery is configured.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
+                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.AuthServer.EmailOtp.AzureCommunicationServicesConnectionString</code> and <code>options.AuthServer.EmailOtp.FromAddress</code> in startup before enabling <code>email_otp</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
-                            <input name="enabledCredentialTypes" placeholder="Enabled credential types" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>
                             <label>Logo upload<input id="auth-page-logo-file" type="file" accept="image/*"></label>
                             <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL">${esc(settings.logoBase64 || "")}</textarea>
                             <button type="submit">Save Auth Page</button>
@@ -2671,7 +2675,7 @@
                             { label: "Grant types", value: (metadata.grantTypesSupported || []).join(", ") }
                         ])}
                         <div class="callout">
-                            <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, and layout. Password is the only first-party credential type enabled in v1, but OIDC and SAML providers still appear below it when configured.
+                            <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, layout, and first-party sign-in methods. OIDC and SAML providers still appear below these local credential choices when configured.
                         </div>
                     </section>
                 </div>

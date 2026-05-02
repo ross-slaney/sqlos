@@ -21,9 +21,11 @@ public sealed class SqlOSAuthorizationPromptTests
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
-        var authService = new SqlOSAuthService(context, options, admin, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,

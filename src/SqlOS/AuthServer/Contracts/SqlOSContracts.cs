@@ -377,7 +377,9 @@ public sealed record SqlOSAuthPageSettingsDto(
     string[] EnabledCredentialTypes,
     DateTime UpdatedAt,
     bool ManagedByStartupSeed,
-    bool HeadlessCapabilityRegistered);
+    bool HeadlessCapabilityRegistered,
+    bool LocalPasswordRuntimeEnabled,
+    bool EmailOtpRuntimeConfigured);
 
 public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string? LogoBase64,

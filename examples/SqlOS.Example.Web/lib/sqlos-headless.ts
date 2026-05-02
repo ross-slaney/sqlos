@@ -10,6 +10,8 @@ export type HeadlessViewModel = {
   clientId: string;
   headlessApiBasePath: string;
   error?: string | null;
+  info?: string | null;
+  challengeToken?: string | null;
   pendingToken?: string | null;
   email?: string | null;
   displayName?: string | null;
@@ -41,6 +43,9 @@ export type HeadlessSettings = {
   accentColor?: string;
   backgroundColor?: string;
   enablePasswordSignup?: boolean;
+  enabledCredentialTypes?: string[];
+  localPasswordRuntimeEnabled?: boolean;
+  emailOtpRuntimeConfigured?: boolean;
 };
 
 export type HeadlessActionResult = {
@@ -97,6 +102,14 @@ export async function headlessIdentify(requestId: string, email: string): Promis
 
 export async function headlessPasswordLogin(requestId: string, email: string, password: string): Promise<HeadlessActionResult> {
   return headlessPost("/password/login", { requestId, email, password });
+}
+
+export async function headlessRequestEmailOtp(requestId: string, email: string): Promise<HeadlessActionResult> {
+  return headlessPost("/email-otp/start", { requestId, email });
+}
+
+export async function headlessVerifyEmailOtp(requestId: string, challengeToken: string, code: string): Promise<HeadlessActionResult> {
+  return headlessPost("/email-otp/verify", { requestId, challengeToken, code });
 }
 
 export async function headlessSignup(

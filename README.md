@@ -33,6 +33,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **SAML SSO** — enterprise single sign-on with home realm discovery by email domain
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
 - **Signing Key Rotation** — automatic RS256 key rotation with configurable intervals
+- **Email OTP** — passwordless sign-in with Azure Communication Services Email
 - **Audit Logging** — track authentication events across your system
 
 ### FGA (Fine-Grained Authorization)
@@ -114,6 +115,48 @@ Or via environment variables:
 SqlOS__Dashboard__AuthMode=Password
 SqlOS__Dashboard__Password=<strong-password>
 ```
+
+## Email OTP with Azure Communication Services
+
+SqlOS includes an Azure Communication Services Email sender for passwordless email-code login. Provision ACS Email with the helper script:
+
+```bash
+AZURE_SUBSCRIPTION_ID=<subscription-id> \
+AZURE_RESOURCE_GROUP=<resource-group> \
+AZURE_DNS_ZONE_NAME=example.com \
+ACS_EMAIL_DOMAIN=example.com \
+ACS_EMAIL_SENDER_USERNAME=no-reply \
+ACS_EMAIL_SENDER_DISPLAY_NAME="Example" \
+./scripts/azure/setup-acs-email.sh --apply-dns --yes
+```
+
+The script creates an ACS Email Service, ACS Communication Service, customer-managed email domain, sender username, and optional Azure DNS verification records. If your DNS is not hosted in Azure, omit `--apply-dns`; the script prints the records to create manually.
+
+Store the connection string securely, then configure SqlOS:
+
+```bash
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString=<acs-connection-string>
+SqlOS__EmailOtp__FromAddress=no-reply@example.com
+```
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureEmailOtp(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+    });
+
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["password", "email_otp"];
+    });
+});
+```
+
+Run `./scripts/azure/setup-acs-email.sh --help` for dry-run, DNS, and connection-string options.
 
 ## Todo Sample
 

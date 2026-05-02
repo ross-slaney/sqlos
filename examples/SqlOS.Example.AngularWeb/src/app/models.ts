@@ -104,6 +104,8 @@ export interface HeadlessViewModel {
   clientId: string;
   headlessApiBasePath: string;
   error?: string | null;
+  info?: string | null;
+  challengeToken?: string | null;
   pendingToken?: string | null;
   email?: string | null;
   displayName?: string | null;
@@ -135,6 +137,9 @@ export interface HeadlessSettings {
   accentColor?: string;
   backgroundColor?: string;
   enablePasswordSignup?: boolean;
+  enabledCredentialTypes?: string[];
+  localPasswordRuntimeEnabled?: boolean;
+  emailOtpRuntimeConfigured?: boolean;
 }
 
 export interface HeadlessActionResult {

@@ -311,6 +311,35 @@ public sealed class SqlOSAuthPageSettings
     public DateTime UpdatedAt { get; set; }
 }
 
+public sealed class SqlOSEmailOtpChallenge
+{
+    public string Id { get; set; } = string.Empty;
+    public string ChallengeTokenHash { get; set; } = string.Empty;
+    public string CodeHash { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
+    public string? UserId { get; set; }
+    public string? UserEmailId { get; set; }
+    public string? AuthorizationRequestId { get; set; }
+    public string? ClientApplicationId { get; set; }
+    public string? RequestedOrganizationId { get; set; }
+    public int AttemptCount { get; set; }
+    public int MaxAttempts { get; set; } = 5;
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime LastSentAt { get; set; }
+    public DateTime? ConsumedAt { get; set; }
+    public DateTime? InvalidatedAt { get; set; }
+    public string? InvalidatedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSUser? User { get; set; }
+    public SqlOSUserEmail? UserEmail { get; set; }
+    public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
+}
+
 public sealed class SqlOSAuthorizationRequest
 {
     public string Id { get; set; } = string.Empty;

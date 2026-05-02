@@ -154,8 +154,10 @@ public sealed class AuthServiceIntegrationTests
         var options = Microsoft.Extensions.Options.Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(ctx, options);
         var admin = new SqlOSAdminService(ctx, options, crypto);
-        var settings = new SqlOSSettingsService(ctx, options);
-        var auth = new SqlOSAuthService(ctx, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(ctx, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(ctx, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(ctx, options, admin, crypto, settings, emailOtp);
         return (auth, ctx);
     }
 
@@ -248,8 +250,10 @@ public sealed class AuthServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options);
-        return new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        return new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
     }
 
     private static SqlOSAdminService BuildAdminService()

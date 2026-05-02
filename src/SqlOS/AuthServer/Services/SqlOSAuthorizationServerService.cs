@@ -41,7 +41,7 @@ public sealed class SqlOSAuthorizationServerService
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        var authPageSettings = await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
         var configuredScopes = await _context.Set<SqlOSClientApplication>()
             .AsNoTracking()
             .Select(x => x.AllowedScopesJson)
@@ -49,7 +49,7 @@ public sealed class SqlOSAuthorizationServerService
 
         var scopes = configuredScopes
             .SelectMany(ParseJsonArray)
-            .Concat(authPageSettings.EnabledCredentialTypes.Select(x => $"auth:{x}"))
+            .Concat(credentialSettings.EnabledCredentialTypes.Select(x => $"auth:{x}"))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
@@ -199,10 +199,21 @@ public sealed class SqlOSAuthorizationServerService
         string password,
         CancellationToken cancellationToken = default)
     {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PasswordEnabled)
+        {
+            throw new InvalidOperationException("Local password authentication is disabled.");
+        }
+
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
         var emailRecord = await _context.Set<SqlOSUserEmail>()
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
             ?? throw new InvalidOperationException("Invalid email or password.");
+
+        if (_options.RequireVerifiedEmailForPasswordLogin && !emailRecord.IsVerified)
+        {
+            throw new InvalidOperationException("Email must be verified before password login.");
+        }
 
         var credential = await _context.Set<SqlOSCredential>()
             .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken)
@@ -229,6 +240,12 @@ public sealed class SqlOSAuthorizationServerService
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PasswordSignupEnabled)
+        {
+            throw new InvalidOperationException("Password signup is disabled.");
+        }
+
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, password),
             cancellationToken);
@@ -297,6 +314,61 @@ public sealed class SqlOSAuthorizationServerService
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == temporaryToken.UserId, cancellationToken);
         return await IssueAuthorizationRedirectAsync(authorizationRequest, user, organizationId, payload.AuthenticationMethod, httpContext, cancellationToken);
+    }
+
+    public async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId))
+        {
+            if (organizations.All(x => x.Id != authorizationRequest.OrganizationId))
+            {
+                throw new InvalidOperationException("The selected organization is not available to this user.");
+            }
+
+            return new SqlOSAuthorizationRequestLoginResult(
+                await IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    user,
+                    authorizationRequest.OrganizationId,
+                    authenticationMethod,
+                    httpContext,
+                    cancellationToken),
+                false,
+                null,
+                organizations);
+        }
+
+        if (organizations.Count > 1)
+        {
+            return new SqlOSAuthorizationRequestLoginResult(
+                null,
+                true,
+                await CreatePendingOrganizationSelectionAsync(
+                    user,
+                    authorizationRequest,
+                    authenticationMethod,
+                    cancellationToken),
+                organizations);
+        }
+
+        return new SqlOSAuthorizationRequestLoginResult(
+            await IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                user,
+                organizations.FirstOrDefault()?.Id,
+                authenticationMethod,
+                httpContext,
+                cancellationToken),
+            false,
+            null,
+            organizations);
     }
 
     public async Task<string> IssueAuthorizationRedirectAsync(
@@ -549,6 +621,12 @@ public sealed record SqlOSPasswordAuthenticationResult(
     SqlOSUser User,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,
     string AuthenticationMethod);
+
+public sealed record SqlOSAuthorizationRequestLoginResult(
+    string? RedirectUrl,
+    bool RequiresOrganizationSelection,
+    string? PendingToken,
+    IReadOnlyList<SqlOSOrganizationOption> Organizations);
 
 public sealed record SqlOSTokenRequest(
     string GrantType,

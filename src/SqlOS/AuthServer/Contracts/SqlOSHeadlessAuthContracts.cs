@@ -21,6 +21,7 @@ public sealed record SqlOSHeadlessViewModel(
     string? Error,
     string? Info,
     IReadOnlyDictionary<string, string> FieldErrors,
+    string? ChallengeToken,
     string? PendingToken,
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
     IReadOnlyList<SqlOSHeadlessProviderDto> Providers,
@@ -54,6 +55,15 @@ public sealed record SqlOSHeadlessPasswordLoginRequest(
     string RequestId,
     string Email,
     string Password);
+
+public sealed record SqlOSHeadlessEmailOtpStartRequest(
+    string RequestId,
+    string Email);
+
+public sealed record SqlOSHeadlessEmailOtpVerifyRequest(
+    string RequestId,
+    string ChallengeToken,
+    string Code);
 
 public sealed record SqlOSHeadlessSignupRequest(
     string RequestId,

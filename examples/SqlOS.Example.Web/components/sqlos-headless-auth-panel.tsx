@@ -9,9 +9,11 @@ import {
   getHeadlessRequest,
   headlessIdentify,
   headlessPasswordLogin,
+  headlessRequestEmailOtp,
   headlessSelectOrganization,
   headlessSignup,
   headlessStartProvider,
+  headlessVerifyEmailOtp,
   type HeadlessViewModel,
   type HeadlessActionResult,
   type HeadlessProvider,
@@ -88,6 +90,7 @@ export function SqlOSHeadlessAuthPanel() {
 
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -187,6 +190,7 @@ export function SqlOSHeadlessAuthPanel() {
       if (result.viewModel.view) setView(result.viewModel.view);
       if (result.viewModel.error) setError(result.viewModel.error);
       if (result.viewModel.email) setEmail(result.viewModel.email);
+      if (result.viewModel.challengeToken) setOtpCode("");
       setFieldErrors(result.viewModel.fieldErrors ?? {});
     }
   }, []);
@@ -206,6 +210,30 @@ export function SqlOSHeadlessAuthPanel() {
     setLoading(true); setError(null); setFieldErrors({});
     try { await handleResult(await headlessPasswordLogin(requestId, email, password)); }
     catch (err) { setError(err instanceof Error ? err.message : "Login failed."); }
+    finally { setLoading(false); }
+  };
+
+  const onRequestEmailOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!requestId) return;
+    setLoading(true); setError(null); setFieldErrors({});
+    try { await handleResult(await headlessRequestEmailOtp(requestId, email)); }
+    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in code."); }
+    finally { setLoading(false); }
+  };
+
+  const onVerifyEmailOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!requestId) return;
+    const challengeToken = viewModel?.challengeToken;
+    if (!challengeToken) {
+      setError("Request a new sign-in code first.");
+      return;
+    }
+
+    setLoading(true); setError(null); setFieldErrors({});
+    try { await handleResult(await headlessVerifyEmailOtp(requestId, challengeToken, otpCode)); }
+    catch (err) { setError(err instanceof Error ? err.message : "The sign-in code was rejected."); }
     finally { setLoading(false); }
   };
 
@@ -238,6 +266,10 @@ export function SqlOSHeadlessAuthPanel() {
 
   const isSignup = view === "signup";
   const showProviderButtons = (view === "login" || view === "identify" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
+  const supportsPassword = !!viewModel?.settings?.localPasswordRuntimeEnabled
+    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("password");
+  const supportsEmailOtp = !!viewModel?.settings?.emailOtpRuntimeConfigured
+    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("email_otp");
 
   const headline = isSignup ? "Start your free trial" : view === "organization" ? "Choose workspace" : "Welcome back";
   const subtitle = isSignup
@@ -289,6 +321,7 @@ export function SqlOSHeadlessAuthPanel() {
           </div>
 
           {error && <div className="ha-error">{error}</div>}
+          {viewModel?.info && <div className="ha-success">{viewModel.info}</div>}
 
           {!requestId ? (
             <HeadlessFlowStarter initialView={isSignup ? "signup" : "login"} nextPath={nextPath} />
@@ -327,6 +360,39 @@ export function SqlOSHeadlessAuthPanel() {
                   </button>
                   <div className="ha-alt">
                     <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Email me a code instead</button>}
+                  </div>
+                </form>
+              )}
+
+              {view === "email-otp" && (
+                <form className="ha-form" onSubmit={onRequestEmailOtp}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-otp-email">Email</label>
+                    <input id="ha-otp-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Sending code..." : "Email me a code"}
+                  </button>
+                  <div className="ha-alt">
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "email-otp-verify" && (
+                <form className="ha-form" onSubmit={onVerifyEmailOtp}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-otp-code">Code</label>
+                    <input id="ha-otp-code" type="text" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="123456" required autoFocus />
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Verifying..." : "Verify code"}
+                  </button>
+                  <div className="ha-alt">
+                    <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Send a new code</button>
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
                   </div>
                 </form>
               )}

@@ -34,6 +34,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
+    public SqlOSEmailOtpOptions EmailOtp { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
@@ -72,6 +73,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigureResourceIndicators(Action<SqlOSResourceIndicatorOptions> configure)
     {
         configure(ResourceIndicators);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureEmailOtp(Action<SqlOSEmailOtpOptions> configure)
+    {
+        configure(EmailOtp);
         return this;
     }
 

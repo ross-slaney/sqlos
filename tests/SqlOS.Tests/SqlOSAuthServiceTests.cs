@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
@@ -24,8 +25,10 @@ public sealed class SqlOSAuthServiceTests
         var options = Options.Create(authOptions);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
-        var auth = new SqlOSAuthService(context, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
 
         await crypto.EnsureActiveSigningKeyAsync();
         await admin.UpsertSeededClientsAsync();
@@ -42,6 +45,39 @@ public sealed class SqlOSAuthServiceTests
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();
         result.Tokens.Should().BeNull();
         result.Organizations.Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public async Task EmailOtpVerify_WhenAuthorizationChallengeIsUsedAsStandalone_DoesNotConsumeChallenge()
+    {
+        using var context = CreateContext();
+        var authOptions = new SqlOSAuthServerOptions();
+        authOptions.SeedAuthPage(page => page.EnabledCredentialTypes = ["email_otp"]);
+        var options = Options.Create(authOptions);
+        var emailSender = new TestAuthEmailSender { IsConfigured = true };
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+
+        await settings.UpsertSeededAuthPageSettingsAsync();
+        await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
+
+        var challenge = await emailOtp.StartForAuthorizationRequestAsync(
+            new SqlOSAuthorizationRequest { Id = "req_bound" },
+            "alice@example.com");
+        var code = Regex.Match(emailSender.Messages.Single().TextBody!, @"\b\d{4,8}\b").Value;
+
+        var act = async () => await emailOtp.VerifyAsync(
+            new SqlOSEmailOtpVerifyRequest(challenge.ChallengeToken, code),
+            expectedAuthorizationRequestId: null,
+            requireAuthorizationRequestMatch: true);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+
+        var storedChallenge = await context.Set<SqlOSEmailOtpChallenge>().SingleAsync();
+        storedChallenge.ConsumedAt.Should().BeNull();
     }
 
     /* ─────────────────────────────────────────────────────────────────────────
@@ -144,7 +180,7 @@ public sealed class SqlOSAuthServiceTests
         using var context = CreateContext();
         var authOptions = new SqlOSAuthServerOptions { RefreshTokenGraceWindowSeconds = 30 };
         var options = Options.Create(authOptions);
-        var settingsService = new SqlOSSettingsService(context, options);
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
 
         // Update via the dashboard API surface.
         var updated = await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
@@ -168,7 +204,7 @@ public sealed class SqlOSAuthServiceTests
     {
         using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var settingsService = new SqlOSSettingsService(context, options);
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
 
         var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
             RefreshTokenLifetimeMinutes: 60,
@@ -195,7 +231,7 @@ public sealed class SqlOSAuthServiceTests
             AccessTokenLifetime = TimeSpan.FromMinutes(10) // 600 seconds
         };
         var options = Options.Create(authOptions);
-        var settingsService = new SqlOSSettingsService(context, options);
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
 
         var act = async () => await settingsService.UpdateSecuritySettingsAsync(new SqlOSUpdateSecuritySettingsRequest(
             RefreshTokenLifetimeMinutes: 60,
@@ -352,8 +388,10 @@ public sealed class SqlOSAuthServiceTests
             // ReplacementAccessToken cache is encrypted at rest as in production.
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
-            var settings = new SqlOSSettingsService(context, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings);
+            var emailSender = new TestAuthEmailSender();
+            var settings = new SqlOSSettingsService(context, options, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();

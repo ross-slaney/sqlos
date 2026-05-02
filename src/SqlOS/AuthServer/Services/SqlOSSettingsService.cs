@@ -12,11 +12,16 @@ public sealed class SqlOSSettingsService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly ISqlOSAuthEmailSender _emailSender;
 
-    public SqlOSSettingsService(ISqlOSAuthServerDbContext context, IOptions<SqlOSAuthServerOptions> options)
+    public SqlOSSettingsService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        ISqlOSAuthEmailSender emailSender)
     {
         _context = context;
         _options = options.Value;
+        _emailSender = emailSender;
     }
 
     public async Task EnsureDefaultSettingsAsync(CancellationToken cancellationToken = default)
@@ -207,7 +212,9 @@ public sealed class SqlOSSettingsService
             DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
             settings.UpdatedAt,
             _options.AuthPageSeed != null,
-            _options.Headless.BuildUiUrl != null);
+            _options.Headless.BuildUiUrl != null,
+            _options.EnableLocalPasswordAuth,
+            _emailSender.IsConfigured);
     }
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
@@ -246,6 +253,28 @@ public sealed class SqlOSSettingsService
         await _context.SaveChangesAsync(cancellationToken);
 
         return await GetAuthPageSettingsAsync(cancellationToken);
+    }
+
+    public async Task<SqlOSResolvedCredentialSettings> GetResolvedCredentialSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await GetAuthPageSettingsAsync(cancellationToken);
+        var effectiveTypes = (settings.EnabledCredentialTypes ?? Array.Empty<string>())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(value =>
+                (string.Equals(value, "password", StringComparison.OrdinalIgnoreCase) && settings.LocalPasswordRuntimeEnabled)
+                || (string.Equals(value, "email_otp", StringComparison.OrdinalIgnoreCase) && settings.EmailOtpRuntimeConfigured))
+            .ToArray();
+
+        var passwordEnabled = effectiveTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
+        var emailOtpEnabled = effectiveTypes.Contains("email_otp", StringComparer.OrdinalIgnoreCase);
+
+        return new SqlOSResolvedCredentialSettings(
+            effectiveTypes,
+            passwordEnabled,
+            passwordEnabled && settings.EnablePasswordSignup,
+            emailOtpEnabled);
     }
 
     private static string[] DeserializeCredentialTypes(string json)

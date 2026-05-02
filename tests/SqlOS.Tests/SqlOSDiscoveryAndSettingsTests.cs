@@ -52,7 +52,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             SessionIdleTimeout = TimeSpan.FromDays(2),
             SessionAbsoluteLifetime = TimeSpan.FromDays(30)
         });
-        var settingsService = new SqlOSSettingsService(context, options);
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
 
         var defaults = await settingsService.GetSecuritySettingsAsync();
         defaults.RefreshTokenLifetimeMinutes.Should().Be((int)TimeSpan.FromDays(90).TotalMinutes);

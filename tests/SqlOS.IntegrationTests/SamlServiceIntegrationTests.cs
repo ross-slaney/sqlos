@@ -25,8 +25,10 @@ public sealed class SamlServiceIntegrationTests
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
-        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options);
-        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML {Guid.NewGuid():N}", null));
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
@@ -72,9 +74,11 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
-        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
         var discovery = new SqlOSHomeRealmDiscoveryService(AspireFixture.SharedContext);
         var ssoAuth = new SqlOSSsoAuthorizationService(AspireFixture.SharedContext, admin, crypto, discovery, saml, auth);
 

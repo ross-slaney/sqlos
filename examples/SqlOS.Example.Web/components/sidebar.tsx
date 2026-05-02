@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -47,11 +48,16 @@ function IconShield() {
   );
 }
 
-const links = [
+const links: ReadonlyArray<{
+  href: Route;
+  label: string;
+  icon: () => React.JSX.Element;
+  exact?: boolean;
+}> = [
   { href: "/retail", label: "Dashboard", icon: IconDashboard, exact: true },
   { href: "/retail/chains", label: "Chains", icon: IconChain },
   { href: "/retail/stores", label: "Stores", icon: IconStore },
-] as const;
+];
 
 export function Sidebar() {
   const pathname = usePathname();

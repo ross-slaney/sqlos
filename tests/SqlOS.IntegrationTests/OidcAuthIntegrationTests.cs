@@ -86,8 +86,10 @@ public sealed class OidcAuthIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options);
-        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
         var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
 
         var client = await EnsureClientAsync(admin, "example-web-oidc");
@@ -156,8 +158,10 @@ public sealed class OidcAuthIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options);
-        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
         var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
 
         var client = await EnsureClientAsync(admin, "example-web-refresh");
