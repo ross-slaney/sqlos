@@ -80,6 +80,232 @@ public sealed class SqlOSAuthServiceTests
         storedChallenge.ConsumedAt.Should().BeNull();
     }
 
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_SendsChallenge_ForNewUser()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+
+        var start = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "New User",
+            "new-user@example.com",
+            "test-client",
+            "New Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        start.ChallengeToken.Should().NotBeNullOrWhiteSpace();
+        start.SignupToken.Should().NotBeNullOrWhiteSpace();
+        harness.EmailSender.Messages.Should().ContainSingle();
+        harness.EmailSender.Messages.Single().To.Should().Be("new-user@example.com");
+    }
+
+    [TestMethod]
+    public async Task VerifyEmailOtpSignupAsync_CreatesVerifiedUserMembershipAndTokens()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+
+        var start = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Verified User",
+            "verified-signup@example.com",
+            "test-client",
+            "Verified Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        var result = await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(
+                start.SignupToken,
+                start.ChallengeToken,
+                GetLatestCode(harness.EmailSender, "verified-signup@example.com")),
+            new DefaultHttpContext());
+
+        result.RequiresOrganizationSelection.Should().BeFalse();
+        result.Tokens.Should().NotBeNull();
+        result.Tokens!.AccessToken.Should().NotBeNullOrWhiteSpace();
+
+        var email = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail("verified-signup@example.com"));
+        email.IsVerified.Should().BeTrue();
+        var session = await harness.Context.Set<SqlOSSession>().SingleAsync();
+        session.AuthenticationMethod.Should().Be("email_otp");
+        session.UserId.Should().Be(email.UserId);
+        result.Tokens.OrganizationId.Should().NotBeNullOrWhiteSpace();
+        var hasMembership = await harness.Context.Set<SqlOSMembership>()
+            .AnyAsync(x => x.UserId == email.UserId && x.OrganizationId == result.Tokens.OrganizationId);
+        hasMembership.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_RejectsExistingUser()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing User", "existing@example.com", "P@ssword123!"));
+
+        var act = async () => await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Existing User",
+            "existing@example.com",
+            "test-client",
+            "Existing Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("An account already exists for this email. Sign in with an email code instead.");
+    }
+
+    [TestMethod]
+    public async Task VerifyEmailOtpSignupAsync_RejectsReusedSignupToken()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+        var start = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Reuse User",
+            "reuse@example.com",
+            "test-client",
+            "Reuse Org",
+            OrganizationId: null,
+            CustomFields: null));
+        var code = GetLatestCode(harness.EmailSender, "reuse@example.com");
+
+        await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(start.SignupToken, start.ChallengeToken, code),
+            new DefaultHttpContext());
+
+        var act = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(start.SignupToken, start.ChallengeToken, code),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+    }
+
+    [TestMethod]
+    public async Task VerifyEmailOtpSignupAsync_RejectsWrongSignupChallengePair()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+        var first = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "First User",
+            "first-pair@example.com",
+            "test-client",
+            "First Org",
+            OrganizationId: null,
+            CustomFields: null));
+        var second = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Second User",
+            "second-pair@example.com",
+            "test-client",
+            "Second Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        var act = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(
+                first.SignupToken,
+                second.ChallengeToken,
+                GetLatestCode(harness.EmailSender, "second-pair@example.com")),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_RateLimitsByEmailIpAndClient()
+    {
+        var byEmail = await EmailOtpHarness.CreateAsync(options =>
+        {
+            options.EmailOtp.MaxChallengesPerHour = 1;
+        });
+        await byEmail.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Email Limit",
+            "email-limit@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null));
+        var emailAct = async () => await byEmail.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Email Limit",
+            "email-limit@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null));
+        await emailAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in code requests. Try again later.");
+
+        var byIp = await EmailOtpHarness.CreateAsync(options =>
+        {
+            options.EmailOtp.MaxChallengesPerHour = 100;
+            options.EmailOtp.MaxChallengesPerIpPerHour = 1;
+            options.EmailOtp.MaxChallengesPerClientPerHour = 100;
+        });
+        var ipContext = new DefaultHttpContext();
+        ipContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.10");
+        await byIp.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "IP One",
+            "ip-one@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null), ipContext);
+        var ipAct = async () => await byIp.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "IP Two",
+            "ip-two@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null), ipContext);
+        await ipAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in code requests. Try again later.");
+
+        var byClient = await EmailOtpHarness.CreateAsync(options =>
+        {
+            options.EmailOtp.MaxChallengesPerHour = 100;
+            options.EmailOtp.MaxChallengesPerIpPerHour = 100;
+            options.EmailOtp.MaxChallengesPerClientPerHour = 1;
+        });
+        await byClient.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Client One",
+            "client-one@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null));
+        var clientAct = async () => await byClient.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Client Two",
+            "client-two@example.com",
+            "test-client",
+            "Org",
+            OrganizationId: null,
+            CustomFields: null));
+        await clientAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in code requests. Try again later.");
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_UsesCustomEmailMessageBuilder()
+    {
+        var harness = await EmailOtpHarness.CreateAsync(options =>
+        {
+            options.EmailOtp.ApplicationName = "ChecklistSquad";
+            options.EmailOtp.BuildMessage = context => new SqlOS.AuthServer.Interfaces.SqlOSAuthEmailMessage(
+                context.Email,
+                $"Custom {context.Purpose} {context.ApplicationName}",
+                $"<p>{context.Code}</p>",
+                $"Custom body for {context.MaskedEmail}");
+        });
+
+        await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Custom Email User",
+            "custom-email@example.com",
+            "test-client",
+            "Custom Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        var message = harness.EmailSender.Messages.Single();
+        message.Subject.Should().Be("Custom signup ChecklistSquad");
+        message.TextBody.Should().Be("Custom body for cu***@example.com");
+    }
+
     /* ─────────────────────────────────────────────────────────────────────────
        Refresh token grace window tests (issue #18)
        ───────────────────────────────────────────────────────────────────────── */
@@ -355,6 +581,61 @@ public sealed class SqlOSAuthServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
+    }
+
+    private static string GetLatestCode(TestAuthEmailSender sender, string email)
+    {
+        var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
+        return Regex.Match(message.TextBody ?? string.Empty, @"\b\d{4,8}\b").Value;
+    }
+
+    private sealed class EmailOtpHarness : IDisposable
+    {
+        public required TestSqlOSInMemoryDbContext Context { get; init; }
+        public required SqlOSAuthService Auth { get; init; }
+        public required SqlOSAdminService Admin { get; init; }
+        public required TestAuthEmailSender EmailSender { get; init; }
+
+        public static async Task<EmailOtpHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
+        {
+            var context = new TestSqlOSInMemoryDbContext(
+                new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
+                    .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                    .Options);
+
+            var authOptions = new SqlOSAuthServerOptions();
+            authOptions.EnableLocalPasswordAuth = false;
+            authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+            authOptions.SeedAuthPage(page =>
+            {
+                page.EnabledCredentialTypes = ["email_otp"];
+                page.EnablePasswordSignup = false;
+            });
+            configure?.Invoke(authOptions);
+
+            var options = Options.Create(authOptions);
+            var emailSender = new TestAuthEmailSender { IsConfigured = true };
+            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var admin = new SqlOSAdminService(context, options, crypto);
+            var settings = new SqlOSSettingsService(context, options, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+
+            await crypto.EnsureActiveSigningKeyAsync();
+            await admin.UpsertSeededClientsAsync();
+            await settings.UpsertSeededAuthPageSettingsAsync();
+
+            return new EmailOtpHarness
+            {
+                Context = context,
+                Auth = auth,
+                Admin = admin,
+                EmailSender = emailSender
+            };
+        }
+
+        public void Dispose()
+            => Context.Dispose();
     }
 
     /// <summary>

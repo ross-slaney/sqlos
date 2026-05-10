@@ -29,6 +29,12 @@ BEGIN
     CREATE INDEX [IX_SqlOSEmailOtpChallenges_NormalizedEmail_CreatedAt]
         ON [{Schema}].[SqlOSEmailOtpChallenges]([NormalizedEmail], [CreatedAt]);
 
+    CREATE INDEX [IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt]
+        ON [{Schema}].[SqlOSEmailOtpChallenges]([IpAddress], [CreatedAt]);
+
+    CREATE INDEX [IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt]
+        ON [{Schema}].[SqlOSEmailOtpChallenges]([ClientApplicationId], [CreatedAt]);
+
     ALTER TABLE [{Schema}].[SqlOSEmailOtpChallenges]
         ADD CONSTRAINT [FK_SqlOSEmailOtpChallenges_Users_UserId]
             FOREIGN KEY ([UserId]) REFERENCES [{Schema}].[SqlOSUsers]([Id]);
@@ -44,6 +50,24 @@ BEGIN
     ALTER TABLE [{Schema}].[SqlOSEmailOtpChallenges]
         ADD CONSTRAINT [FK_SqlOSEmailOtpChallenges_ClientApplications_ClientApplicationId]
             FOREIGN KEY ([ClientApplicationId]) REFERENCES [{Schema}].[SqlOSClientApplications]([Id]);
+END
+
+GO
+
+IF EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSEmailOtpChallenges' AND schema_id = SCHEMA_ID('{Schema}'))
+    AND NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSEmailOtpChallenges]'))
+BEGIN
+    CREATE INDEX [IX_SqlOSEmailOtpChallenges_IpAddress_CreatedAt]
+        ON [{Schema}].[SqlOSEmailOtpChallenges]([IpAddress], [CreatedAt]);
+END
+
+GO
+
+IF EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSEmailOtpChallenges' AND schema_id = SCHEMA_ID('{Schema}'))
+    AND NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSEmailOtpChallenges]'))
+BEGIN
+    CREATE INDEX [IX_SqlOSEmailOtpChallenges_ClientApplicationId_CreatedAt]
+        ON [{Schema}].[SqlOSEmailOtpChallenges]([ClientApplicationId], [CreatedAt]);
 END
 
 GO

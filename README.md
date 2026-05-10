@@ -150,6 +150,7 @@ builder.AddSqlOS<AppDbContext>(options =>
         email.AzureCommunicationServicesConnectionString =
             builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
         email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.ApplicationName = "Example";
     });
 
     options.AuthServer.SeedAuthPage(page =>
@@ -158,6 +159,29 @@ builder.AddSqlOS<AppDbContext>(options =>
     });
 });
 ```
+
+Hosted AuthPage, headless browser flows, and backend SDK usage all use the same OTP primitives. A backend can run a passwordless signup without adding its own REST API surface:
+
+```csharp
+var start = await sqlosAuth.RequestEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@example.com",
+        ClientId: "example-web",
+        OrganizationName: "Example Co",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext);
+
+var login = await sqlosAuth.VerifyEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupVerifyRequest(
+        start.SignupToken,
+        start.ChallengeToken,
+        code),
+    httpContext);
+```
+
+Headless browser clients use `/sqlos/auth/headless/email-otp/start`, `/sqlos/auth/headless/email-otp/verify`, `/sqlos/auth/headless/signup/email-otp/start`, and `/sqlos/auth/headless/signup/email-otp/verify`.
 
 Run `./scripts/azure/setup-acs-email.sh --help` for dry-run, DNS, and connection-string options.
 

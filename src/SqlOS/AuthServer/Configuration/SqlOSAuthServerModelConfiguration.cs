@@ -239,6 +239,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.ChallengeTokenHash).IsUnique();
             entity.HasIndex(x => new { x.NormalizedEmail, x.CreatedAt });
+            entity.HasIndex(x => new { x.IpAddress, x.CreatedAt });
+            entity.HasIndex(x => new { x.ClientApplicationId, x.CreatedAt });
             entity.Property(x => x.ChallengeTokenHash).HasMaxLength(128);
             entity.Property(x => x.CodeHash).HasMaxLength(128);
             entity.Property(x => x.Email).HasMaxLength(320);

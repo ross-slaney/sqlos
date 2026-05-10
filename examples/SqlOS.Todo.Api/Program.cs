@@ -101,6 +101,7 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         email.AzureCommunicationServicesConnectionString =
             builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
         email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.ApplicationName = "SqlOS Todo";
     });
 
     auth.SeedAuthPage(page =>

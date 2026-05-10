@@ -131,6 +131,95 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
     }
 
     [TestMethod]
+    public async Task HeadlessEmailOtpSignup_CompletesAuthorizationCodeFlow_AndRunsSignupHook()
+    {
+        using var factory = CreateOtpFactory(enableHeadlessAuthPage: true);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+
+        var email = $"headless-otp-signup-{Guid.NewGuid():N}@example.com";
+        const string verifier = "headless-email-otp-signup-verifier-123456789";
+        var challenge = CreateCodeChallenge(verifier);
+
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = "headless-email-otp-signup-state",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["view"] = "signup"
+        }));
+
+        authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var requestId = QueryHelpers.ParseQuery(authorizeResponse.Headers.Location!.Query)["request"].ToString();
+        requestId.Should().NotBeNullOrWhiteSpace();
+
+        var startResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup/email-otp/start", new
+        {
+            requestId,
+            displayName = "Otp Signup User",
+            email,
+            organizationName = "OTP Signup Org",
+            customFields = new
+            {
+                referralSource = "docs",
+                firstName = "Otp",
+                lastName = "Signup"
+            }
+        });
+
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        startJson.RootElement.GetProperty("type").GetString().Should().Be("view");
+        var viewModel = startJson.RootElement.GetProperty("viewModel");
+        viewModel.GetProperty("view").GetString().Should().Be("email-otp-signup-verify");
+        var challengeToken = viewModel.GetProperty("challengeToken").GetString();
+        var signupToken = viewModel.GetProperty("signupToken").GetString();
+        challengeToken.Should().NotBeNullOrWhiteSpace();
+        signupToken.Should().NotBeNullOrWhiteSpace();
+
+        var verifyResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup/email-otp/verify", new
+        {
+            requestId,
+            signupToken,
+            challengeToken,
+            code = sender.GetLatestCode(email)
+        });
+        verifyResponse.EnsureSuccessStatusCode();
+        var verifyJson = JsonDocument.Parse(await verifyResponse.Content.ReadAsStringAsync());
+        verifyJson.RootElement.GetProperty("type").GetString().Should().Be("redirect");
+
+        var redirectUrl = verifyJson.RootElement.GetProperty("redirectUrl").GetString();
+        redirectUrl.Should().NotBeNullOrWhiteSpace();
+        var tokenResponse = await ExchangeAuthCodeAsync(client, redirectUrl!, verifier);
+        var accessToken = tokenResponse.RootElement.GetProperty("access_token").GetString();
+
+        var sessionRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/auth/session");
+        sessionRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var sessionResponse = await client.SendAsync(sessionRequest);
+        sessionResponse.EnsureSuccessStatusCode();
+
+        var sessionJson = JsonDocument.Parse(await sessionResponse.Content.ReadAsStringAsync());
+        sessionJson.RootElement.GetProperty("session").GetProperty("authenticationMethod").GetString().Should().Be("email_otp");
+
+        var profileRequest = new HttpRequestMessage(HttpMethod.Get, "/api/profile");
+        profileRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var profileResponse = await client.SendAsync(profileRequest);
+        profileResponse.EnsureSuccessStatusCode();
+
+        var profileJson = JsonDocument.Parse(await profileResponse.Content.ReadAsStringAsync());
+        profileJson.RootElement.GetProperty("profile").GetProperty("referralSource").GetString().Should().Be("docs");
+        profileJson.RootElement.GetProperty("profile").GetProperty("organizationName").GetString().Should().Be("OTP Signup Org");
+        profileJson.RootElement.GetProperty("email").GetString().Should().Be(email);
+    }
+
+    [TestMethod]
     public async Task HostedEmailOtpLogin_CompletesAuthorizationCodeFlow()
     {
         using var factory = CreateOtpFactory(enableHeadlessAuthPage: false);

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -608,6 +609,7 @@ public static class EndpointRouteBuilderExtensions
                     displayName,
                     email,
                     organizationName,
+                    customFields: null,
                     context,
                     cancellationToken);
 
@@ -647,6 +649,7 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSEmailOtpService emailOtpService,
+            ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -655,9 +658,15 @@ public static class EndpointRouteBuilderExtensions
             var signupToken = form["signupToken"].ToString();
             var challengeToken = form["challengeToken"].ToString();
             var code = form["code"].ToString();
+            IDbContextTransaction? transaction = null;
 
             try
             {
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
+
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var signupVerification = await emailOtpService.VerifySignupAsync(
                     new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
@@ -669,25 +678,43 @@ public static class EndpointRouteBuilderExtensions
                     signupVerification.DisplayName,
                     signupVerification.Email,
                     signupVerification.OrganizationName,
-                    authorizationRequest?.OrganizationId,
+                    authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId,
                     cancellationToken);
 
                 if (authorizationRequest == null)
                 {
                     await authPageSessionService.SignInAsync(context, signup.User, signup.Organizations.FirstOrDefault()?.Id, signup.AuthenticationMethod, cancellationToken);
+                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                    if (transaction != null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
                     return Results.Redirect($"{authPrefix}/login?status=signed-up");
                 }
 
-                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
                     authorizationRequest,
                     signup.User,
-                    authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    authorizationRequest.OrganizationId ?? signupVerification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
-                    cancellationToken));
+                    cancellationToken);
+
+                await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Redirect(redirectUrl);
             }
             catch (InvalidOperationException ex)
             {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
                 var page = await BuildAuthPageViewModelAsync(
                     "email-otp-signup-verify",
                     requestId,
@@ -881,6 +908,48 @@ public static class EndpointRouteBuilderExtensions
             try
             {
                 return Results.Ok(await headlessAuthService.VerifyEmailOtpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/email-otp/start", async (
+            SqlOSHeadlessEmailOtpSignupStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestEmailOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/email-otp/verify", async (
+            SqlOSHeadlessEmailOtpSignupVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyEmailOtpSignupAsync(context, request, cancellationToken));
             }
             catch (InvalidOperationException ex)
             {
@@ -1868,18 +1937,21 @@ public static class EndpointRouteBuilderExtensions
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)
     {
-        if (credentialSettings.PasswordEnabled)
-        {
-            return "password";
-        }
-
         if (credentialSettings.EmailOtpEnabled)
         {
             return "email-otp";
         }
 
+        if (credentialSettings.PasswordEnabled)
+        {
+            return "password";
+        }
+
         return "login";
     }
+
+    private static bool SupportsDatabaseTransactions(ISqlOSAuthServerDbContext context)
+        => !string.Equals(context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
 
     private sealed record LogoutRequest(string? RefreshToken, string? SessionId);
     private sealed record LogoutAllRequest(string UserId);

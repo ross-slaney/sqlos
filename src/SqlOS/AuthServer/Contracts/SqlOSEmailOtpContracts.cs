@@ -1,9 +1,19 @@
+using System.Text.Json.Nodes;
+
 namespace SqlOS.AuthServer.Contracts;
 
 public sealed record SqlOSEmailOtpStartRequest(
     string Email,
     string ClientId,
     string? OrganizationId);
+
+public sealed record SqlOSEmailOtpSignupStartRequest(
+    string DisplayName,
+    string Email,
+    string ClientId,
+    string? OrganizationName,
+    string? OrganizationId,
+    JsonObject? CustomFields);
 
 public sealed record SqlOSEmailOtpStartResult(
     string ChallengeToken,

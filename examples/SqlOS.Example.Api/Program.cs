@@ -61,6 +61,7 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
     {
         emailOtp.AzureCommunicationServicesConnectionString = builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
         emailOtp.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        emailOtp.ApplicationName = "SqlOS Example";
     });
 
     var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]

@@ -163,6 +163,21 @@ internal static class SqlOSOptionsValidator
         {
             errors.Add("AuthServer.EmailOtp.MaxChallengesPerHour must be greater than zero.");
         }
+
+        if (options.MaxChallengesPerIpPerHour <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxChallengesPerIpPerHour must be greater than zero.");
+        }
+
+        if (options.MaxChallengesPerClientPerHour <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxChallengesPerClientPerHour must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ApplicationName))
+        {
+            errors.Add("AuthServer.EmailOtp.ApplicationName is required.");
+        }
     }
 
     private static string BuildAuthBasePath(string dashboardBasePath)

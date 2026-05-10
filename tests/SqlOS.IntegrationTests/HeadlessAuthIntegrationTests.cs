@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -222,6 +223,79 @@ public sealed class HeadlessAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task EmailOtpSignUpAsync_WhenHookThrowsValidation_RollsBackUserOrganizationAndChallengeConsumption()
+    {
+        await using var fixture = await CreateFixtureAsync(headless =>
+        {
+            headless.OnHeadlessSignupAsync = (_, _) =>
+                throw new SqlOSHeadlessValidationException(
+                    "Validation failed.",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["companyName"] = "Company name is already in use."
+                    },
+                    ["Please review the highlighted fields."]);
+        });
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-otp-validation",
+                "openid profile email",
+                "challenge-otp-validation",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                """{"lng":"en"}"""));
+
+        var email = $"otp-validation-{Guid.NewGuid():N}@example.com";
+        var organizationName = $"Otp-Acme-{Guid.NewGuid():N}";
+        var start = await fixture.HeadlessAuthService.RequestEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupStartRequest(
+                authorizationRequest.Id,
+                "OTP Alice",
+                email,
+                organizationName,
+                new JsonObject
+                {
+                    ["companyName"] = organizationName
+                }));
+
+        start.Type.Should().Be("view");
+        start.ViewModel.Should().NotBeNull();
+        start.ViewModel!.View.Should().Be("email-otp-signup-verify");
+        var challengeToken = start.ViewModel.ChallengeToken!;
+        var signupToken = start.ViewModel.SignupToken!;
+
+        var verify = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupVerifyRequest(
+                authorizationRequest.Id,
+                signupToken,
+                challengeToken,
+                GetLatestCode(fixture.EmailSender, email)));
+
+        verify.Type.Should().Be("view");
+        verify.ViewModel.Should().NotBeNull();
+        verify.ViewModel!.View.Should().Be("email-otp-signup-verify");
+        verify.ViewModel.FieldErrors.Should().ContainKey("companyName");
+        verify.ViewModel.Error.Should().Be("Please review the highlighted fields.");
+        verify.ViewModel.SignupToken.Should().Be(signupToken);
+        verify.ViewModel.ChallengeToken.Should().Be(challengeToken);
+
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task SignUpAsync_EstablishesReusableAuthPageSession()
     {
         await using var fixture = await CreateFixtureAsync();
@@ -307,6 +381,11 @@ public sealed class HeadlessAuthIntegrationTests
         };
         optionsValue.SeedBrowserClient(clientId, $"Headless Test {clientId}", redirectUri);
         optionsValue.ClientSeeds[0].AllowNativeHeadlessAuth = allowNativeHeadlessAuth;
+        optionsValue.SeedAuthPage(page =>
+        {
+            page.EnabledCredentialTypes = ["password", "email_otp"];
+            page.EnablePasswordSignup = true;
+        });
         optionsValue.UseHeadlessAuthPage(headless =>
         {
             headless.BuildUiUrl = ctx =>
@@ -317,7 +396,7 @@ public sealed class HeadlessAuthIntegrationTests
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var emailSender = new TestAuthEmailSender();
+        var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
@@ -359,9 +438,9 @@ public sealed class HeadlessAuthIntegrationTests
 
         await crypto.EnsureActiveSigningKeyAsync();
         await admin.UpsertSeededClientsAsync();
-        await settings.EnsureDefaultAuthPageSettingsAsync();
+        await settings.UpsertSeededAuthPageSettingsAsync();
 
-        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService);
+        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService, emailSender);
     }
 
     private static TestSqlOSDbContext CreateContext()
@@ -399,6 +478,12 @@ public sealed class HeadlessAuthIntegrationTests
         return setCookieHeader[start..end];
     }
 
+    private static string GetLatestCode(TestAuthEmailSender sender, string email)
+    {
+        var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
+        return Regex.Match(message.TextBody ?? message.HtmlBody, @"\b\d{4,8}\b").Value;
+    }
+
     private sealed record HeadlessFixture(
         TestSqlOSDbContext Context,
         string ClientId,
@@ -406,7 +491,8 @@ public sealed class HeadlessAuthIntegrationTests
         SqlOSAdminService AdminService,
         SqlOSAuthorizationServerService AuthorizationServerService,
         SqlOSHeadlessAuthService HeadlessAuthService,
-        SqlOSAuthPageSessionService AuthPageSessionService) : IAsyncDisposable
+        SqlOSAuthPageSessionService AuthPageSessionService,
+        TestAuthEmailSender EmailSender) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
