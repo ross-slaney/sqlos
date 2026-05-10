@@ -87,7 +87,10 @@ public static class EndpointRouteBuilderExtensions
 
                 var requestedView = context.Request.Query["view"].ToString().Trim().ToLowerInvariant() switch
                 {
+                    "invite" => "invite",
+                    "login" => "login",
                     "signup" => "signup",
+                    "password" => "password",
                     "email-otp" => "email-otp",
                     _ when invitation != null => "invite",
                     _ => "login"

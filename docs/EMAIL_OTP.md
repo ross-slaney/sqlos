@@ -60,6 +60,13 @@ POST /sqlos/auth/headless/signup/email-otp/verify
 
 The signup flow preserves `customFields`, which lets app-owned UIs pass profile and onboarding context while SqlOS still owns the auth transaction.
 
+The `start` responses include raw one-time tokens that SqlOS intentionally cannot return from a later request reload:
+
+- login OTP: keep `challengeToken` until `/email-otp/verify`
+- signup OTP: keep both `signupToken` and `challengeToken` until `/signup/email-otp/verify`
+
+Store these values in component state or browser `sessionStorage`, not in the URL. If the UI route changes from `email-otp` to `email-otp-verify`, do not refetch the headless request in a way that discards those tokens.
+
 ## SDK Usage
 
 Existing users:

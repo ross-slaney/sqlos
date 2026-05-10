@@ -77,6 +77,7 @@ For invitation links, the same rule applies:
 
 - hosted deployments render `/sqlos/auth/invitations/accept?token=...`
 - headless deployments can resolve the token with `POST /sqlos/auth/headless/invitations/resolve`, then pass `invitationToken` through the normal headless start/login/signup/OTP/provider requests
+- after a headless authorization request exists, view changes should preserve that request id; invite login/signup tabs should not restart as standalone links
 
 Read more:
 

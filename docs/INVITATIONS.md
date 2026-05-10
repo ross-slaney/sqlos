@@ -81,6 +81,16 @@ The request body is:
 
 Existing headless start/login/signup/OTP/provider requests accept `invitationToken`. Once an authorization request is bound to an invite, later steps can rely on the request id; SqlOS keeps the invite context server-side.
 
+Recommended headless lifecycle:
+
+1. Resolve the token to render the invite landing screen.
+2. When the user chooses **sign in** or **create account**, start the normal OAuth authorization request with the selected `view` and the same `invitationToken`.
+3. Keep the invited email read-only in your UI. SqlOS will reject a mismatched effective identity.
+4. Pass `invitationToken` through follow-up headless actions until the request is bound. Passing it on every action is safe.
+5. For OTP invite signup, persist the `challengeToken` and `signupToken` returned by `/signup/email-otp/start` until `/signup/email-otp/verify`; those raw tokens are not recoverable from `GET /headless/requests/{requestId}`.
+
+Avoid using plain links between invite/login/signup screens after an authorization request exists. Switch views in client state or include the same request id so the bound invitation and OAuth request are preserved.
+
 ## Dashboard
 
 Open an organization in the Auth dashboard and use the **Invitations** tab to:
