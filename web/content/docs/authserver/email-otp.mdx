@@ -1,0 +1,127 @@
+---
+title: "Email OTP"
+description: "Passwordless email-code sign in and signup for hosted, headless, and SDK flows."
+order: 1.52
+section: authserver
+---
+
+Email OTP lets users sign in or create an account with a short-lived code sent to their inbox. The same runtime works in hosted AuthPage, headless UI, and backend SDK flows.
+
+## Configure delivery
+
+SqlOS ships an Azure Communication Services sender. Set the connection string and verified sender address:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureEmailOtp(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.ApplicationName = "Acme";
+    });
+});
+```
+
+For local development:
+
+```bash
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString="<acs-connection-string>" \
+SqlOS__EmailOtp__FromAddress="no-reply@example.com" \
+dotnet run
+```
+
+Use `scripts/azure/setup-acs-email.sh` to create the ACS Email resources and DNS verification records.
+
+## Enable AuthPage Email OTP
+
+Seed or configure the AuthPage credential types:
+
+```csharp
+options.AuthServer.EnableLocalPasswordAuth = false;
+
+options.AuthServer.SeedAuthPage(page =>
+{
+    page.EnabledCredentialTypes = ["email_otp"];
+    page.EnablePasswordSignup = false;
+});
+```
+
+With hosted AuthPage, SqlOS owns the full flow: email collection, home realm discovery, OTP delivery, verification, signup, session, org selection, and final OAuth redirect.
+
+## Headless flow
+
+Headless apps still let SqlOS run the auth state machine. Your UI posts actions and renders the returned view model.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sqlos/auth/headless/email-otp/start` | Start an existing-user OTP sign-in |
+| `POST /sqlos/auth/headless/email-otp/verify` | Verify an existing-user OTP sign-in |
+| `POST /sqlos/auth/headless/signup/email-otp/start` | Start a new-user OTP signup |
+| `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify OTP signup and issue the redirect |
+
+The start responses include `challengeToken`, masked email, expiry, and resend timing. Signup start also includes `signupToken`. Store those values in page state only long enough to verify the code.
+
+<Callout type="warning" title="Keep HRD in front of OTP">
+  If the email belongs to an organization with required SSO, SqlOS redirects to SSO before creating an OTP challenge. Do not bypass `identify` or the OTP start response handling in a headless UI.
+</Callout>
+
+## SDK flow
+
+Backend developers can use `SqlOSAuthService` directly:
+
+```csharp
+var start = await authService.RequestEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@example.com",
+        ClientId: "web",
+        OrganizationName: "Acme",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext,
+    ct);
+
+var result = await authService.VerifyEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupVerifyRequest(
+        start.SignupToken,
+        start.ChallengeToken,
+        code),
+    httpContext,
+    ct);
+```
+
+Existing-user sign-in uses `RequestEmailOtpAsync(...)` and `VerifyEmailOtpAsync(...)`.
+
+## Rate limits
+
+Configure the limits that make sense for your product:
+
+```csharp
+options.AuthServer.ConfigureEmailOtp(email =>
+{
+    email.MaxChallengesPerHour = 5;          // per email
+    email.MaxChallengesPerIpPerHour = 60;
+    email.MaxChallengesPerClientPerHour = 200;
+});
+```
+
+SqlOS checks the limits before creating or sending a challenge and records audit events for starts, send failures, successes, failures, and rate-limit rejections.
+
+## Custom email content
+
+For built-in branding, use [Email Branding](/docs/authserver/email-branding). For complete control, provide a message builder:
+
+```csharp
+options.AuthServer.ConfigureEmailOtp(email =>
+{
+    email.BuildMessage = ctx => new SqlOSAuthEmailMessage(
+        ctx.Email,
+        $"Your {ctx.ApplicationName} code",
+        $"<p>Your code is <strong>{ctx.Code}</strong>.</p>",
+        $"Your code is {ctx.Code}.");
+});
+```
+
+The builder receives the purpose (`login` or `signup`), email, masked email, code, expiry, application name, and resolved branding.

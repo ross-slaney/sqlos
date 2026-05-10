@@ -38,22 +38,49 @@ public static class SqlOSAuthPageRenderer
         var requestIdInput = string.IsNullOrWhiteSpace(model.AuthorizationRequestId)
             ? string.Empty
             : $"<input type=\"hidden\" name=\"requestId\" value=\"{Html(model.AuthorizationRequestId)}\" />";
+        var invitationTokenInput = string.IsNullOrWhiteSpace(model.InvitationToken)
+            ? string.Empty
+            : $"<input type=\"hidden\" name=\"invitationToken\" value=\"{Html(model.InvitationToken)}\" />";
         var emailValue = Html(model.Email ?? string.Empty);
+        var emailReadonly = model.Invitation == null ? string.Empty : " readonly";
         var encodedMode = Html(normalizedMode);
-        var signupLink = model.Settings.EnablePasswordSignup
+        var supportsPassword = model.Settings.LocalPasswordRuntimeEnabled
+            && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "password");
+        var supportsEmailOtp = model.Settings.EmailOtpRuntimeConfigured
+            && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "email_otp");
+        var supportsPasswordSignup = supportsPassword && model.Settings.EnablePasswordSignup;
+        var supportsEmailOtpSignup = supportsEmailOtp;
+        var supportsInvitationSignup = model.Invitation != null && supportsEmailOtpSignup;
+        var supportsSignup = supportsPasswordSignup || supportsEmailOtpSignup;
+        var signupLink = supportsSignup
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Get started</a>"
             : string.Empty;
         var loginLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Sign in</a>";
+        var passwordLink = supportsPassword
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login", model.AuthorizationRequestId, ("email", model.Email)))}\">Use password instead</a>"
+            : string.Empty;
+        var emailOtpLink = supportsEmailOtp
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Use an email code instead</a>"
+            : string.Empty;
         var signInAgainLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login"))}\">Sign in again</a>";
         var errorMarkup = BuildCallout("error", model.Error);
         var infoMarkup = BuildCallout("info", model.Info);
-
-        var content = normalizedMode switch
-        {
-            "signup" => $$"""
-                {{RenderPanelIntro("Create account", "Use email and password to set up your account.")}}
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
+        var invitationMarkup = RenderInvitationSummary(model.Invitation);
+        var organizationField = model.Invitation == null
+            ? """
+                  <label class="field">
+                    <span>Organization name</span>
+                    <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                  </label>
+              """
+            : string.Empty;
+        var signupContent = supportsInvitationSignup
+            ? $$"""
+                {{RenderPanelIntro("Create account", "Create your account to accept this invitation.")}}
+                {{invitationMarkup}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
                   {{requestIdInput}}
+                  {{invitationTokenInput}}
                   <input type="hidden" name="mode" value="{{encodedMode}}" />
                   <label class="field">
                     <span>Display name</span>
@@ -61,28 +88,129 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   <label class="field">
                     <span>Email</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
-                  </label>
-                  <label class="field">
-                    <span>Password</span>
-                    <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required />
-                  </label>
-                  <label class="field">
-                    <span>Organization name</span>
-                    <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                    <input name="email" type="email" value="{{emailValue}}" autocomplete="email" readonly required />
                   </label>
                   {{RenderPrimaryAction("Create account", "Creating account")}}
                 </form>
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                """
+            : supportsPasswordSignup
+            ? $$"""
+                {{RenderPanelIntro("Create account", "Use email and password to set up your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="mode" value="{{encodedMode}}" />
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                  </label>
+                  <label class="field">
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
+                  </label>
+                  <label class="field">
+                    <span>Password</span>
+                    <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required />
+                  </label>
+                  {{organizationField}}
+                {{RenderPrimaryAction("Create account", "Creating account")}}
+                </form>
+                {{RenderProvidersSection(model)}}
+                {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                """
+            : supportsEmailOtpSignup
+                ? $$"""
+                    {{RenderPanelIntro("Create account", "Verify your email with a one-time code to create your account.")}}
+                    <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/start"))}}">
+                      {{requestIdInput}}
+                      {{invitationTokenInput}}
+                      <input type="hidden" name="mode" value="{{encodedMode}}" />
+                      <label class="field">
+                        <span>Display name</span>
+                        <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                      </label>
+                      <label class="field">
+                        <span>Email</span>
+                        <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
+                      </label>
+                      {{organizationField}}
+                      {{RenderPrimaryAction("Email me a code", "Sending code")}}
+                    </form>
+                    {{RenderProvidersSection(model)}}
+                    {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                    """
+                : $$"""
+                    {{RenderPanelIntro("Create account", "Account creation is not available.")}}
+                    {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                    """;
+
+        var content = normalizedMode switch
+        {
+            "invite" => $$"""
+                {{RenderPanelIntro("Accept Invitation", "Continue with the invited email address to join the organization.")}}
+                {{invitationMarkup}}
+                {{(supportsEmailOtp ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/email-otp/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  {{RenderPrimaryAction("Email me a sign-in code", "Sending code")}}
+                </form>
+                """ : string.Empty)}}
+                {{(supportsInvitationSignup ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                  </label>
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  {{RenderPrimaryAction("Create account", "Creating account")}}
+                </form>
+                """ : string.Empty)}}
+                {{(!supportsInvitationSignup && supportsPasswordSignup ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                  </label>
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Password</span>
+                    <input name="password" type="password" placeholder="Create a password" autocomplete="new-password" required />
+                  </label>
+                  {{RenderPrimaryAction("Create account with password", "Creating account")}}
+                </form>
+                """ : string.Empty)}}
+                {{(supportsPassword ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Password</span>
+                    <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required />
+                  </label>
+                  {{RenderPrimaryAction("Continue with password", "Signing in")}}
+                </form>
+                """ : string.Empty)}}
+                {{(!supportsEmailOtp && !supportsPassword && !supportsInvitationSignup && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
+                {{RenderProvidersSection(model)}}
                 """,
+            "signup" => signupContent,
             "password" => $$"""
                 {{RenderPanelIntro("Password", "Continue with your email and password.")}}
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
                   {{requestIdInput}}
+                  {{invitationTokenInput}}
                   <label class="field">
                     <span>Email</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
                   </label>
                   <label class="field">
                     <span>Password</span>
@@ -90,8 +218,57 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Continue", "Signing in")}}
                 </form>
+                {{(string.IsNullOrWhiteSpace(emailOtpLink) ? string.Empty : RenderFooterLinks(emailOtpLink))}}
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Don't have an account?", signupLink)}}
+                """,
+            "email-otp" => $$"""
+                {{RenderPanelIntro("Email Code", "Get a one-time code sent to your email address.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/email-otp/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <label class="field">
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
+                  </label>
+                  {{RenderPrimaryAction("Email me a code", "Sending code")}}
+                </form>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderProvidersSection(model)}}
+                """,
+            "email-otp-verify" => $$"""
+                {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your email address.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/email-otp/verify"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify code", "Verifying code")}}
+                </form>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] {
+                    $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Send a new code</a>",
+                    passwordLink
+                }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                """,
+            "email-otp-signup-verify" => $$"""
+                {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your email address to create your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/verify"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="signupToken" value="{{Html(model.SignupToken ?? string.Empty)}}" />
+                  <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify and create account", "Verifying code")}}
+                </form>
+                {{RenderFooterLinks($"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Start over</a>")}}
                 """,
             "organization" => $$"""
                 {{RenderPanelIntro("Organization", "Choose the workspace you want to continue into.")}}
@@ -114,9 +291,10 @@ public static class SqlOSAuthPageRenderer
             _ => $$"""
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/identify"))}}" data-flow-kind="hrd">
                   {{requestIdInput}}
+                  {{invitationTokenInput}}
                   <label class="field">
                     <span>Email</span>
-                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
                   </label>
                   {{RenderPrimaryAction("Continue", "Checking email")}}
                   <div class="flow-status" hidden>
@@ -278,6 +456,24 @@ public static class SqlOSAuthPageRenderer
               color: var(--muted);
               font-size: 13px;
               line-height: 1.55;
+            }
+            .invite-summary {
+              display: grid;
+              gap: 6px;
+              padding: 14px;
+              border: 1px solid var(--border);
+              border-radius: 12px;
+              background: color-mix(in srgb, var(--primary) 6%, var(--panel));
+              font-size: 14px;
+              line-height: 1.45;
+            }
+            .invite-summary strong {
+              font-size: 15px;
+              font-weight: 600;
+            }
+            .invite-summary span {
+              color: var(--muted);
+              font-size: 13px;
             }
             .auth-form,
             .organization-list,
@@ -652,6 +848,22 @@ public static class SqlOSAuthPageRenderer
             </div>
             """;
 
+    private static string RenderInvitationSummary(SqlOSEmailInvitationResult? invitation)
+    {
+        if (invitation == null)
+        {
+            return string.Empty;
+        }
+
+        return $$"""
+            <div class="invite-summary">
+              <strong>{{Html(invitation.OrganizationName)}}</strong>
+              <span>{{Html(invitation.Email)}} invited as {{Html(invitation.Role)}}.</span>
+              <span>Expires {{Html(invitation.ExpiresAt.ToString("g", CultureInfo.InvariantCulture))}} UTC.</span>
+            </div>
+            """;
+    }
+
     private static string RenderProvidersSection(SqlOSAuthPageViewModel model)
     {
         if (model.Providers.Count == 0)
@@ -834,14 +1046,64 @@ public static class SqlOSAuthPageRenderer
             ? "login"
             : mode.Trim().ToLowerInvariant();
 
-    private static string BuildRequestQuery(string? requestId)
-        => string.IsNullOrWhiteSpace(requestId) ? string.Empty : $"?request={Uri.EscapeDataString(requestId)}";
+    private static string BuildRequestQuery(string? requestId, string? invitationToken)
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            query.Add($"request={Uri.EscapeDataString(requestId)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(invitationToken))
+        {
+            query.Add($"invitationToken={Uri.EscapeDataString(invitationToken)}");
+        }
+
+        return query.Count == 0 ? string.Empty : $"?{string.Join("&", query)}";
+    }
+
+    private static bool SupportsCredentialType(IEnumerable<string>? enabledCredentialTypes, string credentialType)
+        => (enabledCredentialTypes ?? Array.Empty<string>())
+            .Any(value => string.Equals(value, credentialType, StringComparison.OrdinalIgnoreCase));
 
     private static string AuthPath(SqlOSAuthPageViewModel model, string path, string? requestId = null)
     {
         var basePath = model.BasePath.TrimEnd('/');
         var normalizedPath = path.StartsWith('/') ? path : $"/{path}";
-        return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId)}";
+        return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId, model.InvitationToken)}";
+    }
+
+    private static string AuthPathWithQuery(
+        SqlOSAuthPageViewModel model,
+        string path,
+        string? requestId = null,
+        params (string Key, string? Value)[] queryItems)
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            query.Add($"request={Uri.EscapeDataString(requestId)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.InvitationToken))
+        {
+            query.Add($"invitationToken={Uri.EscapeDataString(model.InvitationToken)}");
+        }
+
+        foreach (var (key, value) in queryItems)
+        {
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            query.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
+        }
+
+        var basePath = AuthPath(model, path);
+        return query.Count == 0
+            ? basePath
+            : $"{basePath.Split('?', 2)[0]}?{string.Join("&", query)}";
     }
 
     private static string Css(string? value, string fallback)
@@ -914,6 +1176,10 @@ public sealed record SqlOSAuthPageViewModel(
     string? Info,
     string? PendingToken,
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
-    IReadOnlyList<SqlOSAuthPageProviderLink> Providers);
+    IReadOnlyList<SqlOSAuthPageProviderLink> Providers,
+    string? ChallengeToken = null,
+    string? SignupToken = null,
+    string? InvitationToken = null,
+    SqlOSEmailInvitationResult? Invitation = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

@@ -81,6 +81,10 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
             <div class="ha-error">{{ error() }}</div>
           }
 
+          @if (viewModel()?.info) {
+            <div class="ha-success">{{ viewModel()?.info }}</div>
+          }
+
           @if (!requestId) {
             <!-- Flow starter -->
             <div class="ha-form">
@@ -137,6 +141,45 @@ const IMAGE_SIGNUP = 'https://images.unsplash.com/photo-1556740758-90de374c12ad?
                 </button>
                 <div class="ha-alt">
                   <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                  @if (supportsEmailOtp()) {
+                    <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Email me a code instead</button>
+                  }
+                </div>
+              </form>
+            }
+
+            @if (view() === 'email-otp') {
+              <form class="ha-form" (ngSubmit)="onRequestEmailOtp()">
+                <div class="ha-field">
+                  <label for="ha-otp-email">Email</label>
+                  <input id="ha-otp-email" type="email" [(ngModel)]="email" name="email" placeholder="you&#64;company.com" required>
+                </div>
+                <button type="submit" class="ha-submit" [disabled]="loading()">
+                  {{ loading() ? 'Sending code...' : 'Email me a code' }}
+                </button>
+                <div class="ha-alt">
+                  @if (supportsPassword()) {
+                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                  }
+                  <button type="button" class="ha-link-btn" (click)="view.set('login')">Use a different email</button>
+                </div>
+              </form>
+            }
+
+            @if (view() === 'email-otp-verify') {
+              <form class="ha-form" (ngSubmit)="onVerifyEmailOtp()">
+                <div class="ha-field">
+                  <label for="ha-otp-code">Code</label>
+                  <input id="ha-otp-code" type="text" [(ngModel)]="otpCode" name="otpCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus>
+                </div>
+                <button type="submit" class="ha-submit" [disabled]="loading()">
+                  {{ loading() ? 'Verifying...' : 'Verify code' }}
+                </button>
+                <div class="ha-alt">
+                  <button type="button" class="ha-link-btn" (click)="view.set('email-otp')">Send a new code</button>
+                  @if (supportsPassword()) {
+                    <button type="button" class="ha-link-btn" (click)="view.set('password')">Use password instead</button>
+                  }
                 </div>
               </form>
             }
@@ -271,6 +314,7 @@ export class AuthAuthorizeComponent implements OnInit {
 
   email = '';
   password = '';
+  otpCode = '';
   organizationName = '';
   firstName = '';
   lastName = '';
@@ -305,6 +349,16 @@ export class AuthAuthorizeComponent implements OnInit {
   showProviderButtons = () => {
     const v = this.view();
     return (v === 'login' || v === 'identify' || v === 'signup') && (this.viewModel()?.providers?.length ?? 0) > 0;
+  };
+
+  supportsPassword = () => {
+    const settings = this.viewModel()?.settings;
+    return !!settings?.localPasswordRuntimeEnabled && (settings.enabledCredentialTypes ?? []).includes('password');
+  };
+
+  supportsEmailOtp = () => {
+    const settings = this.viewModel()?.settings;
+    return !!settings?.emailOtpRuntimeConfigured && (settings.enabledCredentialTypes ?? []).includes('email_otp');
   };
 
   providerMonogram(displayName: string): string {
@@ -401,6 +455,7 @@ export class AuthAuthorizeComponent implements OnInit {
       if (result.viewModel.view) this.view.set(result.viewModel.view);
       if (result.viewModel.error) this.error.set(result.viewModel.error);
       if (result.viewModel.email) this.email = result.viewModel.email;
+      if (result.viewModel.challengeToken) this.otpCode = '';
       this.fieldErrors.set(result.viewModel.fieldErrors ?? {});
     }
   }
@@ -418,6 +473,28 @@ export class AuthAuthorizeComponent implements OnInit {
     this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
     try { await this.handleResult(await this.headless.passwordLogin(this.requestId, this.email, this.password)); }
     catch (err) { this.error.set(err instanceof Error ? err.message : 'Login failed.'); }
+    finally { this.loading.set(false); }
+  }
+
+  async onRequestEmailOtp() {
+    if (!this.requestId) return;
+    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
+    try { await this.handleResult(await this.headless.requestEmailOtp(this.requestId, this.email)); }
+    catch (err) { this.error.set(err instanceof Error ? err.message : 'We could not send a sign-in code.'); }
+    finally { this.loading.set(false); }
+  }
+
+  async onVerifyEmailOtp() {
+    if (!this.requestId) return;
+    const challengeToken = this.viewModel()?.challengeToken;
+    if (!challengeToken) {
+      this.error.set('Request a new sign-in code first.');
+      return;
+    }
+
+    this.loading.set(true); this.error.set(null); this.fieldErrors.set({});
+    try { await this.handleResult(await this.headless.verifyEmailOtp(this.requestId, challengeToken, this.otpCode)); }
+    catch (err) { this.error.set(err instanceof Error ? err.message : 'The sign-in code was rejected.'); }
     finally { this.loading.set(false); }
   }
 

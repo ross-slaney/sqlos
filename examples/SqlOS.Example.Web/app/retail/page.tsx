@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import { useSession } from "next-auth/react";
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
@@ -122,7 +123,7 @@ export default function RetailDashboard() {
   const northyMood = loading ? "thinking" as const : stores.length === 0 ? "wave" as const : lowStockItems.length > 0 ? "alert" as const : "happy" as const;
 
   const quickActions = useMemo(() => {
-    const actions: { label: string; href: string; icon: string }[] = [];
+    const actions: { label: string; href: Route; icon: string }[] = [];
     if (roleLevel === "admin") {
       actions.push({ label: "Add Chain", href: "/retail/chains", icon: "🏢" });
       actions.push({ label: "Add Store", href: "/retail/stores", icon: "📍" });
@@ -131,7 +132,7 @@ export default function RetailDashboard() {
       actions.push({ label: "View All Stores", href: "/retail/stores", icon: "🗺️" });
     }
     if (stores.length === 1) {
-      actions.push({ label: "View Inventory", href: `/retail/locations/${stores[0].id}`, icon: "📦" });
+      actions.push({ label: "View Inventory", href: `/retail/locations/${stores[0].id}` as Route, icon: "📦" });
     }
     if (stores.length > 0) {
       actions.push({ label: "Browse Chains", href: "/retail/chains", icon: "🔍" });

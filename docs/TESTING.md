@@ -27,6 +27,7 @@ They cover:
 - auth schema bootstrap
 - FGA schema bootstrap and TVF registration
 - auth flows
+- Email OTP and invitation service flows
 - client registration and resource binding
 - FGA checks and query composition
 - shared example API and web flows
@@ -39,6 +40,15 @@ They cover:
 - website lint
 - website production build
 - local markdown and MDX link validation across repo docs
+
+## Focused Auth Tests
+
+Useful filters while working on auth features:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter SqlOSInvitationServiceTests
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter RequestEmailOtpSignupAsync
+```
 
 ## Coverage Settings
 

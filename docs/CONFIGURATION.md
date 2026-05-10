@@ -101,6 +101,41 @@ See:
 - repo site source: `web/content/docs/authserver/headless-auth.mdx`
 - published guide: `/docs/authserver/headless-auth`
 
+## Email OTP and invitations
+
+Email OTP and email invitations use the auth email sender configured under `AuthServer.ConfigureEmailOtp`. Invitations have their own policy options, but reuse the sender.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureEmailOtp(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.ApplicationName = "ChecklistSquad";
+    });
+
+    options.AuthServer.ConfigureInvitations(invites =>
+    {
+        invites.DefaultLifetime = TimeSpan.FromDays(7);
+        invites.MaxInvitationsPerEmailPerHour = 10;
+        invites.MaxInvitationsPerIpPerHour = 100;
+        invites.MaxInvitationsPerOrganizationPerHour = 100;
+        invites.MaxInvitationsPerInviterPerHour = 50;
+    });
+});
+```
+
+Environment variables:
+
+```bash
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString=<acs-connection-string>
+SqlOS__EmailOtp__FromAddress=no-reply@example.com
+```
+
+See [Email OTP](EMAIL_OTP.md) and [Email Invitations](INVITATIONS.md).
+
 ## Optional: dashboard password login
 
 Use a dashboard-only password when you are not wiring your app's own auth into the SqlOS admin UI.

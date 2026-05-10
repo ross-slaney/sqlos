@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -17,23 +19,35 @@ public sealed class SqlOSAuthService
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
+    private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSInvitationService? _invitationService;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSAdminService adminService,
         SqlOSCryptoService cryptoService,
-        SqlOSSettingsService settingsService)
+        SqlOSSettingsService settingsService,
+        SqlOSEmailOtpService emailOtpService,
+        SqlOSInvitationService? invitationService = null)
     {
         _context = context;
         _options = options.Value;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _settingsService = settingsService;
+        _emailOtpService = emailOtpService;
+        _invitationService = invitationService;
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
     {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PasswordSignupEnabled)
+        {
+            throw new InvalidOperationException("Password signup is disabled.");
+        }
+
         var user = await _adminService.CreateUserAsync(new SqlOSCreateUserRequest(request.DisplayName, request.Email, request.Password), cancellationToken);
 
         string? organizationId = request.OrganizationId;
@@ -57,7 +71,8 @@ public sealed class SqlOSAuthService
 
     public async Task<SqlOSLoginResult> LoginWithPasswordAsync(SqlOSPasswordLoginRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        if (!_options.EnableLocalPasswordAuth)
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PasswordEnabled)
         {
             throw new InvalidOperationException("Local password authentication is disabled.");
         }
@@ -84,40 +99,258 @@ public sealed class SqlOSAuthService
         credential.LastUsedAt = DateTime.UtcNow;
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == email.UserId, cancellationToken);
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
+    }
 
-        if (!string.IsNullOrWhiteSpace(request.OrganizationId))
+    public async Task<SqlOSEmailOtpStartResult> RequestEmailOtpAsync(
+        SqlOSEmailOtpStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await _emailOtpService.StartForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailOtpSignupStartResult> RequestEmailOtpSignupAsync(
+        SqlOSEmailOtpSignupStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await _emailOtpService.StartSignupForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
+        SqlOSCreateEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().CreateEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> ResendEmailInvitationAsync(
+        SqlOSResendEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().ResendEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> RevokeEmailInvitationAsync(
+        SqlOSRevokeEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().RevokeEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSInvitationAcceptanceResult> AcceptEmailInvitationAsync(
+        SqlOSAcceptEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().AcceptEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSLoginResult> AcceptEmailInvitationSignupAsync(
+        SqlOSAcceptEmailInvitationSignupRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+
+        try
         {
-            if (!await _adminService.UserHasMembershipAsync(user.Id, request.OrganizationId, cancellationToken))
+            if (SupportsDatabaseTransactions())
             {
-                throw new InvalidOperationException("User is not a member of the selected organization.");
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
             }
 
-            await _context.SaveChangesAsync(cancellationToken);
-            var tokens = await CreateSessionAndTokensAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
-            await _adminService.RecordAuditAsync("user.login.password", "user", user.Id, userId: user.Id, organizationId: request.OrganizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
+            var invitation = await RequireInvitationService().ResolveEmailInvitationAsync(
+                request.InvitationToken,
+                httpContext,
+                cancellationToken);
+            var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+
+            signup = await CreateInvitationSignupUserAsync(
+                request.DisplayName,
+                invitation.Email,
+                cancellationToken);
+
+            if (_options.Headless.OnHeadlessSignupAsync != null)
+            {
+                var organization = await _context.Set<SqlOSOrganization>()
+                    .FirstOrDefaultAsync(x => x.Id == invitation.OrganizationId, cancellationToken);
+                await _options.Headless.OnHeadlessSignupAsync(
+                    new SqlOSHeadlessSignupHookContext(
+                        httpContext,
+                        null,
+                        signup.User,
+                        organization,
+                        request.CustomFields ?? invitation.CustomFields ?? new JsonObject()),
+                    cancellationToken);
+            }
+
+            var acceptance = await RequireInvitationService().AcceptEmailInvitationInCurrentTransactionAsync(
+                new SqlOSAcceptEmailInvitationRequest(request.InvitationToken, signup.User.Id),
+                httpContext,
+                cancellationToken);
+
+            await _adminService.RecordAuditAsync(
+                "user.signup.invitation",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: acceptance.OrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+
+            var tokens = await CreateSessionAndTokensAsync(
+                signup.User,
+                client,
+                acceptance.OrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+            var organizations = await _adminService.GetUserOrganizationsAsync(signup.User.Id, cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
             return new SqlOSLoginResult(false, null, organizations, tokens);
         }
-
-        if (organizations.Count > 1)
+        catch
         {
-            var pendingAuthToken = await _cryptoService.CreateTemporaryTokenAsync(
-                "pending_auth",
-                user.Id,
-                client.Id,
-                null,
-                new PendingAuthPayload(client.ClientId, "password"),
-                cancellationToken: cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-            return new SqlOSLoginResult(true, pendingAuthToken, organizations, null);
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    existingOrganizationId: null,
+                    organizationName: null,
+                    cancellationToken: cancellationToken);
+            }
+
+            throw;
+        }
+    }
+
+    public async Task<SqlOSLoginResult> VerifyEmailOtpAsync(
+        SqlOSEmailOtpVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await _emailOtpService.VerifyAsync(request, cancellationToken);
+        if (verification.Challenge.ClientApplicationId == null)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
-        await _context.SaveChangesAsync(cancellationToken);
-        var directTokens = await CreateSessionAndTokensAsync(user, client, organizationId, "password", httpContext, cancellationToken);
-        await _adminService.RecordAuditAsync("user.login.password", "user", user.Id, userId: user.Id, organizationId: organizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
-        return new SqlOSLoginResult(false, null, organizations, directTokens);
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstAsync(x => x.Id == verification.Challenge.ClientApplicationId, cancellationToken);
+
+        return await FinalizeClientLoginAsync(
+            verification.User,
+            client,
+            verification.Challenge.RequestedOrganizationId,
+            verification.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> VerifyEmailOtpSignupAsync(
+        SqlOSEmailOtpSignupVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+        SqlOSEmailOtpSignupVerificationResult? verification = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            verification = await _emailOtpService.VerifySignupAsync(
+                request,
+                expectedAuthorizationRequestId: null,
+                requireAuthorizationRequestMatch: false,
+                cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
+            {
+                throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            }
+
+            var client = await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
+
+            signup = await CreateEmailOtpSignupUserAsync(
+                verification.DisplayName,
+                verification.Email,
+                verification.OrganizationName,
+                verification.OrganizationId,
+                cancellationToken);
+
+            var selectedOrganizationId = verification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+            SqlOSOrganization? organization = null;
+            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
+            {
+                organization = await _context.Set<SqlOSOrganization>()
+                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
+            }
+
+            if (_options.Headless.OnHeadlessSignupAsync != null)
+            {
+                await _options.Headless.OnHeadlessSignupAsync(
+                    new SqlOSHeadlessSignupHookContext(
+                        httpContext,
+                        null,
+                        signup.User,
+                        organization,
+                        verification.CustomFields ?? new JsonObject()),
+                    cancellationToken);
+            }
+
+            await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            await _adminService.RecordAuditAsync(
+                "user.signup.email_otp",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: selectedOrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+
+            var result = await FinalizeClientLoginAsync(
+                signup.User,
+                client,
+                selectedOrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return result;
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    verification?.OrganizationId,
+                    verification?.OrganizationName,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSLoginResult> CompleteExternalLoginAsync(
@@ -696,6 +929,179 @@ public sealed class SqlOSAuthService
             ? client.Audience
             : resource.Trim();
 
+    private bool SupportsDatabaseTransactions()
+        => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
+
+    private async Task<SqlOSPasswordAuthenticationResult> CreateEmailOtpSignupUserAsync(
+        string displayName,
+        string email,
+        string? organizationName,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.EmailOtpEnabled)
+        {
+            throw new InvalidOperationException("Email sign-in is unavailable.");
+        }
+
+        var user = await _adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, null),
+            cancellationToken);
+
+        var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
+        emailRecord.IsVerified = true;
+        emailRecord.VerifiedAt = DateTime.UtcNow;
+        user.DefaultEmail = emailRecord.Email;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        var selectedOrganizationId = organizationId;
+        if (!string.IsNullOrWhiteSpace(organizationName))
+        {
+            var createdOrganization = await _adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(organizationName, null),
+                cancellationToken);
+            selectedOrganizationId = createdOrganization.Id;
+            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(selectedOrganizationId) && organizations.All(x => x.Id != selectedOrganizationId))
+        {
+            organizations = organizations
+                .Concat([new SqlOSOrganizationOption(selectedOrganizationId, selectedOrganizationId, selectedOrganizationId, "member")])
+                .ToList();
+        }
+
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
+    }
+
+    private async Task<SqlOSPasswordAuthenticationResult> CreateInvitationSignupUserAsync(
+        string displayName,
+        string email,
+        CancellationToken cancellationToken)
+    {
+        var user = await _adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, null),
+            cancellationToken);
+
+        var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
+        emailRecord.IsVerified = true;
+        emailRecord.VerifiedAt = DateTime.UtcNow;
+        user.DefaultEmail = emailRecord.Email;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return new SqlOSPasswordAuthenticationResult(
+            user,
+            Array.Empty<SqlOSOrganizationOption>(),
+            "invitation");
+    }
+
+    private async Task CleanupNonTransactionalSignupArtifactsAsync(
+        SqlOSPasswordAuthenticationResult? signup,
+        string? existingOrganizationId,
+        string? organizationName,
+        CancellationToken cancellationToken)
+    {
+        if (signup == null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationName) && string.IsNullOrWhiteSpace(existingOrganizationId))
+        {
+            var organizationIds = signup.Organizations
+                .Select(static x => x.Id)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            if (organizationIds.Length > 0)
+            {
+                var organizations = await _context.Set<SqlOSOrganization>()
+                    .Where(x => organizationIds.Contains(x.Id))
+                    .ToListAsync(cancellationToken);
+                if (organizations.Count > 0)
+                {
+                    _context.Set<SqlOSOrganization>().RemoveRange(organizations);
+                }
+            }
+        }
+
+        var user = await _context.Set<SqlOSUser>()
+            .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
+        if (user != null)
+        {
+            _context.Set<SqlOSUser>().Remove(user);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<SqlOSLoginResult> FinalizeClientLoginAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string? requestedOrganizationId,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(requestedOrganizationId))
+        {
+            if (!await _adminService.UserHasMembershipAsync(user.Id, requestedOrganizationId, cancellationToken))
+            {
+                throw new InvalidOperationException("User is not a member of the selected organization.");
+            }
+
+            var tokens = await CreateSessionAndTokensAsync(user, client, requestedOrganizationId, authenticationMethod, httpContext, cancellationToken);
+            await _adminService.RecordAuditAsync(
+                $"user.login.{authenticationMethod}",
+                "user",
+                user.Id,
+                userId: user.Id,
+                organizationId: requestedOrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+            return new SqlOSLoginResult(false, null, organizations, tokens);
+        }
+
+        if (organizations.Count > 1)
+        {
+            var pendingAuthToken = await _cryptoService.CreateTemporaryTokenAsync(
+                "pending_auth",
+                user.Id,
+                client.Id,
+                null,
+                new PendingAuthPayload(client.ClientId, authenticationMethod),
+                cancellationToken: cancellationToken);
+
+            return new SqlOSLoginResult(true, pendingAuthToken, organizations, null);
+        }
+
+        var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
+        var directTokens = await CreateSessionAndTokensAsync(user, client, organizationId, authenticationMethod, httpContext, cancellationToken);
+        await _adminService.RecordAuditAsync(
+            $"user.login.{authenticationMethod}",
+            "user",
+            user.Id,
+            userId: user.Id,
+            organizationId: organizationId,
+            ipAddress: GetIp(httpContext),
+            cancellationToken: cancellationToken);
+        return new SqlOSLoginResult(false, null, organizations, directTokens);
+    }
+
     private async Task RevokeRefreshTokenFamilyAsync(string sessionId, string familyId, string reason, CancellationToken cancellationToken)
     {
         var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
@@ -721,4 +1127,7 @@ public sealed class SqlOSAuthService
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record PasswordResetPayload(string EmailId);
     private sealed record EmailVerificationPayload(string EmailId);
+
+    private SqlOSInvitationService RequireInvitationService()
+        => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
 }

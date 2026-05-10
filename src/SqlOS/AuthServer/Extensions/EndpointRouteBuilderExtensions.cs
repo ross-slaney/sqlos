@@ -1,7 +1,9 @@
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -49,11 +51,13 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var prompt = context.Request.Query["prompt"].ToString();
+                var invitationToken = ReadInvitationToken(context);
                 if (string.Equals(prompt, "login", StringComparison.Ordinal))
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
@@ -75,9 +79,22 @@ public static class EndpointRouteBuilderExtensions
                         headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
                         context.Request.Query["ui_context"].ToString()),
                     cancellationToken);
-                var requestedView = string.Equals(context.Request.Query["view"], "signup", StringComparison.OrdinalIgnoreCase)
-                    ? "signup"
-                    : "login";
+                SqlOSEmailInvitationResult? invitation = null;
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    invitation = await invitationService.BindInvitationToAuthorizationRequestAsync(invitationToken, authorizationRequest, cancellationToken);
+                }
+
+                var requestedView = context.Request.Query["view"].ToString().Trim().ToLowerInvariant() switch
+                {
+                    "invite" => "invite",
+                    "login" => "login",
+                    "signup" => "signup",
+                    "password" => "password",
+                    "email-otp" => "email-otp",
+                    _ when invitation != null => "invite",
+                    _ => "login"
+                };
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
                 if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
@@ -109,7 +126,7 @@ public static class EndpointRouteBuilderExtensions
                         requestedView,
                         error: null,
                         pendingToken: null,
-                        email: authorizationRequest.LoginHintEmail,
+                        email: invitation?.Email ?? authorizationRequest.LoginHintEmail,
                         displayName: null,
                         uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
                 }
@@ -117,13 +134,15 @@ public static class EndpointRouteBuilderExtensions
                 var page = await BuildAuthPageViewModelAsync(
                     requestedView,
                     authorizationRequest.Id,
-                    authorizationRequest.LoginHintEmail,
+                    invitation?.Email ?? authorizationRequest.LoginHintEmail,
                     null,
                     null,
                     null,
                     authPrefix,
                     authorizationServerService,
-                    cancellationToken);
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitation: invitation);
 
                 return Html(page);
             }
@@ -158,29 +177,98 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
+            var invitationToken = ReadInvitationToken(context);
+            var invitation = !string.IsNullOrWhiteSpace(invitationToken)
+                ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
+                : null;
             if (headlessAuthService.IsBrowserUiEnabled)
             {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    uiContext["invitationToken"] = invitationToken;
+                }
+
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
                     context,
-                    "login",
+                    invitation == null ? "login" : "invite",
                     context.Request.Query["request"].ToString(),
-                    context.Request.Query["email"].ToString(),
-                    SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString())));
+                    invitation?.Email ?? context.Request.Query["email"].ToString(),
+                    uiContext));
             }
 
             var page = await BuildAuthPageViewModelAsync(
-                "login",
+                invitation == null ? "login" : "invite",
                 context.Request.Query["request"].ToString(),
-                context.Request.Query["email"].ToString(),
+                invitation?.Email ?? context.Request.Query["email"].ToString(),
                 null,
                 null,
                 null,
                 authPrefix,
                 authorizationServerService,
-                cancellationToken);
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation);
             return Html(page);
+        });
+
+        auth.MapGet("/invitations/accept", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var invitationToken = ReadInvitationToken(context);
+            try
+            {
+                if (string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    throw new InvalidOperationException("Invitation is invalid or expired.");
+                }
+
+                var invitation = await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken);
+                if (headlessAuthService.IsBrowserUiEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        "invite",
+                        requestId: null,
+                        email: invitation.Email,
+                        uiContext: new JsonObject { ["invitationToken"] = invitationToken }));
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "invite",
+                    null,
+                    invitation.Email,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitation: invitation);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    null,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
         });
 
         auth.MapPost("/login/identify", async (
@@ -189,13 +277,18 @@ public static class EndpointRouteBuilderExtensions
             SqlOSHomeRealmDiscoveryService discoveryService,
             SqlOSSamlService samlService,
             ISqlOSAuthServerDbContext dbContext,
+            SqlOSSettingsService settingsService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var requestId = form["requestId"].ToString();
             var email = form["email"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
 
             var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+            var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken);
+            email = invitation?.Email ?? email;
             var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
             if (authorizationRequest != null)
             {
@@ -222,8 +315,11 @@ public static class EndpointRouteBuilderExtensions
                 return Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
             }
 
+            var credentialSettings = await settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+            var nextView = ResolvePreferredLocalView(credentialSettings);
+
             var page = await BuildAuthPageViewModelAsync(
-                "password",
+                nextView,
                 requestId,
                 email,
                 null,
@@ -231,7 +327,10 @@ public static class EndpointRouteBuilderExtensions
                 null,
                 authPrefix,
                 authorizationServerService,
-                cancellationToken);
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation,
+                invitationService: invitationService);
             return Html(page);
         });
 
@@ -239,67 +338,83 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var requestId = form["requestId"].ToString();
             var email = form["email"].ToString();
             var password = form["password"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
 
             try
             {
-                var authentication = await authorizationServerService.AuthenticatePasswordAsync(email, password, cancellationToken);
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
+                var authentication = await authorizationServerService.AuthenticatePasswordAsync(
+                    email,
+                    password,
+                    cancellationToken,
+                    allowUnverifiedEmailForInvitation: invitation != null);
                 if (authorizationRequest == null)
                 {
-                    await authPageSessionService.SignInAsync(context, authentication.User, authentication.Organizations.FirstOrDefault()?.Id, authentication.AuthenticationMethod, cancellationToken);
-                    return Results.Redirect($"{authPrefix}/login?status=signed-in");
-                }
-
-                if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId))
-                {
-                    if (authentication.Organizations.All(x => x.Id != authorizationRequest.OrganizationId))
+                    var organizationId = authentication.Organizations.FirstOrDefault()?.Id;
+                    if (!string.IsNullOrWhiteSpace(invitationToken))
                     {
-                        throw new InvalidOperationException("The selected organization is not available to this user.");
+                        var acceptance = await invitationService.AcceptEmailInvitationAsync(
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, authentication.User.Id),
+                            context,
+                            cancellationToken);
+                        organizationId = acceptance.OrganizationId;
                     }
 
-                    return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
-                        authorizationRequest,
-                        authentication.User,
-                        authorizationRequest.OrganizationId,
-                        authentication.AuthenticationMethod,
-                        context,
-                        cancellationToken));
+                    await authPageSessionService.SignInAsync(context, authentication.User, organizationId, authentication.AuthenticationMethod, cancellationToken);
+                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-in" : "invitation-accepted")}");
                 }
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    authorizationRequest,
+                    authentication.User,
+                    authentication.AuthenticationMethod,
+                    context,
+                    cancellationToken);
 
-                if (authentication.Organizations.Count > 1)
+                if (completion.RequiresOrganizationSelection)
                 {
-                    var pendingToken = await authorizationServerService.CreatePendingOrganizationSelectionAsync(
-                        authentication.User,
-                        authorizationRequest,
-                        authentication.AuthenticationMethod,
-                        cancellationToken);
                     var organizationPage = await BuildAuthPageViewModelAsync(
                         "organization",
                         requestId,
                         email,
                         null,
                         null,
-                        pendingToken,
+                        completion.PendingToken,
                         authPrefix,
                         authorizationServerService,
                         cancellationToken,
-                        authentication.Organizations);
+                        completion.Organizations,
+                        invitationToken: invitationToken,
+                        invitation: invitation,
+                        invitationService: invitationService);
                     return Html(organizationPage);
                 }
 
-                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
-                    authorizationRequest,
-                    authentication.User,
-                    authentication.Organizations.FirstOrDefault()?.Id,
-                    authentication.AuthenticationMethod,
-                    context,
-                    cancellationToken));
+                return Results.Redirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {
@@ -312,7 +427,225 @@ public static class EndpointRouteBuilderExtensions
                     null,
                     authPrefix,
                     authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/login/email-otp", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var invitationToken = ReadInvitationToken(context);
+            var invitation = !string.IsNullOrWhiteSpace(invitationToken)
+                ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
+                : null;
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    uiContext["invitationToken"] = invitationToken;
+                }
+
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "email-otp",
+                    context.Request.Query["request"].ToString(),
+                    invitation?.Email ?? context.Request.Query["email"].ToString(),
+                    uiContext));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "email-otp",
+                context.Request.Query["request"].ToString(),
+                invitation?.Email ?? context.Request.Query["email"].ToString(),
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/email-otp/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSEmailOtpService emailOtpService,
+            SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
                     cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
+                var challenge = await emailOtpService.StartForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    email,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-verify",
+                    requestId,
+                    email,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: challenge.Message,
+                    challengeToken: challenge.ChallengeToken,
+                    invitationToken: invitationToken,
+                    invitation: invitation,
+                    invitationService: invitationService);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/login/email-otp/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSEmailOtpService emailOtpService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var challengeToken = form["challengeToken"].ToString();
+            var code = form["code"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var verification = await emailOtpService.VerifyAsync(
+                    new SqlOSEmailOtpVerifyRequest(challengeToken, code),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
+                    if (!string.IsNullOrWhiteSpace(invitationToken))
+                    {
+                        var acceptance = await invitationService.AcceptEmailInvitationAsync(
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id),
+                            context,
+                            cancellationToken);
+                        organizationId = acceptance.OrganizationId;
+                    }
+
+                    await authPageSessionService.SignInAsync(
+                        context,
+                        verification.User,
+                        organizationId,
+                        verification.AuthenticationMethod,
+                        cancellationToken);
+                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-in" : "invitation-accepted")}");
+                }
+
+                if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The sign-in code is invalid or expired.");
+                }
+
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    authorizationRequest,
+                    verification.User,
+                    verification.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+
+                if (completion.RequiresOrganizationSelection)
+                {
+                    var organizationPage = await BuildAuthPageViewModelAsync(
+                        "organization",
+                        requestId,
+                        verification.Challenge.Email,
+                        null,
+                        null,
+                        completion.PendingToken,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        completion.Organizations,
+                        invitationToken: invitationToken,
+                        invitation: invitation,
+                        invitationService: invitationService);
+                    return Html(organizationPage);
+                }
+
+                return Results.Redirect(completion.RedirectUrl!);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-verify",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    challengeToken: challengeToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -338,10 +671,12 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSOidcBrowserAuthService oidcBrowserAuthService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
             var requestId = context.Request.Query["request"].ToString();
             var email = context.Request.Query["email"].ToString();
+            var invitationToken = ReadInvitationToken(context);
             if (string.IsNullOrWhiteSpace(requestId))
             {
                 var page = await BuildAuthPageViewModelAsync(
@@ -357,6 +692,9 @@ public static class EndpointRouteBuilderExtensions
                 return Html(page, StatusCodes.Status400BadRequest);
             }
 
+            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+            var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken);
+            email = invitation?.Email ?? email;
             var result = await oidcBrowserAuthService.CreateAuthorizationUrlForAuthRequestAsync(requestId, connectionId, email, context, cancellationToken);
             return Results.Redirect(result.AuthorizationUrl);
         });
@@ -365,28 +703,41 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
+            var invitationToken = ReadInvitationToken(context);
+            var invitation = !string.IsNullOrWhiteSpace(invitationToken)
+                ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
+                : null;
             if (headlessAuthService.IsBrowserUiEnabled)
             {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    uiContext["invitationToken"] = invitationToken;
+                }
+
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
                     context,
                     "signup",
                     context.Request.Query["request"].ToString(),
-                    context.Request.Query["email"].ToString(),
-                    SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString())));
+                    invitation?.Email ?? context.Request.Query["email"].ToString(),
+                    uiContext));
             }
 
             var page = await BuildAuthPageViewModelAsync(
                 "signup",
                 context.Request.Query["request"].ToString(),
-                context.Request.Query["email"].ToString(),
+                invitation?.Email ?? context.Request.Query["email"].ToString(),
                 null,
                 null,
                 null,
                 authPrefix,
                 authorizationServerService,
-                cancellationToken);
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation);
             return Html(page);
         });
 
@@ -394,6 +745,10 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -402,31 +757,270 @@ public static class EndpointRouteBuilderExtensions
             var email = form["email"].ToString();
             var password = form["password"].ToString();
             var organizationName = form["organizationName"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            IDbContextTransaction? transaction = null;
 
             try
             {
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
+
                 var signup = await authorizationServerService.SignUpAsync(
                     displayName,
                     email,
                     password,
-                    organizationName,
-                    authorizationRequest?.OrganizationId,
+                    invitation == null ? organizationName : null,
+                    invitation == null ? authorizationRequest?.OrganizationId : null,
                     cancellationToken);
 
                 if (authorizationRequest == null)
                 {
-                    await authPageSessionService.SignInAsync(context, signup.User, signup.Organizations.FirstOrDefault()?.Id, signup.AuthenticationMethod, cancellationToken);
-                    return Results.Redirect($"{authPrefix}/login?status=signed-up");
+                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                    if (!string.IsNullOrWhiteSpace(invitationToken))
+                    {
+                        var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id),
+                            context,
+                            cancellationToken);
+                        organizationId = acceptance.OrganizationId;
+                    }
+
+                    await authPageSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
+                    if (transaction != null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+
+                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-up" : "invitation-accepted")}");
                 }
 
-                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
                     authorizationRequest,
                     signup.User,
-                    authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    invitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
-                    cancellationToken));
+                    cancellationToken);
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "signup",
+                    requestId,
+                    email,
+                    ex.Message,
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/invitation/submit", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSInvitationService invitationService,
+            SqlOSSettingsService settingsService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var displayName = form["displayName"].ToString();
+            var email = form["email"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            IDbContextTransaction? transaction = null;
+
+            try
+            {
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken)
+                    ?? throw new InvalidOperationException("Invitation is invalid or expired.");
+                email = invitation.Email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    if (transaction != null)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                    }
+
+                    return ssoRedirect;
+                }
+
+                var credentialSettings = await settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+                if (!credentialSettings.EmailOtpEnabled)
+                {
+                    throw new InvalidOperationException("Invitation signup without a password requires Email OTP to be enabled.");
+                }
+
+                var signup = await authorizationServerService.SignUpWithInvitationAsync(
+                    displayName,
+                    email,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
+                        new SqlOSAcceptEmailInvitationRequest(invitationToken!, signup.User.Id),
+                        context,
+                        cancellationToken);
+
+                    await authPageSessionService.SignInAsync(context, signup.User, acceptance.OrganizationId, signup.AuthenticationMethod, cancellationToken);
+                    if (transaction != null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+
+                    return Results.Redirect($"{authPrefix}/login?status=invitation-accepted");
+                }
+
+                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    signup.User,
+                    invitation.OrganizationId,
+                    signup.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "signup",
+                    requestId,
+                    email,
+                    ex.Message,
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/email-otp/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSEmailOtpService emailOtpService,
+            SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var displayName = form["displayName"].ToString();
+            var email = form["email"].ToString();
+            var organizationName = form["organizationName"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
+                var signup = await emailOtpService.StartSignupForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    displayName,
+                    email,
+                    invitation == null ? organizationName : null,
+                    customFields: invitation?.CustomFields,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-signup-verify",
+                    requestId,
+                    email,
+                    null,
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: signup.Message,
+                    challengeToken: signup.ChallengeToken,
+                    signupToken: signup.SignupToken,
+                    invitationToken: invitationToken,
+                    invitation: invitation,
+                    invitationService: invitationService);
+                return Html(page);
             }
             catch (InvalidOperationException ex)
             {
@@ -439,7 +1033,113 @@ public static class EndpointRouteBuilderExtensions
                     null,
                     authPrefix,
                     authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/email-otp/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSEmailOtpService emailOtpService,
+            ISqlOSAuthServerDbContext dbContext,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var signupToken = form["signupToken"].ToString();
+            var challengeToken = form["challengeToken"].ToString();
+            var code = form["code"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            IDbContextTransaction? transaction = null;
+
+            try
+            {
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var signupVerification = await emailOtpService.VerifySignupAsync(
+                    new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
                     cancellationToken);
+
+                var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
+                    signupVerification.DisplayName,
+                    signupVerification.Email,
+                    invitation == null ? signupVerification.OrganizationName : null,
+                    invitation == null ? authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId : null,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                    if (!string.IsNullOrWhiteSpace(invitationToken))
+                    {
+                        var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
+                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id),
+                            context,
+                            cancellationToken);
+                        organizationId = acceptance.OrganizationId;
+                    }
+
+                    await authPageSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
+                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                    if (transaction != null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-up" : "invitation-accepted")}");
+                }
+
+                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    signup.User,
+                    invitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? signupVerification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    signup.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+
+                await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-signup-verify",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    challengeToken: challengeToken,
+                    signupToken: signupToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -452,6 +1152,7 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
         {
             if (!headlessAuthService.IsApiEnabled)
@@ -483,6 +1184,12 @@ public static class EndpointRouteBuilderExtensions
                         SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext)),
                     cancellationToken);
 
+                SqlOSEmailInvitationResult? invitation = null;
+                if (!string.IsNullOrWhiteSpace(request.InvitationToken))
+                {
+                    invitation = await invitationService.BindInvitationToAuthorizationRequestAsync(request.InvitationToken, authorizationRequest, cancellationToken);
+                }
+
                 if (string.Equals(request.Prompt, "none", StringComparison.Ordinal))
                 {
                     return Results.Ok(new SqlOSHeadlessActionResult(
@@ -500,16 +1207,37 @@ public static class EndpointRouteBuilderExtensions
                     null,
                     await headlessAuthService.GetRequestAsync(
                         authorizationRequest.Id,
-                        request.View,
+                        string.IsNullOrWhiteSpace(request.View) && invitation != null ? "invite" : request.View,
                         error: null,
                         pendingToken: null,
-                        email: authorizationRequest.LoginHintEmail,
+                        email: invitation?.Email ?? authorizationRequest.LoginHintEmail,
                         displayName: null,
                         cancellationToken)));
             }
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        headless.MapPost("/invitations/resolve", async (
+            SqlOSHeadlessInvitationResolveRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.ResolveInvitationAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
             }
         });
 
@@ -579,6 +1307,111 @@ public static class EndpointRouteBuilderExtensions
             try
             {
                 return Results.Ok(await headlessAuthService.PasswordLoginAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/email-otp/start", async (
+            SqlOSHeadlessEmailOtpStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestEmailOtpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/email-otp/verify", async (
+            SqlOSHeadlessEmailOtpVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyEmailOtpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/email-otp/start", async (
+            SqlOSHeadlessEmailOtpSignupStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestEmailOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/email-otp/verify", async (
+            SqlOSHeadlessEmailOtpSignupVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyEmailOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/invitations/signup", async (
+            SqlOSHeadlessInvitationSignupRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.SignUpWithInvitationAsync(context, request, cancellationToken));
             }
             catch (InvalidOperationException ex)
             {
@@ -763,6 +1596,12 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/password/login", async (SqlOSPasswordLoginRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.LoginWithPasswordAsync(request, httpContext, cancellationToken)));
 
+        auth.MapPost("/email-otp/start", async (SqlOSEmailOtpStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.RequestEmailOtpAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/email-otp/verify", async (SqlOSEmailOtpVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.VerifyEmailOtpAsync(request, httpContext, cancellationToken)));
+
         auth.MapPost("/select-organization", async (SqlOSSelectOrganizationRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.SelectOrganizationAsync(request, httpContext, cancellationToken)));
 
@@ -838,7 +1677,7 @@ public static class EndpointRouteBuilderExtensions
 
             try
             {
-                var redirectUrl = await samlService.HandleAcsAsync(connectionId, samlResponse, relayState, cancellationToken);
+                var redirectUrl = await samlService.HandleAcsAsync(connectionId, samlResponse, relayState, httpContext, cancellationToken);
                 return Results.Redirect(redirectUrl);
             }
             catch (InvalidOperationException ex)
@@ -1015,6 +1854,94 @@ public static class EndpointRouteBuilderExtensions
             }
 
             return Results.Ok(await adminService.ListOrganizationMembershipsAsync(organizationId, page, pageSize, cancellationToken));
+        });
+
+        api.MapGet("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, int? page, int? pageSize, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await invitationService.ListOrganizationInvitationsAsync(organizationId, page, pageSize, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, CreateOrganizationInvitationRequest request, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await invitationService.CreateEmailInvitationAsync(
+                    new SqlOSCreateEmailInvitationRequest(
+                        organizationId,
+                        request.Email,
+                        string.IsNullOrWhiteSpace(request.Role) ? "member" : request.Role,
+                        request.ClientId,
+                        request.RedirectUri,
+                        request.Scope,
+                        request.Resource,
+                        request.ExpiresAt,
+                        request.CustomFields,
+                        request.InvitedByUserId,
+                        request.SendEmail ?? true),
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/invitations/{invitationId}/resend", async (HttpContext context, string invitationId, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await invitationService.ResendEmailInvitationAsync(
+                    new SqlOSResendEmailInvitationRequest(invitationId),
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/invitations/{invitationId}/revoke", async (HttpContext context, string invitationId, RevokeInvitationRequest request, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await invitationService.RevokeEmailInvitationAsync(
+                    new SqlOSRevokeEmailInvitationRequest(invitationId, request.Reason),
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapPost("/memberships", async (HttpContext context, CreateMembershipRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -1463,6 +2390,26 @@ public static class EndpointRouteBuilderExtensions
             return Results.Ok(await settingsService.UpdateAuthPageSettingsAsync(request, cancellationToken));
         });
 
+        api.MapGet("/settings/email", async (HttpContext context, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.GetAuthEmailBrandingSettingsAsync(cancellationToken));
+        });
+
+        api.MapPut("/settings/email", async (HttpContext context, SqlOSUpdateAuthEmailBrandingSettingsRequest request, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.UpdateAuthEmailBrandingSettingsAsync(request, cancellationToken));
+        });
+
         api.MapGet("/sessions", async (HttpContext context, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -1523,12 +2470,39 @@ public static class EndpointRouteBuilderExtensions
         string authPrefix,
         SqlOSAuthorizationServerService authorizationServerService,
         CancellationToken cancellationToken,
-        IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null)
+        IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null,
+        string? info = null,
+        string? challengeToken = null,
+        string? signupToken = null,
+        string? invitationToken = null,
+        SqlOSEmailInvitationResult? invitation = null,
+        SqlOSInvitationService? invitationService = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
+        if (invitation == null && invitationService != null && !string.IsNullOrWhiteSpace(invitationToken))
+        {
+            invitation = await invitationService.ResolveEmailInvitationAsync(invitationToken, cancellationToken: cancellationToken);
+            email ??= invitation.Email;
+        }
+
+        if (invitation == null && invitationService != null && !string.IsNullOrWhiteSpace(authorizationRequestId))
+        {
+            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+            if (authorizationRequest != null)
+            {
+                invitation = await invitationService.GetBoundInvitationAsync(authorizationRequest, cancellationToken);
+                email ??= invitation?.Email;
+            }
+        }
+
         var providerBasePath = authorizationRequestId == null
             ? null
             : $"{authPrefix}/login/oidc/{{0}}?request={Uri.EscapeDataString(authorizationRequestId)}&email={Uri.EscapeDataString(email ?? string.Empty)}";
+        if (!string.IsNullOrWhiteSpace(invitationToken) && providerBasePath != null)
+        {
+            providerBasePath += $"&invitationToken={Uri.EscapeDataString(invitationToken)}";
+        }
+
         var providers = providerBasePath == null
             ? Array.Empty<SqlOSAuthPageProviderLink>()
             : (await authorizationServerService.ListEnabledOidcProvidersAsync(cancellationToken))
@@ -1547,13 +2521,132 @@ public static class EndpointRouteBuilderExtensions
             email,
             displayName,
             error,
-            null,
+            info,
             pendingToken,
             organizationSelection ?? Array.Empty<SqlOSOrganizationOption>(),
-            providers);
+            providers,
+            challengeToken,
+            signupToken,
+            invitationToken,
+            invitation);
+    }
+
+    private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)
+    {
+        if (credentialSettings.EmailOtpEnabled)
+        {
+            return "email-otp";
+        }
+
+        if (credentialSettings.PasswordEnabled)
+        {
+            return "password";
+        }
+
+        return "login";
+    }
+
+    private static bool SupportsDatabaseTransactions(ISqlOSAuthServerDbContext context)
+        => !string.Equals(context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
+
+    private static string? ReadInvitationToken(HttpContext context, IFormCollection? form = null)
+    {
+        var formValue = form?["invitationToken"].ToString();
+        if (!string.IsNullOrWhiteSpace(formValue))
+        {
+            return formValue;
+        }
+
+        var queryValue = context.Request.Query["invitationToken"].ToString();
+        if (!string.IsNullOrWhiteSpace(queryValue))
+        {
+            return queryValue;
+        }
+
+        queryValue = context.Request.Query["invitation_token"].ToString();
+        if (!string.IsNullOrWhiteSpace(queryValue))
+        {
+            return queryValue;
+        }
+
+        queryValue = context.Request.Query["token"].ToString();
+        return string.IsNullOrWhiteSpace(queryValue) ? null : queryValue;
+    }
+
+    private static async Task<SqlOSEmailInvitationResult?> BindInvitationIfPresentAsync(
+        SqlOSInvitationService invitationService,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string? invitationToken,
+        CancellationToken cancellationToken)
+    {
+        if (authorizationRequest == null || string.IsNullOrWhiteSpace(invitationToken))
+        {
+            return null;
+        }
+
+        return await invitationService.BindInvitationToAuthorizationRequestAsync(invitationToken, authorizationRequest, cancellationToken);
+    }
+
+    private static async Task<SqlOSEmailInvitationResult?> ResolveStandaloneInvitationAsync(
+        SqlOSInvitationService invitationService,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string? invitationToken,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        return authorizationRequest != null || string.IsNullOrWhiteSpace(invitationToken)
+            ? null
+            : await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken);
+    }
+
+    private static async Task<IResult?> RedirectToSsoIfRequiredAsync(
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string email,
+        SqlOSHomeRealmDiscoveryService discoveryService,
+        SqlOSSamlService samlService,
+        ISqlOSAuthServerDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        if (authorizationRequest == null)
+        {
+            return null;
+        }
+
+        var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
+        authorizationRequest.LoginHintEmail = email;
+        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
+        {
+            authorizationRequest.OrganizationId = discovery.OrganizationId;
+            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
+        {
+            authorizationRequest.ConnectionId = discovery.ConnectionId;
+            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(discovery.ConnectionId)
+            ? Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken))
+            : null;
     }
 
     private sealed record LogoutRequest(string? RefreshToken, string? SessionId);
+    private sealed record CreateOrganizationInvitationRequest(
+        string Email,
+        string Role,
+        string? ClientId,
+        string? RedirectUri,
+        string? Scope,
+        string? Resource,
+        DateTime? ExpiresAt,
+        JsonObject? CustomFields,
+        string? InvitedByUserId,
+        bool? SendEmail);
+    private sealed record RevokeInvitationRequest(string? Reason);
     private sealed record LogoutAllRequest(string UserId);
     private sealed record CreateMembershipRequest(string OrganizationId, string UserId, string Role);
     private static bool TryParseClientAuthMethod(string? value, out SqlOSOidcClientAuthMethod? method)

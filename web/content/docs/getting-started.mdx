@@ -84,7 +84,7 @@ This gives you:
 | Path | What it does |
 | --- | --- |
 | `/sqlos` | Admin dashboard |
-| `/sqlos/auth/*` | OAuth 2.0 endpoints (authorize, token, JWKS) |
+| `/sqlos/auth/*` | OAuth 2.0 endpoints, hosted AuthPage, Email OTP, invitations |
 | `/sqlos/admin/auth` | Auth management UI |
 | `/sqlos/admin/fga` | FGA management UI |
 
@@ -103,6 +103,12 @@ builder.AddSqlOS<AppDbContext>(options =>
 ```
 
 That is the default story for most teams: an owned app, hosted auth, and a seeded client.
+
+Next steps for production auth:
+
+- [Email OTP](/docs/authserver/email-otp) for passwordless sign in/sign up.
+- [Email Invitations](/docs/authserver/invitations) for organization onboarding.
+- [Email Branding](/docs/authserver/email-branding) for built-in auth email templates.
 
 ## Protect the dashboard
 

@@ -1,19 +1,20 @@
 ---
 title: "Todo Sample"
-description: "Run the hosted-first SqlOS sample with simple FGA, protected-resource metadata, and public-client onboarding paths."
+description: "Run the SqlOS AuthPage email OTP sample with simple FGA, protected-resource metadata, and public-client onboarding paths."
 order: 1.6
 section: authserver
 ---
 
-The Todo sample is the canonical "ship hosted auth plus simple FGA fast" walkthrough.
+The Todo sample is the canonical "ship hosted AuthPage plus simple FGA fast" walkthrough.
 
 It keeps the model intentionally small:
 
-- hosted auth first
+- hosted AuthPage first
+- passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
+- seeded email branding for the built-in OTP and invitation templates
 - one user = one tenant boundary
 - one tenant resource with child todo resources
 - SQL-backed FGA list filtering and simple auth checks in minimal APIs
-- headless follow-on when you need custom UI
 - a protected resource with audience enforcement
 - protected-resource metadata for MCP clients
 - preregistered local development with `todo-local`
@@ -22,6 +23,19 @@ It keeps the model intentionally small:
 ## Run it
 
 ```bash
+ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
+AZURE_RESOURCE_GROUP=<resource-group>
+ACS_FROM_ADDRESS=no-reply@example.com
+
+ACS_CONN=$(az communication list-key \
+  --name "$ACS_COMMUNICATION_SERVICE_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --query primaryConnectionString \
+  -o tsv)
+
+TodoSample__EnableEmailOtp=true \
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString="$ACS_CONN" \
+SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
@@ -31,17 +45,19 @@ If you already ran an older version of the Todo sample, reset the Todo sample SQ
 
 ## What the sample includes
 
-### Hosted first
+### Hosted AuthPage first
 
 The default path is a seeded browser client called `todo-web`.
 
 Use the landing page to:
 
-- start hosted sign in
-- start hosted sign up
+- start email-code sign in
+- start email-code sign up
 - land in a tiny Todo UI backed by the sample API
 
-This keeps the first experience simple. You do not have to write a custom auth UI to get a working OAuth flow.
+The Todo app only starts the OAuth request. SqlOS AuthPage owns credential collection, OTP delivery, OTP verification, user creation on signup, and the redirect back with an authorization code.
+
+The sample also seeds email branding with `SeedAuthEmails(...)`, so the default OTP emails use the Todo application name and colors without a custom template.
 
 ### Simple FGA
 
@@ -67,23 +83,6 @@ The app grants `tenant_owner` on the user tenant node. Child todo resources inhe
 - authorize toggle/delete against the todo resource
 
 That keeps the controller code small while still populating the FGA dashboard with a real tree.
-
-### Headless follow-on
-
-When you want app-owned auth screens, flip:
-
-```bash
-TodoSample__EnableHeadless=true
-```
-
-The sample then redirects `/sqlos/auth/authorize` into `headless.html`, which drives the same authorization request through the SqlOS headless APIs.
-
-That lets you compare:
-
-- hosted setup for the fastest first version
-- headless setup for custom branding and forms
-
-If your headless UI runs on a different origin than the SqlOS host, send credentialed browser requests to the headless endpoints so SqlOS can persist its reusable auth-page session cookie. Then follow-up `/sqlos/auth/authorize?prompt=none` requests can silently complete when that session exists, or return `login_required` when it does not.
 
 ## Protected resource behavior
 

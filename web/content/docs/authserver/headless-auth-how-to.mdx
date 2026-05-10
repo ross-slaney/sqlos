@@ -39,6 +39,8 @@ End-to-end:
 5. Your page posts actions to SqlOS:
    - identify
    - password login
+   - email OTP start/verify
+   - invitation resolve/signup
    - signup
    - start provider
    - pick org
@@ -226,6 +228,27 @@ await postAction("/oauth/headless/password/login", {
 });
 ```
 
+### Email OTP sign in
+
+Use Email OTP when `model.settings.enabledCredentialTypes` includes `email_otp`. Keep home realm discovery in the loop so SSO-required domains still redirect to SSO.
+
+```tsx
+await postAction("/oauth/headless/email-otp/start", {
+  requestId: model.requestId,
+  email,
+  invitationToken,
+});
+
+await postAction("/oauth/headless/email-otp/verify", {
+  requestId: model.requestId,
+  challengeToken: model.challengeToken,
+  code,
+  invitationToken,
+});
+```
+
+If the email belongs to a configured SSO organization, SqlOS returns a redirect before creating an OTP challenge.
+
 ### Signup
 
 In the Example app, signup sends custom fields in `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx`:
@@ -264,6 +287,45 @@ await postAction("/oauth/headless/signup", {
 });
 ```
 
+### Email OTP signup
+
+For passwordless new-user signup, start and verify the signup challenge:
+
+```tsx
+await postAction("/oauth/headless/signup/email-otp/start", {
+  requestId: model.requestId,
+  displayName,
+  email,
+  organizationName,
+  customFields,
+});
+
+await postAction("/oauth/headless/signup/email-otp/verify", {
+  requestId: model.requestId,
+  signupToken: model.signupToken,
+  challengeToken: model.challengeToken,
+  code,
+});
+```
+
+`signupToken` and `challengeToken` are short-lived flow state. Preserve them only until the user submits the code.
+
+### Invitation signup
+
+Invitation acceptance is a separate lifecycle. Do not send a new signup OTP after the invited user clicks a valid invite link.
+
+```tsx
+await postAction("/oauth/headless/invitations/signup", {
+  requestId: model.requestId,
+  displayName,
+  email: model.invitation.email,
+  customFields,
+  invitationToken,
+});
+```
+
+That call creates the passwordless user, marks the invited email verified, accepts the organization invite, runs `OnHeadlessSignupAsync`, and returns the final redirect. This is the path for new invited users when Email OTP is enabled. If HRD resolves the invited email to SSO, SqlOS returns the SSO redirect instead.
+
 ### OIDC provider start
 
 ```tsx
@@ -282,6 +344,18 @@ await postAction("/oauth/headless/organization/select", {
   organizationId,
 });
 ```
+
+### Invitation resolve
+
+If your app handles invite links directly, resolve the token before starting OAuth:
+
+```tsx
+const resolved = await postAction("/oauth/headless/invitations/resolve", {
+  invitationToken,
+});
+```
+
+Then start `/oauth/authorize` with the same `invitationToken`. SqlOS binds it to the auth request so later actions can accept the invitation safely.
 
 ## Step 5: Optionally persist app-owned signup data
 
@@ -370,9 +444,10 @@ If you are building a consumer app, this is the minimum lifecycle to implement:
 3. Create a custom authorize page route
 4. Start a real PKCE `/sqlos/auth/authorize` request from that page
 5. Load `GET /sqlos/auth/headless/requests/{requestId}`
-6. Post the five user actions back to SqlOS
+6. Post user actions back to SqlOS
 7. Follow redirect results
-8. Optionally implement `OnHeadlessSignupAsync(...)` for app-specific fields
+8. Preserve invitation, challenge, signup, and pending-org tokens exactly as returned
+9. Optionally implement `OnHeadlessSignupAsync(...)` for app-specific fields
 
 That is all you need.
 
@@ -388,6 +463,8 @@ You do **not** need to write:
 - SAML ACS handling
 - token issuance rules
 - refresh rotation
+- invitation consumption
+- OTP challenge verification
 
 That is the entire point of headless mode.
 

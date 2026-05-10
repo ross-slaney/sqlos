@@ -9,6 +9,7 @@ public sealed class TodoSampleOptions
     public bool EnableHeadless { get; set; }
     public bool EnableDcr { get; set; }
     public string Resource { get; set; } = "http://localhost:5080/api/todos";
+    public bool EnableEmailOtp { get; set; }
     public string LocalClientId { get; set; } = "todo-local";
     public string LocalRedirectUri { get; set; } = "http://localhost:3100/oauth/callback";
     public string EmcyClientId { get; set; } = "todo-mcp-local";

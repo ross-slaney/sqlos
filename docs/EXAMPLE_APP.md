@@ -8,6 +8,7 @@ Use it when you want to explore:
 - hosted and headless auth UI
 - Google, Microsoft, Apple, and custom OIDC login
 - org membership
+- organization email invitations
 - SAML SSO initiation and callback flow
 - refresh/logout
 - FGA-protected workspace access
@@ -52,12 +53,14 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ## Validation flow
 
 1. Create an organization, user, and membership in the auth admin dashboard.
-2. Open the example web app and sign in through the hosted flow.
-3. Confirm the app shows session and token debug data.
-4. Switch to the headless route and compare the same auth server with app-owned UI.
-5. Optionally configure an OIDC connection and repeat the sign-in flow with provider buttons.
-6. Create and list workspaces through the protected app flow.
-7. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+2. Open the organization Invitations tab, send an invite, and copy the accept link.
+3. Accept the invite through hosted AuthPage using Email OTP, password, or configured SSO.
+4. Open the example web app and sign in through the hosted flow.
+5. Confirm the app shows session and token debug data.
+6. Switch to the headless route and compare the same auth server with app-owned UI.
+7. Optionally configure an OIDC connection and repeat the sign-in flow with provider buttons.
+8. Create and list workspaces through the protected app flow.
+9. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
 
 For a customer-tenant SAML walkthrough with Microsoft Entra ID, use:
 

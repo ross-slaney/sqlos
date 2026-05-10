@@ -13,6 +13,15 @@ public sealed class SqlOSAuthPageSeedOptions
     public List<string> EnabledCredentialTypes { get; set; } = ["password"];
 }
 
+public sealed class SqlOSAuthEmailSeedOptions
+{
+    public string ApplicationName { get; set; } = "SqlOS";
+    public string? LogoBase64 { get; set; }
+    public string PrimaryColor { get; set; } = "#2563eb";
+    public string AccentColor { get; set; } = "#0f172a";
+    public string BackgroundColor { get; set; } = "#f8fafc";
+}
+
 public sealed class SqlOSClientSeedOptions
 {
     public string ClientId { get; set; } = string.Empty;

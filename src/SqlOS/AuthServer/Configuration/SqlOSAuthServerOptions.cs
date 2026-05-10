@@ -34,11 +34,14 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
+    public SqlOSEmailOtpOptions EmailOtp { get; } = new();
+    public SqlOSInvitationOptions Invitations { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
+    public SqlOSAuthEmailSeedOptions? AuthEmailSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
@@ -52,6 +55,14 @@ public class SqlOSAuthServerOptions
         var seed = AuthPageSeed ?? new SqlOSAuthPageSeedOptions();
         configure(seed);
         AuthPageSeed = seed;
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedAuthEmails(Action<SqlOSAuthEmailSeedOptions> configure)
+    {
+        var seed = AuthEmailSeed ?? new SqlOSAuthEmailSeedOptions();
+        configure(seed);
+        AuthEmailSeed = seed;
         return this;
     }
 
@@ -72,6 +83,18 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigureResourceIndicators(Action<SqlOSResourceIndicatorOptions> configure)
     {
         configure(ResourceIndicators);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureEmailOtp(Action<SqlOSEmailOtpOptions> configure)
+    {
+        configure(EmailOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureInvitations(Action<SqlOSInvitationOptions> configure)
+    {
+        configure(Invitations);
         return this;
     }
 

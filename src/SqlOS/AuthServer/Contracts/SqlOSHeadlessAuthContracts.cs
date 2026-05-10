@@ -21,9 +21,12 @@ public sealed record SqlOSHeadlessViewModel(
     string? Error,
     string? Info,
     IReadOnlyDictionary<string, string> FieldErrors,
+    string? ChallengeToken,
+    string? SignupToken,
     string? PendingToken,
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
     IReadOnlyList<SqlOSHeadlessProviderDto> Providers,
+    SqlOSEmailInvitationResult? Invitation,
     JsonObject? UiContext);
 
 public sealed record SqlOSHeadlessActionResult(
@@ -44,16 +47,45 @@ public sealed record SqlOSHeadlessStartRequest(
     string? Prompt,
     string? Nonce,
     string? View,
-    JsonObject? UiContext);
+    JsonObject? UiContext,
+    string? InvitationToken = null);
 
 public sealed record SqlOSHeadlessIdentifyRequest(
     string RequestId,
-    string Email);
+    string Email,
+    string? InvitationToken = null);
 
 public sealed record SqlOSHeadlessPasswordLoginRequest(
     string RequestId,
     string Email,
-    string Password);
+    string Password,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessEmailOtpStartRequest(
+    string RequestId,
+    string Email,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessEmailOtpVerifyRequest(
+    string RequestId,
+    string ChallengeToken,
+    string Code,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessEmailOtpSignupStartRequest(
+    string RequestId,
+    string DisplayName,
+    string Email,
+    string? OrganizationName,
+    JsonObject? CustomFields,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessEmailOtpSignupVerifyRequest(
+    string RequestId,
+    string SignupToken,
+    string ChallengeToken,
+    string Code,
+    string? InvitationToken = null);
 
 public sealed record SqlOSHeadlessSignupRequest(
     string RequestId,
@@ -61,7 +93,8 @@ public sealed record SqlOSHeadlessSignupRequest(
     string Email,
     string Password,
     string? OrganizationName,
-    JsonObject? CustomFields);
+    JsonObject? CustomFields,
+    string? InvitationToken = null);
 
 public sealed record SqlOSHeadlessOrganizationSelectionRequest(
     string PendingToken,
@@ -70,7 +103,8 @@ public sealed record SqlOSHeadlessOrganizationSelectionRequest(
 public sealed record SqlOSHeadlessProviderStartRequest(
     string RequestId,
     string ConnectionId,
-    string? Email);
+    string? Email,
+    string? InvitationToken = null);
 
 public sealed class SqlOSHeadlessValidationException : InvalidOperationException
 {

@@ -71,6 +71,37 @@ public sealed class SqlOSMembership
     public SqlOSUser? User { get; set; }
 }
 
+public sealed class SqlOSInvitation
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string InvitedEmail { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
+    public string Role { get; set; } = "member";
+    public string TokenHash { get; set; } = string.Empty;
+    public string? InvitedByUserId { get; set; }
+    public string? ClientApplicationId { get; set; }
+    public string? RedirectUri { get; set; }
+    public string? Scope { get; set; }
+    public string? Resource { get; set; }
+    public string? CustomFieldsJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? LastSentAt { get; set; }
+    public string? LastSendError { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public string? AcceptedByUserId { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevokedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSOrganization? Organization { get; set; }
+    public SqlOSUser? InvitedByUser { get; set; }
+    public SqlOSUser? AcceptedByUser { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
+}
+
 public sealed class SqlOSSsoConnection
 {
     public string Id { get; set; } = string.Empty;
@@ -308,7 +339,41 @@ public sealed class SqlOSAuthPageSettings
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public string EnabledCredentialTypesJson { get; set; } = "[\"password\"]";
+    public string? EmailApplicationName { get; set; }
+    public string? EmailLogoBase64 { get; set; }
+    public string EmailPrimaryColor { get; set; } = "#2563eb";
+    public string EmailAccentColor { get; set; } = "#0f172a";
+    public string EmailBackgroundColor { get; set; } = "#f8fafc";
     public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class SqlOSEmailOtpChallenge
+{
+    public string Id { get; set; } = string.Empty;
+    public string ChallengeTokenHash { get; set; } = string.Empty;
+    public string CodeHash { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
+    public string? UserId { get; set; }
+    public string? UserEmailId { get; set; }
+    public string? AuthorizationRequestId { get; set; }
+    public string? ClientApplicationId { get; set; }
+    public string? RequestedOrganizationId { get; set; }
+    public int AttemptCount { get; set; }
+    public int MaxAttempts { get; set; } = 5;
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime LastSentAt { get; set; }
+    public DateTime? ConsumedAt { get; set; }
+    public DateTime? InvalidatedAt { get; set; }
+    public string? InvalidatedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSUser? User { get; set; }
+    public SqlOSUserEmail? UserEmail { get; set; }
+    public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
 }
 
 public sealed class SqlOSAuthorizationRequest
@@ -318,6 +383,7 @@ public sealed class SqlOSAuthorizationRequest
     public string PresentationMode { get; set; } = "hosted";
     public string? OrganizationId { get; set; }
     public string? ConnectionId { get; set; }
+    public string? InvitationId { get; set; }
     public string? LoginHintEmail { get; set; }
     public string? UiContextJson { get; set; }
     public string RedirectUri { get; set; } = string.Empty;
@@ -339,6 +405,7 @@ public sealed class SqlOSAuthorizationRequest
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSOrganization? Organization { get; set; }
     public SqlOSSsoConnection? Connection { get; set; }
+    public SqlOSInvitation? Invitation { get; set; }
 }
 
 public sealed class SqlOSAuthorizationCode

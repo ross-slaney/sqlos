@@ -69,6 +69,7 @@ internal static class SqlOSOptionsValidator
         }
 
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
+        ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
@@ -125,6 +126,57 @@ internal static class SqlOSOptionsValidator
         if (options.ClientRegistration.Dcr.StaleClientRetention <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.ClientRegistration.Dcr.StaleClientRetention must be greater than zero.");
+        }
+    }
+
+    private static void ValidateEmailOtpOptions(SqlOSEmailOtpOptions options, List<string> errors)
+    {
+        var hasConnectionString = !string.IsNullOrWhiteSpace(options.AzureCommunicationServicesConnectionString);
+        var hasFromAddress = !string.IsNullOrWhiteSpace(options.FromAddress);
+
+        if (hasConnectionString != hasFromAddress)
+        {
+            errors.Add("AuthServer.EmailOtp requires both AzureCommunicationServicesConnectionString and FromAddress when either is set.");
+        }
+
+        if (options.CodeLength < 4 || options.CodeLength > 8)
+        {
+            errors.Add("AuthServer.EmailOtp.CodeLength must be between 4 and 8 digits.");
+        }
+
+        if (options.ChallengeLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.EmailOtp.ChallengeLifetime must be greater than zero.");
+        }
+
+        if (options.ResendCooldown < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.EmailOtp.ResendCooldown must be zero or greater.");
+        }
+
+        if (options.MaxAttempts <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxAttempts must be greater than zero.");
+        }
+
+        if (options.MaxChallengesPerHour <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxChallengesPerHour must be greater than zero.");
+        }
+
+        if (options.MaxChallengesPerIpPerHour <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxChallengesPerIpPerHour must be greater than zero.");
+        }
+
+        if (options.MaxChallengesPerClientPerHour <= 0)
+        {
+            errors.Add("AuthServer.EmailOtp.MaxChallengesPerClientPerHour must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ApplicationName))
+        {
+            errors.Add("AuthServer.EmailOtp.ApplicationName is required.");
         }
     }
 

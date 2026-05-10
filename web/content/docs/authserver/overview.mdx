@@ -20,10 +20,11 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 
 <CardGrid cols={3}>
   <Card title="Organizations" description="Multi-tenant orgs, memberships, and roles." />
-  <Card title="Users" description="Email/password, SSO-provisioned, or OIDC-linked identities." />
+  <Card title="Users" description="Email/password, email OTP, SSO-provisioned, or OIDC-linked identities." />
   <Card title="Sessions" description="JWT access tokens, refresh token rotation, and replay detection." />
   <Card title="OIDC" description="Google, Microsoft, Apple, and custom providers." />
   <Card title="SAML SSO" description="Enterprise SSO with provisioning and hosted flows." />
+  <Card title="Invitations" description="Email-bound organization invites with hosted, headless, and SDK acceptance." />
   <Card title="Hosted or headless" description="Use the built-in pages or render your own UI on top of the same runtime." />
 </CardGrid>
 
@@ -41,8 +42,8 @@ app.MapSqlOS();
 Typical browser login:
 
 1. App sends the user to `/sqlos/auth/authorize` with PKCE.
-2. User enters email. [Home realm discovery](/docs/authserver/password-login) picks password vs SSO.
-3. User signs in (password, OIDC, or SAML).
+2. User enters email. [Home realm discovery](/docs/authserver/home-realm-discovery) picks password, Email OTP, or SSO.
+3. User signs in (password, Email OTP, OIDC, or SAML).
 4. Multiple orgs? User picks one.
 5. SqlOS returns an auth code.
 6. App trades the code for access and refresh tokens.
@@ -63,7 +64,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 
 | Service | Purpose |
 | --- | --- |
-| `SqlOSAuthService` | Login, refresh, logout, token validation |
+| `SqlOSAuthService` | Login, Email OTP, invitations, refresh, logout, token validation |
 | `SqlOSAdminService` | Create orgs, users, memberships, clients, SSO |
 | `SqlOSCryptoService` | Token generation, PKCE, password hashing, JWKS |
 | `SqlOSHomeRealmDiscoveryService` | Route users to password or SSO by email domain |
@@ -75,7 +76,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 
 <Accordion>
   <AccordionItem title="Hosted auth" defaultOpen>
-    SqlOS renders the login, signup, and recovery pages for you. This is the fastest path for internal tools and most first-party apps.
+    SqlOS renders the login, signup, invitation, OTP, and recovery pages for you. This is the fastest path for internal tools and most first-party apps.
   </AccordionItem>
   <AccordionItem title="Headless auth">
     SqlOS still runs OAuth/OIDC, sessions, and token issuance. Your application takes ownership of the login UI and interaction flow.
@@ -85,7 +86,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Email Invitations](/docs/authserver/invitations) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 

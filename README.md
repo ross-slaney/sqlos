@@ -12,12 +12,12 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ## Why SqlOS?
 
-| External auth services | SqlOS |
-|---|---|
-| Data lives on someone else's servers | Data lives in **your** SQL Server |
-| Per-MAU pricing that scales against you | **MIT-licensed**, no usage fees |
-| Another vendor dependency to manage | **Single NuGet package**, ships with your app |
-| Limited customization of login flows | **Full control** — branded AuthPage, custom OIDC, SAML |
+| External auth services                  | SqlOS                                                  |
+| --------------------------------------- | ------------------------------------------------------ |
+| Data lives on someone else's servers    | Data lives in **your** SQL Server                      |
+| Per-MAU pricing that scales against you | **MIT-licensed**, no usage fees                        |
+| Another vendor dependency to manage     | **Single NuGet package**, ships with your app          |
+| Limited customization of login flows    | **Full control** — branded AuthPage, custom OIDC, SAML |
 
 ## Features
 
@@ -33,6 +33,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **SAML SSO** — enterprise single sign-on with home realm discovery by email domain
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
 - **Signing Key Rotation** — automatic RS256 key rotation with configurable intervals
+- **Email OTP** — passwordless sign-in with Azure Communication Services Email
 - **Audit Logging** — track authentication events across your system
 
 ### FGA (Fine-Grained Authorization)
@@ -115,6 +116,98 @@ SqlOS__Dashboard__AuthMode=Password
 SqlOS__Dashboard__Password=<strong-password>
 ```
 
+## Email OTP with Azure Communication Services
+
+SqlOS includes an Azure Communication Services Email sender for passwordless email-code login. Provision ACS Email with the helper script:
+
+```bash
+AZURE_SUBSCRIPTION_ID=<subscription-id> \
+AZURE_RESOURCE_GROUP=<resource-group> \
+AZURE_DNS_ZONE_NAME=example.com \
+AZURE_DNS_ZONE_RESOURCE_GROUP=<dns-zone-resource-group> \
+ACS_EMAIL_DOMAIN=example.com \
+ACS_EMAIL_SENDER_USERNAME=no-reply \
+ACS_EMAIL_SENDER_DISPLAY_NAME="Example" \
+./scripts/azure/setup-acs-email.sh --apply-dns --yes
+```
+
+`AZURE_DNS_ZONE_NAME` is the DNS zone apex (for example `example.com`), not a resource group. `AZURE_DNS_ZONE_RESOURCE_GROUP` is the resource group that contains that Azure DNS zone; it defaults to `AZURE_RESOURCE_GROUP` when omitted. Set it when the zone is in a different group than the ACS Email resources, or drop that line from the command when they match.
+
+The script creates an ACS Email Service, ACS Communication Service, customer-managed email domain, sender username, and optional Azure DNS verification records. If your DNS is not hosted in Azure, omit `--apply-dns`; the script prints the records to create manually.
+
+Store the connection string securely, then configure SqlOS:
+
+```bash
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString=<acs-connection-string>
+SqlOS__EmailOtp__FromAddress=no-reply@example.com
+```
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureEmailOtp(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.ApplicationName = "Example";
+    });
+
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["password", "email_otp"];
+    });
+});
+```
+
+Hosted AuthPage, headless browser flows, invite acceptance, and backend SDK usage all use the same OTP primitives. A backend can run a passwordless signup without adding its own REST API surface:
+
+```csharp
+var start = await sqlosAuth.RequestEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@example.com",
+        ClientId: "example-web",
+        OrganizationName: "Example Co",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext);
+
+var login = await sqlosAuth.VerifyEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupVerifyRequest(
+        start.SignupToken,
+        start.ChallengeToken,
+        code),
+    httpContext);
+```
+
+Headless browser clients use `/sqlos/auth/headless/email-otp/start`, `/sqlos/auth/headless/email-otp/verify`, `/sqlos/auth/headless/signup/email-otp/start`, and `/sqlos/auth/headless/signup/email-otp/verify`.
+
+Run `./scripts/azure/setup-acs-email.sh --help` for dry-run, DNS, and connection-string options.
+
+## Invite by Email
+
+SqlOS can send one-time organization invitations that are bound to the invited email address. The hosted accept page is:
+
+```text
+GET /sqlos/auth/invitations/accept?token=...
+```
+
+Admins can create, resend, revoke, and copy invite links from the organization **Invitations** tab in the Auth dashboard. Backend code can use the SDK facade:
+
+```csharp
+var invite = await sqlosAuth.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(
+        OrganizationId: organizationId,
+        Email: "jane@example.com",
+        Role: "member",
+        ClientId: "web",
+        RedirectUri: "https://app.example.com/auth/callback"),
+    httpContext);
+```
+
+Invite acceptance works with Email OTP, password login/signup when enabled, and trusted SSO. See [Email Invitations](docs/INVITATIONS.md).
+
 ## Todo Sample
 
 If your goal is:
@@ -129,8 +222,8 @@ dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 
 That sample stays intentionally narrow:
 
-- hosted auth first
-- headless follow-on
+- hosted AuthPage first
+- passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
 - protected-resource metadata
 - audience-aware token validation
 - local preregistration with `todo-local`
@@ -153,13 +246,13 @@ That starts SQL Server, the sample API, the Todo sample, and the web frontends i
 
 If you build headless auth on a different browser origin than the SqlOS host, make those browser requests credentialed so SqlOS can persist and reuse its auth-page session cookie. Follow-up `/sqlos/auth/authorize?prompt=none` requests should then silently succeed when that session exists, or return `login_required` when it does not.
 
-| | URL |
-|---|---|
-| Dashboard | `http://localhost:5062/sqlos/` |
+|            | URL                                       |
+| ---------- | ----------------------------------------- |
+| Dashboard  | `http://localhost:5062/sqlos/`            |
 | Auth Admin | `http://localhost:5062/sqlos/admin/auth/` |
-| FGA Admin | `http://localhost:5062/sqlos/admin/fga/` |
-| Web App | `http://localhost:3010/` |
-| Todo App | `http://localhost:5080/` |
+| FGA Admin  | `http://localhost:5062/sqlos/admin/fga/`  |
+| Web App    | `http://localhost:3010/`                  |
+| Todo App   | `http://localhost:5080/`                  |
 
 ## Requirements
 
@@ -195,6 +288,8 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
+- [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
+- [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
 - [Todo Sample](examples/SqlOS.Todo.Api/README.md) — hosted auth, simple FGA, and MCP-oriented protected-resource flows
 - [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
 - [Preregistration vs CIMD vs DCR](web/content/docs/authserver/preregistration-vs-cimd-vs-dcr.mdx) — choose the right client onboarding path
@@ -207,6 +302,31 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack
 - [Testing](docs/TESTING.md) — test structure and conventions
 - [Releasing](docs/RELEASE_VERSION.md) — versioning and release process
+
+## Testing Email OTP in the Todo Sample
+
+Run it like this:
+
+```bash
+ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
+AZURE_RESOURCE_GROUP=<resource-group>
+ACS_FROM_ADDRESS=no-reply@example.com
+
+ACS_CONN=$(az communication list-key \
+  --name "$ACS_COMMUNICATION_SERVICE_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --query primaryConnectionString \
+  -o tsv)
+
+TodoSample__EnableEmailOtp=true \
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString="$ACS_CONN" \
+SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Then open `http://localhost:5080/`.
+
+Use **Email code sign in** or **Email code sign up**. In this mode the Todo app only starts the OAuth request; the SqlOS hosted auth page sends the OTP, verifies the code, creates the account on signup, and redirects back with the authorization code.
 
 ## License
 

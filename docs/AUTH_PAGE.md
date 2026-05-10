@@ -25,12 +25,15 @@ When `BasePath = "/sqlos/auth"` the library exposes:
 - `GET /sqlos/auth/.well-known/jwks.json`
 - `GET /sqlos/auth/login`
 - `GET /sqlos/auth/signup`
+- `GET /sqlos/auth/invitations/accept?token=...`
 - `GET /sqlos/auth/logged-out`
 
 When enabled, SqlOS can also expose:
 
 - `POST /sqlos/auth/register` for dynamic client registration
 - `GET /sqlos/auth/headless/*` and `POST /sqlos/auth/headless/*` for headless UI flows
+
+Email OTP and invitations are first-class AuthPage flows. Invite acceptance fixes the email to the invited address, runs the same configured credential methods, and only consumes the invitation when the final session or authorization redirect is issued.
 
 ## Fastest hosted setup
 
@@ -70,6 +73,12 @@ That gives you the simplest path:
 - `BuildUiUrl` exists: your app renders the auth UI
 - `BuildUiUrl` does not exist: SqlOS renders AuthPage
 
+For invitation links, the same rule applies:
+
+- hosted deployments render `/sqlos/auth/invitations/accept?token=...`
+- headless deployments can resolve the token with `POST /sqlos/auth/headless/invitations/resolve`, then pass `invitationToken` through the normal headless start/login/signup/OTP/provider requests
+- after a headless authorization request exists, view changes should preserve that request id; invite login/signup tabs should not restart as standalone links
+
 Read more:
 
 - site docs: `/docs/authserver/hosted-vs-headless`
@@ -97,6 +106,7 @@ The auth dashboard now keeps client onboarding in one place:
 
 - **Clients** — owned, discovered, and registered clients with filters, inspect views, and lifecycle actions
 - **Auth Page** — title, colors, layout, signup toggle, logo
+- **Organization Invitations** — create, resend, revoke, copy links, and inspect delivery state
 - **Security** — session and refresh settings
 - **Providers** — OIDC and SAML
 

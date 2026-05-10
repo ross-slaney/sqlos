@@ -92,7 +92,9 @@ public sealed class SqlOSAuthPageRendererTests
             EnabledCredentialTypes: ["password"],
             UpdatedAt: DateTime.UtcNow,
             ManagedByStartupSeed: false,
-            HeadlessCapabilityRegistered: false);
+            HeadlessCapabilityRegistered: false,
+            LocalPasswordRuntimeEnabled: true,
+            EmailOtpRuntimeConfigured: false);
 
         var html = SqlOSAuthPageRenderer.RenderPage(CreateModel(
             mode: "login",
@@ -125,7 +127,9 @@ public sealed class SqlOSAuthPageRendererTests
             EnabledCredentialTypes: ["password"],
             UpdatedAt: DateTime.UtcNow,
             ManagedByStartupSeed: false,
-            HeadlessCapabilityRegistered: false);
+            HeadlessCapabilityRegistered: false,
+            LocalPasswordRuntimeEnabled: true,
+            EmailOtpRuntimeConfigured: false);
 
         var loginHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(
             mode: "login",
@@ -188,7 +192,9 @@ public sealed class SqlOSAuthPageRendererTests
                 EnabledCredentialTypes: ["password"],
                 UpdatedAt: DateTime.UtcNow,
                 ManagedByStartupSeed: false,
-                HeadlessCapabilityRegistered: false),
+                HeadlessCapabilityRegistered: false,
+                LocalPasswordRuntimeEnabled: true,
+                EmailOtpRuntimeConfigured: false),
             "/sqlos/auth",
             requestId,
             email,

@@ -190,7 +190,7 @@
         }
     };
 
-    const organizationTabs = new Set(["general", "users", "sso"]);
+    const organizationTabs = new Set(["general", "users", "invitations", "sso"]);
     const userTabs = new Set(["general", "organizations", "sessions"]);
 
     const fgaViews = {
@@ -1256,14 +1256,18 @@
         renderLoading("Loading organization details...");
 
         const usersPager = getPagerState(`auth-org-${organizationId}-users`);
+        const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`);
         const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
-        const [organization, users, memberships, ssoConnections] = await Promise.all([
+        const [organization, users, memberships, invitations, ssoConnections] = await Promise.all([
             fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
             fetchJson(`${authApiBasePath}/users?page=1&pageSize=500`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?page=${invitationsPager.page}&pageSize=${invitationsPager.pageSize}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`)
         ]);
         const organizationSsoConnections = Array.isArray(ssoConnections?.data) ? ssoConnections.data : [];
+        const organizationInvitations = Array.isArray(invitations?.data) ? invitations.data : [];
+        const pendingInvitations = organizationInvitations.filter(invitation => invitation.status === "pending").length;
         const latestOrganizationDraft = latestSsoDraft && latestSsoDraft.organizationId === organizationId ? latestSsoDraft : null;
 
         const summaryHtml = `
@@ -1277,12 +1281,12 @@
                     <div class="summary-value">${esc(organization.membershipCount || memberships.totalCount || 0)}</div>
                 </div>
                 <div class="summary-card">
-                    <div class="summary-label">SSO connections</div>
-                    <div class="summary-value">${esc(organization.ssoConnectionCount || ssoConnections.totalCount || 0)}</div>
+                    <div class="summary-label">Pending invites</div>
+                    <div class="summary-value">${esc(pendingInvitations)}</div>
                 </div>
                 <div class="summary-card">
-                    <div class="summary-label">Enabled SSO</div>
-                    <div class="summary-value">${esc(organization.enabledSsoConnections ?? 0)}</div>
+                    <div class="summary-label">SSO connections</div>
+                    <div class="summary-value">${esc(organization.ssoConnectionCount || ssoConnections.totalCount || 0)}</div>
                 </div>
             </div>
         `;
@@ -1291,6 +1295,7 @@
             <div class="tab-strip">
                 ${renderTabLink("general", "General", tab, organizationId)}
                 ${renderTabLink("users", "Users", tab, organizationId)}
+                ${renderTabLink("invitations", "Invitations", tab, organizationId)}
                 ${renderTabLink("sso", "SSO", tab, organizationId)}
             </div>
         `;
@@ -1323,6 +1328,7 @@
                             { label: "Primary domain", value: organization.primaryDomain || "n/a" },
                             { label: "Active", value: organization.isActive ? "Yes" : "No" },
                             { label: "Members", value: organization.membershipCount || memberships.totalCount || 0 },
+                            { label: "Pending invitations", value: pendingInvitations },
                             { label: "Enabled SSO", value: organization.enabledSsoConnections ?? 0 }
                         ])}
                     </section>
@@ -1361,6 +1367,52 @@
                                 ])}
                             `,
                             "No memberships yet."
+                        )}
+                    </section>
+                </div>
+            `;
+        } else if (tab === "invitations") {
+            tabContent = `
+                <div class="panel-grid">
+                    <section class="panel">
+                        <h2>Invite by Email</h2>
+                        <p>Send a one-time invitation link. The invited email must verify through OTP, SSO, existing login, or invite-backed signup before membership is activated.</p>
+                        <form id="create-org-invitation-form">
+                            <input name="email" type="email" placeholder="Email address" required>
+                            <input name="role" placeholder="Role" value="member" required>
+                            <input name="clientId" placeholder="Optional client id">
+                            <input name="redirectUri" placeholder="Optional redirect URI">
+                            <label class="checkbox-row"><input name="sendEmail" type="checkbox" checked> Send invitation email now</label>
+                            <button type="submit">Send invitation</button>
+                        </form>
+                        <div class="callout"><strong>Email delivery:</strong> invitations use the same SqlOS auth email sender as Email OTP.</div>
+                    </section>
+                    <section class="panel">
+                        <h2>Organization Invitations</h2>
+                        <div id="organization-invitations-pagination-top">${renderPagination(invitations.page, invitations.totalPages, invitations.totalCount)}</div>
+                        ${renderList(
+                            organizationInvitations,
+                            item => `
+                                <div class="list-item-header">
+                                    <strong>${esc(item.email)}</strong>
+                                    <span class="inline-code">${esc(item.status)}</span>
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "Invitation ID", value: item.id },
+                                    { label: "Role", value: item.role },
+                                    { label: "Expires", value: formatDate(item.expiresAt) },
+                                    { label: "Last sent", value: formatDate(item.lastSentAt) },
+                                    { label: "Accepted", value: item.acceptedAt ? formatDate(item.acceptedAt) : "No" },
+                                    { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "No" },
+                                    { label: "Delivery error", value: item.lastSendError || "n/a" }
+                                ])}
+                                <div class="form-actions">
+                                    ${item.inviteUrl ? `<button type="button" class="js-copy-invite" data-url="${esc(item.inviteUrl)}">Copy link</button>` : ""}
+                                    ${item.status === "pending" ? `<button type="button" class="js-resend-invite" data-id="${esc(item.id)}">Resend</button>` : ""}
+                                    ${item.status === "pending" ? `<button type="button" class="js-revoke-invite" data-id="${esc(item.id)}">Revoke</button>` : ""}
+                                </div>
+                            `,
+                            "No invitations yet."
                         )}
                     </section>
                 </div>
@@ -1473,6 +1525,69 @@
 
             bindPagination("#organization-users-pagination-top", async page => {
                 setPagerPage(`auth-org-${organizationId}-users`, page);
+                await render();
+            });
+        } else if (tab === "invitations") {
+            bindForm("create-org-invitation-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        email: form.get("email"),
+                        role: form.get("role") || "member",
+                        clientId: form.get("clientId") || null,
+                        redirectUri: form.get("redirectUri") || null,
+                        scope: null,
+                        resource: null,
+                        expiresAt: null,
+                        customFields: null,
+                        invitedByUserId: null,
+                        sendEmail: form.get("sendEmail") === "on"
+                    })
+                });
+                setFlash("success", "Invitation created.");
+            });
+
+            document.querySelectorAll(".js-copy-invite").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const url = button.dataset.url;
+                    if (!url) {
+                        return;
+                    }
+
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(url);
+                        setFlash("success", "Invitation link copied.");
+                    } else {
+                        window.prompt("Invitation link", url);
+                    }
+                    await render();
+                });
+            });
+
+            document.querySelectorAll(".js-resend-invite").forEach(button => {
+                button.addEventListener("click", async () => {
+                    await fetchJson(`${authApiBasePath}/invitations/${encodeURIComponent(button.dataset.id)}/resend`, {
+                        method: "POST",
+                        body: JSON.stringify({})
+                    });
+                    setFlash("success", "Invitation resent.");
+                    await render();
+                });
+            });
+
+            document.querySelectorAll(".js-revoke-invite").forEach(button => {
+                button.addEventListener("click", async () => {
+                    await fetchJson(`${authApiBasePath}/invitations/${encodeURIComponent(button.dataset.id)}/revoke`, {
+                        method: "POST",
+                        body: JSON.stringify({ reason: "revoked_from_dashboard" })
+                    });
+                    setFlash("success", "Invitation revoked.");
+                    await render();
+                });
+            });
+
+            bindPagination("#organization-invitations-pagination-top", async page => {
+                setPagerPage(`auth-org-${organizationId}-invitations`, page);
                 await render();
             });
         } else {
@@ -2614,8 +2729,9 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading Auth Page settings...");
 
-        const [settings, metadata] = await Promise.all([
+        const [settings, emailSettings, metadata] = await Promise.all([
             fetchJson(`${authApiBasePath}/settings/auth-page`),
+            fetchJson(`${authApiBasePath}/settings/email`),
             fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`)
         ]);
 
@@ -2650,8 +2766,12 @@
                             ${settings.headlessCapabilityRegistered
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
+                            ${settings.emailOtpRuntimeConfigured
+                                ? `<div class="callout"><strong>Email OTP delivery is configured.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
+                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.AuthServer.EmailOtp.AzureCommunicationServicesConnectionString</code> and <code>options.AuthServer.EmailOtp.FromAddress</code> in startup before enabling <code>email_otp</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
-                            <input name="enabledCredentialTypes" placeholder="Enabled credential types" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>
                             <label>Logo upload<input id="auth-page-logo-file" type="file" accept="image/*"></label>
                             <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL">${esc(settings.logoBase64 || "")}</textarea>
                             <button type="submit">Save Auth Page</button>
@@ -2671,8 +2791,24 @@
                             { label: "Grant types", value: (metadata.grantTypesSupported || []).join(", ") }
                         ])}
                         <div class="callout">
-                            <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, and layout. Password is the only first-party credential type enabled in v1, but OIDC and SAML providers still appear below it when configured.
+                            <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, layout, and first-party sign-in methods. OIDC and SAML providers still appear below these local credential choices when configured.
                         </div>
+                    </section>
+                    <section class="panel">
+                        <h2>Email Branding</h2>
+                        <p>These settings style built-in Email OTP and invitation emails. Use SDK message builders for advanced copy, layouts, or per-tenant email templates.</p>
+                        ${emailSettings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These email values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                        <form id="auth-email-settings-form">
+                            <input name="applicationName" placeholder="Application name" value="${esc(emailSettings.applicationName || "")}" required>
+                            <div class="panel-grid">
+                                <input name="primaryColor" placeholder="Primary color (#2563eb)" value="${esc(emailSettings.primaryColor || "")}" required>
+                                <input name="accentColor" placeholder="Accent color (#0f172a)" value="${esc(emailSettings.accentColor || "")}" required>
+                            </div>
+                            <input name="backgroundColor" placeholder="Background color (#f8fafc)" value="${esc(emailSettings.backgroundColor || "")}" required>
+                            <label>Email logo upload<input id="auth-email-logo-file" type="file" accept="image/*"></label>
+                            <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL. Leave blank to reuse the Auth Page logo.">${esc(emailSettings.logoBase64 || "")}</textarea>
+                            <button type="submit">Save Email Branding</button>
+                        </form>
                     </section>
                 </div>
             </div>
@@ -2699,6 +2835,20 @@
             setFlash("success", "Auth Page settings saved.");
         });
 
+        bindForm("auth-email-settings-form", async form => {
+            await fetchJson(`${authApiBasePath}/settings/email`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    applicationName: form.get("applicationName"),
+                    logoBase64: form.get("logoBase64") || null,
+                    primaryColor: form.get("primaryColor"),
+                    accentColor: form.get("accentColor"),
+                    backgroundColor: form.get("backgroundColor")
+                })
+            });
+            setFlash("success", "Email branding saved.");
+        });
+
         const fileInput = document.getElementById("auth-page-logo-file");
         const form = document.getElementById("auth-page-settings-form");
         fileInput?.addEventListener("change", () => {
@@ -2710,6 +2860,21 @@
             const reader = new FileReader();
             reader.onload = () => {
                 form.elements.logoBase64.value = String(reader.result || "");
+            };
+            reader.readAsDataURL(file);
+        });
+
+        const emailFileInput = document.getElementById("auth-email-logo-file");
+        const emailForm = document.getElementById("auth-email-settings-form");
+        emailFileInput?.addEventListener("change", () => {
+            const file = emailFileInput.files?.[0];
+            if (!file || !emailForm) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                emailForm.elements.logoBase64.value = String(reader.result || "");
             };
             reader.readAsDataURL(file);
         });

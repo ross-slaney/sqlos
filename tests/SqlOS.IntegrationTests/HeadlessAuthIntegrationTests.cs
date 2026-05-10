@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -222,6 +223,327 @@ public sealed class HeadlessAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task EmailOtpSignUpAsync_WhenHookThrowsValidation_RollsBackUserOrganizationAndChallengeConsumption()
+    {
+        await using var fixture = await CreateFixtureAsync(headless =>
+        {
+            headless.OnHeadlessSignupAsync = (_, _) =>
+                throw new SqlOSHeadlessValidationException(
+                    "Validation failed.",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["companyName"] = "Company name is already in use."
+                    },
+                    ["Please review the highlighted fields."]);
+        });
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-otp-validation",
+                "openid profile email",
+                "challenge-otp-validation",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                """{"lng":"en"}"""));
+
+        var email = $"otp-validation-{Guid.NewGuid():N}@example.com";
+        var organizationName = $"Otp-Acme-{Guid.NewGuid():N}";
+        var start = await fixture.HeadlessAuthService.RequestEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupStartRequest(
+                authorizationRequest.Id,
+                "OTP Alice",
+                email,
+                organizationName,
+                new JsonObject
+                {
+                    ["companyName"] = organizationName
+                }));
+
+        start.Type.Should().Be("view");
+        start.ViewModel.Should().NotBeNull();
+        start.ViewModel!.View.Should().Be("email-otp-signup-verify");
+        var challengeToken = start.ViewModel.ChallengeToken!;
+        var signupToken = start.ViewModel.SignupToken!;
+
+        var verify = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupVerifyRequest(
+                authorizationRequest.Id,
+                signupToken,
+                challengeToken,
+                GetLatestCode(fixture.EmailSender, email)));
+
+        verify.Type.Should().Be("view");
+        verify.ViewModel.Should().NotBeNull();
+        verify.ViewModel!.View.Should().Be("email-otp-signup-verify");
+        verify.ViewModel.FieldErrors.Should().ContainKey("companyName");
+        verify.ViewModel.Error.Should().Be("Please review the highlighted fields.");
+        verify.ViewModel.SignupToken.Should().Be(signupToken);
+        verify.ViewModel.ChallengeToken.Should().Be(challengeToken);
+
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpAsync_WithInvitationForUnknownEmail_ReturnsSignupViewWithoutPhantomChallenge()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var organization = await fixture.AdminService.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite OTP {Guid.NewGuid():N}", null));
+        var invitedEmail = $"invited-{Guid.NewGuid():N}@example.com";
+        var invitation = await fixture.InvitationService.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "member",
+                SendEmail: false),
+            CreateHttpContext());
+        var invitationToken = ExtractInvitationToken(invitation.InviteUrl!);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-invite-login-otp",
+                "openid profile email",
+                "challenge-invite-login-otp",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        await fixture.InvitationService.BindInvitationToAuthorizationRequestAsync(invitationToken, authorizationRequest);
+
+        var result = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpStartRequest(
+                authorizationRequest.Id,
+                invitedEmail));
+
+        result.Type.Should().Be("view");
+        result.ViewModel.Should().NotBeNull();
+        result.ViewModel!.View.Should().Be("signup");
+        result.ViewModel.Error.Should().Be("Create an account to accept this invitation.");
+        result.ViewModel.ChallengeToken.Should().BeNull();
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == invitedEmail)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SignUpWithInvitationAsync_AcceptsInviteWithoutOtpChallenge()
+    {
+        JsonObject? capturedFields = null;
+        await using var fixture = await CreateFixtureAsync(headless =>
+        {
+            headless.OnHeadlessSignupAsync = (ctx, _) =>
+            {
+                capturedFields = JsonNode.Parse(ctx.CustomFields.ToJsonString())?.AsObject();
+                return Task.CompletedTask;
+            };
+        });
+
+        var organization = await fixture.AdminService.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite Direct {Guid.NewGuid():N}", null));
+        var invitedEmail = $"direct-invite-{Guid.NewGuid():N}@example.com";
+        var invitation = await fixture.InvitationService.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "member",
+                SendEmail: false),
+            CreateHttpContext());
+        var invitationToken = ExtractInvitationToken(invitation.InviteUrl!);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-invite-direct-signup",
+                "openid profile email",
+                "challenge-invite-direct-signup",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+
+        var result = await fixture.HeadlessAuthService.SignUpWithInvitationAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessInvitationSignupRequest(
+                authorizationRequest.Id,
+                "Direct Invite",
+                invitedEmail,
+                new JsonObject
+                {
+                    ["firstName"] = "Direct",
+                    ["lastName"] = "Invite"
+                },
+                invitationToken));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith($"{fixture.RedirectUri}?");
+        result.RedirectUrl.Should().Contain("code=");
+        result.RedirectUrl.Should().Contain("state=state-invite-direct-signup");
+        capturedFields?["firstName"]?.GetValue<string>().Should().Be("Direct");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == invitedEmail)).Should().Be(0);
+
+        var email = await fixture.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.Email == invitedEmail);
+        email.IsVerified.Should().BeTrue();
+        var membership = await fixture.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == email.UserId && x.OrganizationId == organization.Id);
+        membership.Role.Should().Be("member");
+        var storedInvitation = await fixture.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task SignUpWithInvitationAsync_WhenEmailMatchesSsoDomain_RedirectsBeforeCreatingUser()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var domain = $"invite-sso-{Guid.NewGuid():N}"[..30].ToLowerInvariant() + ".test";
+        var organization = await CreateSamlOrganizationAsync(fixture, domain);
+        var invitedEmail = $"direct@{domain}";
+        var invitation = await fixture.InvitationService.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "member",
+                SendEmail: false),
+            CreateHttpContext());
+        var invitationToken = ExtractInvitationToken(invitation.InviteUrl!);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-invite-sso-signup",
+                "openid profile email",
+                "challenge-invite-sso-signup",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+
+        var result = await fixture.HeadlessAuthService.SignUpWithInvitationAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessInvitationSignupRequest(
+                authorizationRequest.Id,
+                "SSO Invite",
+                invitedEmail,
+                new JsonObject(),
+                invitationToken));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith("https://idp.example.test/sso?");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == invitedEmail)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == invitedEmail)).Should().Be(0);
+        var storedInvitation = await fixture.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpAsync_WhenEmailMatchesSsoDomain_RedirectsBeforeCreatingOtpChallenge()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var domain = $"headless-sso-{Guid.NewGuid():N}"[..30].ToLowerInvariant() + ".test";
+        await CreateSamlOrganizationAsync(fixture, domain);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-sso-otp",
+                "openid profile email",
+                "challenge-sso-otp",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var email = $"alex@{domain}";
+
+        var result = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpStartRequest(
+                authorizationRequest.Id,
+                email));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith("https://idp.example.test/sso?");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == email)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_WhenEmailMatchesSsoDomain_RedirectsBeforeCreatingSignupChallenge()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var domain = $"signup-sso-{Guid.NewGuid():N}"[..30].ToLowerInvariant() + ".test";
+        await CreateSamlOrganizationAsync(fixture, domain);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-sso-signup",
+                "openid profile email",
+                "challenge-sso-signup",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var email = $"casey@{domain}";
+
+        var result = await fixture.HeadlessAuthService.RequestEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupStartRequest(
+                authorizationRequest.Id,
+                "Casey SSO",
+                email,
+                "Casey Workspace",
+                new JsonObject()));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith("https://idp.example.test/sso?");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == email)).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task SignUpAsync_EstablishesReusableAuthPageSession()
     {
         await using var fixture = await CreateFixtureAsync();
@@ -307,6 +629,11 @@ public sealed class HeadlessAuthIntegrationTests
         };
         optionsValue.SeedBrowserClient(clientId, $"Headless Test {clientId}", redirectUri);
         optionsValue.ClientSeeds[0].AllowNativeHeadlessAuth = allowNativeHeadlessAuth;
+        optionsValue.SeedAuthPage(page =>
+        {
+            page.EnabledCredentialTypes = ["password", "email_otp"];
+            page.EnablePasswordSignup = true;
+        });
         optionsValue.UseHeadlessAuthPage(headless =>
         {
             headless.BuildUiUrl = ctx =>
@@ -317,9 +644,12 @@ public sealed class HeadlessAuthIntegrationTests
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options);
+        var emailSender = new TestAuthEmailSender { IsConfigured = true };
+        var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
-        var authService = new SqlOSAuthService(context, options, admin, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var invitationService = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitationService);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,
@@ -327,7 +657,8 @@ public sealed class HeadlessAuthIntegrationTests
             crypto,
             settings,
             authPageSessionService,
-            options);
+            options,
+            invitationService);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
         var oidcAuthService = new SqlOSOidcAuthService(
             context,
@@ -352,13 +683,15 @@ public sealed class HeadlessAuthIntegrationTests
             oidcBrowserAuthService,
             samlService,
             settings,
-            options);
+            emailOtp,
+            options,
+            invitationService);
 
         await crypto.EnsureActiveSigningKeyAsync();
         await admin.UpsertSeededClientsAsync();
-        await settings.EnsureDefaultAuthPageSettingsAsync();
+        await settings.UpsertSeededAuthPageSettingsAsync();
 
-        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService);
+        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService, emailSender, invitationService);
     }
 
     private static TestSqlOSDbContext CreateContext()
@@ -375,6 +708,24 @@ public sealed class HeadlessAuthIntegrationTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("tests");
         return context;
+    }
+
+    private static async Task<SqlOSOrganization> CreateSamlOrganizationAsync(HeadlessFixture fixture, string domain)
+    {
+        var organization = await fixture.AdminService.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"SSO {Guid.NewGuid():N}", null, domain));
+        await fixture.AdminService.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "Headless SSO",
+            $"urn:headless:{Guid.NewGuid():N}",
+            "https://idp.example.test/sso",
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            true,
+            true,
+            "email",
+            "first_name",
+            "last_name"));
+        return organization;
     }
 
     private static string? ExtractCookieValue(string setCookieHeader, string cookieName)
@@ -396,6 +747,21 @@ public sealed class HeadlessAuthIntegrationTests
         return setCookieHeader[start..end];
     }
 
+    private static string ExtractInvitationToken(string inviteUrl)
+    {
+        var query = new Uri(inviteUrl).Query.TrimStart('?');
+        var tokenPart = query
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .First(x => x.StartsWith("token=", StringComparison.Ordinal));
+        return Uri.UnescapeDataString(tokenPart["token=".Length..]);
+    }
+
+    private static string GetLatestCode(TestAuthEmailSender sender, string email)
+    {
+        var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
+        return Regex.Match(message.TextBody ?? message.HtmlBody, @"\b\d{4,8}\b").Value;
+    }
+
     private sealed record HeadlessFixture(
         TestSqlOSDbContext Context,
         string ClientId,
@@ -403,7 +769,9 @@ public sealed class HeadlessAuthIntegrationTests
         SqlOSAdminService AdminService,
         SqlOSAuthorizationServerService AuthorizationServerService,
         SqlOSHeadlessAuthService HeadlessAuthService,
-        SqlOSAuthPageSessionService AuthPageSessionService) : IAsyncDisposable
+        SqlOSAuthPageSessionService AuthPageSessionService,
+        TestAuthEmailSender EmailSender,
+        SqlOSInvitationService InvitationService) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
