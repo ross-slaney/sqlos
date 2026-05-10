@@ -62,6 +62,78 @@ public sealed class SqlOSEmailOtpService
             cancellationToken);
     }
 
+    public async Task<SqlOSEmailOtpSignupStartResult> StartSignupForAuthorizationRequestAsync(
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string displayName,
+        string email,
+        string? organizationName,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureEmailOtpEnabledAsync(cancellationToken);
+
+        var trimmedDisplayName = displayName?.Trim()
+            ?? throw new InvalidOperationException("Display name is required.");
+        if (string.IsNullOrWhiteSpace(trimmedDisplayName))
+        {
+            throw new InvalidOperationException("Display name is required.");
+        }
+
+        var trimmedEmail = email?.Trim()
+            ?? throw new InvalidOperationException("Email address is required.");
+        if (string.IsNullOrWhiteSpace(trimmedEmail))
+        {
+            throw new InvalidOperationException("Email address is required.");
+        }
+
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var existingEmail = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (existingEmail != null)
+        {
+            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+        }
+
+        if (authorizationRequest != null)
+        {
+            authorizationRequest.LoginHintEmail = trimmedEmail;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        var challenge = await CreateChallengeAsync(
+            trimmedEmail,
+            authorizationRequestId: authorizationRequest?.Id,
+            clientApplicationId: null,
+            requestedOrganizationId: null,
+            httpContext,
+            cancellationToken,
+            sendWhenNoUser: true);
+
+        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
+            "email_otp_signup",
+            userId: null,
+            clientApplicationId: null,
+            organizationId: null,
+            payload: new EmailOtpSignupPayload(
+                _cryptoService.HashToken(challenge.ChallengeToken),
+                authorizationRequest?.Id,
+                trimmedDisplayName,
+                trimmedEmail,
+                string.IsNullOrWhiteSpace(organizationName) ? null : organizationName.Trim()),
+            lifetime: _options.ChallengeLifetime,
+            cancellationToken);
+
+        return new SqlOSEmailOtpSignupStartResult(
+            challenge.ChallengeToken,
+            signupToken,
+            challenge.Email,
+            challenge.MaskedEmail,
+            challenge.Message,
+            challenge.ExpiresAt,
+            challenge.NextAllowedSendAt);
+    }
+
     public async Task<SqlOSEmailOtpStartResult> StartForClientAsync(
         SqlOSEmailOtpStartRequest request,
         HttpContext? httpContext = null,
@@ -96,6 +168,92 @@ public sealed class SqlOSEmailOtpService
     {
         await EnsureEmailOtpEnabledAsync(cancellationToken);
 
+        var challenge = await VerifyChallengeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+
+        if (challenge.User == null || !challenge.User.IsActive)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(challenge.User.Id, cancellationToken);
+        return new SqlOSEmailOtpVerificationResult(challenge, challenge.User, organizations, "email_otp");
+    }
+
+    public async Task<SqlOSEmailOtpSignupVerificationResult> VerifySignupAsync(
+        SqlOSEmailOtpSignupVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureEmailOtpEnabledAsync(cancellationToken);
+
+        var signupToken = request.SignupToken?.Trim()
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        var token = await _cryptoService.FindTemporaryTokenAsync("email_otp_signup", signupToken, cancellationToken)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        var payload = _cryptoService.DeserializePayload<EmailOtpSignupPayload>(token)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+
+        if (requireAuthorizationRequestMatch)
+        {
+            if (string.IsNullOrWhiteSpace(expectedAuthorizationRequestId))
+            {
+                if (!string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
+                {
+                    throw new InvalidOperationException("The sign-in code is invalid or expired.");
+                }
+            }
+            else if (!string.Equals(payload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            }
+        }
+
+        var rawChallengeToken = request.ChallengeToken?.Trim()
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+
+        if (!string.Equals(payload.ChallengeTokenHash, _cryptoService.HashToken(rawChallengeToken), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var challenge = await VerifyChallengeAsync(
+            new SqlOSEmailOtpVerifyRequest(rawChallengeToken, request.Code),
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+
+        if (challenge.User != null)
+        {
+            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+        }
+
+        var existingEmail = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == challenge.NormalizedEmail, cancellationToken);
+        if (existingEmail != null)
+        {
+            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+        }
+
+        await _cryptoService.ConsumeTemporaryTokenAsync("email_otp_signup", signupToken, cancellationToken);
+
+        return new SqlOSEmailOtpSignupVerificationResult(
+            payload.DisplayName,
+            payload.Email,
+            payload.OrganizationName);
+    }
+
+    private async Task<SqlOSEmailOtpChallenge> VerifyChallengeAsync(
+        SqlOSEmailOtpVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken)
+    {
         var rawChallengeToken = request.ChallengeToken?.Trim()
             ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
         var normalizedCode = NormalizeCode(request.Code);
@@ -169,13 +327,7 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
-        if (challenge.User == null || !challenge.User.IsActive)
-        {
-            throw new InvalidOperationException("The sign-in code is invalid or expired.");
-        }
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(challenge.User.Id, cancellationToken);
-        return new SqlOSEmailOtpVerificationResult(challenge, challenge.User, organizations, "email_otp");
+        return challenge;
     }
 
     private async Task<SqlOSEmailOtpStartResult> CreateChallengeAsync(
@@ -184,7 +336,8 @@ public sealed class SqlOSEmailOtpService
         string? clientApplicationId,
         string? requestedOrganizationId,
         HttpContext? httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool sendWhenNoUser = false)
     {
         var trimmedEmail = email?.Trim()
             ?? throw new InvalidOperationException("Email address is required.");
@@ -264,7 +417,7 @@ public sealed class SqlOSEmailOtpService
         _context.Set<SqlOSEmailOtpChallenge>().Add(challenge);
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (emailRecord?.User != null && emailRecord.User.IsActive)
+        if ((emailRecord?.User != null && emailRecord.User.IsActive) || sendWhenNoUser)
         {
             try
             {
@@ -374,6 +527,13 @@ public sealed class SqlOSEmailOtpService
         var minutes = Math.Max(1, (int)Math.Ceiling(lifetime.TotalMinutes));
         return $"Your SqlOS sign-in code is {code}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
     }
+
+    private sealed record EmailOtpSignupPayload(
+        string ChallengeTokenHash,
+        string? AuthorizationRequestId,
+        string DisplayName,
+        string Email,
+        string? OrganizationName);
 }
 
 public sealed record SqlOSEmailOtpVerificationResult(
@@ -381,3 +541,8 @@ public sealed record SqlOSEmailOtpVerificationResult(
     SqlOSUser User,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,
     string AuthenticationMethod);
+
+public sealed record SqlOSEmailOtpSignupVerificationResult(
+    string DisplayName,
+    string Email,
+    string? OrganizationName);

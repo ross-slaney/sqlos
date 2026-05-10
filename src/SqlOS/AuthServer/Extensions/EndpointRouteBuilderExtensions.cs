@@ -75,9 +75,12 @@ public static class EndpointRouteBuilderExtensions
                         headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
                         context.Request.Query["ui_context"].ToString()),
                     cancellationToken);
-                var requestedView = string.Equals(context.Request.Query["view"], "signup", StringComparison.OrdinalIgnoreCase)
-                    ? "signup"
-                    : "login";
+                var requestedView = context.Request.Query["view"].ToString().Trim().ToLowerInvariant() switch
+                {
+                    "signup" => "signup",
+                    "email-otp" => "email-otp",
+                    _ => "login"
+                };
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
                 if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
@@ -581,6 +584,122 @@ public static class EndpointRouteBuilderExtensions
                     authPrefix,
                     authorizationServerService,
                     cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/email-otp/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSEmailOtpService emailOtpService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var displayName = form["displayName"].ToString();
+            var email = form["email"].ToString();
+            var organizationName = form["organizationName"].ToString();
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var signup = await emailOtpService.StartSignupForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    displayName,
+                    email,
+                    organizationName,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-signup-verify",
+                    requestId,
+                    email,
+                    null,
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: signup.Message,
+                    challengeToken: signup.ChallengeToken,
+                    signupToken: signup.SignupToken);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "signup",
+                    requestId,
+                    email,
+                    ex.Message,
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/email-otp/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSEmailOtpService emailOtpService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var signupToken = form["signupToken"].ToString();
+            var challengeToken = form["challengeToken"].ToString();
+            var code = form["code"].ToString();
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var signupVerification = await emailOtpService.VerifySignupAsync(
+                    new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
+                    cancellationToken);
+
+                var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
+                    signupVerification.DisplayName,
+                    signupVerification.Email,
+                    signupVerification.OrganizationName,
+                    authorizationRequest?.OrganizationId,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    await authPageSessionService.SignInAsync(context, signup.User, signup.Organizations.FirstOrDefault()?.Id, signup.AuthenticationMethod, cancellationToken);
+                    return Results.Redirect($"{authPrefix}/login?status=signed-up");
+                }
+
+                return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    signup.User,
+                    authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    signup.AuthenticationMethod,
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-signup-verify",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    challengeToken: challengeToken,
+                    signupToken: signupToken);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -1714,7 +1833,8 @@ public static class EndpointRouteBuilderExtensions
         CancellationToken cancellationToken,
         IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null,
         string? info = null,
-        string? challengeToken = null)
+        string? challengeToken = null,
+        string? signupToken = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
         var providerBasePath = authorizationRequestId == null
@@ -1742,7 +1862,8 @@ public static class EndpointRouteBuilderExtensions
             pendingToken,
             organizationSelection ?? Array.Empty<SqlOSOrganizationOption>(),
             providers,
-            challengeToken);
+            challengeToken,
+            signupToken);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)

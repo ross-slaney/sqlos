@@ -35,6 +35,7 @@ async function initIndexPage() {
         issuer: config.issuer,
         resource: config.resource,
         hostedClient: config.hostedClient,
+        emailOtpEnabled: config.emailOtpEnabled,
         localClient: config.localClient,
         portableClient: config.portableClient,
         cimdEnabled: config.cimdEnabled,
@@ -45,11 +46,23 @@ async function initIndexPage() {
     );
   }
 
-  document.getElementById("hosted-login-button")?.addEventListener("click", async () => {
-    await startAuthorization("login");
+  const hostedLoginButton = document.getElementById("hosted-login-button");
+  const hostedSignupButton = document.getElementById("hosted-signup-button");
+
+  if (config.emailOtpEnabled) {
+    if (hostedLoginButton) {
+      hostedLoginButton.textContent = "Email code sign in";
+    }
+    if (hostedSignupButton) {
+      hostedSignupButton.textContent = "Email code sign up";
+    }
+  }
+
+  hostedLoginButton?.addEventListener("click", async () => {
+    await startAuthorization(config.emailOtpEnabled ? "email-otp" : "login");
   });
 
-  document.getElementById("hosted-signup-button")?.addEventListener("click", async () => {
+  hostedSignupButton?.addEventListener("click", async () => {
     await startAuthorization("signup");
   });
 }
@@ -169,19 +182,10 @@ async function initAppPage() {
 
 async function initHeadlessPage() {
   const requestInfo = document.getElementById("headless-request-info");
-  const message = document.getElementById("headless-message");
   const requestId = new URLSearchParams(window.location.search).get("request");
 
-  document.getElementById("headless-start-login")?.addEventListener("click", async () => {
-    await startAuthorization("login");
-  });
-
-  document.getElementById("headless-start-signup")?.addEventListener("click", async () => {
-    await startAuthorization("signup");
-  });
-
   if (!requestId) {
-    requestInfo.textContent = "No headless authorization request is active yet. Use one of the start buttons above after enabling headless mode in config.";
+    requestInfo.textContent = "No headless authorization request is active.";
     return;
   }
 
@@ -205,46 +209,6 @@ async function initHeadlessPage() {
     null,
     2
   );
-
-  const loginForm = document.getElementById("headless-login-form");
-  loginForm?.addEventListener("submit", async event => {
-    event.preventDefault();
-    const formData = new FormData(loginForm);
-    const result = await postJson("/sqlos/auth/headless/password/login", {
-      requestId,
-      email: String(formData.get("email") || ""),
-      password: String(formData.get("password") || "")
-    });
-    await applyHeadlessResult(result, message);
-  });
-
-  const signupForm = document.getElementById("headless-signup-form");
-  signupForm?.addEventListener("submit", async event => {
-    event.preventDefault();
-    const formData = new FormData(signupForm);
-    const result = await postJson("/sqlos/auth/headless/signup", {
-      requestId,
-      displayName: String(formData.get("displayName") || ""),
-      email: String(formData.get("email") || ""),
-      password: String(formData.get("password") || ""),
-      organizationName: String(formData.get("organizationName") || "")
-    });
-    await applyHeadlessResult(result, message);
-  });
-}
-
-async function applyHeadlessResult(result, messageElement) {
-  if (result.type === "redirect" && result.redirectUrl) {
-    window.location.assign(result.redirectUrl);
-    return;
-  }
-
-  if (result.viewModel) {
-    messageElement.textContent = result.viewModel.error || result.viewModel.info || "Headless step completed.";
-    return;
-  }
-
-  messageElement.textContent = "Unexpected headless response.";
 }
 
 async function refreshTodos(todoListElement, sessionInfoElement) {
@@ -341,6 +305,10 @@ async function startAuthorization(view) {
     view
   });
 
+  if (view === "signup" || view === "email-otp") {
+    params.set("prompt", "login");
+  }
+
   window.location.assign(`/sqlos/auth/authorize?${params.toString()}`);
 }
 
@@ -368,23 +336,6 @@ async function apiFetch(path, options = {}) {
     ...options,
     headers
   });
-}
-
-async function postJson(path, body) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.message || payload.error || "The headless request failed.");
-  }
-
-  return payload;
 }
 
 async function readApiError(response) {

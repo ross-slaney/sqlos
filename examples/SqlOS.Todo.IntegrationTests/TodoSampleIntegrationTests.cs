@@ -10,7 +10,9 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.Todo.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Todo.IntegrationTests;
@@ -57,6 +59,80 @@ public sealed class TodoSampleIntegrationTests
             .Should().Contain(item =>
                 item.GetProperty("title").GetString() == "Ship hosted-first login"
                 && item.GetProperty("resourceId").GetString()!.StartsWith("todo::", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task HostedEmailOtpSignup_DoesNotIssueTokenUntilCodeIsVerified()
+    {
+        await using var factory = TodoApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("TodoSample:EnableEmailOtp", "true");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSAuthEmailSender>();
+                services.AddSingleton<TestAuthEmailSender>();
+                services.AddSingleton<ISqlOSAuthEmailSender>(provider => provider.GetRequiredService<TestAuthEmailSender>());
+            });
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var authorize = await StartAuthorizationAsync(client, HostedClientId, HostedRedirectUri);
+        authorize.Html.Should().Contain("/sqlos/auth/signup/email-otp/start");
+        authorize.Html.Should().NotContain("name=\"password\"");
+        var emailSender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+        var email = $"otp-hosted-{Guid.NewGuid():N}@example.com";
+
+        var passwordSignupResponse = await client.PostAsync("/sqlos/auth/signup/submit", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = authorize.RequestId,
+            ["displayName"] = "Password Bypass User",
+            ["email"] = $"password-bypass-{Guid.NewGuid():N}@example.com",
+            ["password"] = "P@ssword123!",
+            ["organizationName"] = "Password Bypass Org"
+        }));
+        passwordSignupResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        passwordSignupResponse.Headers.Location.Should().BeNull("password signup is disabled in the Todo email OTP demo");
+
+        var startResponse = await client.PostAsync("/sqlos/auth/signup/email-otp/start", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = authorize.RequestId,
+            ["displayName"] = "OTP Hosted User",
+            ["email"] = email,
+            ["organizationName"] = "OTP Hosted Org"
+        }));
+
+        startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        startResponse.Headers.Location.Should().BeNull("email OTP signup must render code verification before issuing an authorization code");
+
+        var verifyHtml = await startResponse.Content.ReadAsStringAsync();
+        verifyHtml.Should().Contain("Verify and create account");
+        var challengeToken = ExtractHiddenInput(verifyHtml, "challengeToken");
+        var signupToken = ExtractHiddenInput(verifyHtml, "signupToken");
+        var code = emailSender.GetLatestCode(email);
+
+        var verifyResponse = await client.PostAsync("/sqlos/auth/signup/email-otp/verify", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = authorize.RequestId,
+            ["email"] = email,
+            ["challengeToken"] = challengeToken,
+            ["signupToken"] = signupToken,
+            ["code"] = code
+        }));
+
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var location = verifyResponse.Headers.Location!.ToString();
+        var authCode = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
+        authCode.Should().NotBeNullOrWhiteSpace();
+
+        var tokens = await ExchangeAuthorizationCodeAsync(client, authCode, HostedClientId, HostedRedirectUri, authorize.CodeVerifier);
+        ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
+
+        var createResponse = await CreateTodoAsync(client, tokens.AccessToken, "Ship passwordless Todo");
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        createJson.RootElement.GetProperty("resourceId").GetString().Should().StartWith("todo::");
     }
 
     [TestMethod]
@@ -419,14 +495,14 @@ public sealed class TodoSampleIntegrationTests
         {
             var redirectUriResult = authorizeResponse.Headers.Location!;
             var requestId = QueryHelpers.ParseQuery(redirectUriResult.Query)["request"].ToString();
-            return new AuthorizationStartResult(requestId, codeVerifier, redirectUriResult);
+            return new AuthorizationStartResult(requestId, codeVerifier, redirectUriResult, null);
         }
 
         authorizeResponse.EnsureSuccessStatusCode();
         var html = await authorizeResponse.Content.ReadAsStringAsync();
         var requestIdMatch = Regex.Match(html, "name=\"requestId\" value=\"([^\"]+)\"");
         requestIdMatch.Success.Should().BeTrue();
-        return new AuthorizationStartResult(requestIdMatch.Groups[1].Value, codeVerifier, null);
+        return new AuthorizationStartResult(requestIdMatch.Groups[1].Value, codeVerifier, null, html);
     }
 
     private static async Task<HostedSignupResult> ExecuteHostedSignupAsync(HttpClient client, string clientId, string redirectUri)
@@ -521,7 +597,17 @@ public sealed class TodoSampleIntegrationTests
         return WebEncoders.Base64UrlEncode(bytes);
     }
 
-    private sealed record AuthorizationStartResult(string RequestId, string CodeVerifier, Uri? HeadlessRedirect);
+    private static string ExtractHiddenInput(string html, string fieldName)
+    {
+        var match = Regex.Match(
+            html,
+            $"name=\"{Regex.Escape(fieldName)}\" value=\"([^\"]*)\"",
+            RegexOptions.CultureInvariant);
+        match.Success.Should().BeTrue($"hidden input '{fieldName}' should be rendered");
+        return WebUtility.HtmlDecode(match.Groups[1].Value);
+    }
+
+    private sealed record AuthorizationStartResult(string RequestId, string CodeVerifier, Uri? HeadlessRedirect, string? Html);
     private sealed record HostedSignupResult(string Code, string CodeVerifier);
     private sealed record TokenResult(string AccessToken, string RefreshToken, string ClientId);
 }

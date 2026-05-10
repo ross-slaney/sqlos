@@ -95,17 +95,26 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
     auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
     auth.PublicOrigin = publicOrigin;
     auth.DefaultAudience = sampleConfig.Resource;
+    auth.EnableLocalPasswordAuth = !sampleConfig.EnableEmailOtp;
+    auth.ConfigureEmailOtp(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+    });
 
     auth.SeedAuthPage(page =>
     {
-        page.PageTitle = "Ship the Todo app first.";
-        page.PageSubtitle = "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
+        page.PageTitle = sampleConfig.EnableEmailOtp ? "Check your email. Ship the Todo app." : "Ship the Todo app first.";
+        page.PageSubtitle = sampleConfig.EnableEmailOtp
+            ? "Use passwordless email codes for sign in and sign up, then land back in the hosted-first Todo sample."
+            : "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
         page.PrimaryColor = "#0f172a";
         page.AccentColor = "#2563eb";
         page.BackgroundColor = "#f8fafc";
         page.Layout = "split";
-        page.EnablePasswordSignup = true;
-        page.EnabledCredentialTypes = ["password"];
+        page.EnablePasswordSignup = !sampleConfig.EnableEmailOtp;
+        page.EnabledCredentialTypes = sampleConfig.EnableEmailOtp ? ["email_otp"] : ["password"];
     });
 
     auth.SeedClient(client =>
@@ -225,9 +234,14 @@ app.UseStaticFiles();
 app.UseCors("todo-emcy-frontend");
 app.MapSqlOS();
 
-app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOptions<SqlOSAuthServerOptions> authOptions) =>
+app.MapGet("/sample/config", async (
+    IOptions<TodoSampleOptions> sampleOptions,
+    IOptions<SqlOSAuthServerOptions> authOptions,
+    SqlOSSettingsService settingsService,
+    CancellationToken cancellationToken) =>
 {
     var sample = sampleOptions.Value;
+    var authPageSettings = await settingsService.GetAuthPageSettingsAsync(cancellationToken);
     var sampleOrigin = sample.PublicOrigin.TrimEnd('/');
     var hostedCallback = $"{sampleOrigin}/callback.html";
     var protectedResourceMetadata = $"{sampleOrigin}/.well-known/oauth-protected-resource";
@@ -258,6 +272,7 @@ app.MapGet("/sample/config", (IOptions<TodoSampleOptions> sampleOptions, IOption
             redirectUri = sample.PortableClientRedirectUri
         },
         headlessEnabled = sample.EnableHeadless,
+        emailOtpEnabled = sample.EnableEmailOtp && authPageSettings.EmailOtpRuntimeConfigured,
         dcrEnabled = authOptions.Value.ClientRegistration.Dcr.Enabled,
         cimdEnabled = authOptions.Value.ClientRegistration.Cimd.Enabled,
         allowedScopes = sample.AllowedScopes

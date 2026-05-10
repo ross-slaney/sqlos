@@ -45,7 +45,9 @@ public static class SqlOSAuthPageRenderer
         var supportsEmailOtp = model.Settings.EmailOtpRuntimeConfigured
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "email_otp");
         var supportsPasswordSignup = supportsPassword && model.Settings.EnablePasswordSignup;
-        var signupLink = supportsPasswordSignup
+        var supportsEmailOtpSignup = supportsEmailOtp;
+        var supportsSignup = supportsPasswordSignup || supportsEmailOtpSignup;
+        var signupLink = supportsSignup
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Get started</a>"
             : string.Empty;
         var loginLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Sign in</a>";
@@ -58,10 +60,8 @@ public static class SqlOSAuthPageRenderer
         var signInAgainLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login"))}\">Sign in again</a>";
         var errorMarkup = BuildCallout("error", model.Error);
         var infoMarkup = BuildCallout("info", model.Info);
-
-        var content = normalizedMode switch
-        {
-            "signup" => $$"""
+        var signupContent = supportsPasswordSignup
+            ? $$"""
                 {{RenderPanelIntro("Create account", "Use email and password to set up your account.")}}
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
                   {{requestIdInput}}
@@ -86,7 +86,38 @@ public static class SqlOSAuthPageRenderer
                 </form>
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Already have an account?", loginLink)}}
-                """,
+                """
+            : supportsEmailOtpSignup
+                ? $$"""
+                    {{RenderPanelIntro("Create account", "Verify your email with a one-time code to create your account.")}}
+                    <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/start"))}}">
+                      {{requestIdInput}}
+                      <input type="hidden" name="mode" value="{{encodedMode}}" />
+                      <label class="field">
+                        <span>Display name</span>
+                        <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                      </label>
+                      <label class="field">
+                        <span>Email</span>
+                        <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required />
+                      </label>
+                      <label class="field">
+                        <span>Organization name</span>
+                        <input name="organizationName" placeholder="Optional" autocomplete="organization" />
+                      </label>
+                      {{RenderPrimaryAction("Email me a code", "Sending code")}}
+                    </form>
+                    {{RenderProvidersSection(model)}}
+                    {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                    """
+                : $$"""
+                    {{RenderPanelIntro("Create account", "Account creation is not available.")}}
+                    {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                    """;
+
+        var content = normalizedMode switch
+        {
+            "signup" => signupContent,
             "password" => $$"""
                 {{RenderPanelIntro("Password", "Continue with your email and password.")}}
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
@@ -134,6 +165,21 @@ public static class SqlOSAuthPageRenderer
                     $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Send a new code</a>",
                     passwordLink
                 }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                """,
+            "email-otp-signup-verify" => $$"""
+                {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your email address to create your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/verify"))}}">
+                  {{requestIdInput}}
+                  <input type="hidden" name="signupToken" value="{{Html(model.SignupToken ?? string.Empty)}}" />
+                  <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify and create account", "Verifying code")}}
+                </form>
+                {{RenderFooterLinks($"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Start over</a>")}}
                 """,
             "organization" => $$"""
                 {{RenderPanelIntro("Organization", "Choose the workspace you want to continue into.")}}
@@ -989,6 +1035,7 @@ public sealed record SqlOSAuthPageViewModel(
     string? PendingToken,
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
     IReadOnlyList<SqlOSAuthPageProviderLink> Providers,
-    string? ChallengeToken = null);
+    string? ChallengeToken = null,
+    string? SignupToken = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

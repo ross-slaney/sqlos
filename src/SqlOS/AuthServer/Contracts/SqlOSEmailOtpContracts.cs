@@ -13,7 +13,21 @@ public sealed record SqlOSEmailOtpStartResult(
     DateTime ExpiresAt,
     DateTime NextAllowedSendAt);
 
+public sealed record SqlOSEmailOtpSignupStartResult(
+    string ChallengeToken,
+    string SignupToken,
+    string Email,
+    string MaskedEmail,
+    string Message,
+    DateTime ExpiresAt,
+    DateTime NextAllowedSendAt);
+
 public sealed record SqlOSEmailOtpVerifyRequest(
+    string ChallengeToken,
+    string Code);
+
+public sealed record SqlOSEmailOtpSignupVerifyRequest(
+    string SignupToken,
     string ChallengeToken,
     string Code);
 

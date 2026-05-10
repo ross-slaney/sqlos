@@ -4,9 +4,9 @@ This is the hosted-first Todo sample for SqlOS.
 
 It shows:
 
-- hosted auth first
+- hosted AuthPage first
+- passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
 - simple per-user FGA with inherited todo access
-- a documented headless follow-on path
 - a protected resource with audience enforcement
 - protected-resource metadata at `/.well-known/oauth-protected-resource`
 - preregistered local development for `todo-local`
@@ -50,12 +50,12 @@ Each authenticated user gets one tenant root resource under `root`. Every todo i
 
 ## What to try
 
-1. Start with `Hosted sign in`.
-2. Create a user on the hosted SqlOS auth page.
-3. Land in the Todo UI and create a few items.
-4. Open `/sqlos/admin/fga/resources` and confirm the tree shows your tenant plus child todo resources.
-5. Inspect `/.well-known/oauth-protected-resource`.
-6. Try `headless.html` after enabling `TodoSample__EnableHeadless=true`.
+1. For the email OTP demo, run the AppHost with `TodoSample__EnableEmailOtp=true` and ACS email settings.
+2. Start with `Email code sign up` or `Email code sign in`.
+3. Create or sign into a user on the hosted SqlOS auth page. The Todo app only starts the OAuth request; SqlOS owns the OTP challenge, verification, and redirect back to the Todo callback.
+4. Land in the Todo UI and create a few items.
+5. Open `/sqlos/admin/fga/resources` and confirm the tree shows your tenant plus child todo resources.
+6. Inspect `/.well-known/oauth-protected-resource`.
 7. Use `todo-local` for preregistered localhost direct-client development.
 8. Use `todo-mcp-local` when Emcy is brokering Todo auth through a hosted MCP server.
 9. Publish the sample on HTTPS, then use:

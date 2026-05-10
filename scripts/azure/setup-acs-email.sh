@@ -275,6 +275,7 @@ get_verification_records() {
       --domain-name "$ACS_EMAIL_DOMAIN" \
       --email-service-name "$ACS_EMAIL_SERVICE_NAME" \
       --resource-group "$AZURE_RESOURCE_GROUP" \
+      --only-show-errors \
       -o json)
     records=$(printf '%s' "$details" | jq -c '.verificationRecords // {}')
 
@@ -294,12 +295,30 @@ get_verification_records() {
 add_txt_record() {
   local name="$1"
   local value="$2"
-  run az network dns record-set txt create \
-    --resource-group "$AZURE_DNS_ZONE_RESOURCE_GROUP" \
-    --zone-name "$AZURE_DNS_ZONE_NAME" \
-    --name "$name" \
-    --ttl "$ACS_DNS_TTL_SECONDS" \
-    --output none >/dev/null 2>&1 || true
+  local record_set
+
+  if [ "$DRY_RUN" != true ]; then
+    record_set=$(az network dns record-set txt show \
+      --resource-group "$AZURE_DNS_ZONE_RESOURCE_GROUP" \
+      --zone-name "$AZURE_DNS_ZONE_NAME" \
+      --name "$name" \
+      -o json 2>/dev/null || true)
+
+    if [ -n "$record_set" ] && printf '%s' "$record_set" | jq -e --arg value "$value" \
+      'any(.TXTRecords[]?; ((.value // []) | join("")) == $value)' >/dev/null; then
+      info "TXT record already exists at $name."
+      return
+    fi
+
+    if [ -z "$record_set" ]; then
+      run az network dns record-set txt create \
+        --resource-group "$AZURE_DNS_ZONE_RESOURCE_GROUP" \
+        --zone-name "$AZURE_DNS_ZONE_NAME" \
+        --name "$name" \
+        --ttl "$ACS_DNS_TTL_SECONDS" \
+        --output none >/dev/null 2>&1
+    fi
+  fi
 
   run az network dns record-set txt add-record \
     --resource-group "$AZURE_DNS_ZONE_RESOURCE_GROUP" \
@@ -311,12 +330,16 @@ add_txt_record() {
 
 apply_dns_records() {
   local records="$1"
-  local domain_value spf_value dkim_name dkim_value relative_name existing_spf existing_cname
+  local domain_name domain_value domain_relative_name
+  local spf_name spf_value spf_relative_name existing_spf
+  local dkim_name dkim_value relative_name existing_cname
 
   info "Verification records:"
   printf '%s\n' "$records" | jq .
 
+  domain_name=$(printf '%s' "$records" | jq -r '.Domain.name // empty')
   domain_value=$(printf '%s' "$records" | jq -r '.Domain.value // empty')
+  spf_name=$(printf '%s' "$records" | jq -r '.SPF.name // empty')
   spf_value=$(printf '%s' "$records" | jq -r '.SPF.value // empty')
 
   if [ "$APPLY_DNS" != true ]; then
@@ -324,25 +347,32 @@ apply_dns_records() {
   fi
 
   if [ -n "$domain_value" ]; then
-    info "Adding domain verification TXT record at @."
-    add_txt_record "@" "$domain_value"
+    domain_name="${domain_name:-$ACS_EMAIL_DOMAIN}"
+    domain_relative_name=$(relative_record_name "$domain_name" "$AZURE_DNS_ZONE_NAME")
+    info "Adding domain verification TXT record at $domain_relative_name."
+    add_txt_record "$domain_relative_name" "$domain_value"
   fi
 
   if [ -n "$spf_value" ]; then
+    spf_name="${spf_name:-$ACS_EMAIL_DOMAIN}"
+    spf_relative_name=$(relative_record_name "$spf_name" "$AZURE_DNS_ZONE_NAME")
     existing_spf=$(az network dns record-set txt show \
       --resource-group "$AZURE_DNS_ZONE_RESOURCE_GROUP" \
       --zone-name "$AZURE_DNS_ZONE_NAME" \
-      --name "@" \
-      --query "TXTRecords[].value[]" \
-      -o tsv 2>/dev/null | awk 'tolower($0) ~ /^v=spf1/ { print }' || true)
+      --name "$spf_relative_name" \
+      -o json 2>/dev/null | jq -r '.TXTRecords[]?.value? | join("") | select(test("^v=spf1"; "i"))' || true)
 
     if [ -n "$existing_spf" ]; then
-      warn "Existing SPF record found at @. Not adding another SPF record automatically."
-      warn "Existing: $existing_spf"
-      warn "ACS wants: $spf_value"
+      if printf '%s\n' "$existing_spf" | grep -Fx -- "$spf_value" >/dev/null; then
+        info "SPF TXT record already exists at $spf_relative_name."
+      else
+        warn "Existing SPF record found at $spf_relative_name. Not adding another SPF record automatically."
+        warn "Existing: $existing_spf"
+        warn "ACS wants: $spf_value"
+      fi
     else
-      info "Adding SPF TXT record at @."
-      add_txt_record "@" "$spf_value"
+      info "Adding SPF TXT record at $spf_relative_name."
+      add_txt_record "$spf_relative_name" "$spf_value"
     fi
   fi
 
@@ -360,9 +390,13 @@ apply_dns_records() {
       -o tsv 2>/dev/null || true)
 
     if [ -n "$existing_cname" ] && [ "$FORCE_DKIM" != true ]; then
-      warn "$key CNAME already exists at $relative_name. Use --force-dkim to replace it."
-      warn "Existing: $existing_cname"
-      warn "ACS wants: $dkim_value"
+      if [ "$existing_cname" = "$dkim_value" ]; then
+        info "$key CNAME already exists at $relative_name."
+      else
+        warn "$key CNAME already exists at $relative_name. Use --force-dkim to replace it."
+        warn "Existing: $existing_cname"
+        warn "ACS wants: $dkim_value"
+      fi
       continue
     fi
 
@@ -396,31 +430,35 @@ verify_domain() {
     return
   fi
 
+  local attempt=0
+  local max_attempts=30
+  local details domain_status spf_status dkim_status dkim2_status
+
   if [ "$APPLY_DNS" = true ]; then
     info "Waiting briefly for DNS propagation."
     sleep 30
   else
-    warn "Skipping domain verification polling because DNS was not applied by this script."
-    return
+    warn "DNS was not applied by this script. Checking current domain verification status once."
   fi
 
-  for type in Domain SPF DKIM DKIM2; do
-    run az communication email domain initiate-verification \
-      --domain-name "$ACS_EMAIL_DOMAIN" \
-      --email-service-name "$ACS_EMAIL_SERVICE_NAME" \
-      --resource-group "$AZURE_RESOURCE_GROUP" \
-      --verification-type "$type" \
-      --output none >/dev/null 2>&1 || true
-  done
+  if [ "$APPLY_DNS" = true ]; then
+    for type in Domain SPF DKIM DKIM2; do
+      run az communication email domain initiate-verification \
+        --domain-name "$ACS_EMAIL_DOMAIN" \
+        --email-service-name "$ACS_EMAIL_SERVICE_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --verification-type "$type" \
+        --only-show-errors \
+        --output none >/dev/null 2>&1 || true
+    done
+  fi
 
-  local attempt=0
-  local max_attempts=30
-  local details domain_status spf_status dkim_status dkim2_status
   while [ "$attempt" -lt "$max_attempts" ]; do
     details=$(az communication email domain show \
       --domain-name "$ACS_EMAIL_DOMAIN" \
       --email-service-name "$ACS_EMAIL_SERVICE_NAME" \
       --resource-group "$AZURE_RESOURCE_GROUP" \
+      --only-show-errors \
       -o json)
     domain_status=$(printf '%s' "$details" | jq -r '.verificationStates.Domain.status // "Unknown"')
     spf_status=$(printf '%s' "$details" | jq -r '.verificationStates.SPF.status // "Unknown"')
@@ -433,11 +471,17 @@ verify_domain() {
       return
     fi
 
+    if [ "$APPLY_DNS" != true ]; then
+      warn "Domain verification is not complete. Create the printed DNS records, then rerun this script."
+      return 1
+    fi
+
     attempt=$((attempt + 1))
     sleep 20
   done
 
-  warn "Domain verification is still pending. DNS propagation can take longer; verify in Azure Portal if needed."
+  warn "Domain verification did not complete. DNS propagation can take longer; verify the records in Azure DNS or Azure Portal."
+  return 1
 }
 
 link_domain() {
@@ -518,9 +562,12 @@ main() {
 
   records=$(get_verification_records)
   apply_dns_records "$records"
-  verify_domain
-  link_domain
-  create_sender_username
+  if verify_domain; then
+    link_domain
+    create_sender_username
+  else
+    warn "Skipping domain link and sender username until domain verification completes."
+  fi
   print_sqlos_config
 }
 

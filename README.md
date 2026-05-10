@@ -12,12 +12,12 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ## Why SqlOS?
 
-| External auth services | SqlOS |
-|---|---|
-| Data lives on someone else's servers | Data lives in **your** SQL Server |
-| Per-MAU pricing that scales against you | **MIT-licensed**, no usage fees |
-| Another vendor dependency to manage | **Single NuGet package**, ships with your app |
-| Limited customization of login flows | **Full control** — branded AuthPage, custom OIDC, SAML |
+| External auth services                  | SqlOS                                                  |
+| --------------------------------------- | ------------------------------------------------------ |
+| Data lives on someone else's servers    | Data lives in **your** SQL Server                      |
+| Per-MAU pricing that scales against you | **MIT-licensed**, no usage fees                        |
+| Another vendor dependency to manage     | **Single NuGet package**, ships with your app          |
+| Limited customization of login flows    | **Full control** — branded AuthPage, custom OIDC, SAML |
 
 ## Features
 
@@ -124,11 +124,14 @@ SqlOS includes an Azure Communication Services Email sender for passwordless ema
 AZURE_SUBSCRIPTION_ID=<subscription-id> \
 AZURE_RESOURCE_GROUP=<resource-group> \
 AZURE_DNS_ZONE_NAME=example.com \
+AZURE_DNS_ZONE_RESOURCE_GROUP=<dns-zone-resource-group> \
 ACS_EMAIL_DOMAIN=example.com \
 ACS_EMAIL_SENDER_USERNAME=no-reply \
 ACS_EMAIL_SENDER_DISPLAY_NAME="Example" \
 ./scripts/azure/setup-acs-email.sh --apply-dns --yes
 ```
+
+`AZURE_DNS_ZONE_NAME` is the DNS zone apex (for example `example.com`), not a resource group. `AZURE_DNS_ZONE_RESOURCE_GROUP` is the resource group that contains that Azure DNS zone; it defaults to `AZURE_RESOURCE_GROUP` when omitted. Set it when the zone is in a different group than the ACS Email resources, or drop that line from the command when they match.
 
 The script creates an ACS Email Service, ACS Communication Service, customer-managed email domain, sender username, and optional Azure DNS verification records. If your DNS is not hosted in Azure, omit `--apply-dns`; the script prints the records to create manually.
 
@@ -172,8 +175,8 @@ dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 
 That sample stays intentionally narrow:
 
-- hosted auth first
-- headless follow-on
+- hosted AuthPage first
+- passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
 - protected-resource metadata
 - audience-aware token validation
 - local preregistration with `todo-local`
@@ -196,13 +199,13 @@ That starts SQL Server, the sample API, the Todo sample, and the web frontends i
 
 If you build headless auth on a different browser origin than the SqlOS host, make those browser requests credentialed so SqlOS can persist and reuse its auth-page session cookie. Follow-up `/sqlos/auth/authorize?prompt=none` requests should then silently succeed when that session exists, or return `login_required` when it does not.
 
-| | URL |
-|---|---|
-| Dashboard | `http://localhost:5062/sqlos/` |
+|            | URL                                       |
+| ---------- | ----------------------------------------- |
+| Dashboard  | `http://localhost:5062/sqlos/`            |
 | Auth Admin | `http://localhost:5062/sqlos/admin/auth/` |
-| FGA Admin | `http://localhost:5062/sqlos/admin/fga/` |
-| Web App | `http://localhost:3010/` |
-| Todo App | `http://localhost:5080/` |
+| FGA Admin  | `http://localhost:5062/sqlos/admin/fga/`  |
+| Web App    | `http://localhost:3010/`                  |
+| Todo App   | `http://localhost:5080/`                  |
 
 ## Requirements
 
@@ -250,6 +253,31 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack
 - [Testing](docs/TESTING.md) — test structure and conventions
 - [Releasing](docs/RELEASE_VERSION.md) — versioning and release process
+
+## Testing Email OTP in the Todo Sample
+
+Run it like this:
+
+```bash
+ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
+AZURE_RESOURCE_GROUP=<resource-group>
+ACS_FROM_ADDRESS=no-reply@example.com
+
+ACS_CONN=$(az communication list-key \
+  --name "$ACS_COMMUNICATION_SERVICE_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --query primaryConnectionString \
+  -o tsv)
+
+TodoSample__EnableEmailOtp=true \
+SqlOS__EmailOtp__AzureCommunicationServicesConnectionString="$ACS_CONN" \
+SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Then open `http://localhost:5080/`.
+
+Use **Email code sign in** or **Email code sign up**. In this mode the Todo app only starts the OAuth request; the SqlOS hosted auth page sends the OTP, verifies the code, creates the account on signup, and redirects back with the authorization code.
 
 ## License
 

@@ -275,6 +275,57 @@ public sealed class SqlOSAuthorizationServerService
         return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
 
+    public async Task<SqlOSPasswordAuthenticationResult> SignUpWithEmailOtpAsync(
+        string displayName,
+        string email,
+        string? organizationName,
+        string? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.EmailOtpEnabled)
+        {
+            throw new InvalidOperationException("Email sign-in is unavailable.");
+        }
+
+        var user = await _adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, null),
+            cancellationToken);
+
+        var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
+        emailRecord.IsVerified = true;
+        emailRecord.VerifiedAt = DateTime.UtcNow;
+        user.DefaultEmail = emailRecord.Email;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        var selectedOrganizationId = organizationId;
+        if (!string.IsNullOrWhiteSpace(organizationName))
+        {
+            var createdOrganization = await _adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(organizationName, null),
+                cancellationToken);
+            selectedOrganizationId = createdOrganization.Id;
+            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(selectedOrganizationId) && organizations.All(x => x.Id != selectedOrganizationId))
+        {
+            organizations = organizations
+                .Concat([new SqlOSOrganizationOption(selectedOrganizationId, selectedOrganizationId, selectedOrganizationId, "member")])
+                .ToList();
+        }
+
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
+    }
+
     public async Task<string> CreatePendingOrganizationSelectionAsync(
         SqlOSUser user,
         SqlOSAuthorizationRequest authorizationRequest,
