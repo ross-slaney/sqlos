@@ -345,6 +345,83 @@ public sealed class HeadlessAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task RequestEmailOtpAsync_WhenEmailMatchesSsoDomain_RedirectsBeforeCreatingOtpChallenge()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var domain = $"headless-sso-{Guid.NewGuid():N}"[..30].ToLowerInvariant() + ".test";
+        await CreateSamlOrganizationAsync(fixture, domain);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-sso-otp",
+                "openid profile email",
+                "challenge-sso-otp",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var email = $"alex@{domain}";
+
+        var result = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpStartRequest(
+                authorizationRequest.Id,
+                email));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith("https://idp.example.test/sso?");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == email)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_WhenEmailMatchesSsoDomain_RedirectsBeforeCreatingSignupChallenge()
+    {
+        await using var fixture = await CreateFixtureAsync();
+
+        var domain = $"signup-sso-{Guid.NewGuid():N}"[..30].ToLowerInvariant() + ".test";
+        await CreateSamlOrganizationAsync(fixture, domain);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-sso-signup",
+                "openid profile email",
+                "challenge-sso-signup",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var email = $"casey@{domain}";
+
+        var result = await fixture.HeadlessAuthService.RequestEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupStartRequest(
+                authorizationRequest.Id,
+                "Casey SSO",
+                email,
+                "Casey Workspace",
+                new JsonObject()));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().StartWith("https://idp.example.test/sso?");
+        fixture.EmailSender.Messages.Should().BeEmpty();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == email)).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task SignUpAsync_EstablishesReusableAuthPageSession()
     {
         await using var fixture = await CreateFixtureAsync();
@@ -509,6 +586,23 @@ public sealed class HeadlessAuthIntegrationTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("tests");
         return context;
+    }
+
+    private static async Task CreateSamlOrganizationAsync(HeadlessFixture fixture, string domain)
+    {
+        var organization = await fixture.AdminService.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"SSO {Guid.NewGuid():N}", null, domain));
+        await fixture.AdminService.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "Headless SSO",
+            $"urn:headless:{Guid.NewGuid():N}",
+            "https://idp.example.test/sso",
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            true,
+            true,
+            "email",
+            "first_name",
+            "last_name"));
     }
 
     private static string? ExtractCookieValue(string setCookieHeader, string cookieName)

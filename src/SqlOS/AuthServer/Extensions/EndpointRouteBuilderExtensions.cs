@@ -336,6 +336,8 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
             ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
@@ -351,6 +353,18 @@ public static class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
                 var authentication = await authorizationServerService.AuthenticatePasswordAsync(
                     email,
                     password,
@@ -464,6 +478,9 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
             SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -477,6 +494,18 @@ public static class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
                 var challenge = await emailOtpService.StartForAuthorizationRequestAsync(
                     authorizationRequest,
                     email,
@@ -714,6 +743,8 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
             ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
@@ -728,15 +759,27 @@ public static class EndpointRouteBuilderExtensions
 
             try
             {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
                 if (SupportsDatabaseTransactions(dbContext))
                 {
                     transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
                 }
 
-                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
-                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
-                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
-                email = invitation?.Email ?? email;
                 var signup = await authorizationServerService.SignUpAsync(
                     displayName,
                     email,
@@ -808,6 +851,9 @@ public static class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
             SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -823,6 +869,18 @@ public static class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
                 var signup = await emailOtpService.StartSignupForAuthorizationRequestAsync(
                     authorizationRequest,
                     displayName,
@@ -2384,6 +2442,41 @@ public static class EndpointRouteBuilderExtensions
         return authorizationRequest != null || string.IsNullOrWhiteSpace(invitationToken)
             ? null
             : await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken);
+    }
+
+    private static async Task<IResult?> RedirectToSsoIfRequiredAsync(
+        SqlOSAuthorizationRequest? authorizationRequest,
+        string email,
+        SqlOSHomeRealmDiscoveryService discoveryService,
+        SqlOSSamlService samlService,
+        ISqlOSAuthServerDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        if (authorizationRequest == null)
+        {
+            return null;
+        }
+
+        var discovery = await discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
+        authorizationRequest.LoginHintEmail = email;
+        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
+        {
+            authorizationRequest.OrganizationId = discovery.OrganizationId;
+            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
+        {
+            authorizationRequest.ConnectionId = discovery.ConnectionId;
+            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(discovery.ConnectionId)
+            ? Results.Redirect(await samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken))
+            : null;
     }
 
     private sealed record LogoutRequest(string? RefreshToken, string? SessionId);

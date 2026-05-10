@@ -245,6 +245,11 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
 
         try
         {
@@ -303,6 +308,12 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
+
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
 
         if (boundInvitation != null)
@@ -387,6 +398,11 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
 
         try
         {
@@ -638,6 +654,12 @@ public sealed class SqlOSHeadlessAuthService
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
+
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
 
@@ -950,6 +972,36 @@ public sealed class SqlOSHeadlessAuthService
     {
         var invitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
         return invitation?.Email ?? requestedEmail;
+    }
+
+    private async Task<SqlOSHeadlessActionResult?> RedirectToSsoIfRequiredAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        string email,
+        CancellationToken cancellationToken)
+    {
+        var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(email), cancellationToken);
+        authorizationRequest.LoginHintEmail = email;
+        if (!string.IsNullOrWhiteSpace(discovery.OrganizationId))
+        {
+            authorizationRequest.OrganizationId = discovery.OrganizationId;
+            authorizationRequest.ResolvedOrganizationId = discovery.OrganizationId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(discovery.ConnectionId))
+        {
+            authorizationRequest.ConnectionId = discovery.ConnectionId;
+            authorizationRequest.ResolvedConnectionId = discovery.ConnectionId;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (string.Equals(discovery.Mode, "sso", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(discovery.ConnectionId))
+        {
+            return Redirect(await _samlService.BuildIdentityProviderRedirectForAuthorizationRequestAsync(authorizationRequest.Id, cancellationToken));
+        }
+
+        return null;
     }
 
     private async Task<bool?> GetAccountActiveStateForEmailAsync(
