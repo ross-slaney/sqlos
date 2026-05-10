@@ -381,6 +381,15 @@ public sealed record SqlOSAuthPageSettingsDto(
     bool LocalPasswordRuntimeEnabled,
     bool EmailOtpRuntimeConfigured);
 
+public sealed record SqlOSAuthEmailBrandingSettingsDto(
+    string ApplicationName,
+    string? LogoBase64,
+    string PrimaryColor,
+    string AccentColor,
+    string BackgroundColor,
+    DateTime UpdatedAt,
+    bool ManagedByStartupSeed);
+
 public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string? LogoBase64,
     string PrimaryColor,
@@ -391,6 +400,13 @@ public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string PageSubtitle,
     bool EnablePasswordSignup,
     string[] EnabledCredentialTypes);
+
+public sealed record SqlOSUpdateAuthEmailBrandingSettingsRequest(
+    string ApplicationName,
+    string? LogoBase64,
+    string PrimaryColor,
+    string AccentColor,
+    string BackgroundColor);
 
 public sealed record SqlOSAuthorizationServerMetadataDto
 {

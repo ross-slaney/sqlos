@@ -1,0 +1,157 @@
+---
+title: "Email Invitations"
+description: "Invite users to organizations with expiring email-bound links."
+order: 4.2
+section: authserver
+---
+
+Email invitations are organization membership invites. An invite is bound to one email address, one organization, and one role. It can be accepted once before it expires.
+
+## What an invite does
+
+When a user accepts an invite, SqlOS:
+
+1. Resolves the opaque invite token from the email link.
+2. Requires the effective authenticated email to match the invited email.
+3. Creates or reactivates the organization membership.
+4. Marks the invited email verified.
+5. Consumes the invite at the end of the successful transaction.
+6. Issues the hosted/headless OAuth redirect or SDK tokens.
+
+Active existing memberships are idempotent. Accepting the invite consumes it but does not downgrade the current role.
+
+## Create an invite with the SDK
+
+```csharp
+var invite = await authService.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(
+        OrganizationId: org.Id,
+        Email: "teammate@example.com",
+        Role: "member",
+        ClientId: "web",
+        RedirectUri: "https://app.example.com/auth/callback",
+        Scope: "openid profile email",
+        Resource: "https://api.example.com",
+        CustomFields: new JsonObject
+        {
+            ["source"] = "members-page"
+        }),
+    httpContext,
+    ct);
+```
+
+The result includes `InviteUrl`. The token is stored hashed in the database.
+
+## Hosted accept page
+
+Invite emails link to:
+
+```text
+/sqlos/auth/invitations/accept?token=...
+```
+
+Hosted AuthPage renders the invite context and uses the configured credential methods:
+
+- Email OTP enabled: sign in or create account with email code.
+- Password enabled: sign in or sign up with password.
+- SSO configured for the invited email domain: redirect through HRD to the organization SSO connection.
+
+For passwordless invitation signup, SqlOS creates the user and accepts the invite directly. It does not send a second OTP code after the user clicked the invite link. If the invited email matches an organization SSO domain, home realm discovery still redirects to SSO before local account creation.
+
+## Headless accept flow
+
+Headless apps should treat invitations as a first-class view, not as a generic signup detour.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sqlos/auth/headless/invitations/resolve` | Validate token and get invitation context before starting OAuth |
+| `GET /sqlos/auth/headless/requests/{requestId}` | Load the bound request and invitation context |
+| `POST /sqlos/auth/headless/invitations/signup` | Create an invited passwordless account and accept the invite |
+
+Recommended headless lifecycle:
+
+1. User opens the invite link.
+2. Your authorize page resolves the token with `/invitations/resolve`.
+3. Your page starts a normal `/sqlos/auth/authorize` request with `invitationToken`.
+4. Render the returned invite view.
+5. Existing users continue through `identify`, SSO, password, or OTP sign-in.
+6. New invited users with Email OTP enabled call `/invitations/signup` directly.
+7. Follow the redirect result from SqlOS. This may be an IdP redirect when the invited email is governed by SSO.
+
+<Callout type="warning" title="Do not start OTP signup for invite-created accounts">
+  For a new invited user, call `/sqlos/auth/headless/invitations/signup`. Calling `/signup/email-otp/start` creates a second proof step and can strand the invite flow behind an unnecessary code challenge.
+</Callout>
+
+## SDK-only acceptance
+
+For backend-owned flows, call the service directly after your application has established the user identity:
+
+```csharp
+await authService.AcceptEmailInvitationAsync(
+    new SqlOSAcceptEmailInvitationRequest(
+        InvitationToken: token,
+        UserId: user.Id),
+    httpContext,
+    ct);
+```
+
+For passwordless invite signup from your own backend:
+
+```csharp
+var result = await authService.AcceptEmailInvitationSignupAsync(
+    new SqlOSAcceptEmailInvitationSignupRequest(
+        InvitationToken: token,
+        DisplayName: "Jane Doe",
+        ClientId: "web",
+        CustomFields: null),
+    httpContext,
+    ct);
+```
+
+This creates a verified user, accepts the invite, creates the session, and returns `SqlOSLoginResult`.
+
+## Resend and revoke
+
+```csharp
+var resent = await authService.ResendEmailInvitationAsync(
+    new SqlOSResendEmailInvitationRequest(invite.Id),
+    httpContext,
+    ct);
+
+var revoked = await authService.RevokeEmailInvitationAsync(
+    new SqlOSRevokeEmailInvitationRequest(invite.Id, "wrong-email"),
+    httpContext,
+    ct);
+```
+
+Resending invalidates the previous token. Revoked, expired, and accepted invites cannot be used.
+
+## Custom fields and hooks
+
+`CustomFields` travel with the invite and are available to headless signup hooks. Use this for product context such as referral source, plan, template, or billing state.
+
+```csharp
+options.AuthServer.UseHeadlessAuthPage(headless =>
+{
+    headless.OnHeadlessSignupAsync = async (ctx, ct) =>
+    {
+        var source = ctx.CustomFields?["source"]?.GetValue<string>();
+        await SaveSignupProfileAsync(ctx.User.Id, source, ct);
+    };
+});
+```
+
+## Email content
+
+Invitations use the same sender and branding system as Email OTP. Configure the built-in look with [Email Branding](/docs/authserver/email-branding), or provide an advanced message builder:
+
+```csharp
+options.AuthServer.ConfigureInvitations(invites =>
+{
+    invites.BuildMessage = ctx => new SqlOSAuthEmailMessage(
+        ctx.Email,
+        $"Join {ctx.OrganizationName}",
+        $"<a href=\"{ctx.AcceptUrl}\">Accept invite</a>",
+        $"Accept invite: {ctx.AcceptUrl}");
+});
+```

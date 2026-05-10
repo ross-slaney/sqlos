@@ -80,6 +80,13 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
         page.EnablePasswordSignup = true;
         page.EnabledCredentialTypes = ["password", "email_otp"];
     });
+    auth.SeedAuthEmails(email =>
+    {
+        email.ApplicationName = "SqlOS Example";
+        email.PrimaryColor = "#2563eb";
+        email.AccentColor = "#0f172a";
+        email.BackgroundColor = "#f8fafc";
+    });
     auth.SeedBrowserClient(
         exampleClientId,
         "Example Web Client",

@@ -1,18 +1,18 @@
 ---
 title: "Home Realm Discovery"
-description: "Route users to password or SSO by email domain."
+description: "Route users to local credentials or SSO by email domain."
 order: 4.8
 section: authserver
 ---
 
-Home realm discovery inspects an email address and returns the appropriate login method. It determines whether a user should log in with password or be redirected to their organization's SSO identity provider.
+Home realm discovery inspects an email address and returns the appropriate login method. It determines whether a user may use local credentials such as password or Email OTP, or must be redirected to their organization's SSO identity provider.
 
 ## How it works
 
 1. Extract the email domain
 2. Check if any organization has a matching primary domain with an active SSO connection
 3. If yes, return `sso` with the organization and connection details
-4. If no, return `password`
+4. If no, return `password`, meaning local credentials are allowed
 
 ## SDK
 
@@ -26,7 +26,8 @@ switch (discovery.Mode)
         // Redirect to IdP via SqlOSSsoAuthorizationService
         break;
     case "password":
-        // Show password form, optionally show OIDC provider buttons
+        // Show the configured local credential method:
+        // password, Email OTP, or provider buttons
         break;
 }
 ```
@@ -60,4 +61,4 @@ Or for an SSO user:
 
 ## Usage in the login UI
 
-The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows either a password form or redirects to SSO. If the mode is `password`, the UI can also display configured [OIDC providers](/docs/authserver/oidc-auth).
+The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows the configured local credential method or redirects to SSO. If the mode is `password`, the UI can show password, [Email OTP](/docs/authserver/email-otp), and configured [OIDC providers](/docs/authserver/oidc-auth), depending on AuthPage settings.

@@ -21,6 +21,12 @@ public sealed record SqlOSRevokeEmailInvitationRequest(string InvitationId, stri
 
 public sealed record SqlOSAcceptEmailInvitationRequest(string InvitationToken, string UserId);
 
+public sealed record SqlOSAcceptEmailInvitationSignupRequest(
+    string InvitationToken,
+    string DisplayName,
+    string ClientId,
+    JsonObject? CustomFields = null);
+
 public sealed record SqlOSEmailInvitationResult(
     string Id,
     string OrganizationId,
@@ -50,3 +56,10 @@ public sealed record SqlOSInvitationAcceptanceResult(
     bool EmailVerified);
 
 public sealed record SqlOSHeadlessInvitationResolveRequest(string InvitationToken);
+
+public sealed record SqlOSHeadlessInvitationSignupRequest(
+    string RequestId,
+    string DisplayName,
+    string Email,
+    JsonObject? CustomFields,
+    string InvitationToken);

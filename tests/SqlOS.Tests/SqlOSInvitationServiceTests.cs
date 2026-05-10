@@ -289,6 +289,70 @@ public sealed class SqlOSInvitationServiceTests
         harness.EmailSender.Messages.Single().TextBody.Should().Contain("/invitations/accept?token=");
     }
 
+    [TestMethod]
+    public async Task CreateEmailInvitationAsync_UsesSeededEmailBrandingForDefaultTemplate()
+    {
+        var harness = await InvitationHarness.CreateAsync(options =>
+        {
+            options.SeedAuthEmails(email =>
+            {
+                email.ApplicationName = "Acme Portal";
+                email.LogoBase64 = "data:image/png;base64,invite-logo";
+                email.PrimaryColor = "#7c3aed";
+                email.AccentColor = "#18181b";
+                email.BackgroundColor = "#faf5ff";
+            });
+        });
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Branded Org", null));
+
+        await harness.InvitationService.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(org.Id, "branded-invite@example.com", "member"),
+            harness.Http);
+
+        var message = harness.EmailSender.Messages.Single();
+        message.Subject.Should().Be("You're invited to Branded Org");
+        message.HtmlBody.Should().Contain("data:image/png;base64,invite-logo");
+        message.HtmlBody.Should().Contain("#7c3aed");
+        message.HtmlBody.Should().Contain("#18181b");
+        message.HtmlBody.Should().Contain("#faf5ff");
+        message.TextBody.Should().Contain("You're invited to Branded Org as member");
+    }
+
+    [TestMethod]
+    public async Task AcceptEmailInvitationSignupAsync_CreatesVerifiedUserMembershipAndTokensWithoutSendingOtp()
+    {
+        var harness = await InvitationHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Invite Signup Org", null));
+        var invite = await harness.InvitationService.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(org.Id, "new-invite-signup@example.com", "admin"),
+            harness.Http);
+
+        var result = await harness.Auth.AcceptEmailInvitationSignupAsync(
+            new SqlOSAcceptEmailInvitationSignupRequest(
+                GetToken(invite),
+                "Invite Signup",
+                "test-client"),
+            harness.Http);
+
+        result.RequiresOrganizationSelection.Should().BeFalse();
+        result.Tokens.Should().NotBeNull();
+        result.Tokens!.OrganizationId.Should().Be(org.Id);
+        harness.EmailSender.Messages.Should().ContainSingle("only the invitation email should be sent");
+
+        var email = await harness.Context.Set<SqlOSUserEmail>()
+            .SingleAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail("new-invite-signup@example.com"));
+        email.IsVerified.Should().BeTrue();
+        var membership = await harness.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == email.UserId && x.OrganizationId == org.Id);
+        membership.Role.Should().Be("admin");
+        var stored = await harness.Context.Set<SqlOSInvitation>().SingleAsync();
+        stored.AcceptedAt.Should().NotBeNull();
+
+        var session = await harness.Context.Set<SqlOSSession>().SingleAsync();
+        session.AuthenticationMethod.Should().Be("invitation");
+        session.UserId.Should().Be(email.UserId);
+    }
+
     private static string GetToken(SqlOSEmailInvitationResult result)
     {
         result.InviteUrl.Should().NotBeNullOrWhiteSpace();
@@ -333,7 +397,7 @@ public sealed class SqlOSInvitationServiceTests
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, options);
+            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options);
             var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitation);
             var http = new DefaultHttpContext();
             http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.42");
@@ -342,6 +406,8 @@ public sealed class SqlOSInvitationServiceTests
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
+            await settings.EnsureDefaultAuthPageSettingsAsync();
+            await settings.UpsertSeededAuthEmailSettingsAsync();
 
             return new InvitationHarness
             {

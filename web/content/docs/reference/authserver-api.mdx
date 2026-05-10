@@ -109,6 +109,135 @@ return Results.Ok(result.Tokens);
 
 ---
 
+### RequestEmailOtpAsync / VerifyEmailOtpAsync
+
+Start and verify passwordless sign-in for an existing user.
+
+```csharp
+var start = await authService.RequestEmailOtpAsync(
+    new SqlOSEmailOtpStartRequest(
+        Email: "jane@example.com",
+        ClientId: "my-app",
+        OrganizationId: null),
+    httpContext,
+    ct);
+
+var result = await authService.VerifyEmailOtpAsync(
+    new SqlOSEmailOtpVerifyRequest(
+        ChallengeToken: start.ChallengeToken,
+        Code: codeFromEmail),
+    httpContext,
+    ct);
+```
+
+`RequestEmailOtpAsync` returns `ChallengeToken`, `MaskedEmail`, `ExpiresAt`, and `NextAllowedSendAt`. `VerifyEmailOtpAsync` returns `SqlOSLoginResult`.
+
+---
+
+### RequestEmailOtpSignupAsync / VerifyEmailOtpSignupAsync
+
+Start and verify passwordless signup.
+
+```csharp
+var start = await authService.RequestEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        Email: "jane@example.com",
+        ClientId: "my-app",
+        OrganizationName: "Acme",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext,
+    ct);
+
+var result = await authService.VerifyEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupVerifyRequest(
+        SignupToken: start.SignupToken,
+        ChallengeToken: start.ChallengeToken,
+        Code: codeFromEmail),
+    httpContext,
+    ct);
+```
+
+Signup verification creates the user, marks the primary email verified, creates the organization or membership, creates a session, and returns `SqlOSLoginResult`.
+
+---
+
+### CreateEmailInvitationAsync
+
+Create and optionally send an organization membership invitation.
+
+```csharp
+var invite = await authService.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(
+        OrganizationId: org.Id,
+        Email: "teammate@example.com",
+        Role: "member",
+        ClientId: "my-app",
+        RedirectUri: "https://app.example.com/auth/callback",
+        CustomFields: null),
+    httpContext,
+    ct);
+```
+
+The returned `InviteUrl` contains the opaque token. SqlOS stores only the token hash.
+
+---
+
+### AcceptEmailInvitationAsync
+
+Accept an invitation for an already-authenticated or already-created user.
+
+```csharp
+var acceptance = await authService.AcceptEmailInvitationAsync(
+    new SqlOSAcceptEmailInvitationRequest(
+        InvitationToken: token,
+        UserId: user.Id),
+    httpContext,
+    ct);
+```
+
+The invited email must match the user's normalized email. Acceptance creates or reactivates membership, marks the email verified, and consumes the invitation.
+
+---
+
+### AcceptEmailInvitationSignupAsync
+
+Create a passwordless invited user and return tokens without sending a second OTP code.
+
+```csharp
+var result = await authService.AcceptEmailInvitationSignupAsync(
+    new SqlOSAcceptEmailInvitationSignupRequest(
+        InvitationToken: token,
+        DisplayName: "Jane Doe",
+        ClientId: "my-app",
+        CustomFields: null),
+    httpContext,
+    ct);
+```
+
+Use this for backend-owned invite signup flows. Hosted and headless browser flows use their invitation endpoints.
+
+---
+
+### ResendEmailInvitationAsync / RevokeEmailInvitationAsync
+
+```csharp
+var resent = await authService.ResendEmailInvitationAsync(
+    new SqlOSResendEmailInvitationRequest(invite.Id),
+    httpContext,
+    ct);
+
+var revoked = await authService.RevokeEmailInvitationAsync(
+    new SqlOSRevokeEmailInvitationRequest(invite.Id, "wrong-email"),
+    httpContext,
+    ct);
+```
+
+Resending invalidates the previous token. Revocation prevents future acceptance.
+
+---
+
 ### SelectOrganizationAsync
 
 Complete login by selecting an organization. Called when `LoginWithPasswordAsync` returns `RequiresOrganizationSelection = true`.

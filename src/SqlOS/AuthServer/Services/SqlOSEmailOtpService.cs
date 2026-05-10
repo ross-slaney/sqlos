@@ -581,7 +581,7 @@ public sealed class SqlOSEmailOtpService
         {
             try
             {
-                await _emailSender.SendAsync(BuildMessage(trimmedEmail, maskedEmail, code, challenge.ExpiresAt, purpose), cancellationToken);
+                await _emailSender.SendAsync(await BuildMessageAsync(trimmedEmail, maskedEmail, code, challenge.ExpiresAt, purpose, cancellationToken), cancellationToken);
             }
             catch
             {
@@ -680,11 +680,20 @@ public sealed class SqlOSEmailOtpService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    private SqlOSAuthEmailMessage BuildMessage(string email, string maskedEmail, string code, DateTime expiresAt, string purpose)
+    private async Task<SqlOSAuthEmailMessage> BuildMessageAsync(
+        string email,
+        string maskedEmail,
+        string code,
+        DateTime expiresAt,
+        string purpose,
+        CancellationToken cancellationToken)
     {
-        var applicationName = string.IsNullOrWhiteSpace(_options.ApplicationName)
-            ? "SqlOS"
-            : _options.ApplicationName.Trim();
+        var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
+        var applicationName = string.IsNullOrWhiteSpace(branding.ApplicationName)
+            ? string.IsNullOrWhiteSpace(_options.ApplicationName)
+                ? "SqlOS"
+                : _options.ApplicationName.Trim()
+            : branding.ApplicationName;
         var context = new SqlOSEmailOtpMessageContext(
             purpose,
             email,
@@ -692,7 +701,10 @@ public sealed class SqlOSEmailOtpService
             code,
             expiresAt,
             _options.ChallengeLifetime,
-            applicationName);
+            applicationName)
+        {
+            Branding = branding with { ApplicationName = applicationName }
+        };
 
         var defaultSubject = context.Purpose == "signup"
             ? $"Your {context.ApplicationName} sign-up code"
@@ -705,8 +717,8 @@ public sealed class SqlOSEmailOtpService
             ?? new SqlOSAuthEmailMessage(
                 email,
                 subject,
-                BuildHtmlBody(context),
-                BuildTextBody(context));
+                SqlOSAuthEmailTemplateRenderer.BuildOtpHtmlBody(context),
+                SqlOSAuthEmailTemplateRenderer.BuildOtpTextBody(context));
     }
 
     private async Task RecordOtpAuditAsync(
@@ -728,37 +740,6 @@ public sealed class SqlOSEmailOtpService
                 details = data
             },
             cancellationToken: cancellationToken);
-
-    private static string BuildHtmlBody(SqlOSEmailOtpMessageContext context)
-    {
-        var minutes = Math.Max(1, (int)Math.Ceiling(context.ChallengeLifetime.TotalMinutes));
-        var applicationName = WebUtility.HtmlEncode(context.ApplicationName);
-        var maskedEmail = WebUtility.HtmlEncode(context.MaskedEmail);
-        var code = WebUtility.HtmlEncode(context.Code);
-        var action = context.Purpose == "signup" ? "creating your account" : "signing in";
-        var heading = context.Purpose == "signup" ? "Your sign-up code" : "Your sign-in code";
-        return $"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
-          <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
-            <p style="margin:0 0 12px;font-size:14px;color:#475569;">{applicationName}</p>
-            <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;">{heading}</h1>
-            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time code to finish {action} as {maskedEmail}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.</p>
-            <div style="margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:#1d4ed8;">{code}</div>
-            <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you didn't request this code, you can ignore this email.</p>
-          </div>
-        </body>
-        </html>
-        """;
-    }
-
-    private static string BuildTextBody(SqlOSEmailOtpMessageContext context)
-    {
-        var minutes = Math.Max(1, (int)Math.Ceiling(context.ChallengeLifetime.TotalMinutes));
-        var action = context.Purpose == "signup" ? "sign-up" : "sign-in";
-        return $"Your {context.ApplicationName} {action} code is {context.Code}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
-    }
 
     private sealed record EmailOtpSignupPayload(
         string ChallengeTokenHash,

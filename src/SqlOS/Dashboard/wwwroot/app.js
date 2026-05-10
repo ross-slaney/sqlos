@@ -2729,8 +2729,9 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading Auth Page settings...");
 
-        const [settings, metadata] = await Promise.all([
+        const [settings, emailSettings, metadata] = await Promise.all([
             fetchJson(`${authApiBasePath}/settings/auth-page`),
+            fetchJson(`${authApiBasePath}/settings/email`),
             fetchJson(`${authServerBasePath}/.well-known/oauth-authorization-server`)
         ]);
 
@@ -2793,6 +2794,22 @@
                             <strong>Admin guidance:</strong> Use this page to set the title, logo, colors, layout, and first-party sign-in methods. OIDC and SAML providers still appear below these local credential choices when configured.
                         </div>
                     </section>
+                    <section class="panel">
+                        <h2>Email Branding</h2>
+                        <p>These settings style built-in Email OTP and invitation emails. Use SDK message builders for advanced copy, layouts, or per-tenant email templates.</p>
+                        ${emailSettings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These email values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                        <form id="auth-email-settings-form">
+                            <input name="applicationName" placeholder="Application name" value="${esc(emailSettings.applicationName || "")}" required>
+                            <div class="panel-grid">
+                                <input name="primaryColor" placeholder="Primary color (#2563eb)" value="${esc(emailSettings.primaryColor || "")}" required>
+                                <input name="accentColor" placeholder="Accent color (#0f172a)" value="${esc(emailSettings.accentColor || "")}" required>
+                            </div>
+                            <input name="backgroundColor" placeholder="Background color (#f8fafc)" value="${esc(emailSettings.backgroundColor || "")}" required>
+                            <label>Email logo upload<input id="auth-email-logo-file" type="file" accept="image/*"></label>
+                            <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL. Leave blank to reuse the Auth Page logo.">${esc(emailSettings.logoBase64 || "")}</textarea>
+                            <button type="submit">Save Email Branding</button>
+                        </form>
+                    </section>
                 </div>
             </div>
         `;
@@ -2818,6 +2835,20 @@
             setFlash("success", "Auth Page settings saved.");
         });
 
+        bindForm("auth-email-settings-form", async form => {
+            await fetchJson(`${authApiBasePath}/settings/email`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    applicationName: form.get("applicationName"),
+                    logoBase64: form.get("logoBase64") || null,
+                    primaryColor: form.get("primaryColor"),
+                    accentColor: form.get("accentColor"),
+                    backgroundColor: form.get("backgroundColor")
+                })
+            });
+            setFlash("success", "Email branding saved.");
+        });
+
         const fileInput = document.getElementById("auth-page-logo-file");
         const form = document.getElementById("auth-page-settings-form");
         fileInput?.addEventListener("change", () => {
@@ -2829,6 +2860,21 @@
             const reader = new FileReader();
             reader.onload = () => {
                 form.elements.logoBase64.value = String(reader.result || "");
+            };
+            reader.readAsDataURL(file);
+        });
+
+        const emailFileInput = document.getElementById("auth-email-logo-file");
+        const emailForm = document.getElementById("auth-email-settings-form");
+        emailFileInput?.addEventListener("change", () => {
+            const file = emailFileInput.files?.[0];
+            if (!file || !emailForm) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                emailForm.elements.logoBase64.value = String(reader.result || "");
             };
             reader.readAsDataURL(file);
         });

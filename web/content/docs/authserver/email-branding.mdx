@@ -1,0 +1,97 @@
+---
+title: "Email Branding"
+description: "Set the built-in logo, colors, and application name used by SqlOS auth emails."
+order: 1.54
+section: authserver
+---
+
+Email Branding controls the built-in templates for Email OTP and organization invitations.
+
+Use it when you want a client-ready branded email without owning every HTML template. Use `BuildMessage` delegates when you need a fully custom layout, copy, localization strategy, or provider-specific payload.
+
+## What is configurable
+
+| Setting | Used for |
+| --- | --- |
+| Application name | OTP subject/body and fallback invite branding |
+| Logo | Header image in built-in email templates |
+| Primary color | Code highlight and invitation button |
+| Accent color | Headings and primary text |
+| Background color | Email body background |
+
+Logo values are stored as data URLs, for example `data:image/png;base64,...`.
+
+## Dashboard
+
+Open:
+
+```text
+/sqlos/admin/auth/settings
+```
+
+Use **Auth Page > Email Branding** to update the application name, colors, and logo used by built-in auth emails.
+
+<Callout type="info" title="AuthPage branding and email branding are separate">
+  AuthPage branding controls the browser UI. Email Branding controls email templates. Email Branding falls back to AuthPage logo/colors when email-specific values are empty.
+</Callout>
+
+## Seed from startup
+
+Seeded email branding is useful for local development, preview apps, and production environments that should be controlled from code or configuration.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedAuthEmails(email =>
+    {
+        email.ApplicationName = "Acme";
+        email.LogoBase64 = builder.Configuration["SqlOS:Email:LogoBase64"];
+        email.PrimaryColor = "#16a34a";
+        email.AccentColor = "#111827";
+        email.BackgroundColor = "#f0fdf4";
+    });
+});
+```
+
+The bootstrapper applies seeded values on startup. If you want admins to control branding in the dashboard, do not seed these values after the initial setup period.
+
+## Advanced templates
+
+Email OTP:
+
+```csharp
+options.AuthServer.ConfigureEmailOtp(email =>
+{
+    email.BuildMessage = ctx => new SqlOSAuthEmailMessage(
+        ctx.Email,
+        $"Your {ctx.ApplicationName} code",
+        RenderOtpHtml(ctx),
+        RenderOtpText(ctx));
+});
+```
+
+Invitations:
+
+```csharp
+options.AuthServer.ConfigureInvitations(invites =>
+{
+    invites.BuildMessage = ctx => new SqlOSAuthEmailMessage(
+        ctx.Email,
+        $"Join {ctx.OrganizationName}",
+        RenderInviteHtml(ctx),
+        RenderInviteText(ctx));
+});
+```
+
+Both contexts include resolved branding so custom templates can reuse the dashboard/seeded values.
+
+## Runtime behavior
+
+SqlOS resolves branding in this order:
+
+1. Email-specific settings from the dashboard or `SeedAuthEmails(...)`.
+2. AuthPage logo/colors for visual fallback.
+3. `EmailOtp.ApplicationName`.
+4. `SqlOS`.
+
+Invitation emails can override the application name with `ConfigureInvitations(invites => invites.ApplicationName = "...")`.

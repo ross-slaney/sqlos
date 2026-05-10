@@ -339,6 +339,11 @@ public sealed class SqlOSAuthPageSettings
     public string PageSubtitle { get; set; } = "Secure your app-owned AI and MCP experiences with SqlOS.";
     public bool EnablePasswordSignup { get; set; } = true;
     public string EnabledCredentialTypesJson { get; set; } = "[\"password\"]";
+    public string? EmailApplicationName { get; set; }
+    public string? EmailLogoBase64 { get; set; }
+    public string EmailPrimaryColor { get; set; } = "#2563eb";
+    public string EmailAccentColor { get; set; } = "#0f172a";
+    public string EmailBackgroundColor { get; set; } = "#f8fafc";
     public DateTime UpdatedAt { get; set; }
 }
 

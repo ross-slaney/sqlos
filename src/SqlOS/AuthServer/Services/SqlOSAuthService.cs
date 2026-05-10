@@ -140,6 +140,95 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default)
         => await RequireInvitationService().AcceptEmailInvitationAsync(request, httpContext, cancellationToken);
 
+    public async Task<SqlOSLoginResult> AcceptEmailInvitationSignupAsync(
+        SqlOSAcceptEmailInvitationSignupRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            var invitation = await RequireInvitationService().ResolveEmailInvitationAsync(
+                request.InvitationToken,
+                httpContext,
+                cancellationToken);
+            var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+
+            signup = await CreateInvitationSignupUserAsync(
+                request.DisplayName,
+                invitation.Email,
+                cancellationToken);
+
+            if (_options.Headless.OnHeadlessSignupAsync != null)
+            {
+                var organization = await _context.Set<SqlOSOrganization>()
+                    .FirstOrDefaultAsync(x => x.Id == invitation.OrganizationId, cancellationToken);
+                await _options.Headless.OnHeadlessSignupAsync(
+                    new SqlOSHeadlessSignupHookContext(
+                        httpContext,
+                        null,
+                        signup.User,
+                        organization,
+                        request.CustomFields ?? invitation.CustomFields ?? new JsonObject()),
+                    cancellationToken);
+            }
+
+            var acceptance = await RequireInvitationService().AcceptEmailInvitationInCurrentTransactionAsync(
+                new SqlOSAcceptEmailInvitationRequest(request.InvitationToken, signup.User.Id),
+                httpContext,
+                cancellationToken);
+
+            await _adminService.RecordAuditAsync(
+                "user.signup.invitation",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: acceptance.OrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+
+            var tokens = await CreateSessionAndTokensAsync(
+                signup.User,
+                client,
+                acceptance.OrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+            var organizations = await _adminService.GetUserOrganizationsAsync(signup.User.Id, cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return new SqlOSLoginResult(false, null, organizations, tokens);
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    existingOrganizationId: null,
+                    organizationName: null,
+                    cancellationToken: cancellationToken);
+            }
+
+            throw;
+        }
+    }
+
     public async Task<SqlOSLoginResult> VerifyEmailOtpAsync(
         SqlOSEmailOtpVerifyRequest request,
         HttpContext httpContext,
@@ -892,6 +981,30 @@ public sealed class SqlOSAuthService
         }
 
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
+    }
+
+    private async Task<SqlOSPasswordAuthenticationResult> CreateInvitationSignupUserAsync(
+        string displayName,
+        string email,
+        CancellationToken cancellationToken)
+    {
+        var user = await _adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, null),
+            cancellationToken);
+
+        var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
+        emailRecord.IsVerified = true;
+        emailRecord.VerifiedAt = DateTime.UtcNow;
+        user.DefaultEmail = emailRecord.Email;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return new SqlOSPasswordAuthenticationResult(
+            user,
+            Array.Empty<SqlOSOrganizationOption>(),
+            "invitation");
     }
 
     private async Task CleanupNonTransactionalSignupArtifactsAsync(

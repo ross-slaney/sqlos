@@ -645,6 +645,140 @@ public sealed class SqlOSHeadlessAuthService
         }
     }
 
+    public async Task<SqlOSHeadlessActionResult> SignUpWithInvitationAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessInvitationSignupRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+        var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken)
+            ?? throw new InvalidOperationException("Invitation is invalid or expired.");
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.EmailOtpEnabled)
+        {
+            throw new InvalidOperationException("Invitation signup without a password requires Email OTP to be enabled.");
+        }
+
+        var email = boundInvitation.Email;
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
+
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            signup = await _authorizationServerService.SignUpWithInvitationAsync(
+                request.DisplayName,
+                email,
+                cancellationToken);
+
+            SqlOSOrganization? organization = null;
+            if (!string.IsNullOrWhiteSpace(boundInvitation.OrganizationId))
+            {
+                organization = await _context.Set<SqlOSOrganization>()
+                    .FirstOrDefaultAsync(x => x.Id == boundInvitation.OrganizationId, cancellationToken);
+            }
+
+            if (_options.Headless.OnHeadlessSignupAsync != null)
+            {
+                await _options.Headless.OnHeadlessSignupAsync(
+                    new SqlOSHeadlessSignupHookContext(
+                        httpContext,
+                        authorizationRequest,
+                        signup.User,
+                        organization,
+                        request.CustomFields ?? boundInvitation.CustomFields ?? new JsonObject()),
+                    cancellationToken);
+            }
+
+            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                signup.User,
+                boundInvitation.OrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            await _adminService.RecordAuditAsync(
+                "user.signup.invitation",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: boundInvitation.OrganizationId,
+                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken: cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return Redirect(redirectUrl);
+        }
+        catch (SqlOSHeadlessValidationException ex)
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    boundInvitation.OrganizationId,
+                    organizationName: null,
+                    cancellationToken: cancellationToken);
+            }
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "signup",
+                ex.GlobalErrors.FirstOrDefault() ?? ex.Message,
+                pendingToken: null,
+                email: email,
+                displayName: request.DisplayName,
+                fieldErrors: ex.FieldErrors,
+                organizationSelection: null,
+                cancellationToken: cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    boundInvitation.OrganizationId,
+                    organizationName: null,
+                    cancellationToken: cancellationToken);
+            }
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "signup",
+                ex.Message,
+                pendingToken: null,
+                email: email,
+                displayName: request.DisplayName,
+                fieldErrors: null,
+                organizationSelection: null,
+                cancellationToken: cancellationToken));
+        }
+    }
+
     public async Task<SqlOSHeadlessActionResult> SignUpAsync(
         HttpContext httpContext,
         SqlOSHeadlessSignupRequest request,

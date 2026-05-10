@@ -9,7 +9,7 @@ SqlOS runs OAuth. You choose who draws the login screens.
 
 ## Hosted AuthPage
 
-The default. SqlOS renders the sign-in, sign-up, and organization selection pages.
+The default. SqlOS renders the sign-in, sign-up, invite acceptance, OTP, and organization selection pages.
 
 **Choose hosted when:**
 
@@ -21,7 +21,7 @@ The default. SqlOS renders the sign-in, sign-up, and organization selection page
 
 - Working OAuth 2.0 flow out of the box
 - Branded login page with your app name and logo
-- Password, OIDC, and SAML support
+- Password, Email OTP, OIDC, and SAML support
 - No frontend auth code to write
 
 **Downside:** Less control over how the popup looks.
@@ -44,7 +44,7 @@ SqlOS owns the OAuth protocol. Your app owns the UI.
 - Full control over the authorize UI
 - App-owned signup fields via `customFields`
 - Same OAuth protocol underneath (PKCE, redirect validation, code issuance)
-- OIDC and SAML still handled by SqlOS
+- Email OTP, invitations, OIDC, and SAML still handled by SqlOS
 
 **Downside:** You build and host the authorize page.
 
@@ -74,6 +74,6 @@ Want your own UI? Use **headless**. Still let SqlOS own codes, tokens, and PKCE.
 
 ## Switching modes
 
-You can flip hosted ↔ headless. OAuth, tokens, sessions, and refresh stay the same. Only the login UI changes.
+You can flip hosted ↔ headless. OAuth, tokens, sessions, OTP, invitations, and refresh stay the same. Only the login UI changes.
 
-How-to: [Headless Auth](/docs/authserver/headless-auth)
+How-to: [Headless Auth](/docs/authserver/headless-auth) · [Email Invitations](/docs/authserver/invitations)

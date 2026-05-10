@@ -330,6 +330,30 @@ public sealed class SqlOSAuthorizationServerService
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
     }
 
+    public async Task<SqlOSPasswordAuthenticationResult> SignUpWithInvitationAsync(
+        string displayName,
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await _adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(displayName, email, null),
+            cancellationToken);
+
+        var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .FirstAsync(x => x.UserId == user.Id && x.IsPrimary, cancellationToken);
+        emailRecord.IsVerified = true;
+        emailRecord.VerifiedAt = DateTime.UtcNow;
+        user.DefaultEmail = emailRecord.Email;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return new SqlOSPasswordAuthenticationResult(
+            user,
+            Array.Empty<SqlOSOrganizationOption>(),
+            "invitation");
+    }
+
     public async Task<string> CreatePendingOrganizationSelectionAsync(
         SqlOSUser user,
         SqlOSAuthorizationRequest authorizationRequest,

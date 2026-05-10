@@ -272,6 +272,10 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.Layout).HasMaxLength(32);
             entity.Property(x => x.PageTitle).HasMaxLength(200);
             entity.Property(x => x.PageSubtitle).HasMaxLength(500);
+            entity.Property(x => x.EmailApplicationName).HasMaxLength(200);
+            entity.Property(x => x.EmailPrimaryColor).HasMaxLength(32);
+            entity.Property(x => x.EmailAccentColor).HasMaxLength(32);
+            entity.Property(x => x.EmailBackgroundColor).HasMaxLength(32);
         });
 
         modelBuilder.Entity<SqlOSEmailOtpChallenge>(entity =>

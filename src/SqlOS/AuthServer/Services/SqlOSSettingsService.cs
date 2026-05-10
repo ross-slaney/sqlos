@@ -58,6 +58,10 @@ public sealed class SqlOSSettingsService
         _context.Set<SqlOSAuthPageSettings>().Add(new SqlOSAuthPageSettings
         {
             Id = "default",
+            EmailApplicationName = ResolveDefaultEmailApplicationName(),
+            EmailPrimaryColor = "#2563eb",
+            EmailAccentColor = "#0f172a",
+            EmailBackgroundColor = "#f8fafc",
             UpdatedAt = DateTime.UtcNow,
         });
         await _context.SaveChangesAsync(cancellationToken);
@@ -100,6 +104,25 @@ public sealed class SqlOSSettingsService
         settings.EnablePasswordSignup = _options.AuthPageSeed.EnablePasswordSignup;
         settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(enabledCredentialTypes);
 
+        settings.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpsertSeededAuthEmailSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.AuthEmailSeed == null)
+        {
+            return;
+        }
+
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        settings.EmailApplicationName = RequireText(_options.AuthEmailSeed.ApplicationName, nameof(_options.AuthEmailSeed.ApplicationName));
+        settings.EmailLogoBase64 = string.IsNullOrWhiteSpace(_options.AuthEmailSeed.LogoBase64) ? null : _options.AuthEmailSeed.LogoBase64.Trim();
+        settings.EmailPrimaryColor = RequireColor(_options.AuthEmailSeed.PrimaryColor, nameof(_options.AuthEmailSeed.PrimaryColor));
+        settings.EmailAccentColor = RequireColor(_options.AuthEmailSeed.AccentColor, nameof(_options.AuthEmailSeed.AccentColor));
+        settings.EmailBackgroundColor = RequireColor(_options.AuthEmailSeed.BackgroundColor, nameof(_options.AuthEmailSeed.BackgroundColor));
         settings.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
     }
@@ -255,6 +278,44 @@ public sealed class SqlOSSettingsService
         return await GetAuthPageSettingsAsync(cancellationToken);
     }
 
+    public async Task<SqlOSAuthEmailBrandingSettingsDto> GetAuthEmailBrandingSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        var resolved = ResolveEmailBranding(settings);
+        return new SqlOSAuthEmailBrandingSettingsDto(
+            resolved.ApplicationName,
+            resolved.LogoBase64,
+            resolved.PrimaryColor,
+            resolved.AccentColor,
+            resolved.BackgroundColor,
+            settings.UpdatedAt,
+            _options.AuthEmailSeed != null);
+    }
+
+    public async Task<SqlOSAuthEmailBrandingSettingsDto> UpdateAuthEmailBrandingSettingsAsync(SqlOSUpdateAuthEmailBrandingSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        settings.EmailApplicationName = RequireText(request.ApplicationName, nameof(request.ApplicationName));
+        settings.EmailLogoBase64 = string.IsNullOrWhiteSpace(request.LogoBase64) ? null : request.LogoBase64.Trim();
+        settings.EmailPrimaryColor = RequireColor(request.PrimaryColor, nameof(request.PrimaryColor));
+        settings.EmailAccentColor = RequireColor(request.AccentColor, nameof(request.AccentColor));
+        settings.EmailBackgroundColor = RequireColor(request.BackgroundColor, nameof(request.BackgroundColor));
+        settings.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await GetAuthEmailBrandingSettingsAsync(cancellationToken);
+    }
+
+    public async Task<SqlOSAuthEmailBranding> GetResolvedAuthEmailBrandingAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        return ResolveEmailBranding(settings);
+    }
+
     public async Task<SqlOSResolvedCredentialSettings> GetResolvedCredentialSettingsAsync(CancellationToken cancellationToken = default)
     {
         var settings = await GetAuthPageSettingsAsync(cancellationToken);
@@ -307,6 +368,36 @@ public sealed class SqlOSSettingsService
         }
 
         return value.Trim();
+    }
+
+    private SqlOSAuthEmailBranding ResolveEmailBranding(SqlOSAuthPageSettings settings)
+        => new(
+            string.IsNullOrWhiteSpace(settings.EmailApplicationName)
+                ? ResolveDefaultEmailApplicationName()
+                : settings.EmailApplicationName.Trim(),
+            string.IsNullOrWhiteSpace(settings.EmailLogoBase64)
+                ? settings.LogoBase64
+                : settings.EmailLogoBase64.Trim(),
+            string.IsNullOrWhiteSpace(settings.EmailPrimaryColor)
+                ? settings.PrimaryColor
+                : settings.EmailPrimaryColor.Trim(),
+            string.IsNullOrWhiteSpace(settings.EmailAccentColor)
+                ? settings.AccentColor
+                : settings.EmailAccentColor.Trim(),
+            string.IsNullOrWhiteSpace(settings.EmailBackgroundColor)
+                ? settings.BackgroundColor
+                : settings.EmailBackgroundColor.Trim());
+
+    private string ResolveDefaultEmailApplicationName()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.Invitations.ApplicationName))
+        {
+            return _options.Invitations.ApplicationName.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
+            ? "SqlOS"
+            : _options.EmailOtp.ApplicationName.Trim();
     }
 }
 

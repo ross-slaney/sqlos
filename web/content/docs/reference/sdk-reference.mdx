@@ -22,6 +22,31 @@ var result = await authService.SignUpAsync(
     new SqlOSSignupRequest(email, password, displayName, clientId),
     httpContext, ct);
 
+// Email OTP login
+var otpStart = await authService.RequestEmailOtpAsync(
+    new SqlOSEmailOtpStartRequest(email, clientId, organizationId), httpContext, ct);
+var otpLogin = await authService.VerifyEmailOtpAsync(
+    new SqlOSEmailOtpVerifyRequest(otpStart.ChallengeToken, code), httpContext, ct);
+
+// Email OTP signup
+var otpSignupStart = await authService.RequestEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupStartRequest(displayName, email, clientId, organizationName, null, customFields),
+    httpContext, ct);
+var otpSignup = await authService.VerifyEmailOtpSignupAsync(
+    new SqlOSEmailOtpSignupVerifyRequest(otpSignupStart.SignupToken, otpSignupStart.ChallengeToken, code),
+    httpContext, ct);
+
+// Organization invitations
+var invite = await authService.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(organizationId, email, "member"),
+    httpContext, ct);
+var invitedSignup = await authService.AcceptEmailInvitationSignupAsync(
+    new SqlOSAcceptEmailInvitationSignupRequest(invitationToken, displayName, clientId, customFields),
+    httpContext, ct);
+await authService.AcceptEmailInvitationAsync(
+    new SqlOSAcceptEmailInvitationRequest(invitationToken, userId),
+    httpContext, ct);
+
 // Organization selection (after multi-org login)
 var tokens = await authService.SelectOrganizationAsync(
     new SqlOSSelectOrganizationRequest(pendingAuthToken, organizationId),
@@ -213,6 +238,10 @@ var result = await executor.ExecuteAsync(dbContext.Chains, spec, subjectId, chai
 | `SqlOSTokenResponse` | `AccessToken`, `RefreshToken`, `SessionId`, `ClientId`, `OrganizationId` |
 | `SqlOSValidatedToken` | `UserId`, `SessionId`, `ClientId`, `OrganizationId`, `Principal` |
 | `SqlOSHomeRealmDiscoveryResponse` | `Mode`, `Organizations`, `SsoConnectionId` |
+| `SqlOSEmailOtpStartResult` | `ChallengeToken`, `MaskedEmail`, `ExpiresAt`, `NextAllowedSendAt` |
+| `SqlOSEmailOtpSignupStartResult` | `SignupToken`, `ChallengeToken`, `MaskedEmail`, `ExpiresAt`, `NextAllowedSendAt` |
+| `SqlOSEmailInvitationResult` | `InviteUrl`, `Email`, `OrganizationId`, `Role`, `Status`, `ExpiresAt` |
+| `SqlOSInvitationAcceptanceResult` | `MembershipCreated`, `MembershipReactivated`, `EmailVerified` |
 
 ### FGA
 

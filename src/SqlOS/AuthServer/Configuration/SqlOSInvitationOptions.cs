@@ -21,4 +21,7 @@ public sealed record SqlOSInvitationMessageContext(
     string Role,
     string AcceptUrl,
     DateTime ExpiresAt,
-    TimeSpan Lifetime);
+    TimeSpan Lifetime)
+{
+    public SqlOSAuthEmailBranding Branding { get; init; } = SqlOSAuthEmailBranding.Default;
+}

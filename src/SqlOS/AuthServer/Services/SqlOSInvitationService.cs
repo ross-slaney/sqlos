@@ -18,6 +18,7 @@ public sealed class SqlOSInvitationService
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly ISqlOSAuthEmailSender _emailSender;
+    private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationOptions _invitationOptions;
 
@@ -26,12 +27,14 @@ public sealed class SqlOSInvitationService
         SqlOSAdminService adminService,
         SqlOSCryptoService cryptoService,
         ISqlOSAuthEmailSender emailSender,
+        SqlOSSettingsService settingsService,
         IOptions<SqlOSAuthServerOptions> options)
     {
         _context = context;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _emailSender = emailSender;
+        _settingsService = settingsService;
         _options = options.Value;
         _invitationOptions = _options.Invitations;
     }
@@ -429,7 +432,7 @@ public sealed class SqlOSInvitationService
         var inviteUrl = BuildAcceptUrl(rawToken, httpContext);
         try
         {
-            await _emailSender.SendAsync(BuildMessage(invitation, organization, inviteUrl), cancellationToken);
+            await _emailSender.SendAsync(await BuildMessageAsync(invitation, organization, inviteUrl, cancellationToken), cancellationToken);
             invitation.LastSentAt = DateTime.UtcNow;
             invitation.LastSendError = null;
             AddAuditEvent(
@@ -456,13 +459,20 @@ public sealed class SqlOSInvitationService
         }
     }
 
-    private SqlOSAuthEmailMessage BuildMessage(SqlOSInvitation invitation, SqlOSOrganization organization, string acceptUrl)
+    private async Task<SqlOSAuthEmailMessage> BuildMessageAsync(
+        SqlOSInvitation invitation,
+        SqlOSOrganization organization,
+        string acceptUrl,
+        CancellationToken cancellationToken)
     {
+        var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
         var applicationName = !string.IsNullOrWhiteSpace(_invitationOptions.ApplicationName)
             ? _invitationOptions.ApplicationName.Trim()
-            : !string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
-                ? _options.EmailOtp.ApplicationName.Trim()
-                : "SqlOS";
+            : !string.IsNullOrWhiteSpace(branding.ApplicationName)
+                ? branding.ApplicationName
+                : !string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
+                    ? _options.EmailOtp.ApplicationName.Trim()
+                    : "SqlOS";
         var context = new SqlOSInvitationMessageContext(
             applicationName,
             organization.Name,
@@ -471,14 +481,17 @@ public sealed class SqlOSInvitationService
             invitation.Role,
             acceptUrl,
             invitation.ExpiresAt,
-            invitation.ExpiresAt - invitation.CreatedAt);
+            invitation.ExpiresAt - invitation.CreatedAt)
+        {
+            Branding = branding with { ApplicationName = applicationName }
+        };
 
         return _invitationOptions.BuildMessage?.Invoke(context)
             ?? new SqlOSAuthEmailMessage(
                 invitation.InvitedEmail,
                 $"You're invited to {context.OrganizationName}",
-                BuildHtmlBody(context),
-                BuildTextBody(context));
+                SqlOSAuthEmailTemplateRenderer.BuildInvitationHtmlBody(context),
+                SqlOSAuthEmailTemplateRenderer.BuildInvitationTextBody(context));
     }
 
     private async Task<SqlOSInvitation> FindInvitationByTokenAsync(string invitationToken, CancellationToken cancellationToken)
@@ -688,33 +701,4 @@ public sealed class SqlOSInvitationService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    private static string BuildHtmlBody(SqlOSInvitationMessageContext context)
-    {
-        var applicationName = WebUtility.HtmlEncode(context.ApplicationName);
-        var organizationName = WebUtility.HtmlEncode(context.OrganizationName);
-        var maskedEmail = WebUtility.HtmlEncode(context.MaskedEmail);
-        var role = WebUtility.HtmlEncode(context.Role);
-        var acceptUrl = WebUtility.HtmlEncode(context.AcceptUrl);
-        var days = Math.Max(1, (int)Math.Ceiling(context.Lifetime.TotalDays));
-        return $"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <body style="margin:0;padding:24px;background:#f8fafc;font-family:Segoe UI,Arial,sans-serif;color:#0f172a;">
-          <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
-            <p style="margin:0 0 12px;font-size:14px;color:#475569;">{applicationName}</p>
-            <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;">You're invited to {organizationName}</h1>
-            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for {maskedEmail} to join as <strong>{role}</strong>. This link expires in {days} day{(days == 1 ? string.Empty : "s")}.</p>
-            <p style="margin:0 0 20px;"><a href="{acceptUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a></p>
-            <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {acceptUrl}</p>
-          </div>
-        </body>
-        </html>
-        """;
-    }
-
-    private static string BuildTextBody(SqlOSInvitationMessageContext context)
-    {
-        var days = Math.Max(1, (int)Math.Ceiling(context.Lifetime.TotalDays));
-        return $"You're invited to {context.OrganizationName} as {context.Role}. Accept the invitation for {context.MaskedEmail}: {context.AcceptUrl}. This link expires in {days} day{(days == 1 ? string.Empty : "s")}.";
-    }
 }

@@ -29,4 +29,17 @@ public sealed record SqlOSEmailOtpMessageContext(
     string Code,
     DateTime ExpiresAt,
     TimeSpan ChallengeLifetime,
-    string ApplicationName);
+    string ApplicationName)
+{
+    public SqlOSAuthEmailBranding Branding { get; init; } = SqlOSAuthEmailBranding.Default;
+}
+
+public sealed record SqlOSAuthEmailBranding(
+    string ApplicationName,
+    string? LogoBase64,
+    string PrimaryColor,
+    string AccentColor,
+    string BackgroundColor)
+{
+    public static SqlOSAuthEmailBranding Default { get; } = new("SqlOS", null, "#2563eb", "#0f172a", "#f8fafc");
+}

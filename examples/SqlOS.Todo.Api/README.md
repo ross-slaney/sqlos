@@ -6,6 +6,7 @@ It shows:
 
 - hosted AuthPage first
 - passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
+- seeded email branding for the built-in auth email templates
 - simple per-user FGA with inherited todo access
 - a protected resource with audience enforcement
 - protected-resource metadata at `/.well-known/oauth-protected-resource`
@@ -52,7 +53,7 @@ Each authenticated user gets one tenant root resource under `root`. Every todo i
 
 1. For the email OTP demo, run the AppHost with `TodoSample__EnableEmailOtp=true` and ACS email settings.
 2. Start with `Email code sign up` or `Email code sign in`.
-3. Create or sign into a user on the hosted SqlOS auth page. The Todo app only starts the OAuth request; SqlOS owns the OTP challenge, verification, and redirect back to the Todo callback.
+3. Create or sign into a user on the hosted SqlOS auth page. The Todo app only starts the OAuth request; SqlOS owns the OTP challenge, verification, email branding, and redirect back to the Todo callback.
 4. Land in the Todo UI and create a few items.
 5. Open `/sqlos/admin/fga/resources` and confirm the tree shows your tenant plus child todo resources.
 6. Inspect `/.well-known/oauth-protected-resource`.

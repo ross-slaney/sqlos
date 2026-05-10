@@ -306,6 +306,38 @@ public sealed class SqlOSAuthServiceTests
         message.TextBody.Should().Be("Custom body for cu***@example.com");
     }
 
+    [TestMethod]
+    public async Task RequestEmailOtpSignupAsync_UsesSeededEmailBrandingForDefaultTemplate()
+    {
+        var harness = await EmailOtpHarness.CreateAsync(options =>
+        {
+            options.SeedAuthEmails(email =>
+            {
+                email.ApplicationName = "Acme Portal";
+                email.LogoBase64 = "data:image/png;base64,abc123";
+                email.PrimaryColor = "#16a34a";
+                email.AccentColor = "#111827";
+                email.BackgroundColor = "#f0fdf4";
+            });
+        });
+
+        await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Branded Email User",
+            "branded-email@example.com",
+            "test-client",
+            "Branded Org",
+            OrganizationId: null,
+            CustomFields: null));
+
+        var message = harness.EmailSender.Messages.Single();
+        message.Subject.Should().Be("Your Acme Portal sign-up code");
+        message.HtmlBody.Should().Contain("data:image/png;base64,abc123");
+        message.HtmlBody.Should().Contain("#16a34a");
+        message.HtmlBody.Should().Contain("#111827");
+        message.HtmlBody.Should().Contain("#f0fdf4");
+        message.TextBody.Should().Contain("Your Acme Portal sign-up code");
+    }
+
     /* ─────────────────────────────────────────────────────────────────────────
        Refresh token grace window tests (issue #18)
        ───────────────────────────────────────────────────────────────────────── */
@@ -624,6 +656,7 @@ public sealed class SqlOSAuthServiceTests
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
             await settings.UpsertSeededAuthPageSettingsAsync();
+            await settings.UpsertSeededAuthEmailSettingsAsync();
 
             return new EmailOtpHarness
             {

@@ -41,6 +41,7 @@ public class SqlOSAuthServerOptions
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
+    public SqlOSAuthEmailSeedOptions? AuthEmailSeed { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
@@ -54,6 +55,14 @@ public class SqlOSAuthServerOptions
         var seed = AuthPageSeed ?? new SqlOSAuthPageSeedOptions();
         configure(seed);
         AuthPageSeed = seed;
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedAuthEmails(Action<SqlOSAuthEmailSeedOptions> configure)
+    {
+        var seed = AuthEmailSeed ?? new SqlOSAuthEmailSeedOptions();
+        configure(seed);
+        AuthEmailSeed = seed;
         return this;
     }
 

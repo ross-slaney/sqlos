@@ -7,6 +7,8 @@ section: authserver
 
 Memberships link users to organizations. Each membership carries a role that your app can use for authorization logic.
 
+For human onboarding, prefer [Email Invitations](/docs/authserver/invitations) over directly creating a user and assigning a password. Invitations are email-bound, expiring, one-time links that create or activate membership only after the invited identity is verified.
+
 ## Create a membership
 
 **SDK**:
@@ -49,3 +51,17 @@ var orgs = await adminService.GetUserOrganizationsAsync(userId, ct);
 ## Syncing to FGA
 
 When using FGA, membership roles can be mapped to FGA grants. See [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga) for the pattern.
+
+## Invite a member
+
+```csharp
+var invite = await authService.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(
+        OrganizationId: org.Id,
+        Email: "teammate@example.com",
+        Role: "member"),
+    httpContext,
+    ct);
+```
+
+When the teammate accepts the invite, SqlOS creates or reactivates the membership. Existing active memberships are accepted idempotently and are not downgraded.

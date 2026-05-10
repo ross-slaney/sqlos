@@ -50,6 +50,7 @@ public static class SqlOSAuthPageRenderer
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "email_otp");
         var supportsPasswordSignup = supportsPassword && model.Settings.EnablePasswordSignup;
         var supportsEmailOtpSignup = supportsEmailOtp;
+        var supportsInvitationSignup = model.Invitation != null && supportsEmailOtpSignup;
         var supportsSignup = supportsPasswordSignup || supportsEmailOtpSignup;
         var signupLink = supportsSignup
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Get started</a>"
@@ -73,7 +74,28 @@ public static class SqlOSAuthPageRenderer
                   </label>
               """
             : string.Empty;
-        var signupContent = supportsPasswordSignup
+        var signupContent = supportsInvitationSignup
+            ? $$"""
+                {{RenderPanelIntro("Create account", "Create your account to accept this invitation.")}}
+                {{invitationMarkup}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="mode" value="{{encodedMode}}" />
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                  </label>
+                  <label class="field">
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" autocomplete="email" readonly required />
+                  </label>
+                  {{RenderPrimaryAction("Create account", "Creating account")}}
+                </form>
+                {{RenderProvidersSection(model)}}
+                {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                """
+            : supportsPasswordSignup
             ? $$"""
                 {{RenderPanelIntro("Create account", "Use email and password to set up your account.")}}
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
@@ -137,8 +159,8 @@ public static class SqlOSAuthPageRenderer
                   {{RenderPrimaryAction("Email me a sign-in code", "Sending code")}}
                 </form>
                 """ : string.Empty)}}
-                {{(supportsEmailOtpSignup ? $$"""
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/start"))}}">
+                {{(supportsInvitationSignup ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
                   <label class="field">
@@ -146,22 +168,10 @@ public static class SqlOSAuthPageRenderer
                     <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
                   </label>
                   <input type="hidden" name="email" value="{{emailValue}}" />
-                  {{RenderPrimaryAction("Create account with code", "Sending code")}}
+                  {{RenderPrimaryAction("Create account", "Creating account")}}
                 </form>
                 """ : string.Empty)}}
-                {{(supportsPassword ? $$"""
-                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
-                  {{requestIdInput}}
-                  {{invitationTokenInput}}
-                  <input type="hidden" name="email" value="{{emailValue}}" />
-                  <label class="field">
-                    <span>Password</span>
-                    <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required />
-                  </label>
-                  {{RenderPrimaryAction("Continue with password", "Signing in")}}
-                </form>
-                """ : string.Empty)}}
-                {{(supportsPasswordSignup ? $$"""
+                {{(!supportsInvitationSignup && supportsPasswordSignup ? $$"""
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
@@ -177,7 +187,19 @@ public static class SqlOSAuthPageRenderer
                   {{RenderPrimaryAction("Create account with password", "Creating account")}}
                 </form>
                 """ : string.Empty)}}
-                {{(!supportsEmailOtp && !supportsPassword && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
+                {{(supportsPassword ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Password</span>
+                    <input name="password" type="password" placeholder="Your password" autocomplete="current-password" required />
+                  </label>
+                  {{RenderPrimaryAction("Continue with password", "Signing in")}}
+                </form>
+                """ : string.Empty)}}
+                {{(!supportsEmailOtp && !supportsPassword && !supportsInvitationSignup && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
                 {{RenderProvidersSection(model)}}
                 """,
             "signup" => signupContent,

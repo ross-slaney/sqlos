@@ -118,6 +118,14 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         page.EnabledCredentialTypes = sampleConfig.EnableEmailOtp ? ["email_otp"] : ["password"];
     });
 
+    auth.SeedAuthEmails(email =>
+    {
+        email.ApplicationName = "SqlOS Todo";
+        email.PrimaryColor = "#0f172a";
+        email.AccentColor = "#2563eb";
+        email.BackgroundColor = "#f8fafc";
+    });
+
     auth.SeedClient(client =>
     {
         client.ClientId = sampleConfig.HostedClientId;

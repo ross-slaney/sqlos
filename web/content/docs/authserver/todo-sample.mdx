@@ -11,6 +11,7 @@ It keeps the model intentionally small:
 
 - hosted AuthPage first
 - passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
+- seeded email branding for the built-in OTP and invitation templates
 - one user = one tenant boundary
 - one tenant resource with child todo resources
 - SQL-backed FGA list filtering and simple auth checks in minimal APIs
@@ -55,6 +56,8 @@ Use the landing page to:
 - land in a tiny Todo UI backed by the sample API
 
 The Todo app only starts the OAuth request. SqlOS AuthPage owns credential collection, OTP delivery, OTP verification, user creation on signup, and the redirect back with an authorization code.
+
+The sample also seeds email branding with `SeedAuthEmails(...)`, so the default OTP emails use the Todo application name and colors without a custom template.
 
 ### Simple FGA
 

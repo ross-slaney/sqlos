@@ -59,7 +59,13 @@ Your UI calls these SqlOS endpoints:
 | `GET /sqlos/auth/headless/requests/{requestId}` | Get the current authorization request state |
 | `POST /sqlos/auth/headless/identify` | Submit email for home realm discovery |
 | `POST /sqlos/auth/headless/password/login` | Submit email + password |
+| `POST /sqlos/auth/headless/email-otp/start` | Send an existing-user email code |
+| `POST /sqlos/auth/headless/email-otp/verify` | Verify an existing-user email code |
 | `POST /sqlos/auth/headless/signup` | Create account with optional custom fields |
+| `POST /sqlos/auth/headless/signup/email-otp/start` | Send a new-user signup code |
+| `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify signup code and complete authorization |
+| `POST /sqlos/auth/headless/invitations/resolve` | Resolve an invitation token before starting OAuth |
+| `POST /sqlos/auth/headless/invitations/signup` | Create an invited passwordless account and accept the invite |
 | `POST /sqlos/auth/headless/organization/select` | Select org for multi-org users |
 | `POST /sqlos/auth/headless/provider/start` | Start OIDC or SSO flow |
 
@@ -116,9 +122,9 @@ if (request.view === "signup") {
 
 // 3. User submits email
 const identified = await headlessIdentify(requestId, email);
-// identified.mode → "password" | "sso" | "signup"
+// SqlOS returns a view, redirect, or next credential step.
 
-// 4. User submits password
+// 4. User submits password or starts/verifies email OTP
 const result = await headlessPasswordLogin(requestId, email, password);
 
 // 5. If multi-org, select organization
@@ -128,6 +134,30 @@ if (result.requiresOrganizationSelection) {
 
 // 6. SqlOS issues the auth code and redirects back to the OAuth client
 ```
+
+## Invitations
+
+Headless invitation links should use the invitation endpoints instead of pretending the invite is a normal signup.
+
+```typescript
+// Resolve token shown in the emailed link.
+const invite = await headlessResolveInvitation(invitationToken);
+
+// Start OAuth and include invitationToken in the authorize request.
+// SqlOS binds the invitation to the saved auth request.
+
+// Existing user: continue through identify, SSO, password, or email OTP.
+// New invited user in passwordless mode:
+await headlessSignupWithInvitation(
+  requestId,
+  displayName,
+  invite.email,
+  customFields,
+  invitationToken,
+);
+```
+
+Calling `/signup/email-otp/start` for a new invited user is the wrong shape: the invite link has already proven mailbox possession. Use `/invitations/signup` so SqlOS creates the verified user, accepts the invitation, and issues the redirect in one transaction. If HRD requires SSO for the invited email domain, SqlOS returns the SSO redirect instead of creating a local account.
 
 ## What doesn't change
 
