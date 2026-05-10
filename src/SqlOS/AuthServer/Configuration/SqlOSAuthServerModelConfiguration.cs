@@ -67,6 +67,47 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSInvitation>(entity =>
+        {
+            entity.ToTable("SqlOSInvitations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.OrganizationId, x.NormalizedEmail, x.CreatedAt });
+            entity.HasIndex(x => new { x.NormalizedEmail, x.CreatedAt });
+            entity.HasIndex(x => new { x.IpAddress, x.CreatedAt });
+            entity.HasIndex(x => new { x.InvitedByUserId, x.CreatedAt });
+            entity.HasIndex(x => x.ExpiresAt);
+            entity.Property(x => x.InvitedEmail).HasMaxLength(320);
+            entity.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            entity.Property(x => x.Role).HasMaxLength(50);
+            entity.Property(x => x.TokenHash).HasMaxLength(128);
+            entity.Property(x => x.RedirectUri).HasMaxLength(2048);
+            entity.Property(x => x.Scope).HasMaxLength(1000);
+            entity.Property(x => x.Resource).HasMaxLength(2048);
+            entity.Property(x => x.CustomFieldsJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.LastSendError).HasMaxLength(500);
+            entity.Property(x => x.RevokedReason).HasMaxLength(120);
+            entity.Property(x => x.IpAddress).HasMaxLength(128);
+            entity.Property(x => x.UserAgent).HasMaxLength(512);
+            entity.Property(x => x.AcceptedAt).IsConcurrencyToken();
+            entity.HasOne(x => x.Organization)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.InvitedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.InvitedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AcceptedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.AcceptedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany()
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSSsoConnection>(entity =>
         {
             entity.ToTable("SqlOSSsoConnections", schema, t => t.ExcludeFromMigrations());
@@ -294,6 +335,10 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasOne(x => x.Connection)
                 .WithMany()
                 .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Invitation)
+                .WithMany()
+                .HasForeignKey(x => x.InvitationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

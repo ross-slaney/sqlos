@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Security;
 using System.IO.Compression;
 using System.Xml;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -22,17 +23,20 @@ public sealed class SqlOSSamlService
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
+    private readonly SqlOSAuthorizationServerService? _authorizationServerService;
 
     public SqlOSSamlService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSAdminService adminService,
-        SqlOSCryptoService cryptoService)
+        SqlOSCryptoService cryptoService,
+        SqlOSAuthorizationServerService? authorizationServerService = null)
     {
         _context = context;
         _options = options.Value;
         _adminService = adminService;
         _cryptoService = cryptoService;
+        _authorizationServerService = authorizationServerService;
     }
 
     public async Task<string> CreateAuthorizationUrlAsync(SqlOSAuthorizationUrlRequest request, CancellationToken cancellationToken = default)
@@ -86,7 +90,7 @@ public sealed class SqlOSSamlService
         return BuildIdentityProviderRedirectUrl(connection, authorizationRequest.Id);
     }
 
-    public async Task<string> HandleAcsAsync(string connectionId, string samlResponse, string relayState, CancellationToken cancellationToken = default)
+    public async Task<string> HandleAcsAsync(string connectionId, string samlResponse, string relayState, HttpContext? httpContext = null, CancellationToken cancellationToken = default)
     {
         var connection = await _context.Set<SqlOSSsoConnection>().FirstOrDefaultAsync(x => x.Id == connectionId && x.IsEnabled, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");
@@ -96,7 +100,7 @@ public sealed class SqlOSSamlService
 
         if (authorizationRequest != null)
         {
-            return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, principal, cancellationToken);
+            return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, principal, httpContext, cancellationToken);
         }
 
         var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync("sso_request", relayState, cancellationToken)
@@ -111,6 +115,7 @@ public sealed class SqlOSSamlService
         SqlOSSsoConnection connection,
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSSamlPrincipal principal,
+        HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
         if (authorizationRequest.CancelledAt != null || authorizationRequest.CompletedAt != null || authorizationRequest.ExpiresAt <= DateTime.UtcNow)
@@ -126,6 +131,18 @@ public sealed class SqlOSSamlService
         if (!await _adminService.UserHasMembershipAsync(user.Id, organizationId, cancellationToken))
         {
             await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
+        }
+
+        if (_authorizationServerService != null)
+        {
+            authorizationRequest.ResolvedConnectionId = connection.Id;
+            return await _authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                user,
+                organizationId,
+                "saml",
+                httpContext ?? new DefaultHttpContext(),
+                cancellationToken);
         }
 
         var rawCode = _cryptoService.GenerateOpaqueToken();

@@ -71,6 +71,37 @@ public sealed class SqlOSMembership
     public SqlOSUser? User { get; set; }
 }
 
+public sealed class SqlOSInvitation
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string InvitedEmail { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
+    public string Role { get; set; } = "member";
+    public string TokenHash { get; set; } = string.Empty;
+    public string? InvitedByUserId { get; set; }
+    public string? ClientApplicationId { get; set; }
+    public string? RedirectUri { get; set; }
+    public string? Scope { get; set; }
+    public string? Resource { get; set; }
+    public string? CustomFieldsJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? LastSentAt { get; set; }
+    public string? LastSendError { get; set; }
+    public DateTime? AcceptedAt { get; set; }
+    public string? AcceptedByUserId { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevokedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSOrganization? Organization { get; set; }
+    public SqlOSUser? InvitedByUser { get; set; }
+    public SqlOSUser? AcceptedByUser { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
+}
+
 public sealed class SqlOSSsoConnection
 {
     public string Id { get; set; } = string.Empty;
@@ -347,6 +378,7 @@ public sealed class SqlOSAuthorizationRequest
     public string PresentationMode { get; set; } = "hosted";
     public string? OrganizationId { get; set; }
     public string? ConnectionId { get; set; }
+    public string? InvitationId { get; set; }
     public string? LoginHintEmail { get; set; }
     public string? UiContextJson { get; set; }
     public string RedirectUri { get; set; } = string.Empty;
@@ -368,6 +400,7 @@ public sealed class SqlOSAuthorizationRequest
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSOrganization? Organization { get; set; }
     public SqlOSSsoConnection? Connection { get; set; }
+    public SqlOSInvitation? Invitation { get; set; }
 }
 
 public sealed class SqlOSAuthorizationCode

@@ -20,6 +20,7 @@ public sealed class SqlOSAuthorizationServerService
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSAuthPageSessionService _authPageSessionService;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly SqlOSInvitationService? _invitationService;
 
     public SqlOSAuthorizationServerService(
         ISqlOSAuthServerDbContext context,
@@ -28,7 +29,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSCryptoService cryptoService,
         SqlOSSettingsService settingsService,
         SqlOSAuthPageSessionService authPageSessionService,
-        IOptions<SqlOSAuthServerOptions> options)
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSInvitationService? invitationService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -37,6 +39,7 @@ public sealed class SqlOSAuthorizationServerService
         _settingsService = settingsService;
         _authPageSessionService = authPageSessionService;
         _options = options.Value;
+        _invitationService = invitationService;
     }
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -197,7 +200,8 @@ public sealed class SqlOSAuthorizationServerService
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
         string password,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowUnverifiedEmailForInvitation = false)
     {
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
         if (!credentialSettings.PasswordEnabled)
@@ -210,7 +214,7 @@ public sealed class SqlOSAuthorizationServerService
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
             ?? throw new InvalidOperationException("Invalid email or password.");
 
-        if (_options.RequireVerifiedEmailForPasswordLogin && !emailRecord.IsVerified)
+        if (_options.RequireVerifiedEmailForPasswordLogin && !emailRecord.IsVerified && !allowUnverifiedEmailForInvitation)
         {
             throw new InvalidOperationException("Email must be verified before password login.");
         }
@@ -374,6 +378,21 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
+        {
+            return new SqlOSAuthorizationRequestLoginResult(
+                await IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    user,
+                    organizationId: null,
+                    authenticationMethod,
+                    httpContext,
+                    cancellationToken),
+                false,
+                null,
+                await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken));
+        }
+
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(authorizationRequest.OrganizationId))
@@ -430,6 +449,17 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
+        {
+            var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
+                authorizationRequest.InvitationId,
+                user.Id,
+                saveChanges: false,
+                httpContext,
+                cancellationToken);
+            organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
+        }
+
         var rawCode = _cryptoService.GenerateOpaqueToken();
         _context.Set<SqlOSAuthorizationCode>().Add(new SqlOSAuthorizationCode
         {
@@ -651,6 +681,9 @@ public sealed class SqlOSAuthorizationServerService
     }
 
     private sealed record PendingAuthorizationPayload(string AuthorizationRequestId, string AuthenticationMethod);
+
+    private SqlOSInvitationService RequireInvitationService()
+        => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
 }
 
 public sealed record SqlOSAuthorizeRequestInput(

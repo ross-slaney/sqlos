@@ -335,6 +335,17 @@ nav a.active {
     border-bottom: 0;
 }
 
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.form-actions button {
+    width: auto;
+}
+
 .meta-list {
     display: grid;
     gap: 6px;

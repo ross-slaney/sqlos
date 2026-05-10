@@ -160,7 +160,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-Hosted AuthPage, headless browser flows, and backend SDK usage all use the same OTP primitives. A backend can run a passwordless signup without adding its own REST API surface:
+Hosted AuthPage, headless browser flows, invite acceptance, and backend SDK usage all use the same OTP primitives. A backend can run a passwordless signup without adding its own REST API surface:
 
 ```csharp
 var start = await sqlosAuth.RequestEmailOtpSignupAsync(
@@ -184,6 +184,29 @@ var login = await sqlosAuth.VerifyEmailOtpSignupAsync(
 Headless browser clients use `/sqlos/auth/headless/email-otp/start`, `/sqlos/auth/headless/email-otp/verify`, `/sqlos/auth/headless/signup/email-otp/start`, and `/sqlos/auth/headless/signup/email-otp/verify`.
 
 Run `./scripts/azure/setup-acs-email.sh --help` for dry-run, DNS, and connection-string options.
+
+## Invite by Email
+
+SqlOS can send one-time organization invitations that are bound to the invited email address. The hosted accept page is:
+
+```text
+GET /sqlos/auth/invitations/accept?token=...
+```
+
+Admins can create, resend, revoke, and copy invite links from the organization **Invitations** tab in the Auth dashboard. Backend code can use the SDK facade:
+
+```csharp
+var invite = await sqlosAuth.CreateEmailInvitationAsync(
+    new SqlOSCreateEmailInvitationRequest(
+        OrganizationId: organizationId,
+        Email: "jane@example.com",
+        Role: "member",
+        ClientId: "web",
+        RedirectUri: "https://app.example.com/auth/callback"),
+    httpContext);
+```
+
+Invite acceptance works with Email OTP, password login/signup when enabled, and trusted SSO. See [Email Invitations](docs/INVITATIONS.md).
 
 ## Todo Sample
 
@@ -265,6 +288,8 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
+- [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
+- [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
 - [Todo Sample](examples/SqlOS.Todo.Api/README.md) — hosted auth, simple FGA, and MCP-oriented protected-resource flows
 - [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
 - [Preregistration vs CIMD vs DCR](web/content/docs/authserver/preregistration-vs-cimd-vs-dcr.mdx) — choose the right client onboarding path

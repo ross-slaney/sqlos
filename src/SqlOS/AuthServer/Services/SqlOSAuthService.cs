@@ -20,6 +20,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSInvitationService? _invitationService;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
@@ -27,7 +28,8 @@ public sealed class SqlOSAuthService
         SqlOSAdminService adminService,
         SqlOSCryptoService cryptoService,
         SqlOSSettingsService settingsService,
-        SqlOSEmailOtpService emailOtpService)
+        SqlOSEmailOtpService emailOtpService,
+        SqlOSInvitationService? invitationService = null)
     {
         _context = context;
         _options = options.Value;
@@ -35,6 +37,7 @@ public sealed class SqlOSAuthService
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _invitationService = invitationService;
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -112,6 +115,30 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
         => await _emailOtpService.StartSignupForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
+        SqlOSCreateEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().CreateEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> ResendEmailInvitationAsync(
+        SqlOSResendEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().ResendEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSEmailInvitationResult> RevokeEmailInvitationAsync(
+        SqlOSRevokeEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().RevokeEmailInvitationAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSInvitationAcceptanceResult> AcceptEmailInvitationAsync(
+        SqlOSAcceptEmailInvitationRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireInvitationService().AcceptEmailInvitationAsync(request, httpContext, cancellationToken);
 
     public async Task<SqlOSLoginResult> VerifyEmailOtpAsync(
         SqlOSEmailOtpVerifyRequest request,
@@ -987,4 +1014,7 @@ public sealed class SqlOSAuthService
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record PasswordResetPayload(string EmailId);
     private sealed record EmailVerificationPayload(string EmailId);
+
+    private SqlOSInvitationService RequireInvitationService()
+        => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
 }
