@@ -39,6 +39,39 @@ public static class EndpointRouteBuilderExtensions
         auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
             Results.Ok(await authorizationServerService.GetMetadataAsync(context, cancellationToken)));
 
+        auth.MapPost("/device_authorization", async (
+            HttpContext context,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+
+            try
+            {
+                var result = await deviceAuthorizationService.StartAsync(
+                    new SqlOSDeviceAuthorizationStartRequest(
+                        form["client_id"].ToString(),
+                        form["scope"].ToString(),
+                        form["resource"].ToString()),
+                    context,
+                    cancellationToken);
+
+                return Results.Ok(new
+                {
+                    device_code = result.DeviceCode,
+                    user_code = result.UserCode,
+                    verification_uri = result.VerificationUri,
+                    verification_uri_complete = result.VerificationUriComplete,
+                    expires_in = result.ExpiresIn,
+                    interval = result.Interval
+                });
+            }
+            catch (SqlOSDeviceAuthorizationException ex)
+            {
+                return Results.BadRequest(BuildDeviceAuthorizationError(ex));
+            }
+        });
+
         auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, SqlOSSettingsService settingsService, CancellationToken cancellationToken) =>
         {
             var rotationSettings = await settingsService.GetKeyRotationSettingsAsync(cancellationToken);
@@ -181,21 +214,26 @@ public static class EndpointRouteBuilderExtensions
             CancellationToken cancellationToken) =>
         {
             var invitationToken = ReadInvitationToken(context);
+            var deviceUserCode = ReadDeviceUserCode(context);
             var invitation = !string.IsNullOrWhiteSpace(invitationToken)
                 ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
                 : null;
-            if (headlessAuthService.IsBrowserUiEnabled)
-            {
-                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
-                if (!string.IsNullOrWhiteSpace(invitationToken))
+                if (headlessAuthService.IsBrowserUiEnabled)
                 {
-                    uiContext["invitationToken"] = invitationToken;
-                }
+                    var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                    if (!string.IsNullOrWhiteSpace(invitationToken))
+                    {
+                        uiContext["invitationToken"] = invitationToken;
+                    }
+                    if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                    {
+                        uiContext["deviceUserCode"] = deviceUserCode;
+                    }
 
-                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
-                    context,
-                    invitation == null ? "login" : "invite",
-                    context.Request.Query["request"].ToString(),
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        invitation == null ? "login" : "invite",
+                        context.Request.Query["request"].ToString(),
                     invitation?.Email ?? context.Request.Query["email"].ToString(),
                     uiContext));
             }
@@ -211,7 +249,8 @@ public static class EndpointRouteBuilderExtensions
                 authorizationServerService,
                 cancellationToken,
                 invitationToken: invitationToken,
-                invitation: invitation);
+                invitation: invitation,
+                deviceUserCode: deviceUserCode);
             return Html(page);
         });
 
@@ -271,6 +310,315 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        auth.MapGet("/device", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var userCode = ReadDeviceUserCode(context);
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                if (string.IsNullOrWhiteSpace(userCode))
+                {
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        "device",
+                        requestId: null,
+                        email: null,
+                        uiContext: null));
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(userCode))
+            {
+                return Html(await BuildAuthPageViewModelAsync(
+                    "device",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken));
+            }
+
+            try
+            {
+                var authorizationRequest = await deviceAuthorizationService.CreateOrGetAuthorizationRequestAsync(
+                    userCode,
+                    headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
+                    cancellationToken);
+                if (headlessAuthService.IsBrowserUiEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildUiUrl(
+                        context,
+                        authorizationRequest.Id,
+                        "device",
+                        error: null,
+                        pendingToken: null,
+                        email: authorizationRequest.LoginHintEmail,
+                        displayName: null,
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+                }
+
+                var session = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+                var resolved = await deviceAuthorizationService.ResolveAsync(authorizationRequest, session?.User, cancellationToken);
+                if (session == null)
+                {
+                    return Html(await BuildAuthPageViewModelAsync(
+                        "login",
+                        authorizationRequest.Id,
+                        null,
+                        null,
+                        null,
+                        null,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        info: $"Sign in to approve CLI access for {resolved.ClientName}.",
+                        deviceAuthorization: resolved));
+                }
+
+                if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
+                {
+                    return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                        authorizationRequest,
+                        session.User,
+                        session.OrganizationId,
+                        session.AuthenticationMethod,
+                        context,
+                        cancellationToken));
+                }
+
+                return Html(await BuildAuthPageViewModelAsync(
+                    "device-approve",
+                    authorizationRequest.Id,
+                    session.User.DefaultEmail,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    resolved.Organizations,
+                    deviceAuthorization: resolved));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Html(await BuildAuthPageViewModelAsync(
+                    "device",
+                    null,
+                    null,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    deviceUserCode: userCode),
+                    StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/device/approve", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var requestId = context.Request.Query["request"].ToString();
+            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken)
+                ?? throw new InvalidOperationException("Device authorization request is invalid or expired.");
+            var session = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+            var resolved = await deviceAuthorizationService.ResolveAsync(authorizationRequest, session?.User, cancellationToken);
+            if (headlessAuthService.IsBrowserUiEnabled && SqlOSHeadlessAuthService.IsHeadlessRequest(authorizationRequest))
+            {
+                return Results.Redirect(headlessAuthService.BuildUiUrl(
+                    context,
+                    authorizationRequest.Id,
+                    session == null ? "login" : "device-approve",
+                    error: null,
+                    pendingToken: null,
+                    email: session?.User.DefaultEmail ?? authorizationRequest.LoginHintEmail,
+                    displayName: null,
+                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+            }
+
+            if (session == null)
+            {
+                return Results.Redirect(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                    $"{authPrefix}/device",
+                    "user_code",
+                    resolved.UserCode));
+            }
+
+            return Html(await BuildAuthPageViewModelAsync(
+                "device-approve",
+                authorizationRequest.Id,
+                session.User.DefaultEmail,
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                resolved.Organizations,
+                deviceAuthorization: resolved));
+        });
+
+        auth.MapPost("/device/verify", async (
+            HttpContext context,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var userCode = form["userCode"].ToString();
+            return Results.Redirect(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                $"{authPrefix}/device",
+                "user_code",
+                userCode));
+        });
+
+        auth.MapPost("/device/approve", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = ReadRequestId(context, form);
+            var userCode = form["userCode"].ToString();
+            var organizationId = form["organizationId"].ToString();
+            var session = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+            if (session == null)
+            {
+                return Results.Redirect(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                    $"{authPrefix}/device",
+                    "user_code",
+                    userCode));
+            }
+
+            try
+            {
+                SqlOSAuthorizationRequest? authorizationRequest = null;
+                SqlOSDeviceAuthorizationResolveResult resolved;
+                if (!string.IsNullOrWhiteSpace(requestId))
+                {
+                    authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(organizationId))
+                    {
+                        authorizationRequest.ResolvedOrganizationId = organizationId;
+                    }
+
+                    resolved = await deviceAuthorizationService.ApproveAsync(
+                        authorizationRequest,
+                        session.User,
+                        session.AuthenticationMethod,
+                        context,
+                        cancellationToken);
+                }
+                else
+                {
+                    resolved = await deviceAuthorizationService.ApproveAsync(
+                        new SqlOSDeviceAuthorizationApprovalRequest(userCode, string.IsNullOrWhiteSpace(organizationId) ? null : organizationId),
+                        session.User,
+                        session.AuthenticationMethod,
+                        context,
+                        cancellationToken);
+                }
+
+                if (resolved.RequiresOrganizationSelection)
+                {
+                    return Html(await BuildAuthPageViewModelAsync(
+                        "device-approve",
+                        authorizationRequest?.Id,
+                        session.User.DefaultEmail,
+                        null,
+                        null,
+                        null,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        resolved.Organizations,
+                        deviceAuthorization: resolved));
+                }
+
+                return Html(await BuildAuthPageViewModelAsync(
+                    "device-approved",
+                    authorizationRequest?.Id,
+                    session.User.DefaultEmail,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    deviceAuthorization: resolved));
+            }
+            catch (InvalidOperationException ex)
+            {
+                var authorizationRequest = string.IsNullOrWhiteSpace(requestId)
+                    ? null
+                    : await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var resolved = authorizationRequest == null
+                    ? await deviceAuthorizationService.ResolveAsync(userCode, session.User, cancellationToken)
+                    : await deviceAuthorizationService.ResolveAsync(authorizationRequest, session.User, cancellationToken);
+                return Html(await BuildAuthPageViewModelAsync(
+                    "device-approve",
+                    authorizationRequest?.Id,
+                    session.User.DefaultEmail,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    resolved.Organizations,
+                    deviceAuthorization: resolved),
+                    StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/device/deny", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = ReadRequestId(context, form);
+            var userCode = form["userCode"].ToString();
+            var session = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(requestId))
+            {
+                var authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+                var resolved = await deviceAuthorizationService.ResolveAsync(authorizationRequest, session?.User, cancellationToken);
+                userCode = resolved.UserCode;
+                authorizationRequest.CancelledAt = DateTime.UtcNow;
+            }
+
+            await deviceAuthorizationService.DenyAsync(userCode, session?.User, context, cancellationToken);
+            return Html(await BuildAuthPageViewModelAsync(
+                "device-approved",
+                string.IsNullOrWhiteSpace(requestId) ? null : requestId,
+                session?.User.DefaultEmail,
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                info: "CLI access was denied.",
+                deviceUserCode: userCode));
+        });
+
         auth.MapPost("/login/identify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
@@ -285,6 +633,7 @@ public static class EndpointRouteBuilderExtensions
             var requestId = form["requestId"].ToString();
             var email = form["email"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
 
             var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
             var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken);
@@ -330,7 +679,8 @@ public static class EndpointRouteBuilderExtensions
                 cancellationToken,
                 invitationToken: invitationToken,
                 invitation: invitation,
-                invitationService: invitationService);
+                invitationService: invitationService,
+                deviceUserCode: deviceUserCode);
             return Html(page);
         });
 
@@ -349,6 +699,7 @@ public static class EndpointRouteBuilderExtensions
             var email = form["email"].ToString();
             var password = form["password"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
 
             try
             {
@@ -386,7 +737,7 @@ public static class EndpointRouteBuilderExtensions
                     }
 
                     await authPageSessionService.SignInAsync(context, authentication.User, organizationId, authentication.AuthenticationMethod, cancellationToken);
-                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-in" : "invitation-accepted")}");
+                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
                 }
                 var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                     authorizationRequest,
@@ -429,7 +780,8 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -442,6 +794,7 @@ public static class EndpointRouteBuilderExtensions
             CancellationToken cancellationToken) =>
         {
             var invitationToken = ReadInvitationToken(context);
+            var deviceUserCode = ReadDeviceUserCode(context);
             var invitation = !string.IsNullOrWhiteSpace(invitationToken)
                 ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
                 : null;
@@ -451,6 +804,10 @@ public static class EndpointRouteBuilderExtensions
                 if (!string.IsNullOrWhiteSpace(invitationToken))
                 {
                     uiContext["invitationToken"] = invitationToken;
+                }
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
                 }
 
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
@@ -472,7 +829,8 @@ public static class EndpointRouteBuilderExtensions
                 authorizationServerService,
                 cancellationToken,
                 invitationToken: invitationToken,
-                invitation: invitation);
+                invitation: invitation,
+                deviceUserCode: deviceUserCode);
             return Html(page);
         });
 
@@ -490,6 +848,7 @@ public static class EndpointRouteBuilderExtensions
             var requestId = form["requestId"].ToString();
             var email = form["email"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
 
             try
             {
@@ -529,7 +888,8 @@ public static class EndpointRouteBuilderExtensions
                     challengeToken: challenge.ChallengeToken,
                     invitationToken: invitationToken,
                     invitation: invitation,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page);
             }
             catch (InvalidOperationException ex)
@@ -545,7 +905,8 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -564,6 +925,7 @@ public static class EndpointRouteBuilderExtensions
             var challengeToken = form["challengeToken"].ToString();
             var code = form["code"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
 
             try
             {
@@ -595,7 +957,7 @@ public static class EndpointRouteBuilderExtensions
                         organizationId,
                         verification.AuthenticationMethod,
                         cancellationToken);
-                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-in" : "invitation-accepted")}");
+                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
                 }
 
                 if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
@@ -645,7 +1007,8 @@ public static class EndpointRouteBuilderExtensions
                     cancellationToken,
                     challengeToken: challengeToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -707,6 +1070,7 @@ public static class EndpointRouteBuilderExtensions
             CancellationToken cancellationToken) =>
         {
             var invitationToken = ReadInvitationToken(context);
+            var deviceUserCode = ReadDeviceUserCode(context);
             var invitation = !string.IsNullOrWhiteSpace(invitationToken)
                 ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
                 : null;
@@ -716,6 +1080,10 @@ public static class EndpointRouteBuilderExtensions
                 if (!string.IsNullOrWhiteSpace(invitationToken))
                 {
                     uiContext["invitationToken"] = invitationToken;
+                }
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
                 }
 
                 return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
@@ -737,7 +1105,8 @@ public static class EndpointRouteBuilderExtensions
                 authorizationServerService,
                 cancellationToken,
                 invitationToken: invitationToken,
-                invitation: invitation);
+                invitation: invitation,
+                deviceUserCode: deviceUserCode);
             return Html(page);
         });
 
@@ -758,6 +1127,7 @@ public static class EndpointRouteBuilderExtensions
             var password = form["password"].ToString();
             var organizationName = form["organizationName"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
             IDbContextTransaction? transaction = null;
 
             try
@@ -809,7 +1179,7 @@ public static class EndpointRouteBuilderExtensions
                         await transaction.CommitAsync(cancellationToken);
                     }
 
-                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-up" : "invitation-accepted")}");
+                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
                 }
 
                 var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
@@ -844,7 +1214,8 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -865,6 +1236,7 @@ public static class EndpointRouteBuilderExtensions
             var displayName = form["displayName"].ToString();
             var email = form["email"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
             IDbContextTransaction? transaction = null;
 
             try
@@ -920,7 +1292,7 @@ public static class EndpointRouteBuilderExtensions
                         await transaction.CommitAsync(cancellationToken);
                     }
 
-                    return Results.Redirect($"{authPrefix}/login?status=invitation-accepted");
+                    return RedirectAfterStandaloneSignIn(authPrefix, "invitation-accepted", deviceUserCode);
                 }
 
                 var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
@@ -955,7 +1327,8 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -976,6 +1349,7 @@ public static class EndpointRouteBuilderExtensions
             var email = form["email"].ToString();
             var organizationName = form["organizationName"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
 
             try
             {
@@ -1019,7 +1393,8 @@ public static class EndpointRouteBuilderExtensions
                     signupToken: signup.SignupToken,
                     invitationToken: invitationToken,
                     invitation: invitation,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page);
             }
             catch (InvalidOperationException ex)
@@ -1035,7 +1410,8 @@ public static class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -1056,6 +1432,7 @@ public static class EndpointRouteBuilderExtensions
             var challengeToken = form["challengeToken"].ToString();
             var code = form["code"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
             IDbContextTransaction? transaction = null;
 
             try
@@ -1100,7 +1477,7 @@ public static class EndpointRouteBuilderExtensions
                     {
                         await transaction.CommitAsync(cancellationToken);
                     }
-                    return Results.Redirect($"{authPrefix}/login?status={(invitation == null ? "signed-up" : "invitation-accepted")}");
+                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
                 }
 
                 var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
@@ -1139,7 +1516,8 @@ public static class EndpointRouteBuilderExtensions
                     challengeToken: challengeToken,
                     signupToken: signupToken,
                     invitationToken: invitationToken,
-                    invitationService: invitationService);
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -1234,6 +1612,69 @@ public static class EndpointRouteBuilderExtensions
             try
             {
                 return Results.Ok(await headlessAuthService.ResolveInvitationAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/device/resolve", async (
+            SqlOSHeadlessDeviceAuthorizationResolveRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.ResolveDeviceAuthorizationAsync(request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/device/approve", async (
+            SqlOSHeadlessDeviceAuthorizationApproveRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.ApproveDeviceAuthorizationAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/device/deny", async (
+            SqlOSHeadlessDeviceAuthorizationResolveRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.DenyDeviceAuthorizationAsync(context, request, cancellationToken));
             }
             catch (InvalidOperationException ex)
             {
@@ -1529,15 +1970,37 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/token", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSDeviceAuthorizationService deviceAuthorizationService,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
+            var grantType = form["grant_type"].ToString();
 
             try
             {
+                if (string.Equals(grantType, SqlOSOAuthGrantTypes.DeviceCode, StringComparison.Ordinal))
+                {
+                    var deviceResult = await deviceAuthorizationService.PollAsync(
+                        new SqlOSDeviceTokenPollRequest(
+                            form["client_id"].ToString(),
+                            form["device_code"].ToString(),
+                            form["resource"].ToString()),
+                        context,
+                        cancellationToken);
+
+                    return Results.Ok(new
+                    {
+                        access_token = deviceResult.Tokens.AccessToken,
+                        refresh_token = deviceResult.Tokens.RefreshToken,
+                        token_type = "Bearer",
+                        expires_in = Math.Max(1, (int)(deviceResult.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
+                        scope = deviceResult.Scope ?? string.Empty
+                    });
+                }
+
                 var result = await authorizationServerService.ExchangeAuthorizationCodeAsync(
                     new SqlOSTokenRequest(
-                        form["grant_type"].ToString(),
+                        grantType,
                         form["code"].ToString(),
                         form["redirect_uri"].ToString(),
                         form["client_id"].ToString(),
@@ -1555,6 +2018,10 @@ public static class EndpointRouteBuilderExtensions
                     expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
                     scope = result.Scope ?? string.Empty
                 });
+            }
+            catch (SqlOSDeviceAuthorizationException ex)
+            {
+                return Results.BadRequest(BuildDeviceAuthorizationError(ex));
             }
             catch (InvalidOperationException ex)
             {
@@ -2024,6 +2491,7 @@ public static class EndpointRouteBuilderExtensions
                     client.Name,
                     client.Audience,
                     client.AllowNativeHeadlessAuth,
+                    client.AllowDeviceAuthorization,
                     RedirectUris = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson),
                     client.IsActive,
                     client.CreatedAt
@@ -2476,9 +2944,14 @@ public static class EndpointRouteBuilderExtensions
         string? signupToken = null,
         string? invitationToken = null,
         SqlOSEmailInvitationResult? invitation = null,
-        SqlOSInvitationService? invitationService = null)
+        SqlOSInvitationService? invitationService = null,
+        string? deviceUserCode = null,
+        SqlOSDeviceAuthorizationResolveResult? deviceAuthorization = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
+        var isDeviceView = string.Equals(mode, "device", StringComparison.OrdinalIgnoreCase)
+            || mode.StartsWith("device-", StringComparison.OrdinalIgnoreCase);
+        var effectiveDeviceUserCode = deviceUserCode ?? (isDeviceView ? deviceAuthorization?.UserCode : null);
         if (invitation == null && invitationService != null && !string.IsNullOrWhiteSpace(invitationToken))
         {
             invitation = await invitationService.ResolveEmailInvitationAsync(invitationToken, cancellationToken: cancellationToken);
@@ -2501,6 +2974,10 @@ public static class EndpointRouteBuilderExtensions
         if (!string.IsNullOrWhiteSpace(invitationToken) && providerBasePath != null)
         {
             providerBasePath += $"&invitationToken={Uri.EscapeDataString(invitationToken)}";
+        }
+        if (!string.IsNullOrWhiteSpace(effectiveDeviceUserCode) && providerBasePath != null)
+        {
+            providerBasePath += $"&deviceUserCode={Uri.EscapeDataString(effectiveDeviceUserCode)}";
         }
 
         var providers = providerBasePath == null
@@ -2528,7 +3005,9 @@ public static class EndpointRouteBuilderExtensions
             challengeToken,
             signupToken,
             invitationToken,
-            invitation);
+            invitation,
+            effectiveDeviceUserCode,
+            deviceAuthorization);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)
@@ -2571,6 +3050,63 @@ public static class EndpointRouteBuilderExtensions
 
         queryValue = context.Request.Query["token"].ToString();
         return string.IsNullOrWhiteSpace(queryValue) ? null : queryValue;
+    }
+
+    private static string? ReadDeviceUserCode(HttpContext context, IFormCollection? form = null)
+    {
+        var formValue = form?["deviceUserCode"].ToString();
+        if (!string.IsNullOrWhiteSpace(formValue))
+        {
+            return formValue.Trim();
+        }
+
+        var queryValue = context.Request.Query["deviceUserCode"].ToString();
+        if (string.IsNullOrWhiteSpace(queryValue))
+        {
+            queryValue = context.Request.Query["user_code"].ToString();
+        }
+
+        return string.IsNullOrWhiteSpace(queryValue) ? null : queryValue.Trim();
+    }
+
+    private static string? ReadRequestId(HttpContext context, IFormCollection? form = null)
+    {
+        var formValue = form?["requestId"].ToString();
+        if (!string.IsNullOrWhiteSpace(formValue))
+        {
+            return formValue.Trim();
+        }
+
+        var queryValue = context.Request.Query["request"].ToString();
+        return string.IsNullOrWhiteSpace(queryValue) ? null : queryValue.Trim();
+    }
+
+    private static IResult RedirectAfterStandaloneSignIn(string authPrefix, string status, string? deviceUserCode)
+    {
+        if (!string.IsNullOrWhiteSpace(deviceUserCode))
+        {
+            return Results.Redirect(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                $"{authPrefix}/device",
+                "user_code",
+                deviceUserCode));
+        }
+
+        return Results.Redirect($"{authPrefix}/login?status={status}");
+    }
+
+    private static object BuildDeviceAuthorizationError(SqlOSDeviceAuthorizationException exception)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["error"] = exception.Error,
+            ["error_description"] = exception.Message
+        };
+        if (exception.Interval.HasValue)
+        {
+            payload["interval"] = exception.Interval.Value;
+        }
+
+        return payload;
     }
 
     private static async Task<SqlOSEmailInvitationResult?> BindInvitationIfPresentAsync(

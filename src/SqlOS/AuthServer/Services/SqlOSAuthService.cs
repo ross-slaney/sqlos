@@ -140,6 +140,39 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken = default)
         => await RequireInvitationService().AcceptEmailInvitationAsync(request, httpContext, cancellationToken);
 
+    public async Task<SqlOSDeviceAuthorizationStartResult> StartDeviceAuthorizationAsync(
+        SqlOSDeviceAuthorizationStartRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => await CreateDeviceAuthorizationService().StartAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSDeviceAuthorizationResolveResult> ResolveDeviceAuthorizationAsync(
+        string userCode,
+        SqlOSUser? user = null,
+        CancellationToken cancellationToken = default)
+        => await CreateDeviceAuthorizationService().ResolveAsync(userCode, user, cancellationToken);
+
+    public async Task<SqlOSDeviceAuthorizationResolveResult> ApproveDeviceAuthorizationAsync(
+        SqlOSDeviceAuthorizationApprovalRequest request,
+        SqlOSUser user,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => await CreateDeviceAuthorizationService().ApproveAsync(request, user, authenticationMethod, httpContext, cancellationToken);
+
+    public async Task DenyDeviceAuthorizationAsync(
+        string userCode,
+        SqlOSUser? user,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => await CreateDeviceAuthorizationService().DenyAsync(userCode, user, httpContext, cancellationToken);
+
+    public async Task<SqlOSDeviceTokenPollResult> PollDeviceAuthorizationAsync(
+        SqlOSDeviceTokenPollRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => await CreateDeviceAuthorizationService().PollAsync(request, httpContext, cancellationToken);
+
     public async Task<SqlOSLoginResult> AcceptEmailInvitationSignupAsync(
         SqlOSAcceptEmailInvitationSignupRequest request,
         HttpContext httpContext,
@@ -1130,4 +1163,7 @@ public sealed class SqlOSAuthService
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
+
+    private SqlOSDeviceAuthorizationService CreateDeviceAuthorizationService()
+        => new(_context, _adminService, this, _cryptoService, Options.Create(_options));
 }

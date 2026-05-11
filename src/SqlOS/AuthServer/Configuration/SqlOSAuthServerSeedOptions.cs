@@ -34,5 +34,6 @@ public sealed class SqlOSClientSeedOptions
     public List<string> RedirectUris { get; set; } = [];
     public bool IsFirstParty { get; set; }
     public bool AllowNativeHeadlessAuth { get; set; }
+    public bool AllowDeviceAuthorization { get; set; }
     public bool IsActive { get; set; } = true;
 }

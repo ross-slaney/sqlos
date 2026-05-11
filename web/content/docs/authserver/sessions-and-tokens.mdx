@@ -67,6 +67,19 @@ var tokens = await authService.RefreshAsync(
 
 **Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
 
+## CLI device-flow tokens
+
+Device Authorization Grant issues the same access and refresh token shape as hosted AuthPage and headless browser flows. The only difference is the token endpoint grant:
+
+```http
+grant_type=urn:ietf:params:oauth:grant-type:device_code
+client_id=acme-cli
+device_code=opaque-device-code
+resource=https://api.acme.com
+```
+
+Until the browser user approves the CLI request, `/sqlos/auth/token` returns `authorization_pending`. After approval it returns the normal OAuth token response and consumes the device code exactly once. See [CLI OAuth](/docs/authserver/cli-oauth).
+
 ## Logout
 
 Revoke a session by refresh token or session ID:

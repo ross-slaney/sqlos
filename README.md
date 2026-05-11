@@ -308,9 +308,9 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 Run it like this:
 
 ```bash
-ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
-AZURE_RESOURCE_GROUP=<resource-group>
-ACS_FROM_ADDRESS=no-reply@example.com
+ACS_COMMUNICATION_SERVICE_NAME=sqlos-dev-comm
+AZURE_RESOURCE_GROUP=rg-sqlos-web-prod
+ACS_FROM_ADDRESS=no-reply@sqlos.dev
 
 ACS_CONN=$(az communication list-key \
   --name "$ACS_COMMUNICATION_SERVICE_NAME" \
@@ -323,6 +323,18 @@ SqlOS__EmailOtp__AzureCommunicationServicesConnectionString="$ACS_CONN" \
 SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
+
+## Testing the CLI Auth
+
+In another terminal:
+
+dotnet run --project examples/SqlOS.Todo.Cli -- login
+Open the printed URL, sign in through SqlOS AuthPage, approve the Todo CLI request, then run:
+
+dotnet run --project examples/SqlOS.Todo.Cli -- whoami
+dotnet run --project examples/SqlOS.Todo.Cli -- add "Ship CLI OAuth"
+dotnet run --project examples/SqlOS.Todo.Cli -- list
+dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
 
 Then open `http://localhost:5080/`.
 

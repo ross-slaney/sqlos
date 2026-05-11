@@ -108,7 +108,67 @@ public sealed record SqlOSCreateClientRequest(
     bool RequirePkce = true,
     bool IsFirstParty = false,
     bool AllowNativeHeadlessAuth = false,
+    bool AllowDeviceAuthorization = false,
     string ClientType = "public_pkce");
+
+public static class SqlOSOAuthGrantTypes
+{
+    public const string AuthorizationCode = "authorization_code";
+    public const string RefreshToken = "refresh_token";
+    public const string DeviceCode = "urn:ietf:params:oauth:grant-type:device_code";
+}
+
+public sealed record SqlOSDeviceAuthorizationStartRequest(
+    string ClientId,
+    string? Scope = null,
+    string? Resource = null);
+
+public sealed record SqlOSDeviceAuthorizationStartResult(
+    string DeviceCode,
+    string UserCode,
+    string VerificationUri,
+    string VerificationUriComplete,
+    int ExpiresIn,
+    int Interval);
+
+public sealed record SqlOSDeviceAuthorizationResolveResult(
+    string Id,
+    string UserCode,
+    string ClientId,
+    string ClientName,
+    string Scope,
+    string? Resource,
+    DateTime ExpiresAt,
+    string Status,
+    bool RequiresOrganizationSelection,
+    IReadOnlyList<SqlOSOrganizationOption> Organizations);
+
+public sealed record SqlOSDeviceAuthorizationApprovalRequest(
+    string UserCode,
+    string? OrganizationId = null);
+
+public sealed record SqlOSDeviceTokenPollRequest(
+    string ClientId,
+    string DeviceCode,
+    string? Resource = null);
+
+public sealed record SqlOSDeviceTokenPollResult(
+    SqlOSTokenResponse Tokens,
+    string Scope);
+
+public sealed class SqlOSDeviceAuthorizationException : InvalidOperationException
+{
+    public SqlOSDeviceAuthorizationException(string error, string message, int? interval = null)
+        : base(message)
+    {
+        Error = error;
+        Interval = interval;
+    }
+
+    public string Error { get; }
+
+    public int? Interval { get; }
+}
 
 public sealed record SqlOSDynamicClientRegistrationRequest
 {
@@ -418,6 +478,10 @@ public sealed record SqlOSAuthorizationServerMetadataDto
 
     [JsonPropertyName("token_endpoint")]
     public required string TokenEndpoint { get; init; }
+
+    [JsonPropertyName("device_authorization_endpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceAuthorizationEndpoint { get; init; }
 
     [JsonPropertyName("jwks_uri")]
     public required string JwksUri { get; init; }

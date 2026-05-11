@@ -105,11 +105,12 @@ public sealed class SqlOSAdminService
                     ClientType = normalized.ClientType,
                     RegistrationSource = "seeded",
                     TokenEndpointAuthMethod = "none",
-                    GrantTypesJson = JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" }),
+                    GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
                     AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
                     AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth,
+                    AllowDeviceAuthorization = normalized.AllowDeviceAuthorization,
                     RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
                     CreatedAt = DateTime.UtcNow,
                     IsFirstParty = normalized.IsFirstParty,
@@ -124,15 +125,14 @@ public sealed class SqlOSAdminService
             existing.ClientType = normalized.ClientType;
             existing.RegistrationSource = "seeded";
             existing.TokenEndpointAuthMethod = string.IsNullOrWhiteSpace(existing.TokenEndpointAuthMethod) ? "none" : existing.TokenEndpointAuthMethod;
-            existing.GrantTypesJson = string.IsNullOrWhiteSpace(existing.GrantTypesJson)
-                ? JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" })
-                : existing.GrantTypesJson;
+            existing.GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes);
             existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
                 ? JsonSerializer.Serialize(new[] { "code" })
                 : existing.ResponseTypesJson;
             existing.RequirePkce = normalized.RequirePkce;
             existing.AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes);
             existing.AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth;
+            existing.AllowDeviceAuthorization = normalized.AllowDeviceAuthorization;
             existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
             existing.IsFirstParty = normalized.IsFirstParty;
             if (existing.DisabledAt != null)
@@ -287,12 +287,13 @@ public sealed class SqlOSAdminService
             ClientType = normalized.ClientType,
             RegistrationSource = "manual",
             TokenEndpointAuthMethod = "none",
-            GrantTypesJson = JsonSerializer.Serialize(new[] { "authorization_code", "refresh_token" }),
+            GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
             ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
             RequirePkce = normalized.RequirePkce,
             AllowedScopesJson = JsonSerializer.Serialize(normalized.AllowedScopes),
             IsFirstParty = normalized.IsFirstParty,
             AllowNativeHeadlessAuth = normalized.AllowNativeHeadlessAuth,
+            AllowDeviceAuthorization = normalized.AllowDeviceAuthorization,
             RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
             CreatedAt = DateTime.UtcNow,
             IsActive = true
@@ -836,6 +837,7 @@ public sealed class SqlOSAdminService
             item.RequirePkce,
             item.IsFirstParty,
             item.AllowNativeHeadlessAuth,
+            item.AllowDeviceAuthorization,
             item.RedirectUris,
             item.GrantTypes,
             item.ResponseTypes,
@@ -1538,6 +1540,7 @@ public sealed class SqlOSAdminService
             seed.RequirePkce,
             seed.IsFirstParty,
             seed.AllowNativeHeadlessAuth,
+            seed.AllowDeviceAuthorization,
             seed.ClientType,
             seed.IsActive);
 
@@ -1562,6 +1565,7 @@ public sealed class SqlOSAdminService
             client.RequirePkce,
             client.IsFirstParty,
             client.AllowNativeHeadlessAuth,
+            client.AllowDeviceAuthorization,
             redirectUris,
             grantTypes,
             responseTypes,
@@ -1727,6 +1731,7 @@ public sealed class SqlOSAdminService
             request.RequirePkce,
             request.IsFirstParty,
             request.AllowNativeHeadlessAuth,
+            request.AllowDeviceAuthorization,
             request.ClientType,
             true);
 
@@ -1740,6 +1745,7 @@ public sealed class SqlOSAdminService
         bool requirePkce,
         bool isFirstParty,
         bool allowNativeHeadlessAuth,
+        bool allowDeviceAuthorization,
         string? clientType,
         bool isActive)
     {
@@ -1757,7 +1763,7 @@ public sealed class SqlOSAdminService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (normalizedRedirectUris.Count == 0)
+        if (normalizedRedirectUris.Count == 0 && !allowDeviceAuthorization)
         {
             throw new InvalidOperationException($"Client '{normalizedClientId}' must define at least one redirect URI.");
         }
@@ -1779,7 +1785,26 @@ public sealed class SqlOSAdminService
             requirePkce,
             isFirstParty,
             allowNativeHeadlessAuth,
+            allowDeviceAuthorization,
+            BuildGrantTypes(normalizedRedirectUris, allowDeviceAuthorization),
             isActive);
+    }
+
+    private static List<string> BuildGrantTypes(IReadOnlyCollection<string> redirectUris, bool allowDeviceAuthorization)
+    {
+        var grants = new List<string>();
+        if (redirectUris.Count > 0)
+        {
+            grants.Add(SqlOSOAuthGrantTypes.AuthorizationCode);
+        }
+
+        if (allowDeviceAuthorization)
+        {
+            grants.Add(SqlOSOAuthGrantTypes.DeviceCode);
+        }
+
+        grants.Add(SqlOSOAuthGrantTypes.RefreshToken);
+        return grants.Distinct(StringComparer.Ordinal).ToList();
     }
 
     private static string RequireText(string? value, string name)
@@ -1817,6 +1842,7 @@ public sealed class SqlOSAdminService
         bool RequirePkce,
         bool IsFirstParty,
         bool AllowNativeHeadlessAuth,
+        bool AllowDeviceAuthorization,
         List<string> RedirectUris,
         List<string> GrantTypes,
         List<string> ResponseTypes,
@@ -1871,5 +1897,7 @@ public sealed class SqlOSAdminService
         bool RequirePkce,
         bool IsFirstParty,
         bool AllowNativeHeadlessAuth,
+        bool AllowDeviceAuthorization,
+        List<string> GrantTypes,
         bool IsActive);
 }

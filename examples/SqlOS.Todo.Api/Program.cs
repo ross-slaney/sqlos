@@ -165,6 +165,12 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         client.IsFirstParty = false;
     });
 
+    auth.SeedCliClient(
+        sampleConfig.CliClientId,
+        sampleConfig.CliClientName,
+        sampleConfig.Resource,
+        sampleConfig.AllowedScopes.ToArray());
+
     options.Fga.Seed(seed =>
     {
         seed.ResourceType(
@@ -228,7 +234,8 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
                     ["error"] = ctx.Error,
                     ["email"] = ctx.Email,
                     ["pendingToken"] = ctx.PendingToken,
-                    ["displayName"] = ctx.DisplayName
+                    ["displayName"] = ctx.DisplayName,
+                    ["ui_context"] = ctx.UiContext?.ToJsonString()
                 });
         });
     }
@@ -274,6 +281,11 @@ app.MapGet("/sample/config", async (
         {
             clientId = sample.EmcyClientId,
             redirectUri = sample.EmcyRedirectUri
+        },
+        cliClient = new
+        {
+            clientId = sample.CliClientId,
+            name = sample.CliClientName
         },
         portableClient = new
         {

@@ -36,6 +36,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
+    public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
@@ -98,6 +99,12 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigureDeviceAuthorization(Action<SqlOSDeviceAuthorizationOptions> configure)
+    {
+        configure(DeviceAuthorization);
+        return this;
+    }
+
     public SqlOSAuthServerOptions SeedBrowserClient(string clientId, string name, params string[] redirectUris)
     {
         SeedClient(client =>
@@ -134,6 +141,27 @@ public class SqlOSAuthServerOptions
             client.RequirePkce = true;
             client.IsFirstParty = true;
             client.AllowNativeHeadlessAuth = allowNativeHeadlessAuth;
+        });
+
+    public SqlOSAuthServerOptions SeedCliClient(
+        string clientId,
+        string name,
+        string? audience = null,
+        params string[] allowedScopes)
+        => SeedClient(client =>
+        {
+            client.ClientId = clientId;
+            client.Name = name;
+            client.Audience = audience;
+            client.ClientType = "public_cli";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+            client.AllowDeviceAuthorization = true;
+            client.AllowedScopes = allowedScopes
+                .Where(static scope => !string.IsNullOrWhiteSpace(scope))
+                .Select(static scope => scope.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
         });
 
     public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)

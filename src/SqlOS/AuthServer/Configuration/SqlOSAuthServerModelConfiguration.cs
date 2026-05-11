@@ -193,6 +193,38 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.DisabledReason).HasMaxLength(500);
         });
 
+        modelBuilder.Entity<SqlOSDeviceAuthorization>(entity =>
+        {
+            entity.ToTable("SqlOSDeviceAuthorizations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.DeviceCodeHash).IsUnique();
+            entity.HasIndex(x => x.UserCodeHash).IsUnique();
+            entity.HasIndex(x => new { x.ClientApplicationId, x.CreatedAt });
+            entity.HasIndex(x => new { x.ClientApplicationId, x.Status, x.ExpiresAt });
+            entity.HasIndex(x => new { x.IpAddress, x.CreatedAt });
+            entity.HasIndex(x => x.ExpiresAt);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.UserCode).HasMaxLength(32);
+            entity.Property(x => x.ClientApplicationId).HasMaxLength(64);
+            entity.Property(x => x.Scope).HasMaxLength(1000);
+            entity.Property(x => x.Resource).HasMaxLength(2048);
+            entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
+            entity.Property(x => x.IpAddress).HasMaxLength(64);
+            entity.Property(x => x.UserAgent).HasMaxLength(500);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany()
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ApprovedUser)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ApprovedOrganization)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedOrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSSession>(entity =>
         {
             entity.ToTable("SqlOSSessions", schema, t => t.ExcludeFromMigrations());
@@ -316,6 +348,10 @@ public static class SqlOSAuthServerModelConfiguration
         {
             entity.ToTable("SqlOSAuthorizationRequests", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.DeviceAuthorizationId)
+                .IsUnique()
+                .HasFilter("[DeviceAuthorizationId] IS NOT NULL");
+            entity.Property(x => x.DeviceAuthorizationId).HasMaxLength(64);
             entity.Property(x => x.PresentationMode).HasMaxLength(32);
             entity.Property(x => x.LoginHintEmail).HasMaxLength(320);
             entity.Property(x => x.UiContextJson).HasColumnType("nvarchar(max)");
@@ -331,6 +367,10 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.DeviceAuthorization)
+                .WithMany()
+                .HasForeignKey(x => x.DeviceAuthorizationId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.Organization)
                 .WithMany()

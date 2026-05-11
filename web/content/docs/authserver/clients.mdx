@@ -10,6 +10,7 @@ A **client** is the app that sends a user into SqlOS sign in and later exchanges
 SqlOS now supports three client onboarding paths:
 
 - **Owned apps** -- seeded or dashboard-created clients for your own web, mobile, desktop, or SPA apps
+- **CLI apps** -- device-flow clients for terminal tools without redirect listeners
 - **Portable clients** -- `CIMD` when the `client_id` is a stable HTTPS metadata document
 - **Compatibility clients** -- optional `DCR` for public clients that still expect runtime registration
 
@@ -66,6 +67,31 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
 | `name` | Yes | Display name |
 | `audience` | No | Token audience claim |
 | `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
+
+## CLI and terminal apps
+
+Use the **CLI / Device OAuth** dashboard preset or seed a CLI client:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedCliClient(
+        "acme-cli",
+        "Acme CLI",
+        "https://api.acme.com",
+        "openid",
+        "profile",
+        "email",
+        "offline_access");
+});
+```
+
+CLI clients are public clients. They do not require redirect URIs and are allowed to use:
+
+- `urn:ietf:params:oauth:grant-type:device_code`
+- `refresh_token`
+
+See [CLI OAuth](/docs/authserver/cli-oauth) for the complete flow and polling rules.
 
 ## Startup-managed vs dashboard-created
 
@@ -129,4 +155,5 @@ auth.SeedOwnedNativeApp("example-expo", "Example Expo", "sqlos-expo://auth-callb
 - [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
 - [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
 - [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
+- [CLI OAuth](/docs/authserver/cli-oauth)
 - [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)

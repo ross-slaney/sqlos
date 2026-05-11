@@ -14,6 +14,8 @@ public sealed class TodoSampleOptions
     public string LocalRedirectUri { get; set; } = "http://localhost:3100/oauth/callback";
     public string EmcyClientId { get; set; } = "todo-mcp-local";
     public string EmcyRedirectUri { get; set; } = "http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback";
+    public string CliClientId { get; set; } = "todo-cli";
+    public string CliClientName { get; set; } = "Todo CLI";
     public string PortableClientPath { get; set; } = "/clients/portable-client.json";
     public string PortableClientName { get; set; } = "SqlOS Todo Portable Client";
     public string PortableClientRedirectUri { get; set; } = "https://portable.todo.example.com/auth/callback";

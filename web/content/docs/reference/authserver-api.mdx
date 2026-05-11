@@ -13,6 +13,49 @@ Core authentication service. Handles login, signup, sessions, tokens, and passwo
 
 ---
 
+### Device Authorization Grant
+
+Start, resolve, approve, deny, and poll a CLI/device OAuth request.
+
+```csharp
+var start = await authService.StartDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationStartRequest(
+        ClientId: "acme-cli",
+        Scope: "openid offline_access",
+        Resource: "https://api.acme.com"),
+    httpContext,
+    ct);
+
+var resolved = await authService.ResolveDeviceAuthorizationAsync(
+    start.UserCode,
+    currentUser,
+    ct);
+
+await authService.ApproveDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationApprovalRequest(start.UserCode, organizationId),
+    currentUser,
+    authenticationMethod: "password",
+    httpContext,
+    ct);
+
+var tokenResult = await authService.PollDeviceAuthorizationAsync(
+    new SqlOSDeviceTokenPollRequest("acme-cli", start.DeviceCode, "https://api.acme.com"),
+    httpContext,
+    ct);
+```
+
+Browser/CLI clients normally use the RFC endpoints instead:
+
+- `POST /sqlos/auth/device_authorization`
+- `GET /sqlos/auth/device`
+- `POST /sqlos/auth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code`
+
+Headless browser UIs still start with `GET /sqlos/auth/device?user_code=...`. SqlOS creates a normal headless authorization request, then your app loads `/sqlos/auth/headless/requests/{requestId}` and approves or denies with `/sqlos/auth/headless/device/approve` or `/sqlos/auth/headless/device/deny` using the `requestId`.
+
+See [CLI OAuth](/docs/authserver/cli-oauth).
+
+---
+
 ### LoginWithPasswordAsync
 
 Authenticate a user with email and password. If the user belongs to multiple organizations and no `OrganizationId` is specified, returns `RequiresOrganizationSelection = true` with a `PendingAuthToken` and the list of organizations.

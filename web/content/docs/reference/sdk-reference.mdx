@@ -47,6 +47,19 @@ await authService.AcceptEmailInvitationAsync(
     new SqlOSAcceptEmailInvitationRequest(invitationToken, userId),
     httpContext, ct);
 
+// CLI device OAuth
+var deviceStart = await authService.StartDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationStartRequest(clientId, scope, resource),
+    httpContext, ct);
+var deviceResolved = await authService.ResolveDeviceAuthorizationAsync(
+    deviceStart.UserCode, currentUser, ct);
+await authService.ApproveDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationApprovalRequest(deviceStart.UserCode, organizationId),
+    currentUser, authenticationMethod, httpContext, ct);
+var deviceTokens = await authService.PollDeviceAuthorizationAsync(
+    new SqlOSDeviceTokenPollRequest(clientId, deviceStart.DeviceCode, resource),
+    httpContext, ct);
+
 // Organization selection (after multi-org login)
 var tokens = await authService.SelectOrganizationAsync(
     new SqlOSSelectOrganizationRequest(pendingAuthToken, organizationId),
