@@ -21,6 +21,8 @@ public sealed class SqlOSHeadlessAuthService
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
     private readonly SqlOSInvitationService? _invitationService;
+    private readonly SqlOSDeviceAuthorizationService? _deviceAuthorizationService;
+    private readonly SqlOSAuthPageSessionService? _authPageSessionService;
     private readonly SqlOSAuthServerOptions _options;
 
     public SqlOSHeadlessAuthService(
@@ -33,7 +35,9 @@ public sealed class SqlOSHeadlessAuthService
         SqlOSSettingsService settingsService,
         SqlOSEmailOtpService emailOtpService,
         IOptions<SqlOSAuthServerOptions> options,
-        SqlOSInvitationService? invitationService = null)
+        SqlOSInvitationService? invitationService = null,
+        SqlOSDeviceAuthorizationService? deviceAuthorizationService = null,
+        SqlOSAuthPageSessionService? authPageSessionService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -44,6 +48,8 @@ public sealed class SqlOSHeadlessAuthService
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
         _invitationService = invitationService;
+        _deviceAuthorizationService = deviceAuthorizationService;
+        _authPageSessionService = authPageSessionService;
         _options = options.Value;
     }
 
@@ -189,6 +195,153 @@ public sealed class SqlOSHeadlessAuthService
             Providers: providers,
             Invitation: invitation,
             UiContext: uiContext);
+    }
+
+    public async Task<SqlOSHeadlessViewModel> ResolveDeviceAuthorizationAsync(
+        SqlOSHeadlessDeviceAuthorizationResolveRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+            var resolvedRequest = await RequireDeviceAuthorizationService().ResolveAsync(authorizationRequest, user: null, cancellationToken);
+            return await BuildViewModelAsync(
+                authorizationRequest,
+                "device",
+                error: null,
+                pendingToken: null,
+                email: null,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: resolvedRequest.Organizations,
+                info: null,
+                cancellationToken: cancellationToken);
+        }
+
+        var userCode = RequireDeviceUserCode(request.UserCode);
+        var resolved = await RequireDeviceAuthorizationService().ResolveAsync(userCode, user: null, cancellationToken);
+        return await BuildStandaloneDeviceViewModelAsync(
+            "device",
+            resolved,
+            error: null,
+            info: null,
+            organizationSelection: resolved.Organizations,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSHeadlessActionResult> ApproveDeviceAuthorizationAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessDeviceAuthorizationApproveRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await RequireAuthPageSessionService().TryGetSessionAsync(httpContext, cancellationToken)
+            ?? throw new InvalidOperationException("Sign in before approving this device request.");
+
+        if (!string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(request.OrganizationId))
+            {
+                authorizationRequest.ResolvedOrganizationId = request.OrganizationId;
+            }
+
+            var requestResolved = await RequireDeviceAuthorizationService().ApproveAsync(
+                authorizationRequest,
+                session.User,
+                session.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            if (requestResolved.RequiresOrganizationSelection)
+            {
+                return View(await BuildViewModelAsync(
+                    authorizationRequest,
+                    "device-approve",
+                    error: null,
+                    pendingToken: null,
+                    email: session.User.DefaultEmail,
+                    displayName: null,
+                    fieldErrors: null,
+                    organizationSelection: requestResolved.Organizations,
+                    cancellationToken: cancellationToken));
+            }
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "device-approved",
+                error: null,
+                pendingToken: null,
+                email: session.User.DefaultEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: requestResolved.Organizations,
+                info: "Your CLI is signed in. You can return to your terminal.",
+                cancellationToken: cancellationToken));
+        }
+
+        var userCode = RequireDeviceUserCode(request.UserCode);
+        var resolved = await RequireDeviceAuthorizationService().ApproveAsync(
+            new SqlOSDeviceAuthorizationApprovalRequest(userCode, request.OrganizationId),
+            session.User,
+            session.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+
+        if (resolved.RequiresOrganizationSelection)
+        {
+            return View(await BuildStandaloneDeviceViewModelAsync(
+                "device-approve",
+                resolved,
+                error: null,
+                info: null,
+                organizationSelection: resolved.Organizations,
+                cancellationToken));
+        }
+
+        return View(await BuildStandaloneDeviceViewModelAsync(
+            "device-approved",
+            resolved,
+            error: null,
+            info: "Your CLI is signed in. You can return to your terminal.",
+            organizationSelection: resolved.Organizations,
+            cancellationToken));
+    }
+
+    public async Task<SqlOSHeadlessActionResult> DenyDeviceAuthorizationAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessDeviceAuthorizationResolveRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await RequireAuthPageSessionService().TryGetSessionAsync(httpContext, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+            var requestResolved = await RequireDeviceAuthorizationService().ResolveAsync(authorizationRequest, session?.User, cancellationToken);
+            authorizationRequest.CancelledAt = DateTime.UtcNow;
+            await RequireDeviceAuthorizationService().DenyAsync(requestResolved.UserCode, session?.User, httpContext, cancellationToken);
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "device-denied",
+                error: null,
+                pendingToken: null,
+                email: session?.User.DefaultEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: Array.Empty<SqlOSOrganizationOption>(),
+                info: "CLI access was denied.",
+                cancellationToken: cancellationToken));
+        }
+
+        var userCode = RequireDeviceUserCode(request.UserCode);
+        await RequireDeviceAuthorizationService().DenyAsync(userCode, session?.User, httpContext, cancellationToken);
+        var resolved = await RequireDeviceAuthorizationService().ResolveAsync(userCode, session?.User, cancellationToken);
+        return View(await BuildStandaloneDeviceViewModelAsync(
+            "device-denied",
+            resolved,
+            error: null,
+            info: "CLI access was denied.",
+            organizationSelection: Array.Empty<SqlOSOrganizationOption>(),
+            cancellationToken));
     }
 
     public async Task<SqlOSHeadlessActionResult> IdentifyAsync(
@@ -953,6 +1106,9 @@ public sealed class SqlOSHeadlessAuthService
                 provider.DisplayName,
                 provider.LogoDataUrl))
             .ToArray();
+        var deviceAuthorization = string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId) || _deviceAuthorizationService == null
+            ? null
+            : ToHeadlessDeviceAuthorization(await _deviceAuthorizationService.ResolveAsync(authorizationRequest, user: null, cancellationToken));
 
         return new SqlOSHeadlessViewModel(
             NormalizeView(requestedView),
@@ -973,7 +1129,8 @@ public sealed class SqlOSHeadlessAuthService
             organizationSelection ?? Array.Empty<SqlOSOrganizationOption>(),
             providers,
             await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken),
-            ParseUiContext(authorizationRequest.UiContextJson));
+            ParseUiContext(authorizationRequest.UiContextJson),
+            DeviceAuthorization: deviceAuthorization);
     }
 
     public static bool IsHeadlessRequest(SqlOSAuthorizationRequest authorizationRequest)
@@ -1056,11 +1213,19 @@ public sealed class SqlOSHeadlessAuthService
                                         ? "invite-email-otp-verify"
                                         : string.Equals(requestedView, "invite-accepted", StringComparison.OrdinalIgnoreCase)
                                             ? "invite-accepted"
-                                            : string.Equals(requestedView, "organization", StringComparison.OrdinalIgnoreCase)
-                                                ? "organization"
-                                                : string.Equals(requestedView, "logged-out", StringComparison.OrdinalIgnoreCase)
-                                                    ? "logged-out"
-                                                    : "login";
+                                            : string.Equals(requestedView, "device", StringComparison.OrdinalIgnoreCase)
+                                                ? "device"
+                                                : string.Equals(requestedView, "device-approve", StringComparison.OrdinalIgnoreCase)
+                                                    ? "device-approve"
+                                                    : string.Equals(requestedView, "device-approved", StringComparison.OrdinalIgnoreCase)
+                                                        ? "device-approved"
+                                                        : string.Equals(requestedView, "device-denied", StringComparison.OrdinalIgnoreCase)
+                                                            ? "device-denied"
+                                                            : string.Equals(requestedView, "organization", StringComparison.OrdinalIgnoreCase)
+                                                                ? "organization"
+                                                                : string.Equals(requestedView, "logged-out", StringComparison.OrdinalIgnoreCase)
+                                                                    ? "logged-out"
+                                                                    : "login";
 
     private static SqlOSHeadlessActionResult Redirect(string url)
         => new("redirect", url, null);
@@ -1167,6 +1332,76 @@ public sealed class SqlOSHeadlessAuthService
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
+
+    private SqlOSDeviceAuthorizationService RequireDeviceAuthorizationService()
+        => _deviceAuthorizationService ?? throw new InvalidOperationException("Device authorization support is not configured.");
+
+    private SqlOSAuthPageSessionService RequireAuthPageSessionService()
+        => _authPageSessionService ?? throw new InvalidOperationException("AuthPage session support is not configured.");
+
+    private async Task<SqlOSHeadlessViewModel> BuildStandaloneDeviceViewModelAsync(
+        string view,
+        SqlOSDeviceAuthorizationResolveResult resolved,
+        string? error,
+        string? info,
+        IReadOnlyList<SqlOSOrganizationOption>? organizationSelection,
+        CancellationToken cancellationToken)
+    {
+        var settings = await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
+        var providers = (await _authorizationServerService.ListEnabledOidcProvidersAsync(cancellationToken))
+            .Select(provider => new SqlOSHeadlessProviderDto(
+                provider.ConnectionId,
+                provider.ProviderType,
+                provider.DisplayName,
+                provider.LogoDataUrl))
+            .ToArray();
+        var uiContext = new JsonObject
+        {
+            ["deviceUserCode"] = resolved.UserCode
+        };
+
+        return new SqlOSHeadlessViewModel(
+            NormalizeView(view),
+            _options.BasePath.TrimEnd('/'),
+            GetHeadlessApiBasePath(),
+            settings,
+            RequestId: null,
+            ClientId: resolved.ClientId,
+            ClientName: resolved.ClientName,
+            Email: null,
+            DisplayName: null,
+            Error: error,
+            Info: info,
+            FieldErrors: new Dictionary<string, string>(StringComparer.Ordinal),
+            ChallengeToken: null,
+            SignupToken: null,
+            PendingToken: null,
+            OrganizationSelection: organizationSelection ?? Array.Empty<SqlOSOrganizationOption>(),
+            Providers: providers,
+            Invitation: null,
+            UiContext: uiContext,
+            DeviceAuthorization: ToHeadlessDeviceAuthorization(resolved));
+    }
+
+    private static SqlOSHeadlessDeviceAuthorizationDto ToHeadlessDeviceAuthorization(SqlOSDeviceAuthorizationResolveResult resolved)
+        => new(
+            resolved.UserCode,
+            resolved.ClientId,
+            resolved.ClientName,
+            resolved.Scope,
+            resolved.Resource,
+            resolved.ExpiresAt,
+            resolved.Status);
+
+    private static string RequireDeviceUserCode(string? userCode)
+    {
+        if (string.IsNullOrWhiteSpace(userCode))
+        {
+            throw new InvalidOperationException("Device user code is required.");
+        }
+
+        return userCode;
+    }
 
     private async Task CleanupNonTransactionalSignupArtifactsAsync(
         SqlOSPasswordAuthenticationResult? signup,

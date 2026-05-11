@@ -251,6 +251,7 @@ public sealed class SqlOSClientApplication
     public string AllowedScopesJson { get; set; } = "[]";
     public bool IsFirstParty { get; set; }
     public bool AllowNativeHeadlessAuth { get; set; }
+    public bool AllowDeviceAuthorization { get; set; }
     public string RedirectUrisJson { get; set; } = "[]";
     public string? MetadataDocumentUrl { get; set; }
     public string? ClientUri { get; set; }
@@ -267,6 +268,36 @@ public sealed class SqlOSClientApplication
     public DateTime? DisabledAt { get; set; }
     public string? DisabledReason { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public sealed class SqlOSDeviceAuthorization
+{
+    public string Id { get; set; } = string.Empty;
+    public string DeviceCodeHash { get; set; } = string.Empty;
+    public string UserCodeHash { get; set; } = string.Empty;
+    public string UserCode { get; set; } = string.Empty;
+    public string ClientApplicationId { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string? Resource { get; set; }
+    public string Status { get; set; } = "pending";
+    public int PollingIntervalSeconds { get; set; } = 5;
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? LastPolledAt { get; set; }
+    public int PollCount { get; set; }
+    public int SlowDownCount { get; set; }
+    public string? ApprovedUserId { get; set; }
+    public string? ApprovedOrganizationId { get; set; }
+    public string? AuthenticationMethod { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? DeniedAt { get; set; }
+    public DateTime? ConsumedAt { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSClientApplication? ClientApplication { get; set; }
+    public SqlOSUser? ApprovedUser { get; set; }
+    public SqlOSOrganization? ApprovedOrganization { get; set; }
 }
 
 public sealed class SqlOSSigningKey
@@ -380,6 +411,7 @@ public sealed class SqlOSAuthorizationRequest
 {
     public string Id { get; set; } = string.Empty;
     public string ClientApplicationId { get; set; } = string.Empty;
+    public string? DeviceAuthorizationId { get; set; }
     public string PresentationMode { get; set; } = "hosted";
     public string? OrganizationId { get; set; }
     public string? ConnectionId { get; set; }
@@ -403,6 +435,7 @@ public sealed class SqlOSAuthorizationRequest
     public DateTime? CancelledAt { get; set; }
 
     public SqlOSClientApplication? ClientApplication { get; set; }
+    public SqlOSDeviceAuthorization? DeviceAuthorization { get; set; }
     public SqlOSOrganization? Organization { get; set; }
     public SqlOSSsoConnection? Connection { get; set; }
     public SqlOSInvitation? Invitation { get; set; }

@@ -308,9 +308,9 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 Run it like this:
 
 ```bash
-ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
-AZURE_RESOURCE_GROUP=<resource-group>
-ACS_FROM_ADDRESS=no-reply@example.com
+ACS_COMMUNICATION_SERVICE_NAME=sqlos-dev-comm
+AZURE_RESOURCE_GROUP=rg-sqlos-web-prod
+ACS_FROM_ADDRESS=no-reply@sqlos.dev
 
 ACS_CONN=$(az communication list-key \
   --name "$ACS_COMMUNICATION_SERVICE_NAME" \

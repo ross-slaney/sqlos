@@ -41,6 +41,9 @@ public static class SqlOSAuthPageRenderer
         var invitationTokenInput = string.IsNullOrWhiteSpace(model.InvitationToken)
             ? string.Empty
             : $"<input type=\"hidden\" name=\"invitationToken\" value=\"{Html(model.InvitationToken)}\" />";
+        var deviceUserCodeInput = string.IsNullOrWhiteSpace(model.DeviceUserCode)
+            ? string.Empty
+            : $"<input type=\"hidden\" name=\"deviceUserCode\" value=\"{Html(model.DeviceUserCode)}\" />";
         var emailValue = Html(model.Email ?? string.Empty);
         var emailReadonly = model.Invitation == null ? string.Empty : " readonly";
         var encodedMode = Html(normalizedMode);
@@ -81,6 +84,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <input type="hidden" name="mode" value="{{encodedMode}}" />
                   <label class="field">
                     <span>Display name</span>
@@ -101,6 +105,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/submit"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <input type="hidden" name="mode" value="{{encodedMode}}" />
                   <label class="field">
                     <span>Display name</span>
@@ -126,6 +131,7 @@ public static class SqlOSAuthPageRenderer
                     <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/start"))}}">
                       {{requestIdInput}}
                       {{invitationTokenInput}}
+                      {{deviceUserCodeInput}}
                       <input type="hidden" name="mode" value="{{encodedMode}}" />
                       <label class="field">
                         <span>Display name</span>
@@ -202,12 +208,55 @@ public static class SqlOSAuthPageRenderer
                 {{(!supportsEmailOtp && !supportsPassword && !supportsInvitationSignup && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
                 {{RenderProvidersSection(model)}}
                 """,
+            "device" => $$"""
+                {{RenderPanelIntro("Connect CLI", "Enter the code shown in your terminal to continue.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/device/verify"))}}">
+                  <label class="field">
+                    <span>Device code</span>
+                    <input name="userCode" value="{{Html(model.DeviceUserCode ?? string.Empty)}}" placeholder="ABCD-EFGH" autocomplete="one-time-code" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Continue", "Checking code")}}
+                </form>
+                """,
+            "device-approve" => $$"""
+                {{RenderPanelIntro("Approve CLI Access", "A command-line app is asking to access this account.")}}
+                {{RenderDeviceSummary(model.DeviceAuthorization)}}
+                {{(model.OrganizationSelection.Count > 1 ? $$"""
+                <form class="auth-form organization-form" method="post" action="{{Html(model.BasePath.TrimEnd('/'))}}/device/approve">
+                  {{requestIdInput}}
+                  <input type="hidden" name="userCode" value="{{Html(model.DeviceUserCode ?? string.Empty)}}" />
+                  <div class="organization-list">{{RenderOrganizationOptions(model.OrganizationSelection)}}</div>
+                  {{RenderPrimaryAction("Approve CLI access", "Approving")}}
+                </form>
+                """ : $$"""
+                <form class="auth-form" method="post" action="{{Html(model.BasePath.TrimEnd('/'))}}/device/approve">
+                  {{requestIdInput}}
+                  <input type="hidden" name="userCode" value="{{Html(model.DeviceUserCode ?? string.Empty)}}" />
+                  {{RenderPrimaryAction("Approve CLI access", "Approving")}}
+                </form>
+                """)}}
+                <form class="auth-form" method="post" action="{{Html(model.BasePath.TrimEnd('/'))}}/device/deny">
+                  {{requestIdInput}}
+                  <input type="hidden" name="userCode" value="{{Html(model.DeviceUserCode ?? string.Empty)}}" />
+                  <button class="secondary-action" type="submit">Deny request</button>
+                </form>
+                """,
+            "device-approved" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>CLI access approved.</strong>
+                    <p>You can return to your terminal.</p>
+                  </div>
+                </div>
+                """,
             "signup" => signupContent,
             "password" => $$"""
                 {{RenderPanelIntro("Password", "Continue with your email and password.")}}
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/password"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <label class="field">
                     <span>Email</span>
                     <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
@@ -227,6 +276,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/email-otp/start"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <label class="field">
                     <span>Email</span>
                     <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
@@ -241,6 +291,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/email-otp/verify"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
                   <input type="hidden" name="email" value="{{emailValue}}" />
                   <label class="field">
@@ -259,6 +310,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/verify"))}}">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <input type="hidden" name="signupToken" value="{{Html(model.SignupToken ?? string.Empty)}}" />
                   <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
                   <input type="hidden" name="email" value="{{emailValue}}" />
@@ -292,6 +344,7 @@ public static class SqlOSAuthPageRenderer
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/identify"))}}" data-flow-kind="hrd">
                   {{requestIdInput}}
                   {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
                   <label class="field">
                     <span>Email</span>
                     <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
@@ -510,6 +563,7 @@ public static class SqlOSAuthPageRenderer
               box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
             }
             .primary-action,
+            .secondary-action,
             .provider-link,
             .organization-option,
             .secondary-link {
@@ -535,12 +589,25 @@ public static class SqlOSAuthPageRenderer
               font-weight: 500;
               cursor: pointer;
             }
+            .secondary-action {
+              width: 100%;
+              min-height: 44px;
+              border: 1px solid var(--border-strong);
+              border-radius: 8px;
+              background: transparent;
+              color: var(--text);
+              font-size: 14px;
+              font-weight: 500;
+              cursor: pointer;
+            }
             .primary-action:hover,
+            .secondary-action:hover,
             .provider-link:hover,
             .organization-option:hover {
               transform: translateY(-1px);
             }
             .primary-action:focus-visible,
+            .secondary-action:focus-visible,
             .provider-link:focus-visible,
             .organization-option:focus-visible,
             .secondary-link:focus-visible {
@@ -864,6 +931,31 @@ public static class SqlOSAuthPageRenderer
             """;
     }
 
+    private static string RenderDeviceSummary(SqlOSDeviceAuthorizationResolveResult? deviceAuthorization)
+    {
+        if (deviceAuthorization == null)
+        {
+            return string.Empty;
+        }
+
+        var scope = string.IsNullOrWhiteSpace(deviceAuthorization.Scope)
+            ? "Default access"
+            : deviceAuthorization.Scope;
+        var resource = string.IsNullOrWhiteSpace(deviceAuthorization.Resource)
+            ? string.Empty
+            : $"<span>Resource: {Html(deviceAuthorization.Resource)}</span>";
+
+        return $$"""
+            <div class="invite-summary">
+              <strong>{{Html(deviceAuthorization.ClientName)}}</strong>
+              <span>Code {{Html(deviceAuthorization.UserCode)}}.</span>
+              <span>Scopes: {{Html(scope)}}.</span>
+              {{resource}}
+              <span>Expires {{Html(deviceAuthorization.ExpiresAt.ToString("g", CultureInfo.InvariantCulture))}} UTC.</span>
+            </div>
+            """;
+    }
+
     private static string RenderProvidersSection(SqlOSAuthPageViewModel model)
     {
         if (model.Providers.Count == 0)
@@ -1042,11 +1134,19 @@ public static class SqlOSAuthPageRenderer
     }
 
     private static string NormalizeMode(string? mode)
-        => string.IsNullOrWhiteSpace(mode)
-            ? "login"
-            : mode.Trim().ToLowerInvariant();
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            return "login";
+        }
 
-    private static string BuildRequestQuery(string? requestId, string? invitationToken)
+        var normalized = mode.Trim().ToLowerInvariant();
+        return normalized is "device" or "device-approve" or "device-approved"
+            ? normalized
+            : normalized;
+    }
+
+    private static string BuildRequestQuery(string? requestId, string? invitationToken, string? deviceUserCode)
     {
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(requestId))
@@ -1057,6 +1157,11 @@ public static class SqlOSAuthPageRenderer
         if (!string.IsNullOrWhiteSpace(invitationToken))
         {
             query.Add($"invitationToken={Uri.EscapeDataString(invitationToken)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(deviceUserCode))
+        {
+            query.Add($"deviceUserCode={Uri.EscapeDataString(deviceUserCode)}");
         }
 
         return query.Count == 0 ? string.Empty : $"?{string.Join("&", query)}";
@@ -1070,7 +1175,7 @@ public static class SqlOSAuthPageRenderer
     {
         var basePath = model.BasePath.TrimEnd('/');
         var normalizedPath = path.StartsWith('/') ? path : $"/{path}";
-        return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId, model.InvitationToken)}";
+        return $"{basePath}{normalizedPath}{BuildRequestQuery(requestId, model.InvitationToken, model.DeviceUserCode)}";
     }
 
     private static string AuthPathWithQuery(
@@ -1088,6 +1193,11 @@ public static class SqlOSAuthPageRenderer
         if (!string.IsNullOrWhiteSpace(model.InvitationToken))
         {
             query.Add($"invitationToken={Uri.EscapeDataString(model.InvitationToken)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.DeviceUserCode))
+        {
+            query.Add($"deviceUserCode={Uri.EscapeDataString(model.DeviceUserCode)}");
         }
 
         foreach (var (key, value) in queryItems)
@@ -1180,6 +1290,8 @@ public sealed record SqlOSAuthPageViewModel(
     string? ChallengeToken = null,
     string? SignupToken = null,
     string? InvitationToken = null,
-    SqlOSEmailInvitationResult? Invitation = null);
+    SqlOSEmailInvitationResult? Invitation = null,
+    string? DeviceUserCode = null,
+    SqlOSDeviceAuthorizationResolveResult? DeviceAuthorization = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

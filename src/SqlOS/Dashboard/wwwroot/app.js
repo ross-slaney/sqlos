@@ -62,6 +62,18 @@
             allowedScopes: ["openid", "profile", "email"],
             isFirstParty: true
         },
+        "cli-device": {
+            title: "CLI / Device OAuth",
+            description: "Best for terminal apps that should show a browser sign-in URL instead of running a localhost redirect listener.",
+            name: "CLI App",
+            audience: "sqlos",
+            redirectHint: "",
+            clientIdHint: "my-cli",
+            allowedScopes: ["openid", "profile", "email", "offline_access"],
+            isFirstParty: true,
+            allowDeviceAuthorization: true,
+            requirePkce: false
+        },
         "portable-mcp": {
             title: "Portable MCP Client",
             description: "Use this when you want a manual client record today but you are really designing for portable public clients. Prefer CIMD when possible.",
@@ -611,8 +623,9 @@
             redirectUris: preset.redirectHint || "",
             description: "",
             allowedScopes: (preset.allowedScopes || []).join("\n"),
-            requirePkce: true,
-            isFirstParty: !!preset.isFirstParty
+            requirePkce: preset.requirePkce !== false,
+            isFirstParty: !!preset.isFirstParty,
+            allowDeviceAuthorization: !!preset.allowDeviceAuthorization
         };
     }
 
@@ -640,6 +653,7 @@
             description: String(data.get("description") || ""),
             allowedScopes: String(data.get("allowedScopes") || ""),
             requirePkce: data.get("requirePkce") === "on",
+            allowDeviceAuthorization: data.get("allowDeviceAuthorization") === "on",
             isFirstParty: previousDraft.isFirstParty
         };
     }
@@ -2101,13 +2115,14 @@
                             <input name="clientId" placeholder="${esc(preset.clientIdHint)}" value="${esc(draft.clientId)}" required>
                             <input name="name" placeholder="${esc(preset.name || "Display name")}" value="${esc(draft.name)}" required>
                             <input name="audience" placeholder="Audience" value="${esc(draft.audience)}">
-                            <textarea name="redirectUris" placeholder="One redirect URI per line" required>${esc(draft.redirectUris)}</textarea>
+                            <textarea name="redirectUris" placeholder="One redirect URI per line">${esc(draft.redirectUris)}</textarea>
                             <details>
                                 <summary>Advanced fields</summary>
                                 <div class="client-advanced-grid">
                                     <textarea name="description" placeholder="Optional description">${esc(draft.description)}</textarea>
                                     <textarea name="allowedScopes" placeholder="Optional scopes, one per line">${esc(draft.allowedScopes)}</textarea>
                                     <label class="checkbox-row"><input name="requirePkce" type="checkbox" ${draft.requirePkce ? "checked" : ""}> Require PKCE</label>
+                                    <label class="checkbox-row"><input name="allowDeviceAuthorization" type="checkbox" ${draft.allowDeviceAuthorization ? "checked" : ""}> Allow device authorization</label>
                                 </div>
                             </details>
                             <button type="submit">Create manual client</button>
@@ -2150,6 +2165,7 @@
                                     { label: "Lifecycle", value: clientDetail.lifecycleState },
                                     { label: "Require PKCE", value: clientDetail.requirePkce ? "Yes" : "No" },
                                     { label: "First-party", value: clientDetail.isFirstParty ? "Yes" : "No" },
+                                    { label: "Device OAuth", value: clientDetail.allowDeviceAuthorization ? "Enabled" : "Disabled" },
                                     { label: "Token auth method", value: clientDetail.tokenEndpointAuthMethod },
                                     { label: "Core metadata editable", value: clientDetail.coreMetadataEditable ? "Yes" : "No" },
                                     { label: "Last seen", value: formatDate(clientDetail.lastSeenAt) },
@@ -2301,7 +2317,9 @@
                         .map(value => value.trim())
                         .filter(Boolean),
                     requirePkce: form.get("requirePkce") === "on",
-                    isFirstParty: draft.isFirstParty
+                    isFirstParty: draft.isFirstParty,
+                    allowDeviceAuthorization: form.get("allowDeviceAuthorization") === "on",
+                    clientType: form.get("allowDeviceAuthorization") === "on" ? "public_cli" : "public_pkce"
                 })
             });
             setFlash("success", "Manual client created.");

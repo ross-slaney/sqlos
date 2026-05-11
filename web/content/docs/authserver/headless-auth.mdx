@@ -24,7 +24,16 @@ builder.AddSqlOS<AppDbContext>(options =>
     options.AuthServer.UseHeadlessAuthPage(headless =>
     {
         headless.BuildUiUrl = ctx =>
-            $"https://app.example.com/authorize?request={ctx.RequestId}&view={ctx.View}";
+            QueryHelpers.AddQueryString(
+                "https://app.example.com/authorize",
+                new Dictionary<string, string?>
+                {
+                    ["request"] = ctx.RequestId,
+                    ["view"] = ctx.View,
+                    ["email"] = ctx.Email,
+                    ["pendingToken"] = ctx.PendingToken,
+                    ["ui_context"] = ctx.UiContext?.ToJsonString()
+                });
     });
 
     options.AuthServer.SeedAuthPage(page =>
@@ -37,7 +46,7 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-The browser hits `/sqlos/auth/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI.
+The browser hits `/sqlos/auth/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI. Preserve `ui_context` values on the page model when present, but do not invent separate auth lifecycles for invitations or CLI device flow; SqlOS binds those to the normal request id.
 
 ## How SqlOS picks the UI
 
@@ -66,8 +75,24 @@ Your UI calls these SqlOS endpoints:
 | `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify signup code and complete authorization |
 | `POST /sqlos/auth/headless/invitations/resolve` | Resolve an invitation token before starting OAuth |
 | `POST /sqlos/auth/headless/invitations/signup` | Create an invited passwordless account and accept the invite |
+| `POST /sqlos/auth/headless/device/resolve` | Resolve a CLI device user code |
+| `POST /sqlos/auth/headless/device/approve` | Approve a CLI device request after sign-in |
+| `POST /sqlos/auth/headless/device/deny` | Deny a CLI device request |
 | `POST /sqlos/auth/headless/organization/select` | Select org for multi-org users |
 | `POST /sqlos/auth/headless/provider/start` | Start OIDC or SSO flow |
+
+## CLI device flow
+
+When a CLI sends the user to `/sqlos/auth/device?user_code=...`, SqlOS resolves the device request and creates a normal headless authorization request bound to that device authorization. Your app receives the same `request` id shape used by login, signup, OTP, SSO, and organization selection.
+
+The lowest-friction pattern is:
+
+1. Load `/headless/requests/{requestId}` and render your normal auth UI. The view may be `device`, `login`, `email-otp`, `password`, `organization`, or `device-approve`.
+2. Let the existing headless login/signup/OTP/SSO handlers complete the request. Do not carry the user code through your credential forms.
+3. When the returned view is `device-approve`, show the CLI client/resource/scope from `deviceAuthorization`.
+4. Approve or deny with `/headless/device/approve` or `/headless/device/deny`, passing the `requestId`. You may pass `userCode` instead for manual-entry UIs, but request-bound approval is preferred.
+
+SqlOS releases tokens to the polling CLI only after approval. See [CLI OAuth](/docs/authserver/cli-oauth).
 
 ## Custom signup fields
 

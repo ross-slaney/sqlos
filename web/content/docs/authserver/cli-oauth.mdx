@@ -1,0 +1,192 @@
+---
+title: "CLI OAuth"
+description: "Use OAuth 2.0 Device Authorization Grant for terminal and device clients."
+order: 4.75
+section: authserver
+---
+
+CLI OAuth lets terminal apps sign users in through the browser without binding a localhost callback port. SqlOS implements the OAuth 2.0 Device Authorization Grant (`urn:ietf:params:oauth:grant-type:device_code`) and reuses the same AuthPage, headless auth, SSO, Email OTP, org selection, sessions, refresh tokens, and audit trail as browser OAuth.
+
+Use device flow for:
+
+- CLIs and terminal tools
+- SSH or remote development sessions
+- desktop helpers that should not own a redirect listener
+- TV/device-style apps where typing a long redirect URL is poor UX
+
+Use authorization-code PKCE instead when the app already has a reliable redirect URI, such as a browser SPA, native deep link, or loopback listener.
+
+## Seed a CLI client
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedCliClient(
+        clientId: "acme-cli",
+        name: "Acme CLI",
+        audience: "https://api.acme.com",
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "projects.read",
+        "projects.write");
+});
+```
+
+`SeedCliClient` creates a public client with no redirect URI requirement, device authorization enabled, and refresh tokens enabled. You can also create the same shape in the dashboard with the **CLI / Device OAuth** client preset.
+
+## Device authorization endpoint
+
+Start the flow from the CLI:
+
+```http
+POST /sqlos/auth/device_authorization
+Content-Type: application/x-www-form-urlencoded
+
+client_id=acme-cli&scope=openid%20offline_access%20projects.read&resource=https%3A%2F%2Fapi.acme.com
+```
+
+Response:
+
+```json
+{
+  "device_code": "opaque-device-code",
+  "user_code": "ABCD-EFGH",
+  "verification_uri": "https://app.example.com/sqlos/auth/device",
+  "verification_uri_complete": "https://app.example.com/sqlos/auth/device?user_code=ABCD-EFGH",
+  "expires_in": 900,
+  "interval": 5
+}
+```
+
+Print `verification_uri_complete` in the terminal and optionally open it in the browser. The user signs in with hosted AuthPage or your headless UI and approves the CLI request.
+
+Start-time validation is strict:
+
+| Error | Meaning |
+| --- | --- |
+| `unauthorized_client` | The client is not enabled for device authorization. |
+| `invalid_client` | The client is not public, or the client id is invalid. |
+| `invalid_scope` | One or more requested scopes are outside the client allow-list. |
+| `invalid_target` | The requested resource does not match the client audience. |
+| `slow_down` | Start rate limits were exceeded for the client or IP address. |
+
+## Poll the token endpoint
+
+Poll no faster than the returned `interval`:
+
+```http
+POST /sqlos/auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:device_code&
+client_id=acme-cli&
+device_code=opaque-device-code&
+resource=https%3A%2F%2Fapi.acme.com
+```
+
+Successful response:
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIs...",
+  "refresh_token": "rt_...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "scope": "openid offline_access projects.read"
+}
+```
+
+Expected polling errors:
+
+| Error | Meaning |
+| --- | --- |
+| `authorization_pending` | User has not approved yet. Wait `interval` seconds and poll again. |
+| `slow_down` | CLI polled too quickly. Increase the polling delay. |
+| `access_denied` | User denied the request in the browser. |
+| `expired_token` | Device code expired. Start over. |
+| `invalid_grant` | Code is wrong, reused, wrong client, or wrong resource. |
+| `invalid_client` | Client is not a public device-flow client. |
+
+Device codes are one-time use. After a successful token response, reuse returns `invalid_grant`.
+
+## Hosted verification page
+
+The hosted route is:
+
+```text
+GET /sqlos/auth/device?user_code=ABCD-EFGH
+```
+
+If the user is not already signed in, SqlOS renders the configured credential flow. Email OTP, password, SSO, and org selection all use the existing AuthPage runtime. After sign-in, SqlOS shows the CLI client name, requested scopes/resource, expiration, and approve/deny buttons.
+
+## Headless verification
+
+If `UseHeadlessAuthPage(...)` is configured, `/sqlos/auth/device?user_code=...` creates a normal headless authorization request bound to the device request, then redirects to your `BuildUiUrl` with `request` and `view=device`. From there, the same headless auth pipeline handles HRD, SSO, password, email OTP, signup, invitation context, and organization selection.
+
+Headless UIs can call:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /sqlos/auth/headless/requests/{requestId}` | Load the device-bound request and normal auth/device views. |
+| `POST /sqlos/auth/headless/device/resolve` | Resolve a user code for manual-entry UIs. |
+| `POST /sqlos/auth/headless/device/approve` | Approve after sign-in. Prefer passing `requestId`; `userCode` is supported for manual entry. |
+| `POST /sqlos/auth/headless/device/deny` | Deny the request. Prefer passing `requestId`; `userCode` is supported for manual entry. |
+
+Do not implement a separate sign-in page for device flow. Treat device verification as a normal SqlOS auth interaction with an extra final approval step. After the existing auth handlers complete, SqlOS returns `device-approve`; approve it and tokens are released to the polling CLI.
+
+## SDK flow
+
+Backend integrations can use `SqlOSAuthService` directly:
+
+```csharp
+var start = await authService.StartDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationStartRequest(
+        ClientId: "acme-cli",
+        Scope: "openid offline_access projects.read",
+        Resource: "https://api.acme.com"),
+    httpContext,
+    ct);
+
+var resolved = await authService.ResolveDeviceAuthorizationAsync(
+    start.UserCode,
+    currentUser,
+    ct);
+
+await authService.ApproveDeviceAuthorizationAsync(
+    new SqlOSDeviceAuthorizationApprovalRequest(start.UserCode, organizationId),
+    currentUser,
+    authenticationMethod: "password",
+    httpContext,
+    ct);
+
+var tokens = await authService.PollDeviceAuthorizationAsync(
+    new SqlOSDeviceTokenPollRequest("acme-cli", start.DeviceCode, "https://api.acme.com"),
+    httpContext,
+    ct);
+```
+
+For most CLIs, prefer the HTTP endpoints because they match RFC 8628 and work across languages. Use SDK methods for server-side orchestration, tests, or custom admin flows.
+
+## CLI checklist
+
+- Discover `device_authorization_endpoint` and `token_endpoint` from `/sqlos/auth/.well-known/oauth-authorization-server`.
+- Request `offline_access` if the CLI needs refresh tokens.
+- Store refresh tokens in the OS/user profile, not in the project directory.
+- Poll at the returned interval and honor `slow_down`.
+- Treat `device_code` as a secret. Print only the user code and verification URI.
+- Include the same `resource` during polling that was used at start.
+
+## Todo CLI example
+
+SqlOS ships a runnable CLI sample:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.Cli -- login
+dotnet run --project examples/SqlOS.Todo.Cli -- whoami
+dotnet run --project examples/SqlOS.Todo.Cli -- add "Ship device OAuth"
+dotnet run --project examples/SqlOS.Todo.Cli -- list
+```
+
+The sample stores tokens under `~/.sqlos/todo-cli/tokens.json` and refreshes access tokens when possible.

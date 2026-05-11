@@ -25,6 +25,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
   <Card title="OIDC" description="Google, Microsoft, Apple, and custom providers." />
   <Card title="SAML SSO" description="Enterprise SSO with provisioning and hosted flows." />
   <Card title="Invitations" description="Email-bound organization invites with hosted, headless, and SDK acceptance." />
+  <Card title="CLI OAuth" description="Device Authorization Grant for terminal apps and remote sessions." />
   <Card title="Hosted or headless" description="Use the built-in pages or render your own UI on top of the same runtime." />
 </CardGrid>
 
@@ -82,11 +83,11 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
     SqlOS still runs OAuth/OIDC, sessions, and token issuance. Your application takes ownership of the login UI and interaction flow.
   </AccordionItem>
   <AccordionItem title="Client onboarding modes">
-    Use seeded or dashboard-created owned clients for the normal path. Reach for `CIMD` and optional `DCR` only when you need portable or compatibility-oriented clients.
+    Use seeded or dashboard-created owned clients for the normal path. Reach for CLI device flow, `CIMD`, and optional `DCR` when you need terminal, portable, or compatibility-oriented clients.
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Email Invitations](/docs/authserver/invitations) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 
@@ -94,4 +95,5 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 - [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
 - [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents)
 - [Dynamic Client Registration](/docs/authserver/dynamic-client-registration)
+- [CLI OAuth](/docs/authserver/cli-oauth)
 - [MCP Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience)

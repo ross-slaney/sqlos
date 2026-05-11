@@ -8,6 +8,15 @@ public sealed record SqlOSHeadlessProviderDto(
     string DisplayName,
     string? LogoDataUrl = null);
 
+public sealed record SqlOSHeadlessDeviceAuthorizationDto(
+    string UserCode,
+    string ClientId,
+    string ClientName,
+    string Scope,
+    string? Resource,
+    DateTime ExpiresAt,
+    string Status);
+
 public sealed record SqlOSHeadlessViewModel(
     string View,
     string AuthBasePath,
@@ -27,7 +36,8 @@ public sealed record SqlOSHeadlessViewModel(
     IReadOnlyList<SqlOSOrganizationOption> OrganizationSelection,
     IReadOnlyList<SqlOSHeadlessProviderDto> Providers,
     SqlOSEmailInvitationResult? Invitation,
-    JsonObject? UiContext);
+    JsonObject? UiContext,
+    SqlOSHeadlessDeviceAuthorizationDto? DeviceAuthorization = null);
 
 public sealed record SqlOSHeadlessActionResult(
     string Type,
@@ -99,6 +109,15 @@ public sealed record SqlOSHeadlessSignupRequest(
 public sealed record SqlOSHeadlessOrganizationSelectionRequest(
     string PendingToken,
     string OrganizationId);
+
+public sealed record SqlOSHeadlessDeviceAuthorizationResolveRequest(
+    string? UserCode,
+    string? RequestId = null);
+
+public sealed record SqlOSHeadlessDeviceAuthorizationApproveRequest(
+    string? UserCode,
+    string? OrganizationId = null,
+    string? RequestId = null);
 
 public sealed record SqlOSHeadlessProviderStartRequest(
     string RequestId,

@@ -59,15 +59,21 @@ public sealed class SqlOSAuthorizationServerService
 
         var origin = GetPublicOrigin(httpContext);
         var basePath = _options.BasePath.TrimEnd('/');
+        var grantTypes = _options.DeviceAuthorization.Enabled
+            ? new[] { SqlOSOAuthGrantTypes.AuthorizationCode, SqlOSOAuthGrantTypes.RefreshToken, SqlOSOAuthGrantTypes.DeviceCode }
+            : new[] { SqlOSOAuthGrantTypes.AuthorizationCode, SqlOSOAuthGrantTypes.RefreshToken };
 
         return new SqlOSAuthorizationServerMetadataDto
         {
             Issuer = _options.Issuer,
             AuthorizationEndpoint = $"{origin}{basePath}/authorize",
             TokenEndpoint = $"{origin}{basePath}/token",
+            DeviceAuthorizationEndpoint = _options.DeviceAuthorization.Enabled
+                ? $"{origin}{basePath}/device_authorization"
+                : null,
             JwksUri = $"{origin}{basePath}/.well-known/jwks.json",
             ResponseTypesSupported = ["code"],
-            GrantTypesSupported = ["authorization_code", "refresh_token"],
+            GrantTypesSupported = grantTypes,
             CodeChallengeMethodsSupported = ["S256"],
             ScopesSupported = scopes,
             TokenEndpointAuthMethodsSupported = ["none"],
@@ -484,6 +490,19 @@ public sealed class SqlOSAuthorizationServerService
             organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
         }
 
+        if (!string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
+        {
+            authorizationRequest.ResolvedAuthMethod = authenticationMethod;
+            authorizationRequest.ResolvedOrganizationId = organizationId;
+            await _context.SaveChangesAsync(cancellationToken);
+            await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
+
+            return QueryHelpers.AddQueryString(
+                $"{_options.BasePath.TrimEnd('/')}/device/approve",
+                "request",
+                authorizationRequest.Id);
+        }
+
         var rawCode = _cryptoService.GenerateOpaqueToken();
         _context.Set<SqlOSAuthorizationCode>().Add(new SqlOSAuthorizationCode
         {
@@ -743,7 +762,8 @@ public sealed record SqlOSTokenRequest(
     string? ClientId,
     string? CodeVerifier,
     string? RefreshToken,
-    string? Resource);
+    string? Resource,
+    string? DeviceCode = null);
 
 public sealed record SqlOSTokenEndpointResult(
     SqlOSTokenResponse Tokens,

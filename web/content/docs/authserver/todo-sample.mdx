@@ -18,6 +18,7 @@ It keeps the model intentionally small:
 - a protected resource with audience enforcement
 - protected-resource metadata for MCP clients
 - preregistered local development with `todo-local`
+- a `todo-cli` device-flow client and runnable .NET CLI
 - portable public-client onboarding with `CIMD` and optional `DCR`
 
 ## Run it
@@ -121,6 +122,28 @@ For the Emcy-hosted local Todo MCP flow, use the additional seeded client:
 - auth method: public PKCE only
 
 This client exists so Emcy can broker the downstream Todo authorization flow while the Todo API itself keeps the same OAuth and audience behavior.
+
+## Todo CLI device flow
+
+The sample also seeds a public CLI client:
+
+- `client_id`: `todo-cli`
+- grant types: device code + refresh token
+- audience/resource: the Todo API resource
+
+Run the AppHost, then in another terminal:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.Cli -- login
+dotnet run --project examples/SqlOS.Todo.Cli -- whoami
+dotnet run --project examples/SqlOS.Todo.Cli -- add "Ship device OAuth"
+dotnet run --project examples/SqlOS.Todo.Cli -- list
+dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
+```
+
+`login` prints and opens `verification_uri_complete`. Sign in through SqlOS AuthPage, approve the CLI request, then return to the terminal. Tokens are stored under `~/.sqlos/todo-cli/tokens.json` for the demo.
+
+More detail: [CLI OAuth](/docs/authserver/cli-oauth).
 
 ## Portable public clients
 
