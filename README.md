@@ -324,6 +324,18 @@ SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
+## Testing the CLI Auth
+
+In another terminal:
+
+dotnet run --project examples/SqlOS.Todo.Cli -- login
+Open the printed URL, sign in through SqlOS AuthPage, approve the Todo CLI request, then run:
+
+dotnet run --project examples/SqlOS.Todo.Cli -- whoami
+dotnet run --project examples/SqlOS.Todo.Cli -- add "Ship CLI OAuth"
+dotnet run --project examples/SqlOS.Todo.Cli -- list
+dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
+
 Then open `http://localhost:5080/`.
 
 Use **Email code sign in** or **Email code sign up**. In this mode the Todo app only starts the OAuth request; the SqlOS hosted auth page sends the OTP, verifies the code, creates the account on signup, and redirects back with the authorization code.
