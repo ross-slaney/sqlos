@@ -17,6 +17,9 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class HeadlessAuthIntegrationTests
 {
+    private const string UnauthorizedOrganizationJoinMessage =
+        "Joining an existing organization requires an invitation or approved join policy.";
+
     [TestMethod]
     public async Task CreateAuthorizationRequestAsync_PersistsHeadlessPresentationAndUiContext()
     {
@@ -165,6 +168,55 @@ public sealed class HeadlessAuthIntegrationTests
 
         (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
         (await fixture.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task HeadlessSignup_WithAuthorizationRequestOrganizationId_WithoutPolicy_DoesNotCreateMembership()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        var existingOrganization = await fixture.AdminService.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Headless Existing {Guid.NewGuid():N}", null));
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-org-probe",
+                "openid profile email",
+                "challenge-org-probe",
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        authorizationRequest.OrganizationId = existingOrganization.Id;
+        authorizationRequest.ResolvedOrganizationId = existingOrganization.Id;
+        await fixture.Context.SaveChangesAsync();
+
+        var email = $"headless-probe-{Guid.NewGuid():N}@example.com";
+        var result = await fixture.HeadlessAuthService.SignUpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessSignupRequest(
+                authorizationRequest.Id,
+                "Headless Probe",
+                email,
+                "P@ssword123!",
+                OrganizationName: null,
+                CustomFields: new JsonObject()));
+
+        result.Type.Should().Be("view");
+        result.ViewModel.Should().NotBeNull();
+        result.ViewModel!.View.Should().Be("signup");
+        result.ViewModel.Error.Should().Be(UnauthorizedOrganizationJoinMessage);
+
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSMembership>()
+            .CountAsync(x => x.OrganizationId == existingOrganization.Id)).Should().Be(0);
+        (await fixture.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
     }
 
     [TestMethod]

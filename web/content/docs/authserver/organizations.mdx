@@ -44,7 +44,7 @@ When you set a primary domain, AuthServer uses it for [home realm discovery](/do
 
 ## Create a membership
 
-Users join organizations through memberships. Each membership has a role.
+Users join organizations through memberships. Each membership has a role. Public signup does not accept an `organizationId` as permission to join an existing organization; use an invitation, trusted SSO/SCIM provisioning, or an admin-owned workflow to create memberships for existing tenants.
 
 ```csharp
 var membership = await adminService.CreateMembershipAsync(new CreateMembershipRequest

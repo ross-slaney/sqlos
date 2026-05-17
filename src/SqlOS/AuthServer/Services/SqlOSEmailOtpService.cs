@@ -99,6 +99,11 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
         }
 
+        if (string.IsNullOrWhiteSpace(authorizationRequest?.InvitationId))
+        {
+            SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(authorizationRequest?.OrganizationId);
+        }
+
         if (authorizationRequest != null)
         {
             authorizationRequest.LoginHintEmail = trimmedEmail;
@@ -119,7 +124,7 @@ public sealed class SqlOSEmailOtpService
             "email_otp_signup",
             userId: null,
             clientApplicationId: authorizationRequest?.ClientApplicationId,
-            organizationId: authorizationRequest?.OrganizationId,
+            organizationId: null,
             payload: new EmailOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 authorizationRequest?.Id,
@@ -128,8 +133,8 @@ public sealed class SqlOSEmailOtpService
                 trimmedDisplayName,
                 trimmedEmail,
                 string.IsNullOrWhiteSpace(organizationName) ? null : organizationName.Trim(),
-                authorizationRequest?.OrganizationId,
-                customFields),
+                OrganizationId: null,
+                CustomFields: customFields),
             lifetime: _options.ChallengeLifetime,
             cancellationToken);
 
@@ -174,11 +179,13 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
         }
 
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
+
         var challenge = await CreateChallengeAsync(
             trimmedEmail,
             authorizationRequestId: null,
             clientApplicationId: client.Id,
-            requestedOrganizationId: request.OrganizationId,
+            requestedOrganizationId: null,
             httpContext,
             cancellationToken,
             sendWhenNoUser: true,
@@ -188,7 +195,7 @@ public sealed class SqlOSEmailOtpService
             "email_otp_signup",
             userId: null,
             clientApplicationId: client.Id,
-            organizationId: request.OrganizationId,
+            organizationId: null,
             payload: new EmailOtpSignupPayload(
                 _cryptoService.HashToken(challenge.ChallengeToken),
                 AuthorizationRequestId: null,
@@ -197,7 +204,7 @@ public sealed class SqlOSEmailOtpService
                 DisplayName: trimmedDisplayName,
                 Email: trimmedEmail,
                 OrganizationName: string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName.Trim(),
-                OrganizationId: request.OrganizationId,
+                OrganizationId: null,
                 CustomFields: request.CustomFields),
             lifetime: _options.ChallengeLifetime,
             cancellationToken);

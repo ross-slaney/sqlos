@@ -693,8 +693,6 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken);
 
             var selectedOrganizationId = boundInvitation?.OrganizationId
-                ?? authorizationRequest.OrganizationId
-                ?? verification.OrganizationId
                 ?? signup.Organizations.FirstOrDefault()?.Id;
             SqlOSOrganization? organization = null;
             if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
@@ -966,7 +964,6 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken);
 
             var selectedOrganizationId = boundInvitation?.OrganizationId
-                ?? authorizationRequest.OrganizationId
                 ?? signup.Organizations.FirstOrDefault()?.Id;
             SqlOSOrganization? organization = null;
             if (!string.IsNullOrWhiteSpace(selectedOrganizationId))

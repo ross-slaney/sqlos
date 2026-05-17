@@ -1185,7 +1185,7 @@ public static class EndpointRouteBuilderExtensions
                 var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
                     authorizationRequest,
                     signup.User,
-                    invitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -1483,7 +1483,7 @@ public static class EndpointRouteBuilderExtensions
                 var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
                     authorizationRequest,
                     signup.User,
-                    invitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? signupVerification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
+                    invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -2058,7 +2058,16 @@ public static class EndpointRouteBuilderExtensions
         }
 
         auth.MapPost("/signup", async (SqlOSSignupRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.SignUpAsync(request, httpContext, cancellationToken)));
+        {
+            try
+            {
+                return Results.Ok(await authService.SignUpAsync(request, httpContext, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
 
         auth.MapPost("/password/login", async (SqlOSPasswordLoginRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.LoginWithPasswordAsync(request, httpContext, cancellationToken)));

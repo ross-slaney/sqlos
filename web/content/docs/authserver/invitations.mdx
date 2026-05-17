@@ -7,6 +7,8 @@ section: authserver
 
 Email invitations are organization membership invites. An invite is bound to one email address, one organization, and one role. It can be accepted once before it expires.
 
+Public signup requests cannot join an existing organization by sending an `organizationId`. Invitations are the built-in explicit join path for email-bound membership, and acceptance is where the membership is created.
+
 ## What an invite does
 
 When a user accepts an invite, SqlOS:
