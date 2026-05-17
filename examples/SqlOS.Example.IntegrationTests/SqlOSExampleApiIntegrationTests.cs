@@ -74,6 +74,47 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task PasswordSignupEndpoint_WithExistingOrganizationId_ReturnsFailureAndNoMembership()
+    {
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Signup Target {Guid.NewGuid():N}"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        var existingOrgResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Org Probe",
+            email = $"org-probe-{Guid.NewGuid():N}@example.com",
+            password = "P@ssword123!",
+            clientId = "example-web",
+            organizationId
+        });
+        existingOrgResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+        var existingBody = await existingOrgResponse.Content.ReadAsStringAsync();
+        existingBody.Should().Contain("Joining an existing organization requires an invitation or approved join policy.");
+        existingBody.Should().NotContain(organizationId);
+
+        var unknownOrgResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Unknown Org Probe",
+            email = $"unknown-org-probe-{Guid.NewGuid():N}@example.com",
+            password = "P@ssword123!",
+            clientId = "example-web",
+            organizationId = $"org_{Guid.NewGuid():N}"
+        });
+        unknownOrgResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+        (await unknownOrgResponse.Content.ReadAsStringAsync()).Should().Be(existingBody);
+
+        var membershipsResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships");
+        membershipsResponse.EnsureSuccessStatusCode();
+        var membershipsJson = JsonDocument.Parse(await membershipsResponse.Content.ReadAsStringAsync());
+        membershipsJson.RootElement.GetProperty("totalCount").GetInt32().Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task PasswordResetAndRefresh_Work()
     {
         var email = $"reset-{Guid.NewGuid():N}@example.com";

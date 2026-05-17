@@ -16,6 +16,9 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSAuthServiceTests
 {
+    private const string UnauthorizedOrganizationJoinMessage =
+        "Joining an existing organization requires an invitation or approved join policy.";
+
     [TestMethod]
     public async Task LoginWithMultipleOrganizations_ReturnsPendingAuthToken()
     {
@@ -45,6 +48,68 @@ public sealed class SqlOSAuthServiceTests
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();
         result.Tokens.Should().BeNull();
         result.Organizations.Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public async Task SignUpAsync_WithExistingOrganizationId_WithoutInvitation_DoesNotCreateMembership()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var existingOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Existing {Guid.NewGuid():N}", null));
+        var email = $"attacker-{Guid.NewGuid():N}@example.com";
+
+        var act = async () => await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "Mallory",
+                email,
+                "P@ssword123!",
+                OrganizationName: null,
+                ClientId: "test-client",
+                OrganizationId: existingOrganization.Id),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(UnauthorizedOrganizationJoinMessage);
+
+        (await harness.Context.Set<SqlOSMembership>()
+            .CountAsync(x => x.OrganizationId == existingOrganization.Id)).Should().Be(0);
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task PublicSignup_UnknownOrgAndExistingOrg_ReturnUniformPublicFailure()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var existingOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Uniform {Guid.NewGuid():N}", null));
+
+        var existingAct = async () => await harness.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Existing Org Probe",
+                    $"existing-probe-{Guid.NewGuid():N}@example.com",
+                    "P@ssword123!",
+                    OrganizationName: null,
+                    ClientId: "test-client",
+                    OrganizationId: existingOrganization.Id),
+                new DefaultHttpContext());
+
+        var unknownAct = async () => await harness.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Unknown Org Probe",
+                    $"unknown-probe-{Guid.NewGuid():N}@example.com",
+                    "P@ssword123!",
+                    OrganizationName: null,
+                    ClientId: "test-client",
+                    OrganizationId: $"org_{Guid.NewGuid():N}"),
+                new DefaultHttpContext());
+
+        var existingFailure = await existingAct.Should().ThrowAsync<InvalidOperationException>();
+        var unknownFailure = await unknownAct.Should().ThrowAsync<InvalidOperationException>();
+
+        existingFailure.Which.Message.Should().Be(UnauthorizedOrganizationJoinMessage);
+        unknownFailure.Which.Message.Should().Be(existingFailure.Which.Message);
+        existingFailure.Which.Message.Should().NotContain(existingOrganization.Id);
     }
 
     [TestMethod]
@@ -97,6 +162,35 @@ public sealed class SqlOSAuthServiceTests
         start.SignupToken.Should().NotBeNullOrWhiteSpace();
         harness.EmailSender.Messages.Should().ContainSingle();
         harness.EmailSender.Messages.Single().To.Should().Be("new-user@example.com");
+    }
+
+    [TestMethod]
+    public async Task EmailOtpSignup_WithExistingOrganizationId_WithoutPolicy_DoesNotCreateChallengeOrMembership()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+        var existingOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"OTP Existing {Guid.NewGuid():N}", null));
+        var email = $"otp-attacker-{Guid.NewGuid():N}@example.com";
+
+        var act = async () => await harness.Auth.RequestEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupStartRequest(
+                "OTP Mallory",
+                email,
+                "test-client",
+                OrganizationName: null,
+                OrganizationId: existingOrganization.Id,
+                CustomFields: null),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(UnauthorizedOrganizationJoinMessage);
+
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSEmailOtpChallenge>().CountAsync(x => x.Email == email)).Should().Be(0);
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))).Should().Be(0);
+        (await harness.Context.Set<SqlOSMembership>()
+            .CountAsync(x => x.OrganizationId == existingOrganization.Id)).Should().Be(0);
     }
 
     [TestMethod]

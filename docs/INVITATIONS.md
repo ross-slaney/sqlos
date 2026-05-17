@@ -2,6 +2,8 @@
 
 SqlOS invitations are organization-membership invites. They are email-bound, one-time, expiring links that only activate membership after the invited email is proven by OTP, trusted SSO, existing login, or invite-backed signup.
 
+Public signup does not treat a caller-supplied `organizationId` as authorization to join an existing tenant. Use invitations or another admin-owned provisioning path when a new user should become a member of an existing organization.
+
 ## Configure Email Delivery
 
 Invitations use the same `ISqlOSAuthEmailSender` delivery abstraction as Email OTP. The ACS sender is configured through Email OTP settings:

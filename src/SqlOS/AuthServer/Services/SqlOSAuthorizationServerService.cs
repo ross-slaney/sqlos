@@ -256,31 +256,21 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Password signup is disabled.");
         }
 
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
+
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, password),
             cancellationToken);
 
-        var selectedOrganizationId = organizationId;
         if (!string.IsNullOrWhiteSpace(organizationName))
         {
             var createdOrganization = await _adminService.CreateOrganizationAsync(
                 new SqlOSCreateOrganizationRequest(organizationName, null),
                 cancellationToken);
-            selectedOrganizationId = createdOrganization.Id;
             await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-        else if (!string.IsNullOrWhiteSpace(organizationId))
-        {
-            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(selectedOrganizationId) && organizations.All(x => x.Id != selectedOrganizationId))
-        {
-            organizations = organizations
-                .Concat([new SqlOSOrganizationOption(selectedOrganizationId, selectedOrganizationId, selectedOrganizationId, "member")])
-                .ToList();
-        }
 
         return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
@@ -298,6 +288,8 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Email sign-in is unavailable.");
         }
 
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
+
         var user = await _adminService.CreateUserAsync(
             new SqlOSCreateUserRequest(displayName, email, null),
             cancellationToken);
@@ -309,29 +301,17 @@ public sealed class SqlOSAuthorizationServerService
         user.DefaultEmail = emailRecord.Email;
         user.UpdatedAt = DateTime.UtcNow;
 
-        var selectedOrganizationId = organizationId;
         if (!string.IsNullOrWhiteSpace(organizationName))
         {
             var createdOrganization = await _adminService.CreateOrganizationAsync(
                 new SqlOSCreateOrganizationRequest(organizationName, null),
                 cancellationToken);
-            selectedOrganizationId = createdOrganization.Id;
             await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-        else if (!string.IsNullOrWhiteSpace(organizationId))
-        {
-            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(selectedOrganizationId) && organizations.All(x => x.Id != selectedOrganizationId))
-        {
-            organizations = organizations
-                .Concat([new SqlOSOrganizationOption(selectedOrganizationId, selectedOrganizationId, selectedOrganizationId, "member")])
-                .ToList();
-        }
 
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
     }
