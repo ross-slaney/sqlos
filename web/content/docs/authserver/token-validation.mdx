@@ -5,7 +5,26 @@ order: 5.0
 section: authserver
 ---
 
-Access tokens are RS256 JWTs. Validate on the server for each API call.
+Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token.
+
+## Resource-server middleware
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+
+app.UseSqlOSAccessTokenValidation(options =>
+{
+    options.ExpectedAudience = "https://api.example.com";
+    options.ShouldValidate = http => http.Request.Path.StartsWithSegments("/api");
+});
+```
+
+The middleware rejects requests at startup if `ExpectedAudience` is empty. On successful authentication it sets `HttpContext.User` and stores the `SqlOSValidatedToken` on the current request:
+
+```csharp
+var validated = httpContext.GetSqlOSValidatedToken();
+var userId = validated?.UserId;
+```
 
 ## Validate with the SDK
 
@@ -14,8 +33,11 @@ var bearerToken = httpContext.Request.Headers.Authorization.ToString();
 if (!bearerToken.StartsWith("Bearer "))
     return Results.Unauthorized();
 
+var expectedAudience = "https://api.example.com";
 var validated = await authService.ValidateAccessTokenAsync(
-    bearerToken["Bearer ".Length..].Trim(), ct);
+    bearerToken["Bearer ".Length..].Trim(),
+    expectedAudience,
+    ct);
 
 if (validated == null)
     return Results.Unauthorized();
@@ -30,7 +52,7 @@ var orgId = validated.OrganizationId;
 The example app uses middleware to extract the subject ID from multiple auth methods:
 
 ```csharp
-public static string? GetSubjectId(this HttpContext http)
+public static string? GetSubjectId(this HttpContext http, string expectedAudience)
 {
     // Bearer JWT
     var auth = http.Request.Headers.Authorization.ToString();
@@ -39,7 +61,7 @@ public static string? GetSubjectId(this HttpContext http)
         var token = auth["Bearer ".Length..].Trim();
         var validated = http.RequestServices
             .GetRequiredService<SqlOSAuthService>()
-            .ValidateAccessTokenAsync(token, ct).Result;
+            .ValidateAccessTokenAsync(token, expectedAudience, ct).Result;
         return validated?.UserId;
     }
 
@@ -54,6 +76,8 @@ public static string? GetSubjectId(this HttpContext http)
     return null;
 }
 ```
+
+`ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session state, but it intentionally does not validate `aud`.
 
 ## JWKS for external validation
 

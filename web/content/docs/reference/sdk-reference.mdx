@@ -74,8 +74,11 @@ var tokens = await authService.ExchangeCodeAsync(
 var tokens = await authService.RefreshAsync(
     new SqlOSRefreshRequest(refreshToken, organizationId), ct);
 
-// Validate access token
-var validated = await authService.ValidateAccessTokenAsync(rawToken, ct);
+// Validate access token for a protected resource server
+var validated = await authService.ValidateAccessTokenAsync(
+    rawToken,
+    expectedAudience: "https://api.example.com",
+    ct);
 
 // Logout
 await authService.LogoutAsync(refreshToken, sessionId, ct);

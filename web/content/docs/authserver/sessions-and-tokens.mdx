@@ -28,7 +28,8 @@ After login, you receive:
 Access tokens are RS256-signed JWTs containing user, session, client, and organization claims. Validate them server-side:
 
 ```csharp
-var validated = await authService.ValidateAccessTokenAsync(rawToken, ct);
+var expectedAudience = "https://api.example.com";
+var validated = await authService.ValidateAccessTokenAsync(rawToken, expectedAudience, ct);
 
 if (validated == null)
     return Results.Unauthorized();

@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using FluentAssertions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Tests.Infrastructure;
@@ -15,6 +18,135 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSResourceBindingTests
 {
+    [TestMethod]
+    public void ValidateAccessTokenAsync_RequiresExpectedAudience_ForPublicApi()
+    {
+        var publicValidatorTypes = new[]
+        {
+            typeof(SqlOSAuthService),
+            typeof(SqlOSCryptoService)
+        };
+
+        foreach (var validatorType in publicValidatorTypes)
+        {
+            var overloads = validatorType
+                .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+                .Where(method => method.Name == nameof(SqlOSAuthService.ValidateAccessTokenAsync))
+                .ToList();
+
+            overloads.Should().NotBeEmpty();
+            overloads.Should().OnlyContain(method =>
+                method.GetParameters().Any(parameter =>
+                    parameter.Name == "expectedAudience"
+                    && parameter.ParameterType == typeof(string)));
+        }
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessTokenWithoutAudienceForIntrospectionOnly_AllowsSignatureAndLifetimeButIsExplicitlyNamed()
+    {
+        using var context = CreateContext();
+        var (options, _, auth) = CreateAuthHarness(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "introspection-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        var tokens = await auth.CreateSessionTokensForUserAsync(
+            user,
+            client,
+            null,
+            "password",
+            "test-agent",
+            "127.0.0.1");
+
+        var wrongAudience = await auth.ValidateAccessTokenAsync(tokens.AccessToken, "https://api-b.example.test");
+        wrongAudience.Should().BeNull();
+
+#pragma warning disable CS0618
+        var introspected = await auth.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(tokens.AccessToken);
+#pragma warning restore CS0618
+
+        introspected.Should().NotBeNull();
+        introspected!.Audience.Should().Be("https://api-a.example.test");
+
+        var method = typeof(SqlOSAuthService).GetMethod(
+            nameof(SqlOSAuthService.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync),
+            [typeof(string), typeof(CancellationToken)]);
+        method.Should().NotBeNull();
+        method!.GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false).Should().NotBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ResourceServerMiddleware_RejectsTokenForDifferentAudience()
+    {
+        using var context = CreateContext();
+        var (options, _, auth) = CreateAuthHarness(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "middleware-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        var tokens = await auth.CreateSessionTokensForUserAsync(
+            user,
+            client,
+            null,
+            "password",
+            "test-agent",
+            "127.0.0.1");
+
+        var nextCalled = false;
+        var middleware = new SqlOSAccessTokenValidationMiddleware(
+            _ =>
+            {
+                nextCalled = true;
+                return Task.CompletedTask;
+            },
+            new SqlOSAccessTokenValidationOptions
+            {
+                ExpectedAudience = "https://api-b.example.test"
+            });
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = $"Bearer {tokens.AccessToken}";
+
+        await middleware.InvokeAsync(httpContext, auth);
+
+        nextCalled.Should().BeFalse();
+        httpContext.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        httpContext.GetSqlOSValidatedToken().Should().BeNull();
+    }
+
+    [TestMethod]
+    public void ResourceServerMiddleware_FailsClosed_WhenAudienceNotConfigured()
+    {
+        var constructMiddleware = () => new SqlOSAccessTokenValidationMiddleware(
+            _ => Task.CompletedTask,
+            new SqlOSAccessTokenValidationOptions());
+
+        constructMiddleware.Should().Throw<InvalidOperationException>()
+            .WithMessage("*expected audience*");
+
+        var app = new ApplicationBuilder(new ServiceCollection().BuildServiceProvider());
+        var configurePipeline = () => app.UseSqlOSAccessTokenValidation("");
+
+        configurePipeline.Should().Throw<InvalidOperationException>()
+            .WithMessage("*expected audience*");
+    }
+
+    [TestMethod]
+    public void DocsExamples_DoNotUseNoAudienceValidationOverload()
+    {
+        var docsRoot = Path.Combine(FindRepoRoot(), "web", "content", "docs");
+        var unsafeValidationCall = new System.Text.RegularExpressions.Regex(
+            @"ValidateAccessTokenAsync\s*\((?<arguments>[\s\S]*?)\);",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        var offenders = Directory
+            .EnumerateFiles(docsRoot, "*.mdx", SearchOption.AllDirectories)
+            .Where(path => HasNoAudienceValidationExample(File.ReadAllText(path), unsafeValidationCall))
+            .Select(path => Path.GetRelativePath(FindRepoRoot(), path))
+            .ToList();
+
+        offenders.Should().BeEmpty("resource-server docs must pass an expected audience to ValidateAccessTokenAsync");
+    }
+
     [TestMethod]
     public async Task CreateSessionTokensForUserAsync_UsesResourceAsAudience()
     {
@@ -304,5 +436,41 @@ public sealed class SqlOSResourceBindingTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "SqlOS.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new DirectoryNotFoundException("Could not find the SqlOS repository root.");
+    }
+
+    private static bool HasNoAudienceValidationExample(
+        string markdown,
+        System.Text.RegularExpressions.Regex validationCall)
+    {
+        foreach (System.Text.RegularExpressions.Match match in validationCall.Matches(markdown))
+        {
+            var arguments = match.Groups["arguments"].Value
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            if (arguments.Length == 1)
+            {
+                return true;
+            }
+
+            if (arguments.Length == 2
+                && (string.Equals(arguments[1], "ct", StringComparison.Ordinal)
+                    || string.Equals(arguments[1], "cancellationToken", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

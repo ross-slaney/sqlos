@@ -287,13 +287,29 @@ public sealed class SqlOSCryptoService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken cancellationToken = default)
-        => await ValidateAccessTokenAsync(rawToken, expectedAudience: null, cancellationToken);
-
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
         string rawToken,
-        string? expectedAudience,
+        string expectedAudience,
         CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(expectedAudience))
+        {
+            throw new ArgumentException("An expected audience is required when validating an access token for a resource server.", nameof(expectedAudience));
+        }
+
+        return await ValidateAccessTokenCoreAsync(rawToken, expectedAudience.Trim(), validateAudience: true, cancellationToken);
+    }
+
+    internal async Task<SqlOSValidatedToken?> ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => await ValidateAccessTokenCoreAsync(rawToken, expectedAudience: null, validateAudience: false, cancellationToken);
+
+    private async Task<SqlOSValidatedToken?> ValidateAccessTokenCoreAsync(
+        string rawToken,
+        string? expectedAudience,
+        bool validateAudience,
+        CancellationToken cancellationToken)
     {
         var keys = await GetValidationSigningKeysAsync(cancellationToken: cancellationToken);
         if (keys.Count == 0)
@@ -313,8 +329,8 @@ public sealed class SqlOSCryptoService
             {
                 ValidateIssuer = true,
                 ValidIssuer = _options.Issuer,
-                ValidateAudience = !string.IsNullOrWhiteSpace(expectedAudience),
-                ValidAudience = expectedAudience,
+                ValidateAudience = validateAudience,
+                ValidAudience = validateAudience ? expectedAudience : null,
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKeys = securityKeys,
                 ValidateLifetime = true,
