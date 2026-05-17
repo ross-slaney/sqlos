@@ -62,7 +62,7 @@ public sealed class SqlOSDashboardSessionService
         return true;
     }
 
-    public void CreateSession(
+    public DateTimeOffset CreateSession(
         HttpContext context,
         string cookiePath,
         TimeSpan sessionLifetime,
@@ -81,6 +81,8 @@ public sealed class SqlOSDashboardSessionService
             Path = cookiePath,
             Expires = expiresAt.UtcDateTime
         });
+
+        return expiresAt;
     }
 
     public void ClearSession(HttpContext context, string cookiePath)

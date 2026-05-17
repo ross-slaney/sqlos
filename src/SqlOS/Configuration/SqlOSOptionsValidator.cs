@@ -31,6 +31,8 @@ internal static class SqlOSOptionsValidator
             errors.Add("Dashboard.SessionLifetime must be greater than zero.");
         }
 
+        ValidateDashboardLoginThrottlingOptions(options.Dashboard.LoginThrottling, errors);
+
         var issuer = ValidateAbsoluteUri(options.AuthServer.Issuer, "AuthServer.Issuer", errors);
         if (issuer != null && authBasePath != null)
         {
@@ -76,6 +78,34 @@ internal static class SqlOSOptionsValidator
         {
             throw new InvalidOperationException(
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
+        }
+    }
+
+    private static void ValidateDashboardLoginThrottlingOptions(SqlOSDashboardLoginThrottlingOptions options, List<string> errors)
+    {
+        if (!options.Enabled)
+        {
+            return;
+        }
+
+        if (options.MaxFailuresPerIp <= 0)
+        {
+            errors.Add("Dashboard.LoginThrottling.MaxFailuresPerIp must be greater than zero.");
+        }
+
+        if (options.MaxGlobalFailures <= 0)
+        {
+            errors.Add("Dashboard.LoginThrottling.MaxGlobalFailures must be greater than zero.");
+        }
+
+        if (options.Window <= TimeSpan.Zero)
+        {
+            errors.Add("Dashboard.LoginThrottling.Window must be greater than zero.");
+        }
+
+        if (options.LockoutDuration <= TimeSpan.Zero)
+        {
+            errors.Add("Dashboard.LoginThrottling.LockoutDuration must be greater than zero.");
         }
     }
 

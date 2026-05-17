@@ -1172,6 +1172,7 @@ public sealed class SqlOSAdminService
                 x.OrganizationId,
                 x.SessionId,
                 x.OccurredAt,
+                x.IpAddress,
                 x.DataJson
             })
             .Cast<object>()

@@ -146,6 +146,11 @@ builder.AddSqlOS<AppDbContext>(options =>
     options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
     options.Dashboard.Password = builder.Configuration["SqlOS:Dashboard:Password"]
         ?? throw new InvalidOperationException("SqlOS dashboard password is not configured.");
+
+    options.Dashboard.LoginThrottling.MaxFailuresPerIp = 5;
+    options.Dashboard.LoginThrottling.MaxGlobalFailures = 25;
+    options.Dashboard.LoginThrottling.Window = TimeSpan.FromMinutes(5);
+    options.Dashboard.LoginThrottling.LockoutDuration = TimeSpan.FromMinutes(5);
 });
 ```
 
@@ -158,6 +163,10 @@ if (sessionMinutes is > 0)
     options.Dashboard.SessionLifetime = TimeSpan.FromMinutes(sessionMinutes.Value);
 }
 ```
+
+Password mode records audit events for dashboard login success, login failure, rate-limit rejection, temporary lockout, and logout. Repeated failed attempts from one client IP are locked out with `429 Too Many Requests`; a distributed spike trips the global backoff even when attempts come from different IPs.
+
+`/sqlos` and `/sqlos/admin` should be treated as administrative endpoints. For production, keep them on a trusted network or behind a VPN, identity-aware proxy, or reverse proxy that enforces HTTPS and edge rate limiting. Do not expose them directly to the public internet with only the shared dashboard password; use stronger admin authentication such as SSO/MFA as the deployment strategy when the dashboard must be reachable from outside a trusted network.
 
 ## EF model registration
 

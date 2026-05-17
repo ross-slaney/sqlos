@@ -15,6 +15,12 @@ Example: `http://localhost:5062/sqlos/`. Protect it with a password in `appsetti
 
 ![Dashboard home](/docs/dashboard-home.png)
 
+## Production exposure
+
+`/sqlos` and `/sqlos/admin` are administrative endpoints for users, organizations, memberships, clients, OIDC/SAML connections, security settings, sessions, audit events, and FGA data. In production, keep them on a trusted network or place them behind HTTPS, reverse-proxy or edge rate limiting, and an admin access layer such as VPN, identity-aware proxy, SSO, or MFA.
+
+Password mode includes dashboard-specific per-IP throttling, global backoff for distributed failures, temporary lockout, and audit events for login success, login failure, rate-limit rejection, lockout, and logout. Treat those built-in controls as a baseline, not as the only protection for a publicly reachable admin surface.
+
 ## Auth Server pages
 
 | Page | URL | What you can do |

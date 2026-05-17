@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using System.Text;
 using System.Text.Json;
+using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 
 namespace SqlOS.Dashboard;
@@ -19,6 +21,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly bool _isDevelopment;
     private readonly SqlOSDashboardOptions _options;
     private readonly SqlOSDashboardSessionService _sessionService;
+    private readonly SqlOSDashboardLoginThrottlingService _loginThrottlingService;
     private readonly IFileProvider _fileProvider;
 
     public SqlOSDashboardMiddleware(
@@ -26,13 +29,15 @@ public sealed class SqlOSDashboardMiddleware
         string pathPrefix,
         IHostEnvironment environment,
         SqlOSDashboardOptions options,
-        SqlOSDashboardSessionService sessionService)
+        SqlOSDashboardSessionService sessionService,
+        SqlOSDashboardLoginThrottlingService loginThrottlingService)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _options = options;
         _sessionService = sessionService;
+        _loginThrottlingService = loginThrottlingService;
         _fileProvider = CreateFileProvider();
     }
 
@@ -144,7 +149,13 @@ public sealed class SqlOSDashboardMiddleware
         if (endpoint.Equals("logout", StringComparison.OrdinalIgnoreCase)
             && HttpMethods.IsPost(context.Request.Method))
         {
+            var clientIp = GetClientIpAddress(context);
             _sessionService.ClearSession(context, _pathPrefix);
+            await RecordDashboardAuditAsync(
+                context,
+                "dashboard.logout",
+                clientIp,
+                new { reason = "operator_requested" });
             context.Response.StatusCode = StatusCodes.Status204NoContent;
             return;
         }
@@ -173,28 +184,129 @@ public sealed class SqlOSDashboardMiddleware
                 return;
             }
 
+            var clientIp = GetClientIpAddress(context);
+            var now = DateTimeOffset.UtcNow;
+            var rejection = _loginThrottlingService.GetRejection(clientIp, _options.LoginThrottling, now);
+            if (rejection != null)
+            {
+                await RecordDashboardAuditAsync(
+                    context,
+                    "dashboard.login.rate-limited",
+                    clientIp,
+                    new
+                    {
+                        scope = rejection.Scope,
+                        retry_after_seconds = GetRetryAfterSeconds(rejection.RetryAfter, now)
+                    });
+                await WriteThrottleResponseAsync(context, rejection, now);
+                return;
+            }
+
             if (!_sessionService.VerifyPassword(_options.Password!, payload.Password))
             {
+                await RecordDashboardAuditAsync(
+                    context,
+                    "dashboard.login.failure",
+                    clientIp,
+                    new { reason = "invalid_password" });
+
+                var lockout = _loginThrottlingService.RecordFailure(clientIp, _options.LoginThrottling, now);
+                if (lockout.PerIpLockedUntil is { } perIpLockedUntil)
+                {
+                    await RecordDashboardAuditAsync(
+                        context,
+                        "dashboard.login.lockout",
+                        clientIp,
+                        new
+                        {
+                            scope = "ip",
+                            retry_after_seconds = GetRetryAfterSeconds(perIpLockedUntil, now)
+                        });
+                }
+
+                if (lockout.GlobalLockedUntil is { } globalLockedUntil)
+                {
+                    await RecordDashboardAuditAsync(
+                        context,
+                        "dashboard.login.lockout",
+                        clientIp,
+                        new
+                        {
+                            scope = "global",
+                            retry_after_seconds = GetRetryAfterSeconds(globalLockedUntil, now)
+                        });
+                }
+
+                context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsync("{\"error\":\"Invalid password\"}");
                 return;
             }
 
+            _loginThrottlingService.RecordSuccess(clientIp, _options.LoginThrottling, now);
             var allowInsecureCookie = _isDevelopment && !context.Request.IsHttps;
-            _sessionService.CreateSession(context, _pathPrefix, _options.SessionLifetime, allowInsecureCookie);
-            var expiresAt = _sessionService.GetSessionExpiry(context);
+            var expiresAt = _sessionService.CreateSession(context, _pathPrefix, _options.SessionLifetime, allowInsecureCookie);
+            await RecordDashboardAuditAsync(
+                context,
+                "dashboard.login.success",
+                clientIp,
+                new { expires_at = expiresAt.UtcDateTime });
 
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync(JsonSerializer.Serialize(new
             {
                 authenticated = true,
-                expiresAt = expiresAt?.UtcDateTime
+                expiresAt = expiresAt.UtcDateTime
             }));
             return;
         }
 
         context.Response.StatusCode = StatusCodes.Status404NotFound;
     }
+
+    private static async Task WriteThrottleResponseAsync(
+        HttpContext context,
+        SqlOSDashboardLoginThrottleRejection rejection,
+        DateTimeOffset now)
+    {
+        var retryAfterSeconds = GetRetryAfterSeconds(rejection.RetryAfter, now);
+        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            error = "Too many dashboard login attempts. Try again later.",
+            scope = rejection.Scope,
+            retryAfterSeconds
+        }));
+    }
+
+    private static async Task RecordDashboardAuditAsync(
+        HttpContext context,
+        string eventType,
+        string clientIp,
+        object? data)
+    {
+        var adminService = context.RequestServices.GetService<SqlOSAdminService>();
+        if (adminService == null)
+        {
+            return;
+        }
+
+        await adminService.RecordAuditAsync(
+            eventType,
+            "dashboard",
+            actorId: null,
+            ipAddress: clientIp,
+            data: data,
+            cancellationToken: context.RequestAborted);
+    }
+
+    private static string GetClientIpAddress(HttpContext context)
+        => context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    private static int GetRetryAfterSeconds(DateTimeOffset retryAfter, DateTimeOffset now)
+        => Math.Max(1, (int)Math.Ceiling((retryAfter - now).TotalSeconds));
 
     private async Task HandleUnauthorizedRequestAsync(HttpContext context, string relativePath)
     {
