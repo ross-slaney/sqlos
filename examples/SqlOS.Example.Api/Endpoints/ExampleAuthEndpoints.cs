@@ -369,7 +369,7 @@ public static class ExampleAuthEndpoints
         ExampleAppDbContext context,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
-        string? expectedAudience,
+        string expectedAudience,
         CancellationToken cancellationToken)
     {
         if (result.Tokens == null)
@@ -397,7 +397,7 @@ public static class ExampleAuthEndpoints
         ExampleAppDbContext context,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
-        string? expectedAudience,
+        string expectedAudience,
         CancellationToken cancellationToken)
     {
         var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, expectedAudience, cancellationToken)
@@ -412,7 +412,7 @@ public static class ExampleAuthEndpoints
         SqlOSUser user,
         SqlOSAuthService authService,
         ExampleFgaService fgaService,
-        string? expectedAudience,
+        string expectedAudience,
         CancellationToken cancellationToken)
     {
         var validated = await authService.ValidateAccessTokenAsync(tokens.AccessToken, expectedAudience, cancellationToken)

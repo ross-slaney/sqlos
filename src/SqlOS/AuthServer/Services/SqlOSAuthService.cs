@@ -827,14 +827,17 @@ public sealed class SqlOSAuthService
         await _adminService.RecordAuditAsync("user.email-verified", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
     }
 
-    public Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(string rawToken, CancellationToken cancellationToken = default)
-        => _cryptoService.ValidateAccessTokenAsync(rawToken, cancellationToken);
-
     public Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
         string rawToken,
-        string? expectedAudience,
+        string expectedAudience,
         CancellationToken cancellationToken = default)
         => _cryptoService.ValidateAccessTokenAsync(rawToken, expectedAudience, cancellationToken);
+
+    [Obsolete("This method does not validate the JWT aud claim and must only be used for token introspection or diagnostics. Resource servers must call ValidateAccessTokenAsync(rawToken, expectedAudience, cancellationToken).", false)]
+    public Task<SqlOSValidatedToken?> ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => _cryptoService.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(rawToken, cancellationToken);
 
     public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
         SqlOSUser user,

@@ -392,10 +392,12 @@ await authService.LogoutAllAsync(userId);
 
 ### ValidateAccessTokenAsync
 
-Validate a JWT access token and extract the claims principal.
+Validate a JWT access token for a protected resource server and extract the claims principal. The expected audience is required so a token minted for another API cannot be accepted by this API.
 
 ```csharp
-var validated = await authService.ValidateAccessTokenAsync(rawToken);
+var validated = await authService.ValidateAccessTokenAsync(
+    rawToken,
+    expectedAudience: "https://api.example.com");
 if (validated is null)
     return Results.Unauthorized();
 
@@ -408,6 +410,7 @@ var orgId = validated.OrganizationId;
 | Name | Type | Description |
 |------|------|-------------|
 | `rawToken` | `string` | The raw JWT access token string. |
+| `expectedAudience` | `string` | The required JWT `aud` value for this resource server. |
 
 **Returns**
 
@@ -420,6 +423,15 @@ var orgId = validated.OrganizationId;
 | `UserId` | `string?` | The authenticated user's ID. |
 | `OrganizationId` | `string?` | The organization from the token. |
 | `ClientId` | `string?` | The client application ID. |
+| `Audience` | `string?` | The JWT audience claim. |
+
+---
+
+### ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync
+
+Validates issuer, signature, lifetime, and session state without validating the JWT `aud` claim. This method is obsolete and is only for diagnostics or token introspection flows that do not authenticate a protected API request.
+
+Resource servers must use `ValidateAccessTokenAsync(rawToken, expectedAudience, cancellationToken)`.
 
 ---
 
@@ -1175,7 +1187,8 @@ public sealed record SqlOSValidatedToken(
     string SessionId,
     string? UserId,
     string? OrganizationId,
-    string? ClientId);
+    string? ClientId,
+    string? Audience);
 ```
 
 ### SqlOSOrganizationOption
