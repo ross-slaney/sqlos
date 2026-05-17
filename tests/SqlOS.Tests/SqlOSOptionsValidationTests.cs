@@ -100,6 +100,20 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenDashboardLoginThrottlingWindowIsNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.Dashboard.LoginThrottling.Window = TimeSpan.Zero;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Dashboard.LoginThrottling.Window must be greater than zero.*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_AllowsValidHeadlessConfiguration()
     {
         var services = new ServiceCollection();

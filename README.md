@@ -47,7 +47,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 - **Auth Admin** — manage organizations, users, clients, OIDC/SAML connections, security settings, sessions, and audit events
 - **FGA Admin** — manage resources, grants, roles, permissions, and test access decisions
-- **Password-Protected** — optional password auth mode for production deployments
+- **Password-Protected** — optional password auth mode with dashboard-specific throttling
 
 ## Quick Start
 
@@ -107,6 +107,10 @@ Protect the dashboard in production with a password:
 ```csharp
 options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
 options.Dashboard.Password = builder.Configuration["SqlOS:Dashboard:Password"];
+options.Dashboard.LoginThrottling.MaxFailuresPerIp = 5;
+options.Dashboard.LoginThrottling.MaxGlobalFailures = 25;
+options.Dashboard.LoginThrottling.Window = TimeSpan.FromMinutes(5);
+options.Dashboard.LoginThrottling.LockoutDuration = TimeSpan.FromMinutes(5);
 ```
 
 Or via environment variables:
@@ -115,6 +119,8 @@ Or via environment variables:
 SqlOS__Dashboard__AuthMode=Password
 SqlOS__Dashboard__Password=<strong-password>
 ```
+
+`/sqlos` and `/sqlos/admin` are administrative surfaces. Do not expose them directly to the public internet unless they are behind HTTPS, trusted reverse-proxy or edge rate limiting, and a stronger admin access strategy such as a private network, VPN, identity-aware proxy, or admin SSO/MFA. The built-in password mode includes per-IP throttling, global backoff, temporary lockout, and audit events for login, lockout, rate-limit rejection, and logout, but it should not be the only control for a public admin endpoint.
 
 ## Email OTP with Azure Communication Services
 

@@ -31,5 +31,15 @@ public sealed class SqlOSDashboardOptions
     public SqlOSDashboardAuthMode AuthMode { get; set; } = SqlOSDashboardAuthMode.DevelopmentOnly;
     public string? Password { get; set; }
     public TimeSpan SessionLifetime { get; set; } = DefaultSessionLifetime;
+    public SqlOSDashboardLoginThrottlingOptions LoginThrottling { get; } = new();
     public Func<HttpContext, Task<bool>>? AuthorizationCallback { get; set; }
+}
+
+public sealed class SqlOSDashboardLoginThrottlingOptions
+{
+    public bool Enabled { get; set; } = true;
+    public int MaxFailuresPerIp { get; set; } = 5;
+    public int MaxGlobalFailures { get; set; } = 25;
+    public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(5);
+    public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(5);
 }

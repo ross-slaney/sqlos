@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddDataProtection();
         services.AddHttpClient();
         services.AddSingleton<SqlOSDashboardSessionService>();
+        services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
         services.AddSingleton<SqlOSDynamicClientRegistrationRateLimiter>();
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
