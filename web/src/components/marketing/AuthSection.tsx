@@ -1,8 +1,6 @@
-import Link from "next/link";
 import AuthPageViz from "@/components/AuthPageViz";
 import ProductScreenshot from "@/components/ProductScreenshot";
 import { authHighlights } from "@/components/marketing/constants";
-import { ArrowIcon } from "@/components/icons";
 
 export default function AuthSection() {
   return (
