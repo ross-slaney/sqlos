@@ -306,7 +306,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [MCP Resource Indicators and Audience](web/content/docs/authserver/mcp-resource-indicators-and-audience.mdx) — resource-bound tokens and audience validation
 - [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
 - [Google OIDC](https://sqlos.dev/docs/authserver/google-oidc) · [Microsoft OIDC](https://sqlos.dev/docs/authserver/microsoft-oidc) · [Apple OIDC](https://sqlos.dev/docs/authserver/apple-oidc) · [Custom OIDC](https://sqlos.dev/docs/authserver/custom-oidc)
-- [Guides](https://sqlos.dev/docs/guides) — task-oriented walkthroughs
+- [Guides](https://sqlos.dev/docs/guides/index) — task-oriented walkthroughs
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack
 - [Testing](https://sqlos.dev/docs/guides/testing) — test structure and conventions
