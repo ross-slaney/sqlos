@@ -1,0 +1,45 @@
+---
+title: "Set up SAML SSO"
+description: "Configure enterprise SSO for an organization with home realm discovery."
+order: 3
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Enterprise SAML SSO per organization"
+  href="/docs/authserver/saml-sso"
+  actionLabel="SAML reference"
+/>
+
+You'll learn how to create a SAML connection, share metadata with your customer’s IdP, and route users by email domain.
+
+<Callout type="info" title="Prerequisites">
+  - An organization in SqlOS with a **primary email domain** set
+  - IdP metadata (XML) or manual Entity ID / ACS URL from your customer
+</Callout>
+
+## Goal
+
+Users with `@acme.com` email automatically use Acme’s SAML IdP instead of password login.
+
+## Steps
+
+1. Open **`/sqlos/admin/auth/`** → SSO / SAML for the target organization.
+2. Create a **draft** SAML connection. Note the **Entity ID** and **ACS URL** SqlOS generates.
+3. Send those values to the customer’s IT admin (or use the [Admin Portal pattern](/docs/authserver/saml-sso) from your product).
+4. Import the IdP **metadata XML** (or paste certificate and endpoints manually).
+5. Enable the connection and set the org **primary domain** to match user emails (e.g. `acme.com`).
+6. Test with [home realm discovery](/docs/authserver/home-realm-discovery): sign in with `user@acme.com` and confirm redirect to the IdP.
+
+## Expected outcome
+
+- SAML assertion maps to a SqlOS user and org membership
+- Audit log shows SSO sign-in events
+- Non-matching domains still use password, OTP, or social login
+
+## Next steps
+
+- [Organizations](/docs/authserver/organizations)
+- [Entra SSO testing notes](https://github.com/ross-slaney/sqlos/blob/main/docs/ENTRA_SSO.md) (repo supplement)
+- [Troubleshooting SAML errors](/docs/guides/troubleshooting)

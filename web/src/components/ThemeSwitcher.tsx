@@ -19,14 +19,7 @@ type AccentId = (typeof accents)[number]["id"];
 export default function ThemeSwitcher({ className }: { className?: string }) {
   const { resolvedTheme, theme, setTheme } = useTheme();
   const mounted = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
-  const [accent, setAccent] = useState<AccentId>(() => {
-    if (typeof window === "undefined") {
-      return "violet";
-    }
-
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    return isAccentId(saved) ? saved : "violet";
-  });
+  const [accent, setAccent] = useState<AccentId>("violet");
 
   useEffect(() => {
     const mode = resolvedTheme === "dark" ? "dark" : "light";
@@ -37,6 +30,12 @@ export default function ThemeSwitcher({ className }: { className?: string }) {
 
   useEffect(() => {
     if (!mounted) {
+      return;
+    }
+
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (isAccentId(saved) && saved !== accent) {
+      setAccent(saved);
       return;
     }
 

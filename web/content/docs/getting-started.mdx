@@ -1,6 +1,6 @@
 ---
 title: "Getting Started"
-description: "Install SqlOS and run the example stack in five minutes."
+description: "Install SqlOS and run the Todo sample in five minutes."
 order: 0
 ---
 
@@ -10,20 +10,28 @@ order: 0
   href="#install"
   actionLabel="Jump to install"
 >
-  The fastest path is still the same: add the package, register it on your `DbContext`, and map `app.MapSqlOS()`. The difference now is that the docs surface is also showing the same shared EmcyDocs components.
+  Add the package, register SqlOS on your EF Core context, and call `app.MapSqlOS()`. In a few minutes you will have a dashboard, OAuth endpoints, hosted login, and FGA admin screens on your app origin.
 </Banner>
 
-<InlineToc items='[{"href":"#install","label":"Install"},{"href":"#configure-services","label":"Configure services"},{"href":"#set-up-your-dbcontext","label":"Set up your DbContext"},{"href":"#map-routes","label":"Map routes"},{"href":"#run-the-right-sample","label":"Run the right sample"},{"href":"#schema-management","label":"Schema management"}]' />
+<Callout type="info" title="Prerequisites">
+  - **.NET 8+** (the repo samples target .NET 9)
+  - **SQL Server** with a connection string your EF `DbContext` can use
+  - For the Todo sample: run via Aspire AppHost (starts SQL Server in a container) or point at your own instance
+</Callout>
+
+You'll learn how to install SqlOS, wire a minimal host, run the Todo sample, and pick the next doc for your use case.
+
+<InlineToc items='[{"href":"#install","label":"Install"},{"href":"#minimal-host","label":"Minimal host"},{"href":"#set-up-your-dbcontext","label":"DbContext"},{"href":"#map-routes","label":"Map routes"},{"href":"#verify","label":"Verify it works"},{"href":"#run-the-right-sample","label":"Run a sample"},{"href":"#schema-management","label":"Schema"},{"href":"#choose-your-path","label":"Choose your path"}]' />
 
 <Steps>
   <Step title="Install the package">
-    Add `SqlOS` to your app and keep your auth plus authorization runtime inside the same ASP.NET process.
+    Add `SqlOS` to your ASP.NET app.
   </Step>
-  <Step title="Register the DbContext integration">
-    Point SqlOS at your EF Core context so it can wire auth and FGA tables into the host application.
+  <Step title="Register on your DbContext">
+    Implement the SqlOS interfaces and call `AddSqlOS` during host setup.
   </Step>
-  <Step title="Map the routes">
-    Expose the dashboard, OAuth/OIDC endpoints, hosted auth UI, and FGA admin screens through `app.MapSqlOS()`.
+  <Step title="Map routes and verify">
+    Call `MapSqlOS()`, start the app, and open the admin dashboard.
   </Step>
 </Steps>
 
@@ -33,19 +41,33 @@ order: 0
 dotnet add package SqlOS
 ```
 
-## Configure services
+## Minimal host
 
-Register SqlOS on your `DbContext`:
+A complete minimal `Program.cs` for an owned web app with hosted auth:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>();
-```
+using Microsoft.EntityFrameworkCore;
+using SqlOS.Extensions;
 
-<Files title="Minimal host setup">
-  <File name="Program.cs" meta="service registration + route mapping" />
-  <File name="AppDbContext.cs" meta="auth + FGA interfaces" />
-  <File name="appsettings.json" meta="dashboard auth settings" />
-</Files>
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.Issuer = "https://localhost:5001/sqlos/auth";
+    options.AuthServer.PublicOrigin = "https://localhost:5001";
+    options.AuthServer.SeedOwnedWebApp(
+        "web",
+        "My Application",
+        "https://localhost:5001/auth/callback");
+});
+
+var app = builder.Build();
+app.MapSqlOS();
+app.Run();
+```
 
 ## Set up your DbContext
 
@@ -69,6 +91,22 @@ public sealed class AppDbContext : DbContext,
         base.OnModelCreating(modelBuilder);
         modelBuilder.UseSqlOS(GetType());
     }
+}
+```
+
+`appsettings.json` needs a SQL Server connection string and optional dashboard password:
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=SqlOSApp;Trusted_Connection=True;TrustServerCertificate=True"
+  },
+  "SqlOS": {
+    "Dashboard": {
+      "AuthMode": "Password",
+      "Password": "change-me-in-production"
+    }
+  }
 }
 ```
 
@@ -102,28 +140,13 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-That is the default story for most teams: an owned app, hosted auth, and a seeded client.
+## Verify it works
 
-Next steps for production auth:
+1. Start your app and open **`/sqlos/admin/auth/`** (or `/sqlos` for the main dashboard).
+2. Sign in with the dashboard password from `appsettings.json` when `AuthMode` is `Password`.
+3. Confirm you can browse organizations, users, and clients.
 
-- [Email OTP](/docs/authserver/email-otp) for passwordless sign in/sign up.
-- [Email Invitations](/docs/authserver/invitations) for organization onboarding.
-- [Email Branding](/docs/authserver/email-branding) for built-in auth email templates.
-
-## Protect the dashboard
-
-Set a dashboard password in `appsettings.json`:
-
-```json
-{
-  "SqlOS": {
-    "Dashboard": {
-      "AuthMode": "Password",
-      "Password": "your-strong-password"
-    }
-  }
-}
-```
+![SqlOS dashboard home](/docs/dashboard-home.png)
 
 ## Run the right sample
 
@@ -134,28 +157,28 @@ Set a dashboard password in `appsettings.json`:
   </TabsList>
 
   <TabsContent value="todo">
-    If your first goal is hosted auth, simple FGA, and public-client onboarding, start with the Todo sample:
+    Fastest path — hosted auth, simple FGA, and client onboarding:
 
     ```bash
     dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
     ```
 
-    That sample focuses on:
+    The AppHost starts SQL Server and the Todo API. Open the URL shown in the console, then `/sqlos/admin/auth/`.
+
+    The Todo sample covers:
 
     - hosted auth first
     - per-user tenant + todo resource hierarchy
-    - SQL-backed FGA filtering and simple auth checks
-    - headless follow-on
-    - protected-resource metadata
-    - preregistration, `CIMD`, and optional `DCR`
+    - SQL-backed FGA filtering
+    - optional headless, CIMD, and DCR flows
   </TabsContent>
 
   <TabsContent value="example">
-    The repo also includes a larger example with API, Next.js frontend, Angular frontend, and Expo mobile app:
+    Full stack with API, Next.js, Angular, and Expo:
 
     ```bash
     cd examples/SqlOS.Example.Web && npm install
-    cd /path/to/SqlOS
+    cd ../..
     dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
     ```
 
@@ -176,9 +199,23 @@ Set a dashboard password in `appsettings.json`:
 
 If you migrate **before** the app has started SqlOS once, call `SqlOSBootstrapper.InitializeAsync()` first. The example API shows that pattern when your tables reference SqlOS.
 
+## Choose your path
+
+<CardGrid cols={2}>
+  <Card title="Hosted auth UI" description="Branded login, dashboard, and OAuth flows out of the box." href="/docs/authserver/overview" />
+  <Card title="Headless / SPA" description="Build your own UI on the same OAuth and session APIs." href="/docs/authserver/headless-auth" />
+  <Card title="FGA basics" description="Model resources, grants, and EF Core query filters." href="/docs/fga/overview" />
+  <Card title="API reference" description="Endpoint and method reference when you need a specific contract." href="/docs/reference/api-reference" />
+</CardGrid>
+
+### Deep dives
+
+- [The Developer's Guide to Hierarchical RBAC](/blog/developers-guide-to-hierarchical-rbac)
+- [Headless auth patterns](/blog/headless-auth-with-sqlos)
+- [Guides](/docs/guides) — task-oriented walkthroughs
+
 ## Next steps
 
-- [AuthServer Overview](/docs/authserver/overview) -- identity, sessions, and auth flows
-- [Todo Sample](/docs/authserver/todo-sample) -- hosted auth, simple FGA, and MCP-oriented flows
-- [FGA Overview](/docs/fga/overview) -- hierarchical authorization and query filtering
-- [SDK Reference](/docs/reference/sdk-reference) -- all services and methods
+- [AuthServer Overview](/docs/authserver/overview) — identity, sessions, and auth flows
+- [Todo Sample](/docs/authserver/todo-sample) — hosted auth and FGA in one sample
+- [Configuration](/docs/guides/configuration) — service registration and dashboard setup

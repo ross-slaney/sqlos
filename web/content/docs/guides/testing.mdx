@@ -1,0 +1,59 @@
+---
+title: "Testing"
+description: "Run unit tests, integration tests, and docs checks in the SqlOS repo."
+order: 7
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Test SqlOS locally and in CI"
+  href="https://github.com/ross-slaney/sqlos"
+  actionLabel="View on GitHub"
+/>
+
+You'll learn how to run the full test suite and focused filters while developing auth or FGA features.
+
+## Test layout
+
+- `tests/SqlOS.Tests` — unit tests
+- `tests/SqlOS.IntegrationTests` — real SQL Server (Aspire container)
+- `examples/SqlOS.Example.IntegrationTests` — example API flows
+- `examples/SqlOS.Todo.IntegrationTests` — Todo sample flows
+- `tests/SqlOS.Benchmarks` — performance benchmarks
+
+## Run everything
+
+```bash
+dotnet build SqlOS.sln
+./scripts/unit-tests.sh
+./scripts/integration-tests.sh
+./scripts/docs-check.sh
+```
+
+`docs-check.sh` runs the website lint, production build, and link validation across repo and site docs.
+
+## Integration coverage
+
+Integration tests use Aspire and SQL Server containers for:
+
+- Auth and FGA schema bootstrap
+- OAuth, OTP, and invitation flows
+- Client registration and resource indicators
+- FGA checks and EF query composition
+- Example and Todo sample end-to-end paths
+
+## Focused runs
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter SqlOSInvitationServiceTests
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter RequestEmailOtpSignupAsync
+```
+
+Coverage settings live in `tests/coverlet.runsettings`.
+
+## Next steps
+
+- [Getting Started](/docs/getting-started)
+- [Troubleshooting](/docs/guides/troubleshooting)
+- [Contributing](https://github.com/ross-slaney/sqlos/blob/main/CONTRIBUTING.md)

@@ -1,20 +1,56 @@
 ---
 title: "Google OIDC"
 description: "Configure Google OAuth for SqlOS AuthServer."
-order: 5.3
+order: 15
 section: authserver
 ---
 
-## Setup
+<Banner
+  eyebrow="Provider"
+  title="Sign in with Google"
+  href="/docs/guides/social-oidc"
+  actionLabel="Social OIDC guide"
+/>
 
-1. Create an OAuth 2.0 Client ID in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Set **Authorized redirect URI** to your callback URL:
+You'll learn how to register redirect URIs in Google Cloud and create the connection in SqlOS.
 
+## Redirect URI
+
+The callback path is connection-specific:
+
+```text
+https://your-app.example.com/sqlos/admin/auth/api/oidc/callback/{connectionId}
 ```
+
+For local development with the example API:
+
+```text
 http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
 ```
 
-3. Create the OIDC connection in SqlOS:
+Create the OIDC connection in SqlOS first, then copy the final callback URI (with `connectionId`) into Google Cloud.
+
+## Google Cloud setup
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+2. Create or select a project and configure the OAuth consent screen.
+3. Create an **OAuth client ID** (Web application).
+4. Add the SqlOS callback URI from the dashboard.
+5. Copy the **client ID** and **client secret**.
+
+## SqlOS dashboard setup
+
+1. Open **`/sqlos/admin/auth/oidc`** on your running app.
+2. Create a connection:
+   - Provider: **Google**
+   - Display name: shown on the login button
+   - Client ID and client secret from Google
+3. Save, then update Google’s redirect URIs with the exact callback shown for that connection id.
+4. **Enable** the connection.
+
+Default scopes when left empty: `openid`, `email`, `profile`.
+
+## API setup (optional)
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
@@ -22,17 +58,35 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
   -d '{
     "providerType": "google",
     "displayName": "Google",
-    "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
-    "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET"
+    "clientId": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "clientSecret": "YOUR_CLIENT_SECRET"
   }'
 ```
-
-4. Enable the connection:
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
 ```
 
-5. Update the redirect URI in Google Console with the actual `connectionId`.
+## Test
 
-See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
+1. Open your app login or `/sqlos/auth/login`.
+2. Enter an email and choose **Continue with Google**.
+3. Complete Google sign-in and confirm your app receives tokens.
+
+## Common failures
+
+| Error | Fix |
+| --- | --- |
+| `redirect_uri_mismatch` | Google Console must list the exact SqlOS callback URL |
+| Callback not allowed in SqlOS | Update the connection’s allowed callback list |
+| Unverified email | Google must return a verified email for linking |
+
+<Callout type="tip" title="Home realm discovery">
+  If the email domain matches an org SAML connection, SqlOS starts SSO instead of Google. See [Home realm discovery](/docs/authserver/home-realm-discovery).
+</Callout>
+
+## Next steps
+
+- [OIDC overview](/docs/authserver/oidc-auth)
+- [Microsoft OIDC](/docs/authserver/microsoft-oidc)
+- [Troubleshooting](/docs/guides/troubleshooting)

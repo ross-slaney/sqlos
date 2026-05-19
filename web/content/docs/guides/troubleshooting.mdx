@@ -1,0 +1,75 @@
+---
+title: "Troubleshooting"
+description: "Fix common SqlOS setup, OAuth, SAML, and database issues."
+order: 8
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Common errors and how to fix them"
+  href="../getting-started"
+  actionLabel="Getting Started"
+/>
+
+You'll learn how to diagnose connection, OAuth callback, SAML, and migration problems quickly.
+
+## SQL Server connection
+
+**Symptom:** App fails at startup with connection string errors.
+
+- Confirm `ConnectionStrings:DefaultConnection` is set for your host and sample.
+- For Todo AppHost, wait for the SQL container to become healthy before hitting the API.
+- Use `TrustServerCertificate=True` for local dev containers if needed.
+
+## SqlOS tables missing
+
+**Symptom:** EF or raw SQL errors referencing `SqlOS_*` tables.
+
+- Ensure `app.MapSqlOS()` runs and the app has started at least once.
+- If your migrations run first, call `SqlOSBootstrapper.InitializeAsync()` before migrating (see [Configuration](/docs/guides/configuration#schema-ownership)).
+
+## OAuth redirect / callback mismatch
+
+**Symptom:** `redirect_uri_mismatch` or `invalid_redirect_uri`.
+
+- Registered redirect URI must **exactly** match the request (scheme, host, port, path).
+- For OIDC social login, update both the IdP console **and** the SqlOS connection’s allowed callbacks after you know the `connectionId`.
+
+## Dashboard login
+
+**Symptom:** Cannot access `/sqlos/admin/auth/`.
+
+- Check `SqlOS:Dashboard:AuthMode` and `Password` in `appsettings.json`.
+- After repeated failures, dashboard throttling may return `429` — wait for the lockout window.
+
+## SAML
+
+**Symptom:** SAML login fails or loops.
+
+- Verify Entity ID and ACS URL match what the IdP expects.
+- Confirm org **primary domain** matches user email for [home realm discovery](/docs/authserver/home-realm-discovery).
+- Rotate IdP signing certificates in the dashboard when the IdP rolls keys.
+- Compare clock skew if assertions are rejected as expired.
+
+**Symptom:** Users expected SSO but see password login.
+
+- Domain on the org must match the email entered at login.
+- SAML connection must be **enabled**, not draft-only.
+
+## FGA filters return empty lists
+
+- Confirm resources were created for domain rows and grants exist for the subject.
+- Permission key in code must match seeded permission keys exactly.
+- Use the access tester in `/sqlos/admin/fga/` to reproduce the check.
+
+## Still stuck?
+
+- Search [GitHub issues](https://github.com/ross-slaney/sqlos/issues)
+- Compare with the [Todo sample](/docs/authserver/todo-sample) which exercises most flows
+
+## Next steps
+
+- [Social OIDC](/docs/guides/social-oidc)
+- [SAML SSO guide](/docs/guides/saml-sso)
+- [AuthServer API reference](/docs/reference/authserver-api)

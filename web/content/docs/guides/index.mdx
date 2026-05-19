@@ -1,0 +1,34 @@
+---
+title: "Guides"
+description: "Task-oriented walkthroughs for auth, SSO, FGA, and operations."
+order: 0
+section: guides
+---
+
+<Banner
+  eyebrow="Guides"
+  title="Step-by-step tasks for shipping SqlOS in production"
+  href="../getting-started"
+  actionLabel="Start with Getting Started"
+>
+  Each guide has a clear goal, prerequisites, and next steps. Use these before diving into the full API reference.
+</Banner>
+
+You'll learn which guide to pick for your next integration task.
+
+<CardGrid cols={2}>
+  <Card title="Password login" description="Add hosted password auth to an existing ASP.NET app." href="/docs/guides/password-login" />
+  <Card title="Google & Microsoft sign-in" description="Configure social OIDC from the dashboard." href="/docs/guides/social-oidc" />
+  <Card title="SAML SSO for an org" description="Enterprise SSO with Entra or any SAML IdP." href="/docs/guides/saml-sso" />
+  <Card title="Model FGA" description="Design a multi-tenant resource hierarchy." href="/docs/guides/model-fga" />
+  <Card title="Filter EF queries" description="Authorization as a LINQ WHERE clause." href="/docs/guides/ef-query-filters" />
+  <Card title="Configuration" description="Service registration, dashboard, and client modes." href="/docs/guides/configuration" />
+  <Card title="Testing" description="Run unit, integration, and docs checks locally." href="/docs/guides/testing" />
+  <Card title="Troubleshooting" description="Common setup failures and how to fix them." href="/docs/guides/troubleshooting" />
+</CardGrid>
+
+## Deep dives (blog)
+
+- [The Developer's Guide to Hierarchical RBAC](/blog/developers-guide-to-hierarchical-rbac)
+- [Headless auth with SqlOS](/blog/headless-auth-with-sqlos)
+- [MCP resource indicators](/blog/mcp-resource-indicators-and-audience)

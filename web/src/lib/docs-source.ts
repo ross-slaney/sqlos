@@ -9,9 +9,10 @@ export const docsSource = createDocsSource({
   titleSuffix: "SqlOS Docs",
   sectionLabels: {
     "": "Getting Started",
+    guides: "Guides",
     authserver: "AuthServer",
     fga: "Fine-Grained Auth",
     reference: "Reference",
   },
-  sectionOrder: ["", "authserver", "fga", "reference"],
+  sectionOrder: ["", "guides", "authserver", "fga", "reference"],
 });

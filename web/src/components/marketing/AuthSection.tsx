@@ -1,0 +1,57 @@
+import Link from "next/link";
+import AuthPageViz from "@/components/AuthPageViz";
+import ProductScreenshot from "@/components/ProductScreenshot";
+import { authHighlights } from "@/components/marketing/constants";
+import { ArrowIcon } from "@/components/icons";
+
+export default function AuthSection() {
+  return (
+    <section className="border-t px-6 py-20 sm:py-24">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
+          <div>
+            <SectionEyebrow>Authentication</SectionEyebrow>
+            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
+              From first user to enterprise SSO
+            </h2>
+            <p className="mt-5 text-base leading-7 text-muted-foreground">
+              SqlOS ships a brandable login page backed by a real OAuth 2.0 server in your ASP.NET pipeline.
+              Start with password auth, add social login from the dashboard, and enable SAML SSO when your
+              customers need it — no rewrites between stages.
+            </p>
+            <div className="mt-7 space-y-5">
+              {authHighlights.map((item) => (
+                <Detail key={item.title} title={item.title} body={item.body} />
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-6 lg:mt-8">
+            <ProductScreenshot
+              src="/docs/auth-signin-page.png"
+              alt="SqlOS hosted sign-in page"
+            />
+            <AuthPageViz />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SectionEyebrow({ children }: { children: string }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+function Detail({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-xl border bg-card/60 p-4 shadow-sm">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{body}</p>
+    </div>
+  );
+}

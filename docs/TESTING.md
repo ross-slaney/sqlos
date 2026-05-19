@@ -1,55 +1,7 @@
 # Testing
 
-The repo now has one shared test tree:
+This guide moved to the docs site:
 
-- `tests/SqlOS.Tests`
-- `tests/SqlOS.IntegrationTests`
-- `tests/SqlOS.IntegrationTests.AppHost`
-- `examples/SqlOS.Example.Tests`
-- `examples/SqlOS.Example.IntegrationTests`
-- `examples/SqlOS.Todo.IntegrationTests`
-- `tests/SqlOS.Benchmarks`
+**https://sqlos.dev/docs/guides/testing**
 
-## Run Everything
-
-```bash
-dotnet build SqlOS.sln
-./scripts/unit-tests.sh
-./scripts/integration-tests.sh
-./scripts/docs-check.sh
-```
-
-## Real SQL Coverage
-
-Integration tests use Aspire and a real SQL Server container.
-
-They cover:
-- auth schema bootstrap
-- FGA schema bootstrap and TVF registration
-- auth flows
-- Email OTP and invitation service flows
-- client registration and resource binding
-- FGA checks and query composition
-- shared example API and web flows
-- Todo sample hosted/headless/prereg/CIMD/DCR flows
-
-## Docs Checks
-
-`./scripts/docs-check.sh` runs:
-
-- website lint
-- website production build
-- local markdown and MDX link validation across repo docs
-
-## Focused Auth Tests
-
-Useful filters while working on auth features:
-
-```bash
-dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter SqlOSInvitationServiceTests
-dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter RequestEmailOtpSignupAsync
-```
-
-## Coverage Settings
-
-Coverage filters live in `tests/coverlet.runsettings`.
+Canonical source: [`web/content/docs/guides/testing.mdx`](../web/content/docs/guides/testing.mdx)
