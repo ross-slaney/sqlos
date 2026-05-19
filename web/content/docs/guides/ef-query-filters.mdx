@@ -1,0 +1,59 @@
+---
+title: "Filter EF queries with FGA"
+description: "Apply authorization filters in LINQ so access checks run in SQL."
+order: 5
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Authorization as a WHERE clause"
+  href="/docs/fga/list-filter"
+  actionLabel="List filtering reference"
+/>
+
+You'll learn how to build an FGA filter and apply it in EF Core queries for list and detail endpoints.
+
+<Callout type="info" title="Prerequisites">
+  - FGA model seeded and resources created for your data
+  - `ISqlOSFgaAuthService` available in your API
+</Callout>
+
+## Goal
+
+List endpoints return only rows the current subject may read — in one SQL round-trip.
+
+## Steps
+
+1. **Inject** `ISqlOSFgaAuthService` in your endpoint or service.
+
+2. **Build a filter** for the entity type:
+
+```csharp
+var filter = await fgaAuth.GetAuthorizationFilterAsync<Project>(
+    subjectId: userId,
+    permissionKey: "project.read");
+
+var projects = await db.Projects
+    .Where(filter)
+    .Where(p => p.IsActive)
+    .OrderBy(p => p.Name)
+    .Take(20)
+    .ToListAsync();
+```
+
+3. **Point checks** for single-resource actions use `CheckAccessAsync` (see [Checking a permission](/docs/fga/checking-a-permission)).
+
+4. **Verify** with the access tester in `/sqlos/admin/fga/`.
+
+## Expected outcome
+
+- LINQ translates to SQL with the FGA TVF in the plan
+- Pagination and sorting stay in the database
+- No N+1 calls to an external policy engine
+
+## Next steps
+
+- [List filtering](/docs/fga/list-filter) — pagination and `PagedSpec`
+- [Syncing auth to FGA](/docs/fga/syncing-auth-to-fga)
+- [SDK reference](/docs/reference/sdk-reference)

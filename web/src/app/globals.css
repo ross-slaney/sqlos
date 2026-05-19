@@ -27,8 +27,10 @@
   --font-mono: var(--font-mono-ui), ui-monospace, monospace;
 }
 
-:root {
+:root,
+html[data-theme="violet"] {
   --radius: 0.625rem;
+  --theme-hue: 270;
 
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
@@ -36,41 +38,89 @@
   --card-foreground: 240 10% 3.9%;
   --popover: 0 0% 100%;
   --popover-foreground: 240 10% 3.9%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
+  --primary: 270 74% 42%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 24% 97%;
+  --secondary-foreground: 240 18% 10%;
   --muted: 240 4.8% 95.9%;
   --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
+  --accent: 270 96% 95%;
+  --accent-foreground: 270 66% 26%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
+  --ring: 270 82% 50%;
+  --shadow-color: hsl(240 15% 10% / 0.14);
 }
 
-.dark {
+html[data-theme="blue"] {
+  --theme-hue: 217;
+  --primary: 217 74% 42%;
+  --accent: 217 96% 95%;
+  --accent-foreground: 217 66% 26%;
+  --ring: 217 82% 50%;
+}
+
+html[data-theme="teal"] {
+  --theme-hue: 172;
+  --primary: 172 74% 36%;
+  --accent: 172 96% 94%;
+  --accent-foreground: 172 66% 22%;
+  --ring: 172 82% 42%;
+}
+
+html[data-theme="amber"] {
+  --theme-hue: 32;
+  --primary: 32 74% 42%;
+  --accent: 32 96% 94%;
+  --accent-foreground: 32 66% 24%;
+  --ring: 32 82% 50%;
+}
+
+.dark,
+html.dark[data-theme="violet"] {
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
   --card: 240 10% 3.9%;
   --card-foreground: 0 0% 98%;
   --popover: 240 10% 3.9%;
   --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
+  --primary: 270 74% 58%;
+  --primary-foreground: 0 0% 100%;
   --secondary: 240 3.7% 15.9%;
   --secondary-foreground: 0 0% 98%;
   --muted: 240 3.7% 15.9%;
   --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
+  --accent: 270 40% 18%;
+  --accent-foreground: 270 80% 88%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
+  --ring: 270 82% 62%;
+  --shadow-color: hsl(0 0% 0% / 0.45);
+}
+
+html.dark[data-theme="blue"] {
+  --primary: 217 74% 58%;
+  --accent: 217 40% 18%;
+  --accent-foreground: 217 80% 88%;
+  --ring: 217 82% 62%;
+}
+
+html.dark[data-theme="teal"] {
+  --primary: 172 74% 48%;
+  --accent: 172 40% 16%;
+  --accent-foreground: 172 80% 88%;
+  --ring: 172 82% 52%;
+}
+
+html.dark[data-theme="amber"] {
+  --primary: 32 74% 54%;
+  --accent: 32 40% 16%;
+  --accent-foreground: 32 80% 88%;
+  --ring: 32 82% 58%;
 }
 
 * {

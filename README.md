@@ -51,6 +51,8 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ## Quick Start
 
+Full walkthrough: **[sqlos.dev/docs/getting-started](https://sqlos.dev/docs/getting-started)**
+
 1. **Add the package**
 
    ```bash
@@ -292,7 +294,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 ## Documentation
 
-- [Configuration](docs/CONFIGURATION.md) — service registration, EF integration, dashboard setup
+- [Configuration](https://sqlos.dev/docs/guides/configuration) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
 - [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
 - [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
@@ -303,10 +305,11 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Dynamic Client Registration](web/content/docs/authserver/dynamic-client-registration.mdx) — compatibility-mode runtime registration
 - [MCP Resource Indicators and Audience](web/content/docs/authserver/mcp-resource-indicators-and-audience.mdx) — resource-bound tokens and audience validation
 - [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
-- [Google OIDC](docs/GOOGLE_OIDC.md) · [Microsoft OIDC](docs/MICROSOFT_OIDC.md) · [Apple OIDC](docs/APPLE_OIDC.md) · [Custom OIDC](docs/CUSTOM_OIDC.md)
+- [Google OIDC](https://sqlos.dev/docs/authserver/google-oidc) · [Microsoft OIDC](https://sqlos.dev/docs/authserver/microsoft-oidc) · [Apple OIDC](https://sqlos.dev/docs/authserver/apple-oidc) · [Custom OIDC](https://sqlos.dev/docs/authserver/custom-oidc)
+- [Guides](https://sqlos.dev/docs/guides/index) — task-oriented walkthroughs
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack
-- [Testing](docs/TESTING.md) — test structure and conventions
+- [Testing](https://sqlos.dev/docs/guides/testing) — test structure and conventions
 - [Releasing](docs/RELEASE_VERSION.md) — versioning and release process
 
 ## Testing Email OTP in the Todo Sample

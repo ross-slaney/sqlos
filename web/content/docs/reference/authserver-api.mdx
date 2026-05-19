@@ -5,7 +5,26 @@ order: 11
 section: reference
 ---
 
+<Banner
+  eyebrow="Reference"
+  title="Method-level API for AuthServer"
+  href="../getting-started"
+  actionLabel="Start with Getting Started"
+>
+  New to SqlOS? Complete [Getting Started](/docs/getting-started) and the [Guides](/docs/guides/index) first. Use this page when you need the exact signature for a specific service method.
+</Banner>
+
 Complete reference for every public method in the AuthServer module.
+
+## Common flows
+
+| Task | Start here |
+| --- | --- |
+| Login / signup | `SqlOSAuthService` — password and Email OTP sections below |
+| Token validation | `ValidateAccessTokenAsync` |
+| Admin CRUD | `SqlOSAdminService` |
+| OIDC social | `SqlOSOidcAuthService` |
+| SAML SSO | `SqlOSSsoAuthorizationService` |
 
 ## SqlOSAuthService
 

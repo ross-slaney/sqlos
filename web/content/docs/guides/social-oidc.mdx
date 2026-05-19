@@ -1,0 +1,59 @@
+---
+title: "Google and Microsoft sign-in"
+description: "Configure social OIDC providers from the SqlOS dashboard."
+order: 2
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Add Google or Microsoft social login"
+  href="/docs/authserver/google-oidc"
+  actionLabel="Google OIDC reference"
+/>
+
+You'll learn how to register redirect URIs, create an OIDC connection in SqlOS, and test the hosted login flow.
+
+<Callout type="info" title="Prerequisites">
+  - SqlOS running with [password login](/docs/guides/password-login) or another primary flow
+  - Admin access to `/sqlos/admin/auth/`
+</Callout>
+
+## Goal
+
+Users click **Continue with Google** or **Continue with Microsoft** on the hosted AuthPage.
+
+## Google
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth **Web application** client.
+2. Open **`/sqlos/admin/auth/oidc`** in your running app.
+3. Create a connection with provider **Google**, your client ID and secret.
+4. Copy the **callback URI** SqlOS shows (includes your connection id) and add it to Google’s authorized redirect URIs.
+5. Enable the connection in the dashboard.
+
+See [Google OIDC](/docs/authserver/google-oidc) for curl-based setup and failure modes.
+
+## Microsoft
+
+1. Register an app in [Microsoft Entra](https://entra.microsoft.com/) (App registrations).
+2. Add a redirect URI matching SqlOS (same pattern as Google).
+3. Create the connection in **`/sqlos/admin/auth/oidc`** with provider **Microsoft**.
+4. Enable the connection.
+
+See [Microsoft OIDC](/docs/authserver/microsoft-oidc).
+
+## Test
+
+1. Open your app’s login entry point (or `/sqlos/auth/login`).
+2. Enter an email and choose the social provider.
+3. Complete the IdP flow and confirm you land back in your app with a valid session.
+
+<Callout type="tip" title="Home realm discovery">
+  If the email domain matches an org SAML connection, SqlOS routes to SSO instead of social login. See [Home realm discovery](/docs/authserver/home-realm-discovery).
+</Callout>
+
+## Next steps
+
+- [SAML SSO for an org](/docs/guides/saml-sso)
+- [OIDC overview](/docs/authserver/oidc-auth)
+- [Troubleshooting](/docs/guides/troubleshooting)

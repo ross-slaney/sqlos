@@ -1,0 +1,117 @@
+---
+title: "Configuration"
+description: "Service registration, EF integration, dashboard setup, and client onboarding modes."
+order: 6
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Configure SqlOS on your ASP.NET host"
+  href="../getting-started"
+  actionLabel="Getting Started"
+/>
+
+You'll learn the three integration points: host registration, EF model registration, and route mapping.
+
+## Wire SqlOS in three places
+
+1. **Host registration** — `builder.AddSqlOS<AppDbContext>(...)`
+2. **EF model** — `modelBuilder.UseSqlOS(GetType())` in `OnModelCreating`
+3. **Routes** — `app.MapSqlOS()` after `Build()`
+
+## Minimal owned-app setup
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+    options.AuthServer.PublicOrigin = "https://app.example.com";
+
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.PageTitle = "Sign in";
+        page.PageSubtitle = "Secure your owned app first.";
+    });
+
+    options.AuthServer.SeedOwnedWebApp(
+        "web",
+        "Main Web App",
+        "https://app.example.com/auth/callback");
+});
+```
+
+## FGA seeding
+
+Keep auth and FGA seeding in the same `AddSqlOS` call:
+
+```csharp
+options.Fga.Seed(seed =>
+{
+    seed.ResourceType("workspace", "Workspace");
+    seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
+    seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
+    seed.RolePermission("workspace_admin", "workspace.view");
+});
+```
+
+## Client onboarding modes
+
+| Mode | When to use |
+| --- | --- |
+| **Owned app** | Seeded or dashboard client; hosted or headless UI |
+| **Portable MCP (`CIMD`)** | Public clients discovered via metadata URL |
+| **DCR** | Compatibility clients that must register at runtime |
+
+```csharp
+options.AuthServer.EnablePortableMcpClients(registration =>
+{
+    registration.Cimd.TrustedHosts.Add("clients.example.com");
+});
+```
+
+## Email OTP and invitations
+
+```csharp
+options.AuthServer.ConfigureEmailOtp(email =>
+{
+    email.AzureCommunicationServicesConnectionString =
+        builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+    email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+    email.ApplicationName = "My App";
+});
+```
+
+## Dashboard password
+
+```json
+{
+  "SqlOS": {
+    "Dashboard": {
+      "AuthMode": "Password",
+      "Password": "your-strong-password"
+    }
+  }
+}
+```
+
+Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict network access in production.
+
+## Schema ownership
+
+SqlOS runs its own SQL scripts on startup. Your EF migrations **do not** own SqlOS tables. If you need SqlOS tables before your migrations, call `SqlOSBootstrapper.InitializeAsync()` once first.
+
+## Dashboard paths
+
+| Path | Purpose |
+| --- | --- |
+| `/sqlos` | Dashboard shell |
+| `/sqlos/admin/auth` | Auth admin UI |
+| `/sqlos/admin/fga` | FGA admin UI |
+| `/sqlos/auth/*` | OAuth and hosted AuthPage |
+
+## Next steps
+
+- [Hosted vs headless](/docs/authserver/hosted-vs-headless)
+- [Testing](/docs/guides/testing)
+- [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)

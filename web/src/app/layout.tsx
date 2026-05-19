@@ -27,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-theme="violet">
       <body className={`${manrope.variable} ${ibmPlexMono.variable} antialiased`}>
         <ThemeProvider>{children}</ThemeProvider>
       </body>

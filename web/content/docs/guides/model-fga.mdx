@@ -1,0 +1,59 @@
+---
+title: "Model FGA for multi-tenant apps"
+description: "Design resource types, roles, and a hierarchy that matches your product."
+order: 4
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Model authorization as a resource tree"
+  href="/docs/fga/overview"
+  actionLabel="FGA overview"
+/>
+
+You'll learn how to define resource types, permissions, roles, and grants for a typical multi-tenant app.
+
+<Callout type="info" title="Prerequisites">
+  - `ISqlOSFgaDbContext` on your `DbContext`
+  - [Getting Started](/docs/getting-started) FGA section complete
+</Callout>
+
+## Goal
+
+Tenants own workspaces; workspaces contain projects; roles granted at the workspace level inherit to projects.
+
+## Steps
+
+1. **Seed the FGA model** at startup:
+
+```csharp
+options.Fga.Seed(seed =>
+{
+    seed.ResourceType("workspace", "Workspace");
+    seed.ResourceType("project", "Project");
+    seed.Permission("perm_project_read", "project.read", "Read project", "project");
+    seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
+    seed.RolePermission("workspace_admin", "project.read");
+});
+```
+
+2. **Create resource instances** when your app creates domain rows (see [Creating resources](/docs/fga/creating-resources)).
+
+3. **Assign grants** at the right node — a grant on a workspace applies to descendant projects automatically.
+
+4. **Open `/sqlos/admin/fga/`** to inspect the tree, grants, and access tester.
+
+The retail example in `examples/SqlOS.Example.Api` (`FgaRetail`) shows chain → store → inventory hierarchies.
+
+## Expected outcome
+
+- Resource tree visible in the FGA dashboard
+- Role assignments inherit down the hierarchy
+- No per-row role explosion in application code
+
+## Next steps
+
+- [Filter EF queries](/docs/guides/ef-query-filters)
+- [Resource hierarchy](/docs/fga/resource-hierarchy)
+- [The Developer's Guide to Hierarchical RBAC](/blog/developers-guide-to-hierarchical-rbac)
