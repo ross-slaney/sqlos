@@ -84,9 +84,7 @@
 % ---- Title ----
 \title{Database-Native Authorization for Human and Autonomous Principals: The SHRBAC Model}
 
-% ---- Double-blind: anonymous authors ----
-\author{\IEEEauthorblockN{Anonymous Author(s)}
-\IEEEauthorblockA{Removed for double-blind review}}
+\author{\IEEEauthorblockN{Ross Slaney}}
 
 \maketitle
 
@@ -94,11 +92,11 @@
 % ABSTRACT
 % ===========================================================================
 \begin{abstract}
-Enterprise applications must answer two authorization questions: ``can this principal act on this resource?'' (point check) and ``which resources can this principal access, filtered, sorted, and paginated?'' (list filtering). Point checks are boolean decisions with well-understood evaluation strategies. List filtering is fundamentally harder: it requires composing authorization decisions with application-defined filtering, sorting, and pagination into a single efficient query---and when authorization logic resides outside the database, an impedance mismatch arises. We present SHRBAC (Scoped Hierarchical Role-Based Access Control), a formal authorization model whose structural constraints---tree-structured resources, flat roles, polymorphic principals including autonomous agents---guarantee that enforcement is a composable database predicate with bounded cost---concretely, a parameterized inline Table-Valued Function (TVF) that the optimizer folds into the execution plan. The model enforces the principle of least privilege through grants scoped by resource subtree, role, and time window, enabling both human users and AI agents to operate with minimum necessary authority. We formalize the model, prove soundness and completeness of the TVF enforcement, and show that under cursor pagination, per-page cost is $O(k \cdot D)$---predictable, linear, and independent of total dataset size. Empirical evaluation on SQL Server 2022 with 1.2M resource nodes ($D{=}5$) and 1.5M resource nodes ($D{=}10$) confirms $N$-independence across three orders of magnitude.
+Enterprise applications must answer two authorization questions: ``can this principal act on this resource?'' (point check) and ``which resources can this principal access, filtered, sorted, and paginated?'' (list filtering). Point checks are boolean decisions with well-understood evaluation strategies. List filtering is harder: it requires composing authorization decisions with application-defined filtering, sorting, and pagination into a single efficient query. We present SHRBAC (Scoped Hierarchical Role-Based Access Control), a formal authorization model whose structural constraints---tree-structured resources, flat roles, non-recursive groups, and scoped temporal grants---make enforcement a composable database predicate with bounded cost. Polymorphic principals allow the same grant semantics to cover human users, service accounts, and autonomous agents; agent support is an application of the model rather than a separate agent-specific mechanism. We formalize the model, prove soundness and completeness of an inline Table-Valued Function (TVF) enforcement, and show that under cursor pagination, bounded principal sets and grant multiplicity, and indexed nested-loop plans, per-page cost is $O(k \cdot D)$. Empirical evaluation on SQL Server 2022 with 1.2M resource nodes ($D{=}5$) and 1.5M resource nodes ($D{=}10$) confirms $N$-independence across three orders of magnitude in the evaluated dense-access workloads.
 \end{abstract}
 
 \begin{IEEEkeywords}
-access control, RBAC, authorization, query composition, table-valued function, resource hierarchy, agentic AI
+access control, RBAC, authorization, query composition, table-valued function, resource hierarchy, autonomous principals
 \end{IEEEkeywords}
 
 % ===========================================================================
@@ -117,15 +115,17 @@ Modern B2B SaaS applications require authorization systems that answer two funda
 
 The first question is well-understood. Google's Zanzibar~\cite{zanzibar} and its descendants handle millions of point checks per second through graph traversal and caching.
 
-The second question---the \textbf{list filtering problem}---is well-solved for flat access models. A single-tenant predicate (\texttt{WHERE tenant\_id = @currentTenant}) composes trivially. However, when access is determined by grants at varying levels of a resource hierarchy, resolved through transitive group memberships, and subject to temporal constraints, list filtering becomes substantially more complex.
+The second question---the \textbf{list filtering problem}---is well-solved for flat access models. A single-tenant predicate (\texttt{WHERE tenant\_id = @currentTenant}) composes trivially. However, when access is determined by grants at varying levels of a resource hierarchy, resolved through group memberships, and subject to temporal constraints, list filtering becomes substantially more complex.
 
-Increasingly, principals are not only human users but \textbf{autonomous AI agents} that issue queries and perform actions over enterprise data. These agents operate in loops, enumerating and filtering large resource sets programmatically. For agentic systems, efficient list filtering is not merely a user-experience optimization---it is a correctness and cost requirement. An agent that makes $N$ external authorization calls per page degrades linearly; an agent whose authorization is a composable database predicate operates at constant cost per page.
+Increasingly, principals are not only human users but \textbf{autonomous AI agents} that issue queries and perform actions over enterprise data. These agents can operate in loops, enumerating and filtering large resource sets programmatically. SHRBAC does not introduce agent-specific policy semantics; it treats agents as first-class principals so that the same scoped and temporal grant model applies to human and autonomous callers. For such callers, efficient list filtering is not merely a user-experience optimization---it bounds the cost of repeated resource enumeration. An agent that makes $N$ external authorization calls per page degrades linearly; an agent whose authorization is a composable database predicate operates at constant cost per page under the assumptions stated in Section~\ref{sec:complexity}.
 
-Beyond efficient querying, the authorization model must enforce the \textbf{principle of least privilege}~\cite{saltzer}: principals, whether human or autonomous, should operate with minimum necessary authority scoped to specific resources and time windows. For AI agents, this is not merely good practice but a safety requirement---an agent should receive a narrow grant (specific subtree, limited role, bounded duration) rather than broad access.
+Beyond efficient querying, the authorization model must enforce the \textbf{principle of least privilege}~\cite{saltzer}: principals, whether human or autonomous, should operate with minimum necessary authority scoped to specific resources and time windows. For agents, narrow grants (specific subtree, limited role, bounded duration) provide an operational guardrail against broad, long-lived authority.
 
 When authorization logic resides outside the database, an impedance mismatch arises. Industry bridges this gap through ID lookups, batch post-filtering, partial policy evaluation, or materialized permission views---each trading scalability, consistency, or complexity. Some of these approaches are SQL-implementable, but they require runtime predicate construction that changes shape as the policy set evolves.
 
-SHRBAC takes a different approach: the model's structural constraints are chosen so that per-page enforcement cost is $O(k \cdot D)$---linear in page size and tree depth, independent of total resource count $N$ and policy set size (Fig.~\ref{fig:enforcement}).
+SHRBAC takes a different approach: the model's structural constraints are chosen so that per-page enforcement cost is $O(k \cdot D)$ under bounded local parameters---linear in page size and tree depth, independent of total resource count $N$ and overall policy set size (Fig.~\ref{fig:enforcement}).
+
+\textbf{Notation.} Throughout the paper, $N$ denotes total entities or resource nodes under evaluation, $k$ the requested page size, $D$ the maximum resource-tree depth, $M=|\mathit{resolve}(p)|$ the number of effective principals for caller $p$, $G_{\max}$ the maximum active grant multiplicity for the same principal-resource pair, and $\sigma$ the selectivity of authorized rows. Model-level symbols use math notation; database artifacts such as \texttt{Resources}, \texttt{Grants}, and \texttt{fn\_IsResourceAccessible} appear in monospace.
 
 % ---- FIGURE: Enforcement artifact vs policy count ----
 \begin{figure}[t]
@@ -201,14 +201,14 @@ SHRBAC takes a different approach: the model's structural constraints are chosen
 
 \item \textbf{Complexity theorem for list filtering.} Under cursor pagination, per-page cost is $O(k \cdot D)$ when $M$ and $G_{\max}$ are bounded---independent of resource count $N$, policy set size, and page depth. This formal bound for the list-filtering problem is absent in prior RBAC, ABAC, and ReBAC models.
 
-\item \textbf{Production-scale empirical validation.} At 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$), we confirm $N$-independence across three orders of magnitude, linear scaling in $k$ and $D$, constant per-CTE-hop cost (${\sim}$0.029ms), and grant density independence.
+\item \textbf{Production-scale empirical validation.} At 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$), we confirm $N$-independence across three orders of magnitude, linear scaling in $k$ and $D$, constant per-CTE-hop cost (${\sim}$0.029ms), cursor-depth independence, and grant-breadth independence in tested dense-access workloads.
 
-\item \textbf{Polymorphic principal model for agent governance.} SHRBAC includes autonomous agents as first-class grant recipients with least-privilege, time-bounded authority. Agent-driven list queries inherit the $O(k \cdot D)$ guarantee, providing database-native agent governance without external authorization infrastructure.
+\item \textbf{Polymorphic principal model for autonomous callers.} SHRBAC includes autonomous agents as first-class grant recipients with least-privilege, time-bounded authority. This contribution is intentionally scoped: agents use the same grant relation as other principals, so agent-driven list queries inherit the same database-native enforcement guarantees.
 \end{enumerate}
 
 \subsection{Paper Organization}
 
-Section~\ref{sec:related} surveys related work. Section~\ref{sec:model} formalizes the model. Section~\ref{sec:algorithm} defines the access evaluation algorithm. Section~\ref{sec:tvf} describes TVF enforcement. Section~\ref{sec:complexity} analyzes complexity. Section~\ref{sec:empirical} presents empirical evaluation. Section~\ref{sec:discussion} discusses design constraints, agentic applications, and limitations. Section~\ref{sec:conclusion} concludes.
+Section~\ref{sec:related} surveys related work. Sections~\ref{sec:model}--\ref{sec:algorithm} define SHRBAC from the access-control model perspective: principals, resources, grants, and access decisions. Sections~\ref{sec:tvf}--\ref{sec:empirical} then switch to the database perspective: relational enforcement, query composition, complexity, and empirical behavior. Section~\ref{sec:discussion} discusses design constraints, autonomous-principal applications, and limitations. Section~\ref{sec:conclusion} concludes.
 
 % ===========================================================================
 % 2. BACKGROUND AND RELATED WORK
@@ -565,6 +565,8 @@ The per-page cost is \emph{parameterized and predictable}---independent of $N$, 
 
 \subsection{Comparison with Alternatives}
 
+Table~\ref{tab:comparison} separates SHRBAC's database-local enforcement path from common alternatives that either call an external authorization service, compile policies into query predicates, or maintain materialized permission state. The comparison is asymptotic and assumes the same cursor-pagination workload used in Theorem~3.
+
 \begin{table}[t]
 \centering
 \caption{Per-page cost comparison across authorization approaches.}
@@ -585,7 +587,7 @@ Materialized JOIN & $O(k)$ & Denorm. & Eventual \\
 
 \subsection{Known Considerations}
 
-\texttt{STRING\_SPLIT} produces poor cardinality estimates; table-valued parameters are recommended for $M > 5$. CTE traversal is not short-circuitable; a closure table replaces $O(D)$ recursive expansion with $O(1)$ lookup for deep hierarchies. Plan shape assumes nested loops with index seeks (observed under correct indexing); stale statistics may produce hash joins, mitigated by \texttt{UPDATE STATISTICS}.
+\texttt{STRING\_SPLIT} can produce poor cardinality estimates; the SQL Server benchmarks in this paper nevertheless use the \texttt{STRING\_SPLIT}-based TVF shown in Section~\ref{sec:tvf}, so the reported $M$-scaling numbers include that overhead for $M \leq 21$. For larger principal sets, table-valued parameters are recommended. CTE traversal is not short-circuitable; a closure table replaces $O(D)$ recursive expansion with $O(1)$ lookup for deep hierarchies. Plan shape assumes nested loops with index seeks (observed under correct indexing); stale statistics may produce hash joins, mitigated by \texttt{UPDATE STATISTICS}.
 
 % ===========================================================================
 % 7. EMPIRICAL EVALUATION
@@ -593,11 +595,11 @@ Materialized JOIN & $O(k)$ & Denorm. & Eventual \\
 \section{Empirical Evaluation}
 \label{sec:empirical}
 
-We evaluate SHRBAC on SQL Server 2022 (Docker, 4 vCPU, 8~GB RAM) across three tiers: (1)~small-scale isolation tests (1K--100K entities) that individually vary each factor, (2)~a production-scale workload at $D{=}5$ with 1.2M resource nodes, and (3)~a deep-hierarchy workload at $D{=}10$ with 1.5M resource nodes.
+We evaluate SHRBAC on SQL Server 2022 (Docker, 4 vCPU, 8~GB RAM) across three tiers: (1)~small-scale isolation tests (1K--100K entities) that individually vary each factor, (2)~a production-scale workload at $D{=}5$ with 1.2M resource nodes, and (3)~a deep-hierarchy workload at $D{=}10$ with 1.5M resource nodes. The environment is a controlled validation setup, not a production latency claim; Section~\ref{sec:discussion} discusses generalizability.
 
 \subsection{Benchmark Methodology}
 
-\textbf{Measurement protocol.} Each query: 3 warmup runs (discarded), 20 measured runs. Each run opens a fresh connection and records wall-clock elapsed time via \texttt{Stopwatch}. We report median, P95, and IQR. Page size $k = 20$ unless stated otherwise.
+\textbf{Measurement protocol.} Each query: 3 warmup runs (discarded), 20 measured runs. Each run opens a fresh connection and records wall-clock elapsed time via \texttt{Stopwatch}. We report median and P95; IQR was recorded for validation. Page size $k = 20$ unless stated otherwise.
 
 \textbf{Query pattern.} All list filtering benchmarks execute the canonical authorized-list query:
 
@@ -614,6 +616,8 @@ ORDER BY p.Id
 \end{lstlisting}
 
 Point checks use the same TVF against a single ResourceId. Query plans verified to use nested loops with index seeks.
+
+\textbf{Principal parameter passing.} All reported SQL Server benchmarks use the \texttt{STRING\_SPLIT} implementation in Section~\ref{sec:tvf}, including the $M{=}11$ and $M{=}21$ isolation and point-check experiments. No table-valued parameters are used in the reported measurements; therefore the conclusion is limited to the tested practical range of effective principals.
 
 \textbf{Hierarchies.} $D{=}5$: root $\to$ 15 chains $\to$ 150 regions $\to$ 15K stores $\to$ 1.2M products = \textbf{1,215,166 resources}. $D{=}10$: root $\to$ 5 divisions $\to$ 25 regions $\to$ 125 districts $\to$ 500 areas $\to$ 2K zones $\to$ 12K stores $\to$ 60K departments $\to$ 240K sections $\to$ 1.2M products = \textbf{1,514,656 resources}. Resources and domain rows are bulk-inserted; \texttt{UPDATE STATISTICS} is run before benchmarks.
 
@@ -660,7 +664,7 @@ Table~\ref{tab:isolation} presents results from controlled single-factor experim
 
 These isolation results confirm core predictions: $N$-independence across 1K--100K (3.32--3.63ms at $D{=}3$), monotonic depth scaling from 2.45ms at $D{=}1$ to 4.21ms at $D{=}5$ consistent with $O(k \cdot D)$, negligible principal set size effect (3.14--3.47ms across $M{=}1$--$21$), and constant cursor pagination cost independent of dataset size. The question is whether these properties hold at production resource scale.
 
-\subsection{Production-Scale at $D{=}5$ (1.2M Resources)}
+\subsection[Production-Scale at D=5 (1.2M Resources)]{Production-Scale at $D{=}5$ (1.2M Resources)}
 
 We constructed a retail SaaS hierarchy: root $\to$ 15 chains $\to$ 150 regions $\to$ 15K stores $\to$ 1.2M products, yielding \textbf{1,215,166 resource nodes} at $D{=}5$. Principals range from company administrators (all 1.2M products accessible) to store managers (${\sim}$80 products).
 
@@ -698,7 +702,7 @@ Table~\ref{tab:production} presents results across three dimensions.
 
 \textbf{Cursor depth} is flat: page 500 at 3.48ms is indistinguishable from page~1 at 3.08ms.
 
-\subsection{Deep Hierarchy at $D{=}10$ (1.5M Resources)}
+\subsection[Deep Hierarchy at D=10 (1.5M Resources)]{Deep Hierarchy at $D{=}10$ (1.5M Resources)}
 
 To test whether $O(k \cdot D)$ scaling holds at deeper hierarchies, we constructed a 10-level tree yielding \textbf{1,514,656 resource nodes}. Table~\ref{tab:d10} compares identical queries across both tree depths.
 
@@ -746,7 +750,7 @@ While SHRBAC's primary contribution is list filtering, the TVF also serves as a 
 \end{tabular}
 \end{table}
 
-Even at depth~9 with 1.5M resource nodes, all point checks complete in \textbf{under 1.5ms median}. Grant set size (1--20 active grants) produces 1.19--1.38ms---flat. Principal set size ($M{=}1$--$21$) produces 0.98--1.28ms---near-constant. The CTE examines only the target resource's ancestor chain (${\leq}D$ nodes), not the grant table at large.
+Even at depth~9 with 1.5M resource nodes, all point checks complete in \textbf{under 1.5ms median}. Grant set size (1--20 active grants) produces 1.19--1.38ms---flat. Principal set size ($M{=}1$--$21$) produces 0.98--1.28ms---near-constant in the tested \texttt{STRING\_SPLIT} range. The CTE examines only the target resource's ancestor chain (${\leq}D$ nodes), not the grant table at large.
 
 \subsection{Factor Analysis}
 
@@ -766,13 +770,15 @@ $k$ (page size) & 10--100 & Linear (2.28--13.71ms $D{=}5$; 3.44--22.01ms $D{=}10
 $D$ (tree depth) & 1--10 & Linear (2.45 $\to$ 4.21 $\to$ 5.69ms) & Sub-1.5ms both & $O(D)$ & \checkmark \\
 Per-hop cost & $D{=}5$ vs $D{=}10$ & 0.034ms $D{=}5$, 0.024ms $D{=}10$ & --- & $O(1)$ & \checkmark \\
 $M$ (principals) & 1--11 & Negligible (3.32--3.44ms $D{=}5$; 5.42--5.85ms $D{=}10$) & None (0.98--1.28ms) & $O(M)$ & Negligible \\
-$G$ (grant density) & 1--10 & None (3.23--3.40ms $D{=}5$; 5.00--5.80ms $D{=}10$) & None (1.19--1.38ms) & $O(G_{\max})$ & Refuted \\
+Grant breadth & 1--10 scopes & None (3.23--3.40ms $D{=}5$; 5.00--5.80ms $D{=}10$) & None (1.19--1.38ms) & $O(1)$ if $G_{\max}$ bounded & \checkmark \\
 Cursor depth & Page 1--500 & None (3.08--3.48ms $D{=}5$; 5.11--5.38ms $D{=}10$) & N/A & $O(1)$ & \checkmark \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \noindent *The 10K$\to$1.2M increase (3.39$\to$3.47ms) compares $D{=}3$ isolation vs $D{=}5$ production; the difference is attributable to depth, not resource count.
+
+\noindent Grant breadth is distinct from $G_{\max}$. The breadth experiments vary the number of distinct resource scopes granted to a principal; for any candidate row, the TVF still probes only that row's ancestor chain. $G_{\max}$ denotes multiple active grants for the same principal-resource pair. The point-check experiments did not show sensitivity for 1--20 active grants, but the list-filtering evaluation does not refute the formal $O(G_{\max})$ factor under high local grant multiplicity.
 
 Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 
@@ -790,12 +796,12 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
  & $M{=}6$ & 3.36 \\
  & $M{=}11$ & 3.44 \\
 \addlinespace
-\multirow{4}{*}{Grant density} & 1 chain (${\sim}$80K accessible) & 3.31 \\
+\multirow{4}{*}{Grant breadth} & 1 chain (${\sim}$80K accessible) & 3.31 \\
  & 3 chains (${\sim}$240K) & 3.23 \\
  & 5 chains (${\sim}$400K) & 3.41 \\
  & 10 chains (${\sim}$800K) & 3.40 \\
 \addlinespace
-\multirow{4}{*}{Grant depth} & Chain grant (inherit all) & 3.12 \\
+\multirow{4}{*}{Grant scope} & Chain grant (inherit all) & 3.12 \\
  & 100 store grants & 4.27 \\
  & 10 store grants & 2.50 \\
  & 1 store grant & 2.28 \\
@@ -840,7 +846,7 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 
 \textbf{Per-hop cost.} At $D{=}5$, per-row cost is ${\sim}$0.14ms (4 CTE hops $\times$ 0.034ms/hop). At $D{=}10$, per-row cost is ${\sim}$0.22ms (9 CTE hops $\times$ 0.024ms/hop). The per-hop cost converges at higher page sizes as fixed per-page overhead diminishes, giving $O(k \cdot D)$ a concrete, measurable constant.
 
-\textbf{Grant density remains irrelevant.} At $D{=}5$: 3.31 vs.\ 3.40ms---a 0.09ms difference for a $10\times$ increase. At $D{=}10$: 5.00 vs.\ 5.76ms. The TVF evaluates each row via its ancestor chain; the breadth of authority does not affect per-row cost.
+\textbf{Grant breadth is not local grant multiplicity.} At $D{=}5$, 1 vs.\ 10 chain scopes changes median latency by 0.09ms (3.31 vs.\ 3.40ms). At $D{=}10$, 1 vs.\ 5 division scopes changes latency from 5.00ms to 5.76ms. These experiments vary the breadth of a principal's authority, not $G_{\max}$: unrelated grant rows at other scopes are not scanned when evaluating a candidate resource. The formal per-row bound remains $O(D \cdot M \cdot G_{\max})$.
 
 % ---- FIGURE: Leaf grants vs inherited grants ----
 \begin{figure}[t]
@@ -869,13 +875,13 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \legend{Inherited, Store-level}
 \end{axis}
 \end{tikzpicture}
-\caption{Store-level grants outperform inherited grants at 1.2M resources. A single store grant (2.28ms) is 27\% faster than a chain-level grant (3.12ms). The CTE walks UP from the product; grants closer to the leaf short-circuit sooner.}
+\caption{Grant scope and locality at 1.2M resources. A single store grant is faster than a chain-level grant because it short-circuits closer to the leaf. The 100-store case is slower, showing that many disjoint narrow grants can affect constants through selectivity and locality even though unrelated grant rows are not scanned for a candidate resource.}
 \label{fig:leafgrants}
 \end{figure}
 
-\textbf{Least-privilege grants outperform inherited grants (Fig.~\ref{fig:leafgrants}).} A chain-level grant (3.12ms) is 37\% slower than a single store grant (2.28ms). The CTE walks UP from the product toward the root; a store-level grant matches at the first ancestor hop, while a chain-level grant requires 3--4 hops. This validates the short-circuit property and reveals that least-privilege grants are not only more secure---they are faster.
+\textbf{Narrow grants can improve constants (Fig.~\ref{fig:leafgrants}).} A chain-level grant (3.12ms) is 37\% slower than a single store grant (2.28ms). The CTE walks UP from the product toward the root; a store-level grant can match at the first ancestor hop, while a chain-level grant requires 3--4 hops. However, the 100-store case (4.27ms) shows that many disjoint narrow grants are not monotonically faster; selectivity, row ordering, and plan estimates can affect constants. This reconciles the grant-breadth result with the store-grant experiment and preserves the stated $O(D \cdot M \cdot G_{\max})$ per-row bound.
 
-\textbf{Principal set size is negligible.} $M{=}1$ vs $M{=}11$ produces 3.36 vs.\ 3.44ms. At $D{=}10$: 5.63 vs.\ 5.85ms. \texttt{STRING\_SPLIT} overhead is negligible at practical principal counts.
+\textbf{Principal set size is negligible in the tested range.} $M{=}1$ vs $M{=}11$ produces 3.36 vs.\ 3.44ms. At $D{=}10$: 5.63 vs.\ 5.85ms. Because these experiments used \texttt{STRING\_SPLIT}, the result should be read as an empirical observation for small effective-principal sets ($M \leq 21$), not a claim that parameter passing is irrelevant for large $M$.
 
 \textbf{Point checks are sub-1.5ms even at $D{=}10$.} At depth~9 (the deepest leaf), point checks complete in 1.32ms median. Grant set size (1--20) and principal set size ($M{=}1$--$21$) have no measurable impact.
 
@@ -946,7 +952,7 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \section{Discussion}
 \label{sec:discussion}
 
-The theoretical analysis in Sections~\ref{sec:model}--\ref{sec:complexity} established that SHRBAC's per-page enforcement cost is $O(k \cdot D)$, and the empirical results in Section~\ref{sec:empirical} confirmed this bound across three orders of magnitude. This section examines the design trade-offs that make these guarantees possible, positions SHRBAC relative to alternative authorization models, and discusses implications for agentic systems.
+The theoretical analysis in Sections~\ref{sec:model}--\ref{sec:complexity} established the conditions under which SHRBAC's per-page enforcement cost simplifies to $O(k \cdot D)$, and the empirical results in Section~\ref{sec:empirical} confirmed this behavior across three orders of magnitude for dense-access workloads on SQL Server. This section examines the design trade-offs that make these guarantees possible, positions SHRBAC relative to alternative authorization models, and discusses implications for autonomous principals.
 
 \subsection{Constraints as Architectural Choice}
 
@@ -964,13 +970,13 @@ Crucially, these constraints are not artificial restrictions imposed to simplify
 
 SHRBAC evaluates two attributes---role and resource-scope---making it a two-attribute constrained ABAC system~\cite{abac-nist}. The resource tree can be viewed as a constrained ReBAC graph where all relationships are \texttt{parent\_of} typed and the graph is a tree. The tree constraint (bounded depth, deterministic ancestor chains) is what makes TVF enforcement tractable. For applications requiring arbitrary relationship graphs, ReBAC/Zanzibar is more appropriate; for organizational hierarchies, SHRBAC's constraint matches the domain and provides predictable performance.
 
-\subsection{SHRBAC for Agentic Systems}
+\subsection{SHRBAC for Autonomous Principals}
 
-SHRBAC's polymorphic principal model naturally accommodates autonomous AI agents. An agent is a principal with $\tau(p) = \text{agent}$ that participates in the same grant relation as human users, with three properties critical for agent governance:
+SHRBAC's polymorphic principal model accommodates autonomous AI agents in a narrow but useful sense. An agent is a principal with $\tau(p) = \text{agent}$ that participates in the same grant relation as human users. SHRBAC therefore supports database authorization for agents that query or mutate application resources, but it does not address prompt injection, tool-selection safety, model alignment, delegation-chain reasoning, or semantic policy generation. Within this scope, three properties follow directly from the common grant model:
 
 \textbf{Least-privilege delegation.} SHRBAC's grant triple (principal, role, resource) with temporal bounds directly enforces least-privilege delegation: an agent receives only the role it needs, at only the resource subtree it operates on, for only the duration of its task. A 15-minute grant at a specific project subtree is expressible directly, without special-case logic.
 
-\textbf{Predictable query cost.} Agents that enumerate resources in loops amplify per-query costs. The TVF's $O(k \cdot D)$ per-page bound ensures that agent-driven queries have predictable, bounded database impact regardless of how many resources exist---preventing runaway load from autonomous operations.
+\textbf{Predictable query cost.} Agents that enumerate resources in loops amplify per-query costs. Under the same pagination, indexing, and selectivity assumptions as human callers, the TVF's per-page bound ensures that agent-driven queries have predictable database impact with respect to total resource count.
 
 \textbf{Auditability.} Every agent action traces to a specific (agent, role, resource) grant with temporal bounds. When an agent's authority expires ($\mathit{EffectiveTo} < \mathit{now}$), access ceases immediately without requiring token revocation infrastructure.
 
@@ -981,7 +987,9 @@ SHRBAC's polymorphic principal model naturally accommodates autonomous AI agents
 \item \textbf{Non-recursive groups (C2):} Deeply nested group structures require extending $\mathit{resolve}(p)$ with CTE traversal.
 \item \textbf{Flat roles (C3):} Role definitions must explicitly enumerate permissions rather than inheriting.
 \item \textbf{No arbitrary attributes (C4):} IP-based, device-type, or other dynamic attribute conditions are not expressible.
-\item \textbf{Database engine:} Portability requirements discussed in \S\ref{sec:tvf}. PostgreSQL and MySQL 8.0+ support the necessary primitives (recursive CTEs, predicate inlining).
+\item \textbf{Low-selectivity workloads:} The evaluation focuses on dense authorized-list workloads. Theorem~3 predicts $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$ for sparse access and $O(N \cdot D \cdot M \cdot G_{\max})$ when no rows are authorized; deny-heavy workloads remain an empirical failure mode to stress-test.
+\item \textbf{Engine and hardware constants:} All measurements use SQL Server 2022 in Docker with 4 vCPU and 8~GB RAM. The measured constants (for example, 0.024--0.034ms per hop) are not production SLAs; storage latency, memory pressure, concurrent workloads, and network topology can change the coefficient even when the asymptotic plan shape holds.
+\item \textbf{Cross-DBMS validation:} PostgreSQL and MySQL 8.0+ support the necessary primitives (recursive CTEs and predicate inlining), but this paper validates only SQL Server 2022. Cross-DBMS performance and optimizer stability are future work.
 \end{itemize}
 
 % ===========================================================================
@@ -990,19 +998,17 @@ SHRBAC's polymorphic principal model naturally accommodates autonomous AI agents
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented SHRBAC, a formal authorization model whose structural constraints guarantee that per-page enforcement cost is $O(k \cdot D)$---linear in page size and tree depth, independent of total resource count and policy set size. The model sits at the intersection of hierarchical RBAC (ROBAC/RRBAC), polymorphic principal resolution, and Stonebraker's query modification.
+We presented SHRBAC, a formal authorization model whose structural constraints allow per-page enforcement cost to simplify to $O(k \cdot D)$ under bounded principal sets, bounded local grant multiplicity, cursor pagination, correct indexing, and stable nested-loop plans. The model sits at the intersection of hierarchical RBAC (ROBAC/RRBAC), polymorphic principal resolution, and Stonebraker's query modification.
 
-Empirical evaluation at 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$) confirms the predicted complexity: per-page latency is $N$-independent across three orders of magnitude, scales linearly with $k$ and $D$, and is unaffected by grant density or cursor depth. The per-CTE-hop cost is constant across both tree depths, giving $O(k \cdot D)$ a measurable constant. A notable finding is that least-privilege grants are not only more secure but faster---the upward tree walk short-circuits sooner at narrower scopes.
+Empirical evaluation at 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$) confirms the predicted behavior for the evaluated dense-access workloads: per-page latency is $N$-independent across three orders of magnitude, scales linearly with $k$ and $D$, and is unaffected by cursor depth or grant breadth in tested configurations. The per-CTE-hop cost is constant across both tree depths, giving $O(k \cdot D)$ a measurable coefficient. A notable finding is that narrow grants can be faster when they match closer to the leaf, though many disjoint narrow grants can affect constants.
 
-As autonomous agents become principals in enterprise systems, the need for scoped, auditable, time-bounded authorization with efficient list filtering will intensify. SHRBAC's grant model---where an agent receives exactly the authority it needs, at the scope it needs, for the duration it needs---provides a foundation for database-native agent governance without requiring external authorization infrastructure.
+As autonomous agents become principals in enterprise systems, the need for scoped, auditable, time-bounded authorization with efficient list filtering will intensify. SHRBAC provides this database-native authorization substrate by applying the same scoped grant model to autonomous and human principals; broader agent-specific safety mechanisms remain outside the model.
 
 % ===========================================================================
-% ACKNOWLEDGMENTS
+% AI DISCLOSURE
 % ===========================================================================
-\section*{Acknowledgments}
-{[Removed for double-blind review.]}
-
-\smallskip\noindent\textit{AI Disclosure:} In accordance with IEEE policy, the authors disclose that AI tools (Claude, Anthropic) were used to assist with manuscript preparation and editing. All technical content, formal definitions, proofs, implementation, and experimental design are the work of the authors.
+\section*{AI Disclosure}
+In accordance with IEEE policy, the author discloses that AI tools (Claude, Anthropic) were used to assist with manuscript preparation and editing. All technical content, formal definitions, proofs, implementation, and experimental design are the work of the author.
 
 % ===========================================================================
 % REFERENCES
@@ -1011,7 +1017,7 @@ As autonomous agents become principals in enterprise systems, the need for scope
 \begin{thebibliography}{20}
 
 \bibitem{zanzibar}
-R.~Pang et~al., ``Zanzibar: Google's Consistent, Global Authorization System,'' in \emph{Proc. USENIX ATC}, 2019.
+R.~Pang, R.~Caceres, M.~Burrows, Z.~Chen, P.~Dave, N.~Germer, A.~Golynski, K.~Graney, N.~Kang, L.~Kissner, J.~L. Korn, A.~Parmar, C.~D. Richards, and M.~Wang, ``Zanzibar: Google's Consistent, Global Authorization System,'' in \emph{Proc. USENIX ATC}, pp.~33--46, 2019.
 
 \bibitem{saltzer}
 J.~H. Saltzer and M.~D. Schroeder, ``The Protection of Information in Computer Systems,'' \emph{Proc. IEEE}, vol.~63, no.~9, pp.~1278--1308, 1975.
