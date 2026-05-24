@@ -273,6 +273,7 @@ public sealed class SqlOSExampleApiIntegrationTests
     [DataRow("/sqlos/admin/auth/users/example/general")]
     [DataRow("/sqlos/admin/auth/clients")]
     [DataRow("/sqlos/admin/fga/resources")]
+    [DataRow("/sqlos/admin/email/templates")]
     public async Task DashboardShell_PageRoutes_Render(string path)
     {
         var response = await ExampleApiFixture.Client.GetAsync(path);
@@ -319,6 +320,9 @@ public sealed class SqlOSExampleApiIntegrationTests
         var fgaStatsUnauthorized = await client.GetAsync("/sqlos/admin/fga/api/stats");
         fgaStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
 
+        var emailTemplatesUnauthorized = await client.GetAsync("/sqlos/admin/email/api/templates");
+        emailTemplatesUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+
         var invalidLoginResponse = await client.PostAsJsonAsync("/sqlos/dashboard-auth/login", new { password = "wrong-password" });
         invalidLoginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
 
@@ -331,11 +335,76 @@ public sealed class SqlOSExampleApiIntegrationTests
         var fgaStatsResponse = await client.GetAsync("/sqlos/admin/fga/api/stats");
         fgaStatsResponse.EnsureSuccessStatusCode();
 
+        var emailTemplatesResponse = await client.GetAsync("/sqlos/admin/email/api/templates");
+        emailTemplatesResponse.EnsureSuccessStatusCode();
+
         var logoutResponse = await client.PostAsync("/sqlos/dashboard-auth/logout", null);
         logoutResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
 
         var authStatsAfterLogout = await client.GetAsync("/sqlos/admin/auth/api/stats");
         authStatsAfterLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_AdminApi_CrudTemplateAndPreview()
+    {
+        var templateKey = $"order-shipped-{Guid.NewGuid():N}"[..28];
+        var createResponse = await AdminPostAsync("/sqlos/admin/email/api/templates", new
+        {
+            key = templateKey,
+            displayName = "Order shipped",
+            subjectTemplate = "Order {orderId} shipped",
+            htmlBodyTemplate = "<p>Track <strong>{orderId}</strong> at {trackingUrl}</p>",
+            textBodyTemplate = "Track {orderId} at {trackingUrl}",
+            variables = new
+            {
+                orderId = new { description = "Order id" },
+                trackingUrl = new { description = "Tracking URL" }
+            },
+            isActive = true
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var templateId = createJson.RootElement.GetProperty("id").GetString();
+        createJson.RootElement.GetProperty("version").GetInt32().Should().Be(1);
+
+        var previewResponse = await AdminPostAsync($"/sqlos/admin/email/api/templates/{templateId}/preview", new
+        {
+            variables = new
+            {
+                orderId = "<123>",
+                trackingUrl = "https://tracking.example.test/123"
+            }
+        });
+        previewResponse.EnsureSuccessStatusCode();
+        var previewJson = JsonDocument.Parse(await previewResponse.Content.ReadAsStringAsync());
+        previewJson.RootElement.GetProperty("subject").GetString().Should().Be("Order <123> shipped");
+        previewJson.RootElement.GetProperty("htmlBody").GetString().Should().Contain("&lt;123&gt;");
+        previewJson.RootElement.GetProperty("textBody").GetString().Should().Contain("<123>");
+
+        var updateResponse = await ExampleApiFixture.Client.PutAsJsonAsync($"/sqlos/admin/email/api/templates/{templateId}", new
+        {
+            key = templateKey,
+            displayName = "Order shipped updated",
+            subjectTemplate = "Order {orderId} is on the way",
+            htmlBodyTemplate = "<p>Updated {orderId}</p>",
+            textBodyTemplate = "Updated {orderId}",
+            variables = new { orderId = new { description = "Order id" } },
+            isActive = false
+        });
+        updateResponse.EnsureSuccessStatusCode();
+        var updateJson = JsonDocument.Parse(await updateResponse.Content.ReadAsStringAsync());
+        updateJson.RootElement.GetProperty("displayName").GetString().Should().Be("Order shipped updated");
+        updateJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeFalse();
+        updateJson.RootElement.GetProperty("version").GetInt32().Should().Be(2);
+
+        var listResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/email/api/templates?search={templateKey}");
+        listResponse.EnsureSuccessStatusCode();
+        var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
+
+        var deleteResponse = await ExampleApiFixture.Client.DeleteAsync($"/sqlos/admin/email/api/templates/{templateId}");
+        deleteResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
     }
 
     [TestMethod]

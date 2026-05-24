@@ -357,6 +357,11 @@ public sealed class SqlOSDashboardMiddleware
             return true;
         }
 
+        if (relativePath.StartsWith("admin/email/api/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (relativePath.StartsWith("auth/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/api/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/.well-known/", StringComparison.OrdinalIgnoreCase)
@@ -367,13 +372,15 @@ public sealed class SqlOSDashboardMiddleware
 
         if (Path.HasExtension(relativePath)
             && (relativePath.StartsWith("admin/auth/", StringComparison.OrdinalIgnoreCase)
-                || relativePath.StartsWith("admin/fga/", StringComparison.OrdinalIgnoreCase)))
+                || relativePath.StartsWith("admin/fga/", StringComparison.OrdinalIgnoreCase)
+                || relativePath.StartsWith("admin/email/", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
 
         if (embedMode && (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase)
-                          || relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase)))
+                          || relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase)
+                          || relativePath.StartsWith("admin/email", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
@@ -402,7 +409,8 @@ public sealed class SqlOSDashboardMiddleware
             return true;
         }
 
-        if (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase))
+        if (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith("admin/email", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

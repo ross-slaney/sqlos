@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
+using SqlOS.Email.Interfaces;
 using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
 
@@ -97,6 +98,17 @@ public sealed class SqlOSOptionsValidationTests
         });
 
         act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_RegistersTransactionalEmailService()
+    {
+        var services = new ServiceCollection();
+
+        services.AddSqlOS<TestSqlOSInMemoryDbContext>();
+
+        services.Should().Contain(descriptor => descriptor.ServiceType == typeof(ISqlOSTransactionalEmailService));
+        services.Should().Contain(descriptor => descriptor.ServiceType == typeof(ISqlOSEmailSender));
     }
 
     [TestMethod]

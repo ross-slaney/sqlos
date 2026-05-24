@@ -7,6 +7,9 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
 using SqlOS.Dashboard;
+using SqlOS.Email.Configuration;
+using SqlOS.Email.Interfaces;
+using SqlOS.Email.Services;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
@@ -33,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Options.Create(options.AuthServer));
         services.AddSingleton(Options.Create(options.Fga));
+        services.AddSingleton(Options.Create(options.Email));
         services.AddDataProtection();
         services.AddHttpClient();
         services.AddSingleton<SqlOSDashboardSessionService>();
@@ -47,6 +51,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<SqlOSSettingsService>();
         services.AddSingleton<ISqlOSAuthEmailSender, SqlOSAcsAuthEmailSender>();
+        services.AddSingleton<ISqlOSEmailSender, SqlOSAcsEmailSender>();
+        services.AddSingleton<SqlOSEmailTemplateRenderer>();
+        services.AddScoped<ISqlOSTransactionalEmailService, SqlOSTransactionalEmailService>();
+        services.AddScoped<SqlOSEmailAdminService>();
         services.AddScoped<SqlOSEmailOtpService>();
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();
