@@ -73,8 +73,13 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
             To = recipient,
             Status = SqlOSEmailDeliveryStatuses.Pending,
             RenderedSubject = TrimTo(rendered.Subject, 500),
-            RenderedTextPreview = TrimTo(rendered.TextBody, _options.RenderedTextPreviewMaxLength),
-            RenderedHtmlPreview = _options.PersistRenderedHtmlPreview ? rendered.HtmlBody : null,
+            RenderedTextPreview = SqlOSBuiltInEmailTemplates.SuppressesRenderedContentStorage(template.Key)
+                ? "[suppressed for sensitive built-in template]"
+                : TrimTo(rendered.TextBody, _options.RenderedTextPreviewMaxLength),
+            RenderedHtmlPreview = _options.PersistRenderedHtmlPreview
+                && !SqlOSBuiltInEmailTemplates.SuppressesRenderedContentStorage(template.Key)
+                    ? rendered.HtmlBody
+                    : null,
             IdempotencyKey = _options.EnableIdempotency ? idempotencyKey : null,
             CreatedAt = now,
             UpdatedAt = now

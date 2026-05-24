@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -2103,6 +2104,34 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
             Results.Ok(new { token = await authService.CreatePasswordResetTokenAsync(request, cancellationToken) }));
 
+        auth.MapPost("/password/reset-email", async (SqlOSSendPasswordResetEmailRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.SendPasswordResetEmailAsync(request, httpContext, cancellationToken)));
+
+        auth.MapGet("/password/reset", (HttpContext context) =>
+            Results.Content(
+                BuildPasswordResetPage(context.Request.Query["token"].ToString(), error: null, success: false),
+                contentType: "text/html"));
+
+        auth.MapPost("/password/reset/submit", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var token = form["token"].ToString();
+            var newPassword = form["newPassword"].ToString();
+
+            try
+            {
+                await authService.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, newPassword), cancellationToken);
+                return Results.Content(BuildPasswordResetPage(token: null, error: null, success: true), contentType: "text/html");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Content(
+                    BuildPasswordResetPage(token, ex.Message, success: false),
+                    contentType: "text/html",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
+
         auth.MapPost("/password/reset", async (SqlOSResetPasswordRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
             await authService.ResetPasswordAsync(request, cancellationToken);
@@ -2233,6 +2262,23 @@ public static class EndpointRouteBuilderExtensions
             }
 
             return Results.Ok(await adminService.ListUserSessionsAsync(userId, page, pageSize, cancellationToken));
+        });
+
+        api.MapPost("/users/{userId}/password-reset-email", async (HttpContext context, string userId, SqlOSSendUserPasswordResetEmailRequest request, SqlOSAuthService authService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await authService.SendPasswordResetEmailForUserAsync(userId, request, context, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapPost("/users", async (HttpContext context, SqlOSCreateUserRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -2936,6 +2982,64 @@ public static class EndpointRouteBuilderExtensions
 
     private static IResult Html(SqlOSAuthPageViewModel model, int statusCode = StatusCodes.Status200OK)
         => Results.Content(SqlOSAuthPageRenderer.RenderPage(model), contentType: "text/html", statusCode: statusCode);
+
+    private static string BuildPasswordResetPage(string? token, string? error, bool success)
+    {
+        static string H(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+
+        var errorMarkup = string.IsNullOrWhiteSpace(error)
+            ? string.Empty
+            : $"""<div class="callout error">{H(error)}</div>""";
+        var body = success
+            ? """
+              <div class="state-card">
+                <strong>Password updated.</strong>
+                <p>You can close this tab and sign in with your new password.</p>
+              </div>
+              """
+            : $$"""
+              <form method="post" action="reset/submit">
+                <input type="hidden" name="token" value="{{H(token)}}" />
+                <label>
+                  <span>New password</span>
+                  <input name="newPassword" type="password" autocomplete="new-password" required />
+                </label>
+                <button type="submit">Reset password</button>
+              </form>
+              """;
+
+        return $$"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reset password</title>
+          <style>
+            body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
+            main { width:min(440px, calc(100vw - 32px)); background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:28px; box-shadow:0 24px 70px rgba(15,23,42,.10); }
+            h1 { margin:0 0 8px; font-size:28px; line-height:1.1; }
+            p { margin:0 0 20px; color:#475569; line-height:1.5; }
+            form { display:grid; gap:16px; }
+            label { display:grid; gap:8px; font-size:13px; font-weight:700; color:#334155; }
+            input { border:1px solid #cbd5e1; border-radius:10px; padding:12px; font:inherit; }
+            button { border:0; border-radius:10px; padding:12px 16px; font:inherit; font-weight:700; color:white; background:#2563eb; cursor:pointer; }
+            .callout { border-radius:12px; padding:12px; margin:0 0 16px; font-size:14px; line-height:1.4; }
+            .error { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
+            .state-card strong { display:block; margin:0 0 8px; font-size:20px; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Reset password</h1>
+            <p>Choose a new password for your account.</p>
+            {{errorMarkup}}
+            {{body}}
+          </main>
+        </body>
+        </html>
+        """;
+    }
 
     private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(
         string mode,

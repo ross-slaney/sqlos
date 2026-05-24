@@ -4,6 +4,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Email.Interfaces;
 using System.Text.Json;
 
 namespace SqlOS.AuthServer.Services;
@@ -13,15 +14,18 @@ public sealed class SqlOSSettingsService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly ISqlOSAuthEmailSender _emailSender;
+    private readonly ISqlOSEmailSender? _transactionalEmailSender;
 
     public SqlOSSettingsService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSAuthEmailSender emailSender)
+        ISqlOSAuthEmailSender emailSender,
+        ISqlOSEmailSender? transactionalEmailSender = null)
     {
         _context = context;
         _options = options.Value;
         _emailSender = emailSender;
+        _transactionalEmailSender = transactionalEmailSender;
     }
 
     public async Task EnsureDefaultSettingsAsync(CancellationToken cancellationToken = default)
@@ -237,8 +241,11 @@ public sealed class SqlOSSettingsService
             _options.AuthPageSeed != null,
             _options.Headless.BuildUiUrl != null,
             _options.EnableLocalPasswordAuth,
-            _emailSender.IsConfigured);
+            IsAuthEmailRuntimeConfigured);
     }
+
+    private bool IsAuthEmailRuntimeConfigured
+        => _emailSender.IsConfigured || _transactionalEmailSender?.IsConfigured == true;
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
     {

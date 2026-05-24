@@ -51,6 +51,45 @@ public sealed partial class SqlOSEmailAdminService
         return await PaginateAsync(query, resolvedPage, resolvedPageSize, ToTemplateSummary, cancellationToken);
     }
 
+    public async Task EnsureBuiltInTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        var builtInKeys = SqlOSBuiltInEmailTemplates.All.Select(definition => definition.Key).ToList();
+        var existingKeys = await _context.Set<SqlOSEmailTemplate>()
+            .Where(template => builtInKeys.Contains(template.Key))
+            .Select(template => template.Key)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var existingKeySet = existingKeys.ToHashSet(StringComparer.Ordinal);
+        foreach (var definition in SqlOSBuiltInEmailTemplates.All)
+        {
+            if (existingKeySet.Contains(definition.Key))
+            {
+                continue;
+            }
+
+            var template = new SqlOSEmailTemplate
+            {
+                Id = _cryptoService.GenerateId("emt"),
+                Key = definition.Key,
+                DisplayName = definition.DisplayName,
+                SubjectTemplate = definition.SubjectTemplate,
+                HtmlBodyTemplate = definition.HtmlBodyTemplate,
+                TextBodyTemplate = definition.TextBodyTemplate,
+                VariablesJson = definition.VariablesJson,
+                IsActive = true,
+                Version = 1,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            _context.Set<SqlOSEmailTemplate>().Add(template);
+            AddAuditEvent("email.template.seeded", template, new { templateId = template.Id, template.Key, template.Version });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<object> GetTemplateAsync(string templateId, CancellationToken cancellationToken = default)
     {
         var template = await GetRequiredTemplateAsync(templateId, cancellationToken);

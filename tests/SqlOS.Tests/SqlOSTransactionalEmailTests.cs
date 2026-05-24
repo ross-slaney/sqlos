@@ -230,6 +230,105 @@ public sealed class SqlOSTransactionalEmailTests
         (await context.Set<SqlOSEmailDelivery>().CountAsync()).Should().Be(0);
     }
 
+    [TestMethod]
+    public async Task BuiltInAuthTemplates_AreSeededAutomatically()
+    {
+        using var context = CreateContext();
+        var admin = CreateEmailAdmin(context);
+
+        await admin.EnsureBuiltInTemplatesAsync();
+
+        var keys = await context.Set<SqlOSEmailTemplate>()
+            .Select(x => x.Key)
+            .ToListAsync();
+        keys.Should().Contain([
+            SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
+            SqlOSBuiltInEmailTemplates.AuthInvitationKey,
+            SqlOSBuiltInEmailTemplates.AuthPasswordResetKey
+        ]);
+    }
+
+    [TestMethod]
+    public async Task AuthEmailOtpAndInvitation_UseBuiltInTransactionalTemplates_WhenConfigured()
+    {
+        using var context = CreateContext();
+        var authOptions = new SqlOSAuthServerOptions();
+        authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+        authOptions.SeedAuthPage(page => page.EnabledCredentialTypes = ["email_otp"]);
+        var options = Options.Create(authOptions);
+        var authEmailSender = new TestAuthEmailSender { IsConfigured = false };
+        var transactionalSender = new FakeTransactionalEmailSender();
+        var transactionalService = CreateEmailService(context, transactionalSender);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var settings = new SqlOSSettingsService(context, options, authEmailSender, transactionalSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService, transactionalSender);
+        var invitationService = new SqlOSInvitationService(context, admin, crypto, authEmailSender, settings, options, transactionalService, transactionalSender);
+        await CreateEmailAdmin(context).EnsureBuiltInTemplatesAsync();
+
+        await crypto.EnsureActiveSigningKeyAsync();
+        await admin.UpsertSeededClientsAsync();
+        await settings.UpsertSeededAuthPageSettingsAsync();
+        await settings.UpsertSeededAuthEmailSettingsAsync();
+
+        await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
+        await emailOtp.StartForClientAsync(new SqlOSEmailOtpStartRequest("alice@example.com", "test-client", null));
+
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Email Template Org", null));
+        await invitationService.CreateEmailInvitationAsync(new SqlOSCreateEmailInvitationRequest(
+            org.Id,
+            "invitee@example.com",
+            "member"));
+
+        authEmailSender.Messages.Should().BeEmpty();
+        transactionalSender.Messages.Should().HaveCount(2);
+        transactionalSender.Messages[0].Subject.Should().Contain("sign-in code");
+        transactionalSender.Messages[1].Subject.Should().Be("You're invited to Email Template Org");
+
+        var deliveries = await context.Set<SqlOSEmailDelivery>()
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
+        deliveries.Should().HaveCount(2);
+        deliveries.Select(x => x.TemplateKey).Should().Contain([
+            SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
+            SqlOSBuiltInEmailTemplates.AuthInvitationKey
+        ]);
+        deliveries.Should().OnlyContain(x => x.RenderedTextPreview == "[suppressed for sensitive built-in template]");
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_UsesBuiltInTransactionalTemplate()
+    {
+        using var context = CreateContext();
+        var authOptions = new SqlOSAuthServerOptions();
+        authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+        var options = Options.Create(authOptions);
+        var authEmailSender = new TestAuthEmailSender { IsConfigured = false };
+        var transactionalSender = new FakeTransactionalEmailSender();
+        var transactionalService = CreateEmailService(context, transactionalSender);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var settings = new SqlOSSettingsService(context, options, authEmailSender, transactionalSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService, transactionalSender);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, transactionalEmailService: transactionalService, transactionalEmailSender: transactionalSender);
+        await CreateEmailAdmin(context).EnsureBuiltInTemplatesAsync();
+
+        await crypto.EnsureActiveSigningKeyAsync();
+        await admin.UpsertSeededClientsAsync();
+        await admin.CreateUserAsync(new SqlOSCreateUserRequest("Reset User", "reset@example.com", "OldPassword123!"));
+
+        var result = await auth.SendPasswordResetEmailAsync(new SqlOSSendPasswordResetEmailRequest("reset@example.com"));
+
+        result.DeliveryStatus.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
+        transactionalSender.Messages.Should().ContainSingle();
+        transactionalSender.Messages[0].Subject.Should().Be("Reset your SqlOS password");
+        transactionalSender.Messages[0].TextBody.Should().Contain("/sqlos/auth/password/reset?token=");
+
+        var delivery = await context.Set<SqlOSEmailDelivery>().SingleAsync();
+        delivery.TemplateKey.Should().Be(SqlOSBuiltInEmailTemplates.AuthPasswordResetKey);
+        delivery.RenderedTextPreview.Should().Be("[suppressed for sensitive built-in template]");
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()

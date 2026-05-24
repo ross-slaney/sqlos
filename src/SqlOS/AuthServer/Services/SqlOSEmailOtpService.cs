@@ -11,6 +11,10 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
+using SqlOS.Email.Models;
+using SqlOS.Email.Services;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -21,6 +25,8 @@ public sealed class SqlOSEmailOtpService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSAuthEmailSender _emailSender;
+    private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
+    private readonly ISqlOSEmailSender? _transactionalEmailSender;
     private readonly SqlOSEmailOtpOptions _options;
 
     public SqlOSEmailOtpService(
@@ -29,17 +35,21 @@ public sealed class SqlOSEmailOtpService
         SqlOSCryptoService cryptoService,
         SqlOSSettingsService settingsService,
         ISqlOSAuthEmailSender emailSender,
-        IOptions<SqlOSAuthServerOptions> options)
+        IOptions<SqlOSAuthServerOptions> options,
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        ISqlOSEmailSender? transactionalEmailSender = null)
     {
         _context = context;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _emailSender = emailSender;
+        _transactionalEmailService = transactionalEmailService;
+        _transactionalEmailSender = transactionalEmailSender;
         _options = options.Value.EmailOtp;
     }
 
-    public bool IsRuntimeConfigured => _emailSender.IsConfigured;
+    public bool IsRuntimeConfigured => _emailSender.IsConfigured || _transactionalEmailSender?.IsConfigured == true;
 
     public async Task<SqlOSEmailOtpStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
@@ -588,7 +598,14 @@ public sealed class SqlOSEmailOtpService
         {
             try
             {
-                await _emailSender.SendAsync(await BuildMessageAsync(trimmedEmail, maskedEmail, code, challenge.ExpiresAt, purpose, cancellationToken), cancellationToken);
+                await SendEmailAsync(
+                    trimmedEmail,
+                    maskedEmail,
+                    code,
+                    challenge.ExpiresAt,
+                    purpose,
+                    challenge.Id,
+                    cancellationToken);
             }
             catch
             {
@@ -687,7 +704,40 @@ public sealed class SqlOSEmailOtpService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    private async Task<SqlOSAuthEmailMessage> BuildMessageAsync(
+    private async Task SendEmailAsync(
+        string email,
+        string maskedEmail,
+        string code,
+        DateTime expiresAt,
+        string purpose,
+        string challengeId,
+        CancellationToken cancellationToken)
+    {
+        var context = await BuildMessageContextAsync(email, maskedEmail, code, expiresAt, purpose, cancellationToken);
+        if (_options.BuildMessage == null
+            && _transactionalEmailService != null
+            && _transactionalEmailSender?.IsConfigured == true)
+        {
+            var result = await _transactionalEmailService.SendAsync(
+                new SqlOSSendEmailRequest(
+                    SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
+                    email,
+                    BuildTemplateVariables(context),
+                    IdempotencyKey: $"auth-email-otp:{challengeId}"),
+                cancellationToken);
+
+            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(result.SanitizedError ?? "Email OTP delivery failed.");
+            }
+
+            return;
+        }
+
+        await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
+    }
+
+    private async Task<SqlOSEmailOtpMessageContext> BuildMessageContextAsync(
         string email,
         string maskedEmail,
         string code,
@@ -713,6 +763,11 @@ public sealed class SqlOSEmailOtpService
             Branding = branding with { ApplicationName = applicationName }
         };
 
+        return context;
+    }
+
+    private SqlOSAuthEmailMessage BuildLegacyMessage(SqlOSEmailOtpMessageContext context)
+    {
         var defaultSubject = context.Purpose == "signup"
             ? $"Your {context.ApplicationName} sign-up code"
             : $"Your {context.ApplicationName} sign-in code";
@@ -722,10 +777,28 @@ public sealed class SqlOSEmailOtpService
 
         return _options.BuildMessage?.Invoke(context)
             ?? new SqlOSAuthEmailMessage(
-                email,
+                context.Email,
                 subject,
                 SqlOSAuthEmailTemplateRenderer.BuildOtpHtmlBody(context),
                 SqlOSAuthEmailTemplateRenderer.BuildOtpTextBody(context));
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildTemplateVariables(SqlOSEmailOtpMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.ChallengeLifetime.TotalMinutes));
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["applicationName"] = context.ApplicationName,
+            ["purposeLabel"] = context.Purpose == "signup" ? "sign-up" : "sign-in",
+            ["heading"] = context.Purpose == "signup" ? "Your sign-up code" : "Your sign-in code",
+            ["action"] = context.Purpose == "signup" ? "creating your account" : "signing in",
+            ["maskedEmail"] = context.MaskedEmail,
+            ["code"] = context.Code,
+            ["expiresInMinutes"] = minutes,
+            ["primaryColor"] = context.Branding.PrimaryColor,
+            ["accentColor"] = context.Branding.AccentColor,
+            ["backgroundColor"] = context.Branding.BackgroundColor
+        };
     }
 
     private async Task RecordOtpAuditAsync(

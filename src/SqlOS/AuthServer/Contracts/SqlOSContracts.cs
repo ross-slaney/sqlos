@@ -86,6 +86,23 @@ public sealed record SqlOSForgotPasswordRequest(string Email);
 
 public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
 
+public sealed record SqlOSSendPasswordResetEmailRequest(
+    string Email,
+    string? ResetUrlTemplate = null);
+
+public sealed record SqlOSSendUserPasswordResetEmailRequest(
+    string? ResetUrlTemplate = null);
+
+public sealed record SqlOSPasswordResetEmailResult(
+    string Email,
+    string MaskedEmail,
+    DateTime ExpiresAt,
+    string DeliveryId,
+    string DeliveryStatus,
+    string? ProviderMessageId,
+    string? SanitizedError,
+    string Message);
+
 public sealed record SqlOSCreateVerificationTokenRequest(string Email);
 
 public sealed record SqlOSVerifyEmailRequest(string Token);

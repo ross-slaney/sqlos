@@ -1,6 +1,7 @@
 using Azure;
 using Azure.Communication.Email;
 using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.Email.Configuration;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
@@ -10,19 +11,30 @@ namespace SqlOS.Email.Services;
 public sealed class SqlOSAcsEmailSender : ISqlOSEmailSender
 {
     private readonly EmailClient? _client;
-    private readonly SqlOSEmailOptions _options;
+    private readonly string? _fromAddress;
 
-    public SqlOSAcsEmailSender(IOptions<SqlOSEmailOptions> options)
+    public SqlOSAcsEmailSender(
+        IOptions<SqlOSEmailOptions> options,
+        IOptions<SqlOSAuthServerOptions>? authOptions = null)
     {
-        _options = options.Value;
+        var emailOptions = options.Value;
+        var authEmailOptions = authOptions?.Value.EmailOtp;
+        var connectionString = emailOptions.AzureCommunicationServicesConnectionString;
+        _fromAddress = emailOptions.FromAddress;
 
-        if (_options.IsConfigured)
+        if (string.IsNullOrWhiteSpace(connectionString) && authEmailOptions?.IsConfigured == true)
         {
-            _client = new EmailClient(_options.AzureCommunicationServicesConnectionString!);
+            connectionString = authEmailOptions.AzureCommunicationServicesConnectionString;
+            _fromAddress = authEmailOptions.FromAddress;
+        }
+
+        if (!string.IsNullOrWhiteSpace(connectionString) && !string.IsNullOrWhiteSpace(_fromAddress))
+        {
+            _client = new EmailClient(connectionString);
         }
     }
 
-    public bool IsConfigured => _options.IsConfigured && _client != null;
+    public bool IsConfigured => _client != null && !string.IsNullOrWhiteSpace(_fromAddress);
 
     public async Task<SqlOSEmailProviderResult> SendAsync(
         SqlOSEmailMessage message,
@@ -40,7 +52,7 @@ public sealed class SqlOSAcsEmailSender : ISqlOSEmailSender
         };
 
         var email = new Azure.Communication.Email.EmailMessage(
-            senderAddress: _options.FromAddress!,
+            senderAddress: _fromAddress!,
             recipients: new EmailRecipients([new EmailAddress(message.To)]),
             content: content);
 

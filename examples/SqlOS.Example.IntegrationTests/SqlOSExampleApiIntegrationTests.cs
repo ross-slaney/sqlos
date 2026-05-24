@@ -6,8 +6,13 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
 using SqlOS.Example.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Example.IntegrationTests;
@@ -408,6 +413,67 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task TransactionalEmail_BuiltInAuthTemplates_AreAvailable()
+    {
+        var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/email/api/templates?search=auth.&pageSize=20");
+        response.EnsureSuccessStatusCode();
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var keys = json.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("key").GetString())
+            .ToArray();
+
+        keys.Should().Contain([
+            "auth.email-otp",
+            "auth.invitation",
+            "auth.password-reset"
+        ]);
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_AdminApi_QueuesBuiltInTemplate()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+
+        var userResponse = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new
+        {
+            displayName = "Reset Email User",
+            email = $"reset-email-{Guid.NewGuid():N}@example.com",
+            password = "P@ssword123!"
+        });
+        userResponse.EnsureSuccessStatusCode();
+        var userJson = JsonDocument.Parse(await userResponse.Content.ReadAsStringAsync());
+        var userId = userJson.RootElement.GetProperty("id").GetString();
+
+        var resetResponse = await client.PostAsJsonAsync($"/sqlos/admin/auth/api/users/{userId}/password-reset-email", new
+        {
+            resetUrlTemplate = "https://app.example.test/reset?token={token}"
+        });
+        resetResponse.EnsureSuccessStatusCode();
+
+        var resetJson = JsonDocument.Parse(await resetResponse.Content.ReadAsStringAsync());
+        resetJson.RootElement.GetProperty("deliveryStatus").GetString().Should().Be("queued");
+        sender.Messages.Should().ContainSingle();
+        sender.Messages[0].Subject.Should().StartWith("Reset your ");
+        sender.Messages[0].Subject.Should().EndWith(" password");
+        sender.Messages[0].TextBody.Should().Contain("https://app.example.test/reset?token=");
+    }
+
+    [TestMethod]
     public async Task Organization_CanBeUpdatedThroughAdminApi()
     {
         var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
@@ -626,5 +692,19 @@ public sealed class SqlOSExampleApiIntegrationTests
         signedXml.ComputeSignature();
         responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
+    }
+
+    private sealed class CapturingTransactionalEmailSender : ISqlOSEmailSender
+    {
+        public bool IsConfigured => true;
+        public List<SqlOSEmailMessage> Messages { get; } = [];
+
+        public Task<SqlOSEmailProviderResult> SendAsync(
+            SqlOSEmailMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add(message);
+            return Task.FromResult(new SqlOSEmailProviderResult($"provider-{Messages.Count}"));
+        }
     }
 }

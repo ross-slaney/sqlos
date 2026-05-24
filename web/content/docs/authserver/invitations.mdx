@@ -145,6 +145,8 @@ options.AuthServer.UseHeadlessAuthPage(headless =>
 
 ## Email content
 
+SqlOS creates the default `auth.invitation` template automatically. Edit it in **Dashboard > Communications > Templates** to customize organization invitation email copy and layout while keeping the same runtime variables.
+
 Invitations use the same sender and branding system as Email OTP. Configure the built-in look with [Email Branding](/docs/authserver/email-branding), or provide an advanced message builder:
 
 ```csharp

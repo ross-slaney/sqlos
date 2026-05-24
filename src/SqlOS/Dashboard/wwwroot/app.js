@@ -1824,6 +1824,14 @@
                             { label: "External identities", value: user.externalIdentityCount || 0 }
                         ])}
                     </section>
+                    <section class="panel">
+                        <h2>Account Actions</h2>
+                        <p>Send a password reset email using the built-in password reset template.</p>
+                        <form id="send-password-reset-email-form">
+                            <input name="resetUrlTemplate" placeholder="Optional reset URL template with {token}">
+                            <button type="submit" ${user.defaultEmail ? "" : "disabled"}>Send password reset email</button>
+                        </form>
+                    </section>
                 </div>
             `;
         } else if (tab === "organizations") {
@@ -1893,7 +1901,17 @@
             ${tabContent}
         `;
 
-        if (tab === "organizations") {
+        if (tab === "general") {
+            bindForm("send-password-reset-email-form", async form => {
+                await fetchJson(`${authApiBasePath}/users/${encodeURIComponent(userId)}/password-reset-email`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        resetUrlTemplate: String(form.get("resetUrlTemplate") || "").trim() || null
+                    })
+                });
+                setFlash("success", "Password reset email queued.");
+            });
+        } else if (tab === "organizations") {
             bindPagination("#user-memberships-pagination-top", async page => {
                 setPagerPage(`auth-user-${userId}-memberships`, page);
                 await render();
@@ -2826,7 +2844,7 @@
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
                             ${settings.emailOtpRuntimeConfigured
                                 ? `<div class="callout"><strong>Email OTP delivery is configured.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
-                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.AuthServer.EmailOtp.AzureCommunicationServicesConnectionString</code> and <code>options.AuthServer.EmailOtp.FromAddress</code> in startup before enabling <code>email_otp</code>.</div>`}
+                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.Email</code> or <code>options.AuthServer.EmailOtp</code> ACS settings in startup before enabling <code>email_otp</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
                             <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
                             <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>
@@ -2854,7 +2872,7 @@
                     </section>
                     <section class="panel">
                         <h2>Email Branding</h2>
-                        <p>These settings style built-in Email OTP and invitation emails. Use SDK message builders for advanced copy, layouts, or per-tenant email templates.</p>
+                        <p>These settings style built-in AuthServer emails. Use Communications templates for copy and layout, or SDK message builders for advanced custom behavior.</p>
                         ${emailSettings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These email values are seeded from application startup and will be reapplied on restart.</div>` : ""}
                         <form id="auth-email-settings-form">
                             <input name="applicationName" placeholder="Application name" value="${esc(emailSettings.applicationName || "")}" required>

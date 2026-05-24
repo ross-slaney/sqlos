@@ -5,7 +5,7 @@ order: 11
 section: authserver
 ---
 
-Transactional email is a host-application API for audited operational messages. It is separate from the built-in Email OTP and invitation sender, which continue to use the V0 auth-email path.
+Transactional email is the audited template system for operational messages and built-in AuthServer email. Every SqlOS implementation automatically gets templates for Email OTP, organization invitations, and password reset emails during startup.
 
 ## Configure ACS Email
 
@@ -56,6 +56,7 @@ Open `SqlOS Dashboard > Communications`.
 
 - Templates: create, edit, activate, deactivate, delete templates without delivery history, and preview rendered output with sample variables.
 - Messages: filter delivery log entries by status, template key, recipient, and date range.
+- Built-in auth templates: `auth.email-otp`, `auth.invitation`, and `auth.password-reset` are created automatically and can be customized like other templates.
 
 ## Retention and PII posture
 
@@ -63,6 +64,8 @@ SqlOS stores delivery history with recipient, template key/version, status, time
 
 Rendered HTML bodies are not stored unless `options.Email.PersistRenderedHtmlPreview` is enabled. `options.Email.DeliveryRetention` records the host retention policy value; SqlOS does not run a destructive cleanup worker in V0.
 
-## Auth email remains separate
+## Built-in auth email
 
-Email OTP and invitations use `ISqlOSAuthEmailSender` and auth-specific templates. They are intentionally not migrated onto transactional email in V0 so authentication behavior remains unchanged.
+Email OTP, organization invitations, and password reset emails use the built-in transactional templates when transactional delivery is configured. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
+
+Existing custom `BuildMessage` hooks and custom `ISqlOSAuthEmailSender` implementations still work as escape hatches for advanced auth email behavior.

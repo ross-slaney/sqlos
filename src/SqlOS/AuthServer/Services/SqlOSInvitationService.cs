@@ -9,6 +9,10 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
+using SqlOS.Email.Models;
+using SqlOS.Email.Services;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -18,6 +22,8 @@ public sealed class SqlOSInvitationService
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly ISqlOSAuthEmailSender _emailSender;
+    private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
+    private readonly ISqlOSEmailSender? _transactionalEmailSender;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationOptions _invitationOptions;
@@ -28,23 +34,30 @@ public sealed class SqlOSInvitationService
         SqlOSCryptoService cryptoService,
         ISqlOSAuthEmailSender emailSender,
         SqlOSSettingsService settingsService,
-        IOptions<SqlOSAuthServerOptions> options)
+        IOptions<SqlOSAuthServerOptions> options,
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        ISqlOSEmailSender? transactionalEmailSender = null)
     {
         _context = context;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _emailSender = emailSender;
+        _transactionalEmailService = transactionalEmailService;
+        _transactionalEmailSender = transactionalEmailSender;
         _settingsService = settingsService;
         _options = options.Value;
         _invitationOptions = _options.Invitations;
     }
+
+    private bool IsEmailDeliveryConfigured
+        => _emailSender.IsConfigured || _transactionalEmailSender?.IsConfigured == true;
 
     public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
         SqlOSCreateEmailInvitationRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (request.SendEmail && !_emailSender.IsConfigured)
+        if (request.SendEmail && !IsEmailDeliveryConfigured)
         {
             throw new InvalidOperationException("Invitation email delivery is not configured.");
         }
@@ -160,7 +173,7 @@ public sealed class SqlOSInvitationService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (!_emailSender.IsConfigured)
+        if (!IsEmailDeliveryConfigured)
         {
             throw new InvalidOperationException("Invitation email delivery is not configured.");
         }
@@ -432,7 +445,7 @@ public sealed class SqlOSInvitationService
         var inviteUrl = BuildAcceptUrl(rawToken, httpContext);
         try
         {
-            await _emailSender.SendAsync(await BuildMessageAsync(invitation, organization, inviteUrl, cancellationToken), cancellationToken);
+            await SendInvitationMessageAsync(invitation, organization, inviteUrl, cancellationToken);
             invitation.LastSentAt = DateTime.UtcNow;
             invitation.LastSendError = null;
             AddAuditEvent(
@@ -459,7 +472,37 @@ public sealed class SqlOSInvitationService
         }
     }
 
-    private async Task<SqlOSAuthEmailMessage> BuildMessageAsync(
+    private async Task SendInvitationMessageAsync(
+        SqlOSInvitation invitation,
+        SqlOSOrganization organization,
+        string acceptUrl,
+        CancellationToken cancellationToken)
+    {
+        var context = await BuildMessageContextAsync(invitation, organization, acceptUrl, cancellationToken);
+        if (_invitationOptions.BuildMessage == null
+            && _transactionalEmailService != null
+            && _transactionalEmailSender?.IsConfigured == true)
+        {
+            var result = await _transactionalEmailService.SendAsync(
+                new SqlOSSendEmailRequest(
+                    SqlOSBuiltInEmailTemplates.AuthInvitationKey,
+                    invitation.InvitedEmail,
+                    BuildTemplateVariables(context),
+                    IdempotencyKey: $"auth-invitation:{invitation.Id}:{invitation.TokenHash[..Math.Min(32, invitation.TokenHash.Length)]}"),
+                cancellationToken);
+
+            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(result.SanitizedError ?? "Invitation email delivery failed.");
+            }
+
+            return;
+        }
+
+        await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
+    }
+
+    private async Task<SqlOSInvitationMessageContext> BuildMessageContextAsync(
         SqlOSInvitation invitation,
         SqlOSOrganization organization,
         string acceptUrl,
@@ -486,12 +529,32 @@ public sealed class SqlOSInvitationService
             Branding = branding with { ApplicationName = applicationName }
         };
 
-        return _invitationOptions.BuildMessage?.Invoke(context)
+        return context;
+    }
+
+    private SqlOSAuthEmailMessage BuildLegacyMessage(SqlOSInvitationMessageContext context)
+        => _invitationOptions.BuildMessage?.Invoke(context)
             ?? new SqlOSAuthEmailMessage(
-                invitation.InvitedEmail,
+                context.Email,
                 $"You're invited to {context.OrganizationName}",
                 SqlOSAuthEmailTemplateRenderer.BuildInvitationHtmlBody(context),
                 SqlOSAuthEmailTemplateRenderer.BuildInvitationTextBody(context));
+
+    private static IReadOnlyDictionary<string, object?> BuildTemplateVariables(SqlOSInvitationMessageContext context)
+    {
+        var days = Math.Max(1, (int)Math.Ceiling(context.Lifetime.TotalDays));
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["applicationName"] = context.ApplicationName,
+            ["organizationName"] = context.OrganizationName,
+            ["maskedEmail"] = context.MaskedEmail,
+            ["role"] = context.Role,
+            ["acceptUrl"] = context.AcceptUrl,
+            ["expiresInDays"] = days,
+            ["primaryColor"] = context.Branding.PrimaryColor,
+            ["accentColor"] = context.Branding.AccentColor,
+            ["backgroundColor"] = context.Branding.BackgroundColor
+        };
     }
 
     private async Task<SqlOSInvitation> FindInvitationByTokenAsync(string invitationToken, CancellationToken cancellationToken)
