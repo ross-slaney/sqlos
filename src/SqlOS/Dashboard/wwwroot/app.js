@@ -30,11 +30,11 @@
     };
 
     const authViews = {
-        overview: { title: "Auth Server", description: "Organizations, users, sessions, clients, and security settings." },
+        overview: { title: "Auth Server", description: "Organizations, users, sessions, applications, and security settings." },
         organizations: { title: "Organizations", description: "Create and manage organizations and their primary domains." },
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
-        clients: { title: "Clients", description: "Manage owned apps, discovered clients, registered compatibility clients, and lifecycle actions." },
+        clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
         oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
@@ -1989,9 +1989,11 @@
         const clients = await fetchJson(`${authApiBasePath}/clients?${params.toString()}`);
         const clientItems = Array.isArray(clients.data) ? clients.data : [];
         let clientDetail = null;
+        let clientAccess = null;
         if (selectedClientId) {
             try {
                 clientDetail = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(selectedClientId)}`);
+                clientAccess = await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments`);
                 selectedClientId = clientDetail.id;
             } catch {
                 if (route?.clientApplicationId) {
@@ -2161,6 +2163,7 @@
                                     { label: "Client ID", value: clientDetail.clientId },
                                     { label: "Description", value: clientDetail.description || "n/a" },
                                     { label: "Audience", value: clientDetail.audience },
+                                    { label: "Access mode", value: clientDetail.accessMode || "all_organizations" },
                                     { label: "Source", value: clientDetail.sourceLabel },
                                     { label: "Lifecycle", value: clientDetail.lifecycleState },
                                     { label: "Require PKCE", value: clientDetail.requirePkce ? "Yes" : "No" },
@@ -2200,6 +2203,61 @@
                                         value: clientDetail.allowedScopes.length ? clientDetail.allowedScopes.join(", ") : "n/a"
                                     }
                                 ])}
+                                <div>
+                                    <h3>Access</h3>
+                                    <form id="application-access-mode-form" class="client-filter-form">
+                                        <select name="accessMode">
+                                            ${["all_organizations", "selected_organizations", "selected_users_groups_roles", "internal_only", "disabled"].map(mode => `
+                                                <option value="${esc(mode)}" ${(clientAccess?.accessMode || clientDetail.accessMode || "all_organizations") === mode ? "selected" : ""}>${esc(mode)}</option>
+                                            `).join("")}
+                                        </select>
+                                        <button type="submit">Save access mode</button>
+                                    </form>
+                                    <form id="create-application-assignment-form" class="client-assignment-form">
+                                        <select name="principalType">
+                                            <option value="organization">Organization</option>
+                                            <option value="user">User</option>
+                                            <option value="group">Group</option>
+                                            <option value="role">Role</option>
+                                        </select>
+                                        <input name="organizationId" placeholder="Organization ID">
+                                        <input name="principalId" placeholder="User or group ID">
+                                        <input name="roleKey" placeholder="Role key">
+                                        <select name="access">
+                                            <option value="allowed">Allowed</option>
+                                            <option value="denied">Denied</option>
+                                        </select>
+                                        <input name="reason" placeholder="Reason">
+                                        <button type="submit">Add assignment</button>
+                                    </form>
+                                    ${renderList(
+                                        clientAccess?.assignments || [],
+                                        assignment => `
+                                            <div class="client-list-row">
+                                                <div class="client-list-header">
+                                                    <div>
+                                                        <strong>${esc(assignment.principalType)}</strong>
+                                                        <div class="client-badge-row">
+                                                            ${renderClientBadge(assignment.access, assignment.access === "denied" ? "danger" : "success")}
+                                                            ${assignment.revokedAt ? renderClientBadge("Revoked", "muted") : ""}
+                                                        </div>
+                                                    </div>
+                                                    ${assignment.revokedAt ? "" : `
+                                                        <button type="button" data-application-assignment-revoke="${esc(assignment.id)}">Revoke</button>
+                                                    `}
+                                                </div>
+                                                ${renderMetadataRows([
+                                                    { label: "Organization", value: assignment.organization || assignment.organizationId || "n/a" },
+                                                    { label: "Principal ID", value: assignment.principalId || "n/a" },
+                                                    { label: "Role key", value: assignment.roleKey || "n/a" },
+                                                    { label: "Reason", value: assignment.reason || "n/a" },
+                                                    { label: "Created", value: formatDate(assignment.createdAt) }
+                                                ])}
+                                            </div>
+                                        `,
+                                        "No assignments for this application."
+                                    )}
+                                </div>
                                 <details>
                                     <summary>Raw metadata</summary>
                                     <pre class="json-preview">${esc(formatJson(clientDetail.metadataJson))}</pre>
@@ -2331,6 +2389,56 @@
         bindPagination("#clients-pagination-top", async page => {
             setPagerPage("auth-clients", page);
             await render();
+        });
+
+        bindForm("application-access-mode-form", async form => {
+            if (!clientDetail) {
+                return;
+            }
+
+            await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/access-mode`, {
+                method: "POST",
+                body: JSON.stringify({ accessMode: form.get("accessMode") })
+            });
+            setFlash("success", "Application access mode updated.");
+        });
+
+        bindForm("create-application-assignment-form", async form => {
+            if (!clientDetail) {
+                return;
+            }
+
+            await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments`, {
+                method: "POST",
+                body: JSON.stringify({
+                    principalType: form.get("principalType"),
+                    organizationId: form.get("organizationId") || null,
+                    principalId: form.get("principalId") || null,
+                    roleKey: form.get("roleKey") || null,
+                    access: form.get("access") || "allowed",
+                    reason: form.get("reason") || null
+                })
+            });
+            setFlash("success", "Application assignment added.");
+        });
+
+        document.querySelectorAll("[data-application-assignment-revoke]").forEach(button => {
+            button.addEventListener("click", async () => {
+                if (!clientDetail) {
+                    return;
+                }
+
+                const assignmentId = button.getAttribute("data-application-assignment-revoke");
+                if (!assignmentId) {
+                    return;
+                }
+
+                await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments/${encodeURIComponent(assignmentId)}`, {
+                    method: "DELETE"
+                });
+                setFlash("success", "Application assignment revoked.");
+                await render();
+            });
         });
 
         document.querySelectorAll("[data-client-action]").forEach(button => {

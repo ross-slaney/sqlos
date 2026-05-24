@@ -13,6 +13,7 @@ public sealed class SqlOSOrganization
 
     public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
     public ICollection<SqlOSSsoConnection> SsoConnections { get; set; } = new List<SqlOSSsoConnection>();
+    public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
 }
 
 public sealed class SqlOSUser
@@ -177,6 +178,7 @@ public sealed class SqlOSSession
     public string UserId { get; set; } = string.Empty;
     public string? AuthenticationMethod { get; set; }
     public string? ClientApplicationId { get; set; }
+    public string? OrganizationId { get; set; }
     public string? Resource { get; set; }
     public string? EffectiveAudience { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -190,6 +192,7 @@ public sealed class SqlOSSession
 
     public SqlOSUser? User { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
+    public SqlOSOrganization? Organization { get; set; }
     public ICollection<SqlOSRefreshToken> RefreshTokens { get; set; } = new List<SqlOSRefreshToken>();
 }
 
@@ -242,6 +245,7 @@ public sealed class SqlOSClientApplication
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string Audience { get; set; } = "sqlos";
+    public string AccessMode { get; set; } = "all_organizations";
     public string ClientType { get; set; } = "public_pkce";
     public string RegistrationSource { get; set; } = "manual";
     public string TokenEndpointAuthMethod { get; set; } = "none";
@@ -268,6 +272,29 @@ public sealed class SqlOSClientApplication
     public DateTime? DisabledAt { get; set; }
     public string? DisabledReason { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
+}
+
+public sealed class SqlOSApplicationAssignment
+{
+    public string Id { get; set; } = string.Empty;
+    public string ClientApplicationId { get; set; } = string.Empty;
+    public string? OrganizationId { get; set; }
+    public string PrincipalType { get; set; } = "organization";
+    public string? PrincipalId { get; set; }
+    public string? RoleKey { get; set; }
+    public string Access { get; set; } = "allowed";
+    public string? Reason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string? CreatedByActorType { get; set; }
+    public string? CreatedByActorId { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevokedByActorType { get; set; }
+    public string? RevokedByActorId { get; set; }
+
+    public SqlOSClientApplication? ClientApplication { get; set; }
+    public SqlOSOrganization? Organization { get; set; }
 }
 
 public sealed class SqlOSDeviceAuthorization

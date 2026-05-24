@@ -1,0 +1,93 @@
+---
+title: "Single-Application Setup"
+description: "Use one product-level declaration for a WorkOS-style SqlOS setup."
+order: 18
+section: authserver
+---
+
+Most SqlOS projects start with one SaaS app. Use single-application mode when you want organizations, users, sessions, SSO, invitations, and permissions without thinking about several OAuth clients up front.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication("Todo", app =>
+    {
+        app.Origin = "https://todo.example.com";
+    });
+});
+```
+
+This expands into the same seeded client records SqlOS already uses. It does not create a separate runtime path.
+
+## Defaults
+
+| Setting | Default |
+| --- | --- |
+| Application name | The provided name |
+| Client ID | Stable slug from the name, such as `todo` |
+| Audience | Same as the client ID |
+| Redirect URI | `{Origin}/auth/callback` |
+| Client type | `public_pkce` |
+| PKCE | Required, S256 only |
+| First-party | `true` |
+| Scopes | `openid`, `profile`, `email`, `offline_access` |
+| Auth page title | `Sign in to {ApplicationName}` |
+| Email application name | `{ApplicationName}` |
+| Application access | `all_organizations` |
+
+Single-application mode also keeps `DCR`, `CIMD`, and resource indicators off until you opt into those advanced features.
+
+## Overrides
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication("Todo", app =>
+    {
+        app.Origin = "https://todo.example.com";
+        app.ClientId = "todo-web";
+        app.Audience = "https://todo.example.com/api";
+        app.RedirectPath = "/auth/callback";
+        app.AllowedScopes = ["openid", "profile", "email", "offline_access", "todos.read", "todos.write"];
+        app.EnablePasswordSignup = true;
+        app.EnabledCredentialTypes = ["password"];
+    });
+});
+```
+
+`Origin` must be an absolute `http` or `https` origin without a query string or fragment. `RedirectPath` must start with `/`. You can also provide `RedirectUris` directly when an origin-derived callback is not enough.
+
+## Configuration
+
+Deployment-friendly projects can bind from configuration:
+
+```json
+{
+  "SqlOS": {
+    "Application": {
+      "Name": "Todo",
+      "Origin": "https://todo.example.com",
+      "ClientId": "todo-web",
+      "Audience": "https://todo.example.com/api",
+      "RedirectPath": "/auth/callback"
+    }
+  }
+}
+```
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication(builder.Configuration);
+});
+```
+
+## When to graduate
+
+Move to explicit multi-application setup when you have more than one app experience, such as a customer portal, an admin console, a CLI, and a partner integration. At that point, use seeded clients or the dashboard to manage each application and use [Application Access](/docs/authserver/application-access) to control who can use each one.
+
+Audience and application assignment stay separate:
+
+- Audience controls where a token is accepted.
+- Application assignment controls who can use an application.
+

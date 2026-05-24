@@ -283,6 +283,14 @@ public sealed class SqlOSDeviceAuthorizationService
             return ToResolveResult(deviceAuthorization, true, organizations);
         }
 
+        await _adminService.EnsureApplicationAccessAsync(
+            deviceAuthorization.ClientApplication!,
+            user.Id,
+            organizationId,
+            "application.access.device_denied",
+            GetIp(httpContext),
+            cancellationToken);
+
         deviceAuthorization.Status = ApprovedStatus;
         deviceAuthorization.ApprovedUserId = user.Id;
         deviceAuthorization.ApprovedOrganizationId = organizationId;

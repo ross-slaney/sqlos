@@ -497,6 +497,14 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("User is not a member of the selected organization.");
         }
 
+        organizationId ??= session.OrganizationId;
+        await _adminService.EnsureApplicationAccessAsync(
+            session.ClientApplication!,
+            session.UserId,
+            organizationId,
+            "application.access.refresh_denied",
+            cancellationToken: cancellationToken);
+
         // Mint the access token, build the new refresh token row, and
         // populate the grace-window cache fields all BEFORE the single
         // SaveChangesAsync. This avoids a visibility window where
@@ -915,11 +923,19 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken)
     {
         var effectiveAudience = ResolveEffectiveAudience(client, resource);
+        await _adminService.EnsureApplicationAccessAsync(
+            client,
+            user.Id,
+            organizationId,
+            "application.access.token_denied",
+            ipAddress,
+            cancellationToken);
         var session = new SqlOSSession
         {
             Id = _cryptoService.GenerateId("ses"),
             UserId = user.Id,
             ClientApplicationId = client.Id,
+            OrganizationId = organizationId,
             AuthenticationMethod = authenticationMethod,
             Resource = resource,
             EffectiveAudience = effectiveAudience,

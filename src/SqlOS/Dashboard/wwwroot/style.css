@@ -527,7 +527,8 @@ nav a.active {
     gap: 12px;
 }
 
-.client-filter-form {
+.client-filter-form,
+.client-assignment-form {
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     align-items: end;
     margin-bottom: 16px;
@@ -561,14 +562,16 @@ nav a.active {
 }
 
 .client-action-row button,
-.client-filter-form button {
+.client-filter-form button,
+.client-assignment-form button {
     background: var(--zinc-100);
     color: var(--zinc-800);
     border: 1px solid var(--zinc-200);
 }
 
 .client-action-row button:hover,
-.client-filter-form button:hover {
+.client-filter-form button:hover,
+.client-assignment-form button:hover {
     background: var(--zinc-200);
 }
 

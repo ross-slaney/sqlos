@@ -173,12 +173,14 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSClientApplications", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.ClientId).IsUnique();
+            entity.HasIndex(x => x.AccessMode);
             entity.HasIndex(x => x.RegistrationSource);
             entity.HasIndex(x => new { x.IsActive, x.RegistrationSource });
             entity.HasIndex(x => x.MetadataDocumentUrl);
             entity.HasIndex(x => x.LastSeenAt);
             entity.Property(x => x.ClientId).HasMaxLength(850);
             entity.Property(x => x.Audience).HasMaxLength(850);
+            entity.Property(x => x.AccessMode).HasMaxLength(40);
             entity.Property(x => x.Name).HasMaxLength(200);
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.ClientType).HasMaxLength(40);
@@ -191,6 +193,35 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.SoftwareVersion).HasMaxLength(120);
             entity.Property(x => x.MetadataEtag).HasMaxLength(256);
             entity.Property(x => x.DisabledReason).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<SqlOSApplicationAssignment>(entity =>
+        {
+            entity.ToTable("SqlOSApplicationAssignments", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ClientApplicationId, x.PrincipalType, x.PrincipalId, x.OrganizationId, x.RoleKey, x.RevokedAt })
+                .HasDatabaseName("IX_SqlOSApplicationAssignments_Target");
+            entity.HasIndex(x => new { x.ClientApplicationId, x.RevokedAt });
+            entity.HasIndex(x => new { x.OrganizationId, x.RevokedAt });
+            entity.Property(x => x.ClientApplicationId).HasMaxLength(64);
+            entity.Property(x => x.OrganizationId).HasMaxLength(64);
+            entity.Property(x => x.PrincipalType).HasMaxLength(40);
+            entity.Property(x => x.PrincipalId).HasMaxLength(128);
+            entity.Property(x => x.RoleKey).HasMaxLength(80);
+            entity.Property(x => x.Access).HasMaxLength(20);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.Property(x => x.CreatedByActorType).HasMaxLength(80);
+            entity.Property(x => x.CreatedByActorId).HasMaxLength(128);
+            entity.Property(x => x.RevokedByActorType).HasMaxLength(80);
+            entity.Property(x => x.RevokedByActorId).HasMaxLength(128);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany(x => x.ApplicationAssignments)
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Organization)
+                .WithMany(x => x.ApplicationAssignments)
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<SqlOSDeviceAuthorization>(entity =>
@@ -230,6 +261,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSSessions", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
+            entity.Property(x => x.OrganizationId).HasMaxLength(64);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.EffectiveAudience).HasMaxLength(2048);
             entity.HasOne(x => x.User)
@@ -239,6 +271,10 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Organization)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

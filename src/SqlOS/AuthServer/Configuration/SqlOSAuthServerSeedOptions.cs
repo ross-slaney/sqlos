@@ -1,5 +1,20 @@
 namespace SqlOS.AuthServer.Configuration;
 
+public sealed class SqlOSSingleApplicationOptions
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Origin { get; set; }
+    public string? ClientId { get; set; }
+    public string? Audience { get; set; }
+    public string RedirectPath { get; set; } = "/auth/callback";
+    public List<string> RedirectUris { get; } = [];
+    public List<string> AllowedScopes { get; set; } = ["openid", "profile", "email", "offline_access"];
+    public bool EnablePasswordSignup { get; set; } = true;
+    public List<string> EnabledCredentialTypes { get; set; } = ["password"];
+    public bool ConfigureAuthPageBranding { get; set; } = true;
+    public bool ConfigureEmailBranding { get; set; } = true;
+}
+
 public sealed class SqlOSAuthPageSeedOptions
 {
     public string? LogoBase64 { get; set; }

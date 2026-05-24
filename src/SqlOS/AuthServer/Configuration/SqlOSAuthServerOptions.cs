@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using SqlOS.Configuration;
 
 namespace SqlOS.AuthServer.Configuration;
@@ -43,6 +44,7 @@ public class SqlOSAuthServerOptions
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public SqlOSAuthEmailSeedOptions? AuthEmailSeed { get; private set; }
+    public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
@@ -73,6 +75,77 @@ public class SqlOSAuthServerOptions
         configure(seed);
         ClientSeeds.Add(seed);
         return this;
+    }
+
+    public SqlOSAuthServerOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
+    {
+        var application = new SqlOSSingleApplicationOptions { Name = name };
+        configure?.Invoke(application);
+        return UseSingleApplication(application);
+    }
+
+    public SqlOSAuthServerOptions UseSingleApplication(SqlOSSingleApplicationOptions application)
+    {
+        if (string.IsNullOrWhiteSpace(application.Name))
+        {
+            throw new InvalidOperationException("Single-application mode requires an application name.");
+        }
+
+        SingleApplication = application;
+        ClientRegistration.Cimd.Enabled = false;
+        ResourceIndicators.Enabled = false;
+        ApplySingleApplicationBranding(application);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions UseSingleApplication(IConfiguration configuration, string sectionName = "SqlOS:Application")
+    {
+        var section = configuration.GetSection(sectionName);
+        if (!section.Exists())
+        {
+            throw new InvalidOperationException($"Configuration section '{sectionName}' was not found.");
+        }
+
+        var application = new SqlOSSingleApplicationOptions
+        {
+            Name = section["Name"] ?? string.Empty,
+            Origin = section["Origin"],
+            ClientId = section["ClientId"],
+            Audience = section["Audience"],
+            RedirectPath = section["RedirectPath"] ?? "/auth/callback",
+            EnablePasswordSignup = ReadBool(section, "EnablePasswordSignup", true),
+            ConfigureAuthPageBranding = ReadBool(section, "ConfigureAuthPageBranding", true),
+            ConfigureEmailBranding = ReadBool(section, "ConfigureEmailBranding", true)
+        };
+
+        var redirectUris = section.GetSection("RedirectUris").GetChildren()
+            .Select(static child => child.Value)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!.Trim())
+            .ToList();
+        application.RedirectUris.AddRange(redirectUris);
+
+        var allowedScopes = section.GetSection("AllowedScopes").GetChildren()
+            .Select(static child => child.Value)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!.Trim())
+            .ToList();
+        if (allowedScopes.Count > 0)
+        {
+            application.AllowedScopes = allowedScopes;
+        }
+
+        var credentialTypes = section.GetSection("EnabledCredentialTypes").GetChildren()
+            .Select(static child => child.Value)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!.Trim())
+            .ToList();
+        if (credentialTypes.Count > 0)
+        {
+            application.EnabledCredentialTypes = credentialTypes;
+        }
+
+        return UseSingleApplication(application);
     }
 
     public SqlOSAuthServerOptions ConfigureClientRegistration(Action<SqlOSClientRegistrationOptions> configure)
@@ -189,4 +262,29 @@ public class SqlOSAuthServerOptions
         configure?.Invoke(ClientRegistration.Dcr);
         return this;
     }
+
+    private void ApplySingleApplicationBranding(SqlOSSingleApplicationOptions application)
+    {
+        if (application.ConfigureAuthPageBranding && AuthPageSeed == null)
+        {
+            SeedAuthPage(page =>
+            {
+                page.PageTitle = $"Sign in to {application.Name.Trim()}";
+                page.EnablePasswordSignup = application.EnablePasswordSignup;
+                page.EnabledCredentialTypes = application.EnabledCredentialTypes
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Select(static value => value.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            });
+        }
+
+        if (application.ConfigureEmailBranding && AuthEmailSeed == null)
+        {
+            SeedAuthEmails(email => email.ApplicationName = application.Name.Trim());
+        }
+    }
+
+    private static bool ReadBool(IConfigurationSection section, string key, bool defaultValue)
+        => bool.TryParse(section[key], out var parsed) ? parsed : defaultValue;
 }

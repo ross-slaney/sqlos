@@ -470,6 +470,17 @@ public sealed class SqlOSAuthorizationServerService
             organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
         }
 
+        var client = authorizationRequest.ClientApplication
+            ?? await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        await _adminService.EnsureApplicationAccessAsync(
+            client,
+            user.Id,
+            organizationId,
+            "application.access.authorization_denied",
+            httpContext.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
         if (!string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
         {
             authorizationRequest.ResolvedAuthMethod = authenticationMethod;
