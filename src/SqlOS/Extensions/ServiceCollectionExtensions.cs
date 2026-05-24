@@ -48,6 +48,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSSettingsService>();
         services.AddSingleton<ISqlOSAuthEmailSender, SqlOSAcsAuthEmailSender>();
         services.AddScoped<SqlOSEmailOtpService>();
+        services.AddScoped<SqlOSPasswordLoginAbuseService>();
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();
         services.AddScoped<SqlOSCimdClientService>();

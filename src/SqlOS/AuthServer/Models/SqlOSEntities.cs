@@ -59,6 +59,28 @@ public sealed class SqlOSCredential
     public SqlOSUser? User { get; set; }
 }
 
+public sealed class SqlOSPasswordLoginBucket
+{
+    public string Id { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string BucketKey { get; set; } = string.Empty;
+    public string? NormalizedEmail { get; set; }
+    public string? UserId { get; set; }
+    public string? ClientKey { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgentHash { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime? WindowStartedAt { get; set; }
+    public DateTime? LastFailureAt { get; set; }
+    public DateTime? LastSuccessAt { get; set; }
+    public DateTime? LockedUntil { get; set; }
+    public string? LockoutReason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public SqlOSUser? User { get; set; }
+}
+
 public sealed class SqlOSMembership
 {
     public string OrganizationId { get; set; } = string.Empty;
