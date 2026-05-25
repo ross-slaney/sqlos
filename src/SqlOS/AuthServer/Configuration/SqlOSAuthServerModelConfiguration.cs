@@ -52,6 +52,30 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSPasswordLoginBucket>(entity =>
+        {
+            entity.ToTable("SqlOSPasswordLoginBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Scope, x.BucketKey }).IsUnique();
+            entity.HasIndex(x => new { x.NormalizedEmail, x.UpdatedAt });
+            entity.HasIndex(x => new { x.UserId, x.UpdatedAt });
+            entity.HasIndex(x => new { x.IpAddress, x.UpdatedAt });
+            entity.HasIndex(x => new { x.ClientKey, x.UpdatedAt });
+            entity.HasIndex(x => x.LockedUntil);
+            entity.Property(x => x.Scope).HasMaxLength(40);
+            entity.Property(x => x.BucketKey).HasMaxLength(512);
+            entity.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            entity.Property(x => x.UserId).HasMaxLength(64);
+            entity.Property(x => x.ClientKey).HasMaxLength(850);
+            entity.Property(x => x.IpAddress).HasMaxLength(128);
+            entity.Property(x => x.UserAgentHash).HasMaxLength(128);
+            entity.Property(x => x.LockoutReason).HasMaxLength(120);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSMembership>(entity =>
         {
             entity.ToTable("SqlOSMemberships", schema, t => t.ExcludeFromMigrations());

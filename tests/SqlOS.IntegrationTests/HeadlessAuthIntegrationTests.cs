@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Net;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -666,9 +667,56 @@ public sealed class HeadlessAuthIntegrationTests
         await act.Should().NotThrowAsync();
     }
 
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_UsesSameThrottleStateAsApiLogin()
+    {
+        await using var fixture = await CreateFixtureAsync(configureOptions: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(10);
+        });
+        var user = await fixture.AdminService.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Headless Lockout",
+            $"headless-lockout-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var apiFailure = async () => await fixture.AuthService.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", fixture.ClientId, null),
+            CreateHttpContext("203.0.113.70"));
+        await apiFailure.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var authorizationRequest = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "headless-lockout",
+                "openid profile email",
+                "challenge-headless-lockout",
+                "S256",
+                null,
+                user.DefaultEmail,
+                null,
+                null,
+                "headless",
+                null));
+
+        var headlessResult = await fixture.HeadlessAuthService.PasswordLoginAsync(
+            CreateHttpContext("203.0.113.70"),
+            new SqlOSHeadlessPasswordLoginRequest(
+                authorizationRequest.Id,
+                user.DefaultEmail!,
+                "P@ssword123!"));
+
+        headlessResult.Type.Should().Be("view");
+        headlessResult.ViewModel!.Error.Should().Be(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+    }
+
     private static async Task<HeadlessFixture> CreateFixtureAsync(
         Action<SqlOSHeadlessAuthOptions>? configureHeadless = null,
-        bool allowNativeHeadlessAuth = false)
+        bool allowNativeHeadlessAuth = false,
+        Action<SqlOSAuthServerOptions>? configureOptions = null)
     {
         var context = CreateContext();
         var clientId = $"headless-{Guid.NewGuid():N}";
@@ -692,6 +740,7 @@ public sealed class HeadlessAuthIntegrationTests
                 $"https://app.example.test/authorize?request={Uri.EscapeDataString(ctx.RequestId ?? string.Empty)}&view={Uri.EscapeDataString(ctx.View)}";
         });
         configureHeadless?.Invoke(optionsValue.Headless);
+        configureOptions?.Invoke(optionsValue);
 
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options);
@@ -701,7 +750,16 @@ public sealed class HeadlessAuthIntegrationTests
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
         var invitationService = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options);
-        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitationService);
+        var passwordAbuse = new SqlOSPasswordLoginAbuseService(context, admin, crypto, options);
+        var authService = new SqlOSAuthService(
+            context,
+            options,
+            admin,
+            crypto,
+            settings,
+            emailOtp,
+            invitationService,
+            passwordAbuse);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,
@@ -710,7 +768,8 @@ public sealed class HeadlessAuthIntegrationTests
             settings,
             authPageSessionService,
             options,
-            invitationService);
+            invitationService,
+            passwordAbuse);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
         var oidcAuthService = new SqlOSOidcAuthService(
             context,
@@ -743,7 +802,7 @@ public sealed class HeadlessAuthIntegrationTests
         await admin.UpsertSeededClientsAsync();
         await settings.UpsertSeededAuthPageSettingsAsync();
 
-        return new HeadlessFixture(context, clientId, redirectUri, admin, authorizationServerService, headlessAuthService, authPageSessionService, emailSender, invitationService);
+        return new HeadlessFixture(context, clientId, redirectUri, admin, authService, authorizationServerService, headlessAuthService, authPageSessionService, emailSender, invitationService);
     }
 
     private static TestSqlOSDbContext CreateContext()
@@ -759,6 +818,14 @@ public sealed class HeadlessAuthIntegrationTests
         var context = new DefaultHttpContext();
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("tests");
+        return context;
+    }
+
+    private static DefaultHttpContext CreateHttpContext(string ipAddress)
+    {
+        var context = CreateHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse(ipAddress);
+        context.Request.Headers.UserAgent = "SqlOSTest";
         return context;
     }
 
@@ -819,6 +886,7 @@ public sealed class HeadlessAuthIntegrationTests
         string ClientId,
         string RedirectUri,
         SqlOSAdminService AdminService,
+        SqlOSAuthService AuthService,
         SqlOSAuthorizationServerService AuthorizationServerService,
         SqlOSHeadlessAuthService HeadlessAuthService,
         SqlOSAuthPageSessionService AuthPageSessionService,

@@ -35,6 +35,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
+    public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
@@ -90,6 +91,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigureEmailOtp(Action<SqlOSEmailOtpOptions> configure)
     {
         configure(EmailOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigurePasswordLoginAbuse(Action<SqlOSPasswordLoginAbuseOptions> configure)
+    {
+        configure(PasswordLogin);
         return this;
     }
 
@@ -189,4 +196,15 @@ public class SqlOSAuthServerOptions
         configure?.Invoke(ClientRegistration.Dcr);
         return this;
     }
+}
+
+public sealed class SqlOSPasswordLoginAbuseOptions
+{
+    public bool Enabled { get; set; } = true;
+    public int MaxFailedAttemptsPerAccount { get; set; } = 5;
+    public int MaxFailedAttemptsPerIp { get; set; } = 20;
+    public int MaxFailedAttemptsPerClient { get; set; } = 50;
+    public int MaxFailedAttemptsPerDevice { get; set; } = 20;
+    public TimeSpan FailureWindow { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
 }

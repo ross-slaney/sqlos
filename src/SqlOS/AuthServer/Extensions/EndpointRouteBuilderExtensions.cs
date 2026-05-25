@@ -723,7 +723,11 @@ public static class EndpointRouteBuilderExtensions
                     email,
                     password,
                     cancellationToken,
-                    allowUnverifiedEmailForInvitation: invitation != null);
+                    allowUnverifiedEmailForInvitation: invitation != null,
+                    httpContext: context,
+                    clientKey: authorizationRequest?.ClientApplication?.ClientId ?? authorizationRequest?.ClientApplicationId,
+                    authorizationRequestId: authorizationRequest?.Id,
+                    surface: authorizationRequest == null ? "hosted_standalone" : "hosted");
                 if (authorizationRequest == null)
                 {
                     var organizationId = authentication.Organizations.FirstOrDefault()?.Id;

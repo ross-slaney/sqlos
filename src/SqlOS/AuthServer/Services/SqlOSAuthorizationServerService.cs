@@ -21,6 +21,7 @@ public sealed class SqlOSAuthorizationServerService
     private readonly SqlOSAuthPageSessionService _authPageSessionService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationService? _invitationService;
+    private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
 
     public SqlOSAuthorizationServerService(
         ISqlOSAuthServerDbContext context,
@@ -30,7 +31,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSSettingsService settingsService,
         SqlOSAuthPageSessionService authPageSessionService,
         IOptions<SqlOSAuthServerOptions> options,
-        SqlOSInvitationService? invitationService = null)
+        SqlOSInvitationService? invitationService = null,
+        SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -40,6 +42,8 @@ public sealed class SqlOSAuthorizationServerService
         _authPageSessionService = authPageSessionService;
         _options = options.Value;
         _invitationService = invitationService;
+        _passwordLoginAbuseService = passwordLoginAbuseService
+            ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
     }
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -207,7 +211,11 @@ public sealed class SqlOSAuthorizationServerService
         string email,
         string password,
         CancellationToken cancellationToken = default,
-        bool allowUnverifiedEmailForInvitation = false)
+        bool allowUnverifiedEmailForInvitation = false,
+        HttpContext? httpContext = null,
+        string? clientKey = null,
+        string? authorizationRequestId = null,
+        string? surface = null)
     {
         var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
         if (!credentialSettings.PasswordEnabled)
@@ -216,9 +224,24 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+        var attempt = _passwordLoginAbuseService.CreateAttempt(
+            normalizedEmail,
+            httpContext,
+            clientKey,
+            authorizationRequestId,
+            surface ?? "authorization");
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
+
         var emailRecord = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (emailRecord == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "unknown_email", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        attempt = attempt with { UserId = emailRecord.UserId };
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
 
         if (_options.RequireVerifiedEmailForPasswordLogin && !emailRecord.IsVerified && !allowUnverifiedEmailForInvitation)
         {
@@ -226,15 +249,21 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        if (credential == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "missing_password_credential", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
 
         if (!_cryptoService.VerifyPassword(credential.SecretHash, password))
         {
-            throw new InvalidOperationException("Invalid email or password.");
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "invalid_password", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
         credential.LastUsedAt = DateTime.UtcNow;
+        await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == emailRecord.UserId, cancellationToken);
