@@ -3156,6 +3156,7 @@
 
     function renderEmailTemplateFormFields(template = null) {
         const variables = template?.variables || {};
+        const isCreateForm = !template;
         return `
             <label>
                 Key
@@ -3171,11 +3172,11 @@
             </label>
             <label>
                 HTML body template
-                <textarea name="htmlBodyTemplate" spellcheck="false" required>${esc(template?.htmlBodyTemplate || "<p>Your order {orderId} shipped.</p>")}</textarea>
+                <textarea name="htmlBodyTemplate" spellcheck="false" required>${esc(template?.htmlBodyTemplate ?? (isCreateForm ? "<p>Your order {orderId} shipped.</p>" : ""))}</textarea>
             </label>
             <label>
                 Text body template
-                <textarea name="textBodyTemplate" spellcheck="false" required>${esc(template?.textBodyTemplate || "Your order {orderId} shipped.")}</textarea>
+                <textarea name="textBodyTemplate" spellcheck="false" required>${esc(template?.textBodyTemplate ?? (isCreateForm ? "Your order {orderId} shipped." : ""))}</textarea>
             </label>
             <label>
                 Variables JSON

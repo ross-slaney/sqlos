@@ -429,6 +429,13 @@ public sealed class SqlOSExampleApiIntegrationTests
             "auth.invitation",
             "auth.password-reset"
         ]);
+
+        var passwordResetTemplate = json.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("key").GetString() == "auth.password-reset");
+        passwordResetTemplate.GetProperty("subjectTemplate").GetString().Should().Be("Reset your {applicationName} password");
+        passwordResetTemplate.GetProperty("htmlBodyTemplate").GetString().Should().Contain("{resetUrl}");
+        passwordResetTemplate.GetProperty("textBodyTemplate").GetString().Should().Contain("{resetUrl}");
     }
 
     [TestMethod]
