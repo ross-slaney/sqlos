@@ -35,6 +35,10 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
     options.DashboardBasePath = "/sqlos";
     var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
     var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? "http://localhost:3000/auth/callback";
+    var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
+        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+    var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
+        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"];
 
     if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
     {
@@ -57,10 +61,15 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
     auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
     auth.DefaultSigningKeyRotationIntervalDays = 90;
     auth.DefaultSigningKeyGraceWindowDays = 7;
+    options.ConfigureEmail(email =>
+    {
+        email.AzureCommunicationServicesConnectionString = emailConnectionString;
+        email.FromAddress = emailFromAddress;
+    });
     auth.ConfigureEmailOtp(emailOtp =>
     {
-        emailOtp.AzureCommunicationServicesConnectionString = builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
-        emailOtp.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        emailOtp.AzureCommunicationServicesConnectionString = emailConnectionString;
+        emailOtp.FromAddress = emailFromAddress;
         emailOtp.ApplicationName = "SqlOS Example";
     });
 

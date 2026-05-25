@@ -90,17 +90,25 @@ builder.Services.AddCors(options =>
 builder.AddSqlOS<TodoSampleDbContext>(options =>
 {
     options.DashboardBasePath = "/sqlos";
+    var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
+        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+    var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
+        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"];
 
     var auth = options.AuthServer;
     auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
     auth.PublicOrigin = publicOrigin;
     auth.DefaultAudience = sampleConfig.Resource;
     auth.EnableLocalPasswordAuth = !sampleConfig.EnableEmailOtp;
+    options.ConfigureEmail(email =>
+    {
+        email.AzureCommunicationServicesConnectionString = emailConnectionString;
+        email.FromAddress = emailFromAddress;
+    });
     auth.ConfigureEmailOtp(email =>
     {
-        email.AzureCommunicationServicesConnectionString =
-            builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
-        email.FromAddress = builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        email.AzureCommunicationServicesConnectionString = emailConnectionString;
+        email.FromAddress = emailFromAddress;
         email.ApplicationName = "SqlOS Todo";
     });
 
