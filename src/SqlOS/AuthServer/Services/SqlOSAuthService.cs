@@ -27,8 +27,6 @@ public sealed class SqlOSAuthService
     private readonly SqlOSInvitationService? _invitationService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly ISqlOSEmailSender? _transactionalEmailSender;
-    private readonly ISqlOSAuthEmailSender? _authEmailSender;
-    private readonly SqlOSEmailTemplateRenderer _emailTemplateRenderer;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
@@ -39,9 +37,7 @@ public sealed class SqlOSAuthService
         SqlOSEmailOtpService emailOtpService,
         SqlOSInvitationService? invitationService = null,
         ISqlOSTransactionalEmailService? transactionalEmailService = null,
-        ISqlOSEmailSender? transactionalEmailSender = null,
-        ISqlOSAuthEmailSender? authEmailSender = null,
-        SqlOSEmailTemplateRenderer? emailTemplateRenderer = null)
+        ISqlOSEmailSender? transactionalEmailSender = null)
     {
         _context = context;
         _options = options.Value;
@@ -52,8 +48,6 @@ public sealed class SqlOSAuthService
         _invitationService = invitationService;
         _transactionalEmailService = transactionalEmailService;
         _transactionalEmailSender = transactionalEmailSender;
-        _authEmailSender = authEmailSender;
-        _emailTemplateRenderer = emailTemplateRenderer ?? new SqlOSEmailTemplateRenderer();
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -817,9 +811,7 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        var canUseTransactionalEmail = _transactionalEmailService != null && _transactionalEmailSender?.IsConfigured == true;
-        var canUseAuthEmail = _authEmailSender?.IsConfigured == true;
-        if (!canUseTransactionalEmail && !canUseAuthEmail)
+        if (_transactionalEmailService == null || _transactionalEmailSender?.IsConfigured != true)
         {
             throw new InvalidOperationException("Password reset email delivery is not configured.");
         }
@@ -844,17 +836,14 @@ public sealed class SqlOSAuthService
             ["accentColor"] = branding.AccentColor,
             ["backgroundColor"] = branding.BackgroundColor
         };
-        var idempotencyKey = $"auth-password-reset:{email.UserId}:{_cryptoService.HashToken(token)[..32]}";
 
-        var result = canUseTransactionalEmail
-            ? await _transactionalEmailService!.SendAsync(
-                new SqlOSSendEmailRequest(
-                    SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
-                    email.Email,
-                    variables,
-                    IdempotencyKey: idempotencyKey),
-                cancellationToken)
-            : await SendPasswordResetWithAuthEmailSenderAsync(email.Email, variables, idempotencyKey, cancellationToken);
+        var result = await _transactionalEmailService.SendAsync(
+            new SqlOSSendEmailRequest(
+                SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
+                email.Email,
+                variables,
+                IdempotencyKey: $"auth-password-reset:{email.UserId}:{_cryptoService.HashToken(token)[..32]}"),
+            cancellationToken);
 
         if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
         {
@@ -878,68 +867,6 @@ public sealed class SqlOSAuthService
             result.ProviderMessageId,
             result.SanitizedError,
             $"Password reset email queued for {maskedEmail}.");
-    }
-
-    private async Task<SqlOSSendEmailResult> SendPasswordResetWithAuthEmailSenderAsync(
-        string recipient,
-        IReadOnlyDictionary<string, object?> variables,
-        string idempotencyKey,
-        CancellationToken cancellationToken)
-    {
-        var template = await _context.Set<SqlOSEmailTemplate>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                x => x.Key == SqlOSBuiltInEmailTemplates.AuthPasswordResetKey && x.IsActive,
-                cancellationToken)
-            ?? throw new InvalidOperationException($"Email template '{SqlOSBuiltInEmailTemplates.AuthPasswordResetKey}' was not found or is inactive.");
-        var rendered = _emailTemplateRenderer.Render(template, variables);
-        var now = DateTime.UtcNow;
-        var delivery = new SqlOSEmailDelivery
-        {
-            Id = _cryptoService.GenerateId("edl"),
-            TemplateId = template.Id,
-            TemplateKey = template.Key,
-            TemplateVersion = template.Version,
-            To = recipient,
-            Status = SqlOSEmailDeliveryStatuses.Pending,
-            RenderedSubject = TrimTo(rendered.Subject, 500),
-            RenderedTextPreview = "[suppressed for sensitive built-in template]",
-            RenderedHtmlPreview = null,
-            IdempotencyKey = idempotencyKey,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        _context.Set<SqlOSEmailDelivery>().Add(delivery);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            await _authEmailSender!.SendAsync(
-                new SqlOSAuthEmailMessage(recipient, rendered.Subject, rendered.HtmlBody, rendered.TextBody),
-                cancellationToken);
-
-            delivery.Status = SqlOSEmailDeliveryStatuses.Queued;
-            delivery.SentAt = DateTime.UtcNow;
-            delivery.UpdatedAt = delivery.SentAt.Value;
-            AddEmailDeliveryAuditEvent("email.send.queued", delivery, new { deliveryId = delivery.Id, templateKey = delivery.TemplateKey, templateVersion = delivery.TemplateVersion });
-            await _context.SaveChangesAsync(cancellationToken);
-            return ToSendEmailResult(delivery);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            delivery.Status = SqlOSEmailDeliveryStatuses.Failed;
-            delivery.SanitizedError = "Email delivery failed.";
-            delivery.FailedAt = DateTime.UtcNow;
-            delivery.UpdatedAt = delivery.FailedAt.Value;
-            AddEmailDeliveryAuditEvent("email.send.failed", delivery, new { deliveryId = delivery.Id, templateKey = delivery.TemplateKey, templateVersion = delivery.TemplateVersion, error = delivery.SanitizedError });
-            await _context.SaveChangesAsync(cancellationToken);
-            return ToSendEmailResult(delivery);
-        }
     }
 
     public async Task ResetPasswordAsync(SqlOSResetPasswordRequest request, CancellationToken cancellationToken = default)
@@ -1186,31 +1113,6 @@ public sealed class SqlOSAuthService
             ? _options.Issuer.TrimEnd('/')[..^_options.BasePath.TrimEnd('/').Length]
             : _options.Issuer.TrimEnd('/');
     }
-
-    private void AddEmailDeliveryAuditEvent(string eventType, SqlOSEmailDelivery delivery, object data)
-    {
-        _context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
-        {
-            Id = _cryptoService.GenerateId("evt"),
-            EventType = eventType,
-            ActorType = "email_delivery",
-            ActorId = delivery.Id,
-            OccurredAt = DateTime.UtcNow,
-            DataJson = JsonSerializer.Serialize(data)
-        });
-    }
-
-    private static SqlOSSendEmailResult ToSendEmailResult(SqlOSEmailDelivery delivery)
-        => new(
-            delivery.Id,
-            delivery.Status,
-            delivery.TemplateKey,
-            delivery.TemplateVersion,
-            delivery.ProviderMessageId,
-            delivery.SanitizedError);
-
-    private static string TrimTo(string value, int maxLength)
-        => value.Length <= maxLength ? value : value[..maxLength];
 
     private static string MaskEmail(string email)
     {
