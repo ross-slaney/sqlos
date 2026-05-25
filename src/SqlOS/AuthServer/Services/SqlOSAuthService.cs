@@ -25,6 +25,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
     private readonly SqlOSInvitationService? _invitationService;
+    private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
 
     public SqlOSAuthService(
@@ -35,6 +36,7 @@ public sealed class SqlOSAuthService
         SqlOSSettingsService settingsService,
         SqlOSEmailOtpService emailOtpService,
         SqlOSInvitationService? invitationService = null,
+        SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null,
         ISqlOSTransactionalEmailService? transactionalEmailService = null)
     {
         _context = context;
@@ -44,6 +46,8 @@ public sealed class SqlOSAuthService
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
         _invitationService = invitationService;
+        _passwordLoginAbuseService = passwordLoginAbuseService
+            ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
         _transactionalEmailService = transactionalEmailService;
     }
 
@@ -83,9 +87,23 @@ public sealed class SqlOSAuthService
         }
 
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
+        var attempt = _passwordLoginAbuseService.CreateAttempt(
+            normalizedEmail,
+            httpContext,
+            clientKey: request.ClientId,
+            surface: "api");
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
+
         var email = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (email == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "unknown_email", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        attempt = attempt with { UserId = email.UserId };
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
 
         if (_options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
         {
@@ -93,18 +111,24 @@ public sealed class SqlOSAuthService
         }
 
         var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        if (credential == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "missing_password_credential", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
 
         if (!_cryptoService.VerifyPassword(credential.SecretHash, request.Password))
         {
-            throw new InvalidOperationException("Invalid email or password.");
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "invalid_password", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
         credential.LastUsedAt = DateTime.UtcNow;
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == email.UserId, cancellationToken);
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
     }

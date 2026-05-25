@@ -410,7 +410,11 @@ public sealed class SqlOSHeadlessAuthService
                 email,
                 request.Password,
                 cancellationToken,
-                allowUnverifiedEmailForInvitation: !string.IsNullOrWhiteSpace(authorizationRequest.InvitationId));
+                allowUnverifiedEmailForInvitation: !string.IsNullOrWhiteSpace(authorizationRequest.InvitationId),
+                httpContext: httpContext,
+                clientKey: authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
+                authorizationRequestId: authorizationRequest.Id,
+                surface: "headless");
             var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 authentication.User,

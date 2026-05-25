@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISqlOSTransactionalEmailService, SqlOSTransactionalEmailService>();
         services.AddScoped<SqlOSEmailAdminService>();
         services.AddScoped<SqlOSEmailOtpService>();
+        services.AddScoped<SqlOSPasswordLoginAbuseService>();
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();
         services.AddScoped<SqlOSCimdClientService>();

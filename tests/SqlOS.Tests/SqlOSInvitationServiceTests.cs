@@ -406,7 +406,7 @@ public sealed class SqlOSInvitationServiceTests
                 Options.Create(new SqlOSEmailOptions()));
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
             var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options, transactionalEmailService);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitation, transactionalEmailService);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitation, transactionalEmailService: transactionalEmailService);
             var http = new DefaultHttpContext();
             http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.42");
             http.Request.Scheme = "https";

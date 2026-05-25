@@ -74,6 +74,7 @@ internal static class SqlOSOptionsValidator
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
         ValidateEmailOptions(options.Email, errors);
+        ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
@@ -125,6 +126,44 @@ internal static class SqlOSOptionsValidator
         if (options.OnHeadlessSignupAsync != null && !options.EnableApi)
         {
             errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.EnableApi.");
+        }
+    }
+
+    private static void ValidatePasswordLoginAbuseOptions(SqlOSPasswordLoginAbuseOptions options, List<string> errors)
+    {
+        if (!options.Enabled)
+        {
+            return;
+        }
+
+        if (options.MaxFailedAttemptsPerAccount <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerAccount must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerIp <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerIp must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerClient <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerClient must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerDevice <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerDevice must be greater than zero.");
+        }
+
+        if (options.FailureWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordLogin.FailureWindow must be greater than zero.");
+        }
+
+        if (options.LockoutDuration <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordLogin.LockoutDuration must be greater than zero.");
         }
     }
 
