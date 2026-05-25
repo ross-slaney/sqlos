@@ -91,9 +91,11 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
 {
     options.DashboardBasePath = "/sqlos";
     var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
-        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
+        ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
     var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
-        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
+        ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
 
     var auth = options.AuthServer;
     auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";

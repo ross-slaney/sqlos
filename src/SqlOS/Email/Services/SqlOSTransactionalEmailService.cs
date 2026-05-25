@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
@@ -18,19 +19,22 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
     private readonly ISqlOSEmailSender _sender;
     private readonly SqlOSEmailTemplateRenderer _renderer;
     private readonly SqlOSEmailOptions _options;
+    private readonly ILogger<SqlOSTransactionalEmailService>? _logger;
 
     public SqlOSTransactionalEmailService(
         ISqlOSAuthServerDbContext context,
         SqlOSCryptoService cryptoService,
         ISqlOSEmailSender sender,
         SqlOSEmailTemplateRenderer renderer,
-        IOptions<SqlOSEmailOptions> options)
+        IOptions<SqlOSEmailOptions> options,
+        ILogger<SqlOSTransactionalEmailService>? logger = null)
     {
         _context = context;
         _cryptoService = cryptoService;
         _sender = sender;
         _renderer = renderer;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<SqlOSRenderedEmailPreview> PreviewAsync(
@@ -124,8 +128,14 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogWarning(
+                ex,
+                "Transactional email delivery failed for delivery {DeliveryId}, template {TemplateKey}, recipient {Recipient}.",
+                delivery.Id,
+                delivery.TemplateKey,
+                recipient);
             return await MarkFailedAsync(delivery, "Email delivery failed.", cancellationToken);
         }
     }

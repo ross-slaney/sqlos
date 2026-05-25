@@ -7,9 +7,11 @@ var todoOrigin = $"http://localhost:{todoPort}";
 var todoResource = $"{todoOrigin}/api/todos";
 var todoIssuer = $"{todoOrigin}/sqlos/auth";
 var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
-    ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"];
+    ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
+    ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
 var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
-    ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"];
+    ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
+    ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
 var sqlPassword = builder.AddParameter("sql-password", value: "LocalDevPassword123!");
 
 var sql = builder.AddSqlServer("sql", password: sqlPassword, port: 1434)
