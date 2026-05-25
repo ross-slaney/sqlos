@@ -26,7 +26,6 @@ public sealed class SqlOSAuthService
     private readonly SqlOSEmailOtpService _emailOtpService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
-    private readonly ISqlOSEmailSender? _transactionalEmailSender;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
@@ -36,8 +35,7 @@ public sealed class SqlOSAuthService
         SqlOSSettingsService settingsService,
         SqlOSEmailOtpService emailOtpService,
         SqlOSInvitationService? invitationService = null,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null,
-        ISqlOSEmailSender? transactionalEmailSender = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null)
     {
         _context = context;
         _options = options.Value;
@@ -47,7 +45,6 @@ public sealed class SqlOSAuthService
         _emailOtpService = emailOtpService;
         _invitationService = invitationService;
         _transactionalEmailService = transactionalEmailService;
-        _transactionalEmailSender = transactionalEmailSender;
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -811,10 +808,8 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        if (_transactionalEmailService == null || _transactionalEmailSender?.IsConfigured != true)
-        {
-            throw new InvalidOperationException("Password reset email delivery is not configured.");
-        }
+        var transactionalEmailService = _transactionalEmailService
+            ?? throw new InvalidOperationException("Transactional email service is not registered.");
 
         var token = await CreatePasswordResetTokenForEmailAsync(email, cancellationToken);
         var resetUrl = BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
@@ -829,6 +824,9 @@ public sealed class SqlOSAuthService
         var variables = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["applicationName"] = applicationName,
+            ["logoBase64"] = branding.LogoBase64 ?? string.Empty,
+            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "none" : "block",
+            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "block" : "none",
             ["maskedEmail"] = maskedEmail,
             ["resetUrl"] = resetUrl,
             ["expiresInMinutes"] = Math.Max(1, (int)Math.Ceiling(lifetime.TotalMinutes)),
@@ -837,7 +835,7 @@ public sealed class SqlOSAuthService
             ["backgroundColor"] = branding.BackgroundColor
         };
 
-        var result = await _transactionalEmailService.SendAsync(
+        var result = await transactionalEmailService.SendAsync(
             new SqlOSSendEmailRequest(
                 SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
                 email.Email,

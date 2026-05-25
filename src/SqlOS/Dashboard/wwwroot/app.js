@@ -2843,8 +2843,8 @@
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
                             ${settings.emailOtpRuntimeConfigured
-                                ? `<div class="callout"><strong>Email OTP delivery is configured.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
-                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.Email</code> or <code>options.AuthServer.EmailOtp</code> ACS settings in startup before enabling <code>email_otp</code>.</div>`}
+                                ? `<div class="callout"><strong>Email OTP uses transactional templates.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
+                                : `<div class="callout"><strong>Custom Email OTP delivery is not configured.</strong> Configure the custom auth email sender before enabling <code>email_otp</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
                             <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
                             <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>

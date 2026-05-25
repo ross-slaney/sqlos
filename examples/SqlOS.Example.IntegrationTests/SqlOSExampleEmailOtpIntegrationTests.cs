@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Email.Interfaces;
 using SqlOS.Example.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Example.IntegrationTests;
@@ -293,8 +294,10 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<ISqlOSAuthEmailSender>();
+                services.RemoveAll<ISqlOSEmailSender>();
                 services.AddSingleton<TestAuthEmailSender>();
                 services.AddSingleton<ISqlOSAuthEmailSender>(sp => sp.GetRequiredService<TestAuthEmailSender>());
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<TestAuthEmailSender>());
             });
         });
 

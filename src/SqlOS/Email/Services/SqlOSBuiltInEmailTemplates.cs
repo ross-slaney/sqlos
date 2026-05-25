@@ -17,7 +17,8 @@ public static class SqlOSBuiltInEmailTemplates
             <html lang="en">
             <body style="margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};">
               <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
-                <p style="margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
+                <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
+                <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
                 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">{heading}</h1>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time code to finish {action} as {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>
                 <div style="margin:0 0 20px;padding:18px 20px;border-radius:16px;background:#eff6ff;border:1px solid #bfdbfe;font-size:34px;letter-spacing:0.24em;font-weight:700;text-align:center;color:{primaryColor};">{code}</div>
@@ -27,7 +28,7 @@ public static class SqlOSBuiltInEmailTemplates
             </html>
             """,
             "Your {applicationName} {purposeLabel} code is {code}. It expires in {expiresInMinutes} minute(s).",
-            """{"applicationName":"SqlOS","purposeLabel":"sign-in","heading":"Your sign-in code","action":"signing in","maskedEmail":"us***@example.com","code":"123456","expiresInMinutes":"10","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
+            """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","purposeLabel":"sign-in","heading":"Your sign-in code","action":"signing in","maskedEmail":"us***@example.com","code":"123456","expiresInMinutes":"10","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true),
         new(
             AuthInvitationKey,
@@ -38,7 +39,8 @@ public static class SqlOSBuiltInEmailTemplates
             <html lang="en">
             <body style="margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};">
               <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
-                <p style="margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
+                <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
+                <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
                 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">You're invited to {organizationName}</h1>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Accept this invitation for {maskedEmail} to join as {role}. This link expires in {expiresInDays} day(s).</p>
                 <p style="margin:0 0 20px;"><a href="{acceptUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Accept invitation</a></p>
@@ -48,7 +50,7 @@ public static class SqlOSBuiltInEmailTemplates
             </html>
             """,
             "You're invited to {organizationName} as {role}. Accept the invitation for {maskedEmail}: {acceptUrl}. This link expires in {expiresInDays} day(s).",
-            """{"applicationName":"SqlOS","organizationName":"Example Org","maskedEmail":"us***@example.com","role":"member","acceptUrl":"https://app.example.test/sqlos/auth/invitations/accept?token=sample","expiresInDays":"7","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
+            """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","organizationName":"Example Org","maskedEmail":"us***@example.com","role":"member","acceptUrl":"https://app.example.test/sqlos/auth/invitations/accept?token=sample","expiresInDays":"7","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true),
         new(
             AuthPasswordResetKey,
@@ -59,7 +61,8 @@ public static class SqlOSBuiltInEmailTemplates
             <html lang="en">
             <body style="margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};">
               <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
-                <p style="margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
+                <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
+                <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
                 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">Reset your password</h1>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this link to reset the password for {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>
                 <p style="margin:0 0 20px;"><a href="{resetUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Reset password</a></p>
@@ -69,7 +72,7 @@ public static class SqlOSBuiltInEmailTemplates
             </html>
             """,
             "Reset your {applicationName} password for {maskedEmail}: {resetUrl}. This link expires in {expiresInMinutes} minute(s).",
-            """{"applicationName":"SqlOS","maskedEmail":"us***@example.com","resetUrl":"https://app.example.test/sqlos/auth/password/reset?token=sample","expiresInMinutes":"60","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
+            """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","maskedEmail":"us***@example.com","resetUrl":"https://app.example.test/sqlos/auth/password/reset?token=sample","expiresInMinutes":"60","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true)
     ];
 

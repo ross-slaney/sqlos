@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Email.Interfaces;
 using SqlOS.Todo.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Todo.IntegrationTests;
@@ -70,8 +71,10 @@ public sealed class TodoSampleIntegrationTests
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<ISqlOSAuthEmailSender>();
+                services.RemoveAll<ISqlOSEmailSender>();
                 services.AddSingleton<TestAuthEmailSender>();
                 services.AddSingleton<ISqlOSAuthEmailSender>(provider => provider.GetRequiredService<TestAuthEmailSender>());
+                services.AddSingleton<ISqlOSEmailSender>(provider => provider.GetRequiredService<TestAuthEmailSender>());
             });
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions

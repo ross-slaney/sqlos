@@ -9,6 +9,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Configuration;
+using SqlOS.Email.Services;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -123,8 +125,10 @@ public sealed class SqlOSAuthServiceTests
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, emailSender);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
 
+        await CreateEmailAdmin(context, crypto).EnsureBuiltInTemplatesAsync();
         await settings.UpsertSeededAuthPageSettingsAsync();
         await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
 
@@ -715,6 +719,22 @@ public sealed class SqlOSAuthServiceTests
         return Regex.Match(message.TextBody ?? string.Empty, @"\b\d{4,8}\b").Value;
     }
 
+    private static SqlOSTransactionalEmailService CreateTransactionalEmailService(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSCryptoService crypto,
+        TestAuthEmailSender sender)
+        => new(
+            context,
+            crypto,
+            sender,
+            new SqlOSEmailTemplateRenderer(),
+            Options.Create(new SqlOSEmailOptions()));
+
+    private static SqlOSEmailAdminService CreateEmailAdmin(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSCryptoService crypto)
+        => new(context, crypto, new SqlOSEmailTemplateRenderer());
+
     private sealed class EmailOtpHarness : IDisposable
     {
         public required TestSqlOSInMemoryDbContext Context { get; init; }
@@ -744,13 +764,15 @@ public sealed class SqlOSAuthServiceTests
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
-            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+            var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, transactionalEmailService: transactionalEmailService);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
             await settings.UpsertSeededAuthPageSettingsAsync();
             await settings.UpsertSeededAuthEmailSettingsAsync();
+            await CreateEmailAdmin(context, crypto).EnsureBuiltInTemplatesAsync();
 
             return new EmailOtpHarness
             {

@@ -23,7 +23,6 @@ public sealed class SqlOSInvitationService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
-    private readonly ISqlOSEmailSender? _transactionalEmailSender;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationOptions _invitationOptions;
@@ -35,33 +34,23 @@ public sealed class SqlOSInvitationService
         ISqlOSAuthEmailSender emailSender,
         SqlOSSettingsService settingsService,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null,
-        ISqlOSEmailSender? transactionalEmailSender = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null)
     {
         _context = context;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
-        _transactionalEmailSender = transactionalEmailSender;
         _settingsService = settingsService;
         _options = options.Value;
         _invitationOptions = _options.Invitations;
     }
-
-    private bool IsEmailDeliveryConfigured
-        => _emailSender.IsConfigured || _transactionalEmailSender?.IsConfigured == true;
 
     public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
         SqlOSCreateEmailInvitationRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (request.SendEmail && !IsEmailDeliveryConfigured)
-        {
-            throw new InvalidOperationException("Invitation email delivery is not configured.");
-        }
-
         var organization = await RequireActiveOrganizationAsync(request.OrganizationId, cancellationToken);
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var invitedEmail = request.Email.Trim();
@@ -173,11 +162,6 @@ public sealed class SqlOSInvitationService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        if (!IsEmailDeliveryConfigured)
-        {
-            throw new InvalidOperationException("Invitation email delivery is not configured.");
-        }
-
         var invitation = await _context.Set<SqlOSInvitation>()
             .Include(x => x.Organization)
             .FirstOrDefaultAsync(x => x.Id == request.InvitationId, cancellationToken)
@@ -479,27 +463,26 @@ public sealed class SqlOSInvitationService
         CancellationToken cancellationToken)
     {
         var context = await BuildMessageContextAsync(invitation, organization, acceptUrl, cancellationToken);
-        if (_invitationOptions.BuildMessage == null
-            && _transactionalEmailService != null
-            && _transactionalEmailSender?.IsConfigured == true)
+        if (_invitationOptions.BuildMessage != null)
         {
-            var result = await _transactionalEmailService.SendAsync(
-                new SqlOSSendEmailRequest(
-                    SqlOSBuiltInEmailTemplates.AuthInvitationKey,
-                    invitation.InvitedEmail,
-                    BuildTemplateVariables(context),
-                    IdempotencyKey: $"auth-invitation:{invitation.Id}:{invitation.TokenHash[..Math.Min(32, invitation.TokenHash.Length)]}"),
-                cancellationToken);
-
-            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(result.SanitizedError ?? "Invitation email delivery failed.");
-            }
-
+            await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
             return;
         }
 
-        await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
+        var transactionalEmailService = _transactionalEmailService
+            ?? throw new InvalidOperationException("Transactional email service is not registered.");
+        var result = await transactionalEmailService.SendAsync(
+            new SqlOSSendEmailRequest(
+                SqlOSBuiltInEmailTemplates.AuthInvitationKey,
+                invitation.InvitedEmail,
+                BuildTemplateVariables(context),
+                IdempotencyKey: $"auth-invitation:{invitation.Id}:{invitation.TokenHash[..Math.Min(32, invitation.TokenHash.Length)]}"),
+            cancellationToken);
+
+        if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(result.SanitizedError ?? "Invitation email delivery failed.");
+        }
     }
 
     private async Task<SqlOSInvitationMessageContext> BuildMessageContextAsync(
@@ -546,6 +529,9 @@ public sealed class SqlOSInvitationService
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["applicationName"] = context.ApplicationName,
+            ["logoBase64"] = context.Branding.LogoBase64 ?? string.Empty,
+            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "none" : "block",
+            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "block" : "none",
             ["organizationName"] = context.OrganizationName,
             ["maskedEmail"] = context.MaskedEmail,
             ["role"] = context.Role,

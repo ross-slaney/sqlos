@@ -195,42 +195,6 @@ public sealed class SqlOSTransactionalEmailTests
     }
 
     [TestMethod]
-    public async Task ExistingEmailOtpAndInvitationSends_UseCurrentV0AuthEmailPath()
-    {
-        using var context = CreateContext();
-        var authOptions = new SqlOSAuthServerOptions();
-        authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
-        authOptions.SeedAuthPage(page => page.EnabledCredentialTypes = ["email_otp"]);
-        var options = Options.Create(authOptions);
-        var authEmailSender = new TestAuthEmailSender { IsConfigured = true };
-        var transactionalSender = new FakeTransactionalEmailSender();
-        var crypto = new SqlOSCryptoService(context, options);
-        var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options, authEmailSender);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options);
-        var invitationService = new SqlOSInvitationService(context, admin, crypto, authEmailSender, settings, options);
-        _ = CreateEmailService(context, transactionalSender);
-
-        await crypto.EnsureActiveSigningKeyAsync();
-        await admin.UpsertSeededClientsAsync();
-        await settings.UpsertSeededAuthPageSettingsAsync();
-        await settings.UpsertSeededAuthEmailSettingsAsync();
-
-        await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
-        await emailOtp.StartForClientAsync(new SqlOSEmailOtpStartRequest("alice@example.com", "test-client", null));
-
-        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Email Regression Org", null));
-        await invitationService.CreateEmailInvitationAsync(new SqlOSCreateEmailInvitationRequest(
-            org.Id,
-            "invitee@example.com",
-            "member"));
-
-        authEmailSender.Messages.Should().HaveCount(2);
-        transactionalSender.Messages.Should().BeEmpty();
-        (await context.Set<SqlOSEmailDelivery>().CountAsync()).Should().Be(0);
-    }
-
-    [TestMethod]
     public async Task BuiltInAuthTemplates_AreSeededAutomatically()
     {
         using var context = CreateContext();
@@ -261,9 +225,9 @@ public sealed class SqlOSTransactionalEmailTests
         var transactionalService = CreateEmailService(context, transactionalSender);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options, authEmailSender, transactionalSender);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService, transactionalSender);
-        var invitationService = new SqlOSInvitationService(context, admin, crypto, authEmailSender, settings, options, transactionalService, transactionalSender);
+        var settings = new SqlOSSettingsService(context, options, authEmailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService);
+        var invitationService = new SqlOSInvitationService(context, admin, crypto, authEmailSender, settings, options, transactionalService);
         await CreateEmailAdmin(context).EnsureBuiltInTemplatesAsync();
 
         await crypto.EnsureActiveSigningKeyAsync();
@@ -308,9 +272,9 @@ public sealed class SqlOSTransactionalEmailTests
         var transactionalService = CreateEmailService(context, transactionalSender);
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var settings = new SqlOSSettingsService(context, options, authEmailSender, transactionalSender);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService, transactionalSender);
-        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, transactionalEmailService: transactionalService, transactionalEmailSender: transactionalSender);
+        var settings = new SqlOSSettingsService(context, options, authEmailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, transactionalEmailService: transactionalService);
         await CreateEmailAdmin(context).EnsureBuiltInTemplatesAsync();
 
         await crypto.EnsureActiveSigningKeyAsync();

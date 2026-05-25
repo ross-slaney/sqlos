@@ -26,7 +26,6 @@ public sealed class SqlOSEmailOtpService
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
-    private readonly ISqlOSEmailSender? _transactionalEmailSender;
     private readonly SqlOSEmailOtpOptions _options;
 
     public SqlOSEmailOtpService(
@@ -36,8 +35,7 @@ public sealed class SqlOSEmailOtpService
         SqlOSSettingsService settingsService,
         ISqlOSAuthEmailSender emailSender,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null,
-        ISqlOSEmailSender? transactionalEmailSender = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -45,11 +43,10 @@ public sealed class SqlOSEmailOtpService
         _settingsService = settingsService;
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
-        _transactionalEmailSender = transactionalEmailSender;
         _options = options.Value.EmailOtp;
     }
 
-    public bool IsRuntimeConfigured => _emailSender.IsConfigured || _transactionalEmailSender?.IsConfigured == true;
+    public bool IsRuntimeConfigured => _options.BuildMessage == null || _emailSender.IsConfigured;
 
     public async Task<SqlOSEmailOtpStartResult> StartForAuthorizationRequestAsync(
         SqlOSAuthorizationRequest? authorizationRequest,
@@ -714,27 +711,26 @@ public sealed class SqlOSEmailOtpService
         CancellationToken cancellationToken)
     {
         var context = await BuildMessageContextAsync(email, maskedEmail, code, expiresAt, purpose, cancellationToken);
-        if (_options.BuildMessage == null
-            && _transactionalEmailService != null
-            && _transactionalEmailSender?.IsConfigured == true)
+        if (_options.BuildMessage != null)
         {
-            var result = await _transactionalEmailService.SendAsync(
-                new SqlOSSendEmailRequest(
-                    SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
-                    email,
-                    BuildTemplateVariables(context),
-                    IdempotencyKey: $"auth-email-otp:{challengeId}"),
-                cancellationToken);
-
-            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(result.SanitizedError ?? "Email OTP delivery failed.");
-            }
-
+            await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
             return;
         }
 
-        await _emailSender.SendAsync(BuildLegacyMessage(context), cancellationToken);
+        var transactionalEmailService = _transactionalEmailService
+            ?? throw new InvalidOperationException("Transactional email service is not registered.");
+        var result = await transactionalEmailService.SendAsync(
+            new SqlOSSendEmailRequest(
+                SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
+                email,
+                BuildTemplateVariables(context),
+                IdempotencyKey: $"auth-email-otp:{challengeId}"),
+            cancellationToken);
+
+        if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(result.SanitizedError ?? "Email OTP delivery failed.");
+        }
     }
 
     private async Task<SqlOSEmailOtpMessageContext> BuildMessageContextAsync(
@@ -789,6 +785,9 @@ public sealed class SqlOSEmailOtpService
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["applicationName"] = context.ApplicationName,
+            ["logoBase64"] = context.Branding.LogoBase64 ?? string.Empty,
+            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "none" : "block",
+            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "block" : "none",
             ["purposeLabel"] = context.Purpose == "signup" ? "sign-up" : "sign-in",
             ["heading"] = context.Purpose == "signup" ? "Your sign-up code" : "Your sign-in code",
             ["action"] = context.Purpose == "signup" ? "creating your account" : "signing in",

@@ -66,6 +66,6 @@ Rendered HTML bodies are not stored unless `options.Email.PersistRenderedHtmlPre
 
 ## Built-in auth email
 
-Email OTP, organization invitations, and password reset emails use the built-in transactional templates when transactional delivery is configured. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
+Email OTP, organization invitations, and password reset emails use the built-in transactional templates by default. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
 
 Existing custom `BuildMessage` hooks and custom `ISqlOSAuthEmailSender` implementations still work as escape hatches for advanced auth email behavior.
