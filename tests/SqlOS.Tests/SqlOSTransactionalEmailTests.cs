@@ -329,6 +329,49 @@ public sealed class SqlOSTransactionalEmailTests
         delivery.RenderedTextPreview.Should().Be("[suppressed for sensitive built-in template]");
     }
 
+    [TestMethod]
+    public async Task PasswordResetEmail_FallsBackToAuthEmailSender_WhenTransactionalSenderIsNotConfigured()
+    {
+        using var context = CreateContext();
+        var authOptions = new SqlOSAuthServerOptions();
+        var options = Options.Create(authOptions);
+        var authEmailSender = new TestAuthEmailSender { IsConfigured = true };
+        var transactionalSender = new FakeTransactionalEmailSender { IsConfigured = false };
+        var transactionalService = CreateEmailService(context, transactionalSender);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var settings = new SqlOSSettingsService(context, options, authEmailSender, transactionalSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService, transactionalSender);
+        var auth = new SqlOSAuthService(
+            context,
+            options,
+            admin,
+            crypto,
+            settings,
+            emailOtp,
+            transactionalEmailService: transactionalService,
+            transactionalEmailSender: transactionalSender,
+            authEmailSender: authEmailSender,
+            emailTemplateRenderer: new SqlOSEmailTemplateRenderer());
+        await CreateEmailAdmin(context).EnsureBuiltInTemplatesAsync();
+
+        await crypto.EnsureActiveSigningKeyAsync();
+        await admin.CreateUserAsync(new SqlOSCreateUserRequest("Reset User", "reset@example.com", "OldPassword123!"));
+
+        var result = await auth.SendPasswordResetEmailAsync(new SqlOSSendPasswordResetEmailRequest("reset@example.com"));
+
+        result.DeliveryStatus.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
+        transactionalSender.Messages.Should().BeEmpty();
+        authEmailSender.Messages.Should().ContainSingle();
+        authEmailSender.Messages[0].Subject.Should().Be("Reset your SqlOS password");
+        authEmailSender.Messages[0].TextBody.Should().Contain("/sqlos/auth/password/reset?token=");
+
+        var delivery = await context.Set<SqlOSEmailDelivery>().SingleAsync();
+        delivery.TemplateKey.Should().Be(SqlOSBuiltInEmailTemplates.AuthPasswordResetKey);
+        delivery.Status.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
+        delivery.RenderedTextPreview.Should().Be("[suppressed for sensitive built-in template]");
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
