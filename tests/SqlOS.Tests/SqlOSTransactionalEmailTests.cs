@@ -1,3 +1,4 @@
+using Azure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -120,17 +121,48 @@ public sealed class SqlOSTransactionalEmailTests
             }));
 
         result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
-        result.SanitizedError.Should().Be("Email delivery failed.");
+        result.SanitizedError.Should().Be("Email delivery failed. See server logs for provider details.");
 
         var delivery = await context.Set<SqlOSEmailDelivery>().SingleAsync();
         delivery.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
-        delivery.SanitizedError.Should().Be("Email delivery failed.");
+        delivery.SanitizedError.Should().Be("Email delivery failed. See server logs for provider details.");
         delivery.SanitizedError.Should().NotContain("secret");
 
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x =>
             x.EventType == "email.send.failed"
             && x.ActorId == delivery.Id
             && x.DataJson!.Contains(delivery.Id))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_AzureSendFailure_RecordsProviderReason()
+    {
+        using var context = CreateContext();
+        var sender = new FakeTransactionalEmailSender
+        {
+            ExceptionOnSend = new RequestFailedException(
+                400,
+                "The specified sender domain is not linked to this Communication Services resource.",
+                "BadRequest",
+                null)
+        };
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "order-azure-failed");
+
+        var result = await service.SendAsync(new SqlOSSendEmailRequest(
+            "order-azure-failed",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            }));
+
+        result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
+        result.SanitizedError.Should().Contain("Azure Communication Email send failed");
+        result.SanitizedError.Should().Contain("Status 400");
+        result.SanitizedError.Should().Contain("ErrorCode BadRequest");
+        result.SanitizedError.Should().Contain("sender domain is not linked");
     }
 
     [TestMethod]
@@ -340,12 +372,18 @@ public sealed class SqlOSTransactionalEmailTests
     {
         public bool IsConfigured { get; set; } = true;
         public bool ThrowOnSend { get; set; }
+        public Exception? ExceptionOnSend { get; set; }
         public List<SqlOSEmailMessage> Messages { get; } = [];
 
         public Task<SqlOSEmailProviderResult> SendAsync(
             SqlOSEmailMessage message,
             CancellationToken cancellationToken = default)
         {
+            if (ExceptionOnSend != null)
+            {
+                throw ExceptionOnSend;
+            }
+
             if (ThrowOnSend)
             {
                 throw new InvalidOperationException("Provider secret leaked in raw exception.");

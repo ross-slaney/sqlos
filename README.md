@@ -349,6 +349,14 @@ Then open `http://localhost:5080/`.
 
 Use **Email code sign in** or **Email code sign up**. In this mode the Todo app only starts the OAuth request; the SqlOS hosted auth page sends the OTP, verifies the code, creates the account on signup, and redirects back with the authorization code.
 
+## Running the Example App with Transactional Email
+
+```bash
+AZURE_EMAIL_CONNECTION_STRING="endpoint=https://...." \
+AZURE_EMAIL_SENDER_ADDRESS="hello@domain.com" \
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
 ## License
 
 MIT

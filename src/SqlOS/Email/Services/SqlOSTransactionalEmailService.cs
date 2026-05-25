@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -130,13 +131,15 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
         }
         catch (Exception ex)
         {
+            var sanitizedError = BuildSanitizedProviderError(ex);
             _logger?.LogWarning(
                 ex,
-                "Transactional email delivery failed for delivery {DeliveryId}, template {TemplateKey}, recipient {Recipient}.",
+                "Transactional email delivery failed for delivery {DeliveryId}, template {TemplateKey}, recipient {Recipient}: {SanitizedError}",
                 delivery.Id,
                 delivery.TemplateKey,
-                recipient);
-            return await MarkFailedAsync(delivery, "Email delivery failed.", cancellationToken);
+                recipient,
+                sanitizedError);
+            return await MarkFailedAsync(delivery, sanitizedError, cancellationToken);
         }
     }
 
@@ -221,4 +224,45 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
 
     internal static string TrimTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    private static string BuildSanitizedProviderError(Exception exception)
+    {
+        if (exception is RequestFailedException requestFailedException)
+        {
+            var message = NormalizeProviderMessage(requestFailedException.Message);
+            var status = requestFailedException.Status > 0
+                ? $"Status {requestFailedException.Status}"
+                : "Status unknown";
+            var errorCode = string.IsNullOrWhiteSpace(requestFailedException.ErrorCode)
+                ? null
+                : $"ErrorCode {requestFailedException.ErrorCode}";
+
+            return TrimTo(
+                string.Join(
+                    ": ",
+                    new[]
+                    {
+                        "Azure Communication Email send failed",
+                        status,
+                        errorCode,
+                        string.IsNullOrWhiteSpace(message) ? null : message
+                    }.Where(static value => !string.IsNullOrWhiteSpace(value))),
+                500);
+        }
+
+        return "Email delivery failed. See server logs for provider details.";
+    }
+
+    private static string NormalizeProviderMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return string.Empty;
+        }
+
+        return message
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim();
+    }
 }
