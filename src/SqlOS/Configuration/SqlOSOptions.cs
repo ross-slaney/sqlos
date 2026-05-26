@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Email.Configuration;
 using SqlOS.Fga.Configuration;
 
 namespace SqlOS.Configuration;
@@ -22,6 +23,13 @@ public sealed class SqlOSOptions
     public SqlOSDashboardOptions Dashboard { get; } = new();
     public SqlOSFgaOptions Fga { get; } = new();
     public SqlOSAuthServerOptions AuthServer { get; } = new();
+    public SqlOSEmailOptions Email { get; } = new();
+
+    public SqlOSOptions ConfigureEmail(Action<SqlOSEmailOptions> configure)
+    {
+        configure(Email);
+        return this;
+    }
 }
 
 public sealed class SqlOSDashboardOptions

@@ -237,8 +237,11 @@ public sealed class SqlOSSettingsService
             _options.AuthPageSeed != null,
             _options.Headless.BuildUiUrl != null,
             _options.EnableLocalPasswordAuth,
-            _emailSender.IsConfigured);
+            IsAuthEmailRuntimeConfigured);
     }
+
+    private bool IsAuthEmailRuntimeConfigured
+        => _options.EmailOtp.BuildMessage == null || _emailSender.IsConfigured;
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
     {

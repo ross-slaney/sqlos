@@ -1,4 +1,5 @@
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Email.Configuration;
 
 namespace SqlOS.Configuration;
 
@@ -72,6 +73,7 @@ internal static class SqlOSOptionsValidator
 
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
+        ValidateEmailOptions(options.Email, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
 
@@ -246,6 +248,27 @@ internal static class SqlOSOptionsValidator
         if (string.IsNullOrWhiteSpace(options.ApplicationName))
         {
             errors.Add("AuthServer.EmailOtp.ApplicationName is required.");
+        }
+    }
+
+    private static void ValidateEmailOptions(SqlOSEmailOptions options, List<string> errors)
+    {
+        var hasConnectionString = !string.IsNullOrWhiteSpace(options.AzureCommunicationServicesConnectionString);
+        var hasFromAddress = !string.IsNullOrWhiteSpace(options.FromAddress);
+
+        if (hasConnectionString != hasFromAddress)
+        {
+            errors.Add("Email requires both AzureCommunicationServicesConnectionString and FromAddress when either is set.");
+        }
+
+        if (options.DeliveryRetention <= TimeSpan.Zero)
+        {
+            errors.Add("Email.DeliveryRetention must be greater than zero.");
+        }
+
+        if (options.RenderedTextPreviewMaxLength <= 0)
+        {
+            errors.Add("Email.RenderedTextPreviewMaxLength must be greater than zero.");
         }
     }
 

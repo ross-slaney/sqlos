@@ -482,14 +482,12 @@ var tokens = await authService.ExchangeCodeAsync(
 
 ### CreatePasswordResetTokenAsync
 
-Generate a one-time password reset token. Send the returned token to the user via email.
+Generate a one-time password reset token for custom reset flows. Most apps should use `SendPasswordResetEmailAsync`, which sends the built-in `auth.password-reset` template.
 
 ```csharp
 var token = await authService.CreatePasswordResetTokenAsync(
     new SqlOSForgotPasswordRequest(Email: request.Email));
 
-// Send token via email (you provide the email transport)
-await emailService.SendResetEmail(request.Email, token);
 ```
 
 **Parameters**
@@ -501,6 +499,33 @@ await emailService.SendResetEmail(request.Email, token);
 **Returns**
 
 `Task<string>` — the raw reset token to deliver to the user.
+
+---
+
+### SendPasswordResetEmailAsync
+
+Generate a reset token and send a password reset email with the built-in transactional template.
+
+```csharp
+var result = await authService.SendPasswordResetEmailAsync(
+    new SqlOSSendPasswordResetEmailRequest(
+        Email: request.Email,
+        ResetUrlTemplate: "https://app.example.com/reset-password?token={token}"),
+    httpContext);
+```
+
+Use `ResetUrlTemplate: null` to link to SqlOS' hosted reset form at `/sqlos/auth/password/reset?token=...`.
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `request.Email` | `string` | The user's email address. |
+| `request.ResetUrlTemplate` | `string?` | Optional reset URL template. If it includes `{token}`, SqlOS replaces it with the escaped reset token. |
+
+**Returns**
+
+`Task<SqlOSPasswordResetEmailResult>` — masked email, expiry, delivery id/status, provider message id, and sanitized failure detail.
 
 ---
 

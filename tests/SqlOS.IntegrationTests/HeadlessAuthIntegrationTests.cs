@@ -11,6 +11,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Configuration;
+using SqlOS.Email.Services;
 using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
@@ -748,8 +750,14 @@ public sealed class HeadlessAuthIntegrationTests
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-        var invitationService = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options);
+        var transactionalEmailService = new SqlOSTransactionalEmailService(
+            context,
+            crypto,
+            emailSender,
+            new SqlOSEmailTemplateRenderer(),
+            Options.Create(new SqlOSEmailOptions()));
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+        var invitationService = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options, transactionalEmailService);
         var passwordAbuse = new SqlOSPasswordLoginAbuseService(context, admin, crypto, options);
         var authService = new SqlOSAuthService(
             context,
@@ -759,7 +767,8 @@ public sealed class HeadlessAuthIntegrationTests
             settings,
             emailOtp,
             invitationService,
-            passwordAbuse);
+            passwordAbuse,
+            transactionalEmailService);
         var authorizationServerService = new SqlOSAuthorizationServerService(
             context,
             admin,
@@ -801,6 +810,8 @@ public sealed class HeadlessAuthIntegrationTests
         await crypto.EnsureActiveSigningKeyAsync();
         await admin.UpsertSeededClientsAsync();
         await settings.UpsertSeededAuthPageSettingsAsync();
+        await settings.UpsertSeededAuthEmailSettingsAsync();
+        await new SqlOSEmailAdminService(context, crypto, new SqlOSEmailTemplateRenderer()).EnsureBuiltInTemplatesAsync();
 
         return new HeadlessFixture(context, clientId, redirectUri, admin, authService, authorizationServerService, headlessAuthService, authPageSessionService, emailSender, invitationService);
     }

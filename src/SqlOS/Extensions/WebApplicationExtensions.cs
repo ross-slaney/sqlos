@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Configuration;
+using SqlOS.Email.Extensions;
 
 namespace SqlOS.Extensions;
 
@@ -15,7 +16,9 @@ public static class WebApplicationExtensions
     public static WebApplication MapSqlOS(this WebApplication app)
     {
         var authOptions = app.Services.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
+        var sqlosOptions = app.Services.GetRequiredService<IOptions<SqlOSOptions>>().Value;
         app.MapAuthServer(authOptions.BasePath);
+        app.MapSqlOSEmailAdmin(sqlosOptions.DashboardBasePath);
 
         return app;
     }

@@ -4,8 +4,10 @@
     const authServerBasePath = `${dashboardBasePath}/auth`;
     const authDashboardPath = `${dashboardBasePath}/admin/auth`;
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
+    const emailDashboardPath = `${dashboardBasePath}/admin/email`;
     const authApiBasePath = `${authDashboardPath}/api`;
     const fgaApiBasePath = `${fgaDashboardPath}/api`;
+    const emailApiBasePath = `${emailDashboardPath}/api`;
     const clientOnboardingDocsUrl = "https://sqlos.dev/docs/authserver/preregistration-vs-cimd-vs-dcr";
 
     const content = document.getElementById("content");
@@ -27,6 +29,13 @@
         source: "all",
         status: "all",
         search: ""
+    };
+    const emailMessageFilters = {
+        status: "all",
+        templateKey: "",
+        recipient: "",
+        from: "",
+        to: ""
     };
 
     const authViews = {
@@ -216,6 +225,10 @@
         "user-groups": { title: "User Groups", description: "Review groups and inherited access paths.", hash: "/user-groups" },
         "access-tester": { title: "Access Tester", description: "Trace access decisions for a subject, resource, and permission.", hash: "/access-tester" }
     };
+    const emailViews = {
+        templates: { title: "Email Templates", description: "Create, edit, activate, deactivate, and preview transactional email templates." },
+        messages: { title: "Email Messages", description: "Review recent transactional email deliveries and provider outcomes." }
+    };
 
     configureNavLinks();
 
@@ -394,6 +407,10 @@
             return `${fgaDashboardPath}/${route.slice(4)}`;
         }
 
+        if (route.startsWith("email-")) {
+            return `${emailDashboardPath}/${route.slice(6)}`;
+        }
+
         return `${dashboardBasePath}/`;
     }
 
@@ -497,6 +514,16 @@
                 view,
                 key: `fga-${view}`,
                 canonicalPath: `${fgaDashboardPath}/${view}`
+            };
+        }
+
+        if (segments[1] === "email") {
+            const view = emailViews[segments[2]] ? segments[2] : "templates";
+            return {
+                kind: "email",
+                view,
+                key: `email-${view}`,
+                canonicalPath: `${emailDashboardPath}/${view}`
             };
         }
 
@@ -972,6 +999,11 @@
                 return;
             }
 
+            if (route.kind === "email") {
+                await renderEmailRoute(route.view);
+                return;
+            }
+
             await renderFgaRoute(route.view);
         } catch (error) {
             content.innerHTML = `${consumeFlashHtml()}<div class="error-banner">${esc(error.message || String(error))}</div>`;
@@ -1091,6 +1123,14 @@
                         ${quickLink("fga-grants", "Grants")}
                         ${quickLink("fga-roles", "Roles")}
                         ${quickLink("fga-access-tester", "Access Tester")}
+                    </div>
+                </section>
+                <section class="card">
+                    <h2>Communications</h2>
+                    <p>Manage operational email templates and inspect delivery history.</p>
+                    <div class="link-list">
+                        ${quickLink("email-templates", "Email Templates")}
+                        ${quickLink("email-messages", "Email Messages")}
                     </div>
                 </section>
             </div>
@@ -1784,6 +1824,14 @@
                             { label: "External identities", value: user.externalIdentityCount || 0 }
                         ])}
                     </section>
+                    <section class="panel">
+                        <h2>Account Actions</h2>
+                        <p>Send a password reset email using the built-in password reset template.</p>
+                        <form id="send-password-reset-email-form">
+                            <input name="resetUrlTemplate" placeholder="Optional reset URL template with {token}">
+                            <button type="submit" ${user.defaultEmail ? "" : "disabled"}>Send password reset email</button>
+                        </form>
+                    </section>
                 </div>
             `;
         } else if (tab === "organizations") {
@@ -1853,7 +1901,17 @@
             ${tabContent}
         `;
 
-        if (tab === "organizations") {
+        if (tab === "general") {
+            bindForm("send-password-reset-email-form", async form => {
+                await fetchJson(`${authApiBasePath}/users/${encodeURIComponent(userId)}/password-reset-email`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        resetUrlTemplate: String(form.get("resetUrlTemplate") || "").trim() || null
+                    })
+                });
+                setFlash("success", "Password reset email queued.");
+            });
+        } else if (tab === "organizations") {
             bindPagination("#user-memberships-pagination-top", async page => {
                 setPagerPage(`auth-user-${userId}-memberships`, page);
                 await render();
@@ -2785,8 +2843,8 @@
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
                             ${settings.emailOtpRuntimeConfigured
-                                ? `<div class="callout"><strong>Email OTP delivery is configured.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
-                                : `<div class="callout"><strong>Email OTP delivery is not configured.</strong> Set <code>options.AuthServer.EmailOtp.AzureCommunicationServicesConnectionString</code> and <code>options.AuthServer.EmailOtp.FromAddress</code> in startup before enabling <code>email_otp</code>.</div>`}
+                                ? `<div class="callout"><strong>Email OTP uses transactional templates.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
+                                : `<div class="callout"><strong>Custom Email OTP delivery is not configured.</strong> Configure the custom auth email sender before enabling <code>email_otp</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
                             <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
                             <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>
@@ -2814,7 +2872,7 @@
                     </section>
                     <section class="panel">
                         <h2>Email Branding</h2>
-                        <p>These settings style built-in Email OTP and invitation emails. Use SDK message builders for advanced copy, layouts, or per-tenant email templates.</p>
+                        <p>These settings style built-in AuthServer emails. Use Communications templates for copy and layout, or SDK message builders for advanced custom behavior.</p>
                         ${emailSettings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These email values are seeded from application startup and will be reapplied on restart.</div>` : ""}
                         <form id="auth-email-settings-form">
                             <input name="applicationName" placeholder="Application name" value="${esc(emailSettings.applicationName || "")}" required>
@@ -2965,6 +3023,324 @@
                 )}
             </section>
         `;
+    }
+
+    async function renderEmailRoute(view) {
+        const config = emailViews[view] || emailViews.templates;
+        setHeader("Communications", config.title, config.description);
+
+        if (view === "messages") {
+            await renderEmailMessages();
+            return;
+        }
+
+        await renderEmailTemplates();
+    }
+
+    function renderEmailTabs(activeView) {
+        return `
+            <div class="tab-strip email-tab-strip">
+                <a class="tab-link ${activeView === "templates" ? "active" : ""}" href="${esc(pathForRoute("email-templates"))}" data-dashboard-route="email-templates">Templates</a>
+                <a class="tab-link ${activeView === "messages" ? "active" : ""}" href="${esc(pathForRoute("email-messages"))}" data-dashboard-route="email-messages">Messages</a>
+            </div>
+        `;
+    }
+
+    async function renderEmailTemplates() {
+        renderLoading("Loading email templates...");
+        const pager = getPagerState("email-templates", 10);
+        const templates = await fetchJson(`${emailApiBasePath}/templates?page=${pager.page}&pageSize=${pager.pageSize}`);
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            ${renderEmailTabs("templates")}
+            <div class="panel-grid email-template-grid">
+                <section class="panel">
+                    <h2>Create Template</h2>
+                    <form id="create-email-template-form">
+                        ${renderEmailTemplateFormFields()}
+                        <div class="form-actions">
+                            <button type="submit">Create template</button>
+                        </div>
+                    </form>
+                </section>
+                <section class="panel">
+                    <div class="panel-actions">
+                        <div>
+                            <h2>Templates</h2>
+                            <p>Template keys are stable API identifiers. Editing content increments the version used by future sends.</p>
+                        </div>
+                    </div>
+                    ${renderList(
+                        templates.data || [],
+                        renderEmailTemplateItem,
+                        "No email templates yet."
+                    )}
+                    <div class="email-template-pagination">
+                        ${renderPagination(templates.page, templates.totalPages, templates.totalCount)}
+                    </div>
+                </section>
+            </div>
+        `;
+
+        bindForm("create-email-template-form", async form => {
+            await fetchJson(`${emailApiBasePath}/templates`, {
+                method: "POST",
+                body: JSON.stringify(emailTemplatePayloadFromForm(form))
+            });
+            setFlash("success", "Email template created.");
+            setPagerPage("email-templates", 1);
+        });
+
+        (templates.data || []).forEach(template => {
+            const safeId = domId(template.id);
+            bindForm(`edit-email-template-${safeId}`, async form => {
+                await fetchJson(`${emailApiBasePath}/templates/${encodeURIComponent(template.id)}`, {
+                    method: "PUT",
+                    body: JSON.stringify(emailTemplatePayloadFromForm(form))
+                });
+                setFlash("success", "Email template updated.");
+            });
+            bindEmailPreviewForm(template.id, safeId);
+        });
+
+        document.querySelectorAll("[data-email-template-delete]").forEach(button => {
+            button.addEventListener("click", async () => {
+                await fetchJson(`${emailApiBasePath}/templates/${encodeURIComponent(button.dataset.emailTemplateDelete)}`, {
+                    method: "DELETE"
+                });
+                setFlash("success", "Email template removed or deactivated.");
+                await render();
+            });
+        });
+
+        bindPagination(".email-template-pagination", page => {
+            setPagerPage("email-templates", page);
+            render();
+        });
+    }
+
+    function renderEmailTemplateItem(template) {
+        const safeId = domId(template.id);
+        return `
+            <details class="email-template-item">
+                <summary>
+                    <span>
+                        <strong>${esc(template.displayName || template.key)}</strong>
+                        <span class="inline-code">${esc(template.key)}</span>
+                    </span>
+                    <span class="client-badge ${template.isActive ? "client-badge--success" : "client-badge--muted"}">${template.isActive ? "Active" : "Inactive"} v${esc(template.version)}</span>
+                </summary>
+                <div class="email-template-body">
+                    <form id="edit-email-template-${safeId}">
+                        ${renderEmailTemplateFormFields(template)}
+                        <div class="form-actions">
+                            <button type="submit">Save changes</button>
+                            <button type="button" data-email-template-delete="${esc(template.id)}">Delete</button>
+                        </div>
+                    </form>
+                    <form id="preview-email-template-${safeId}" class="nested-form">
+                        <label>
+                            Sample variables JSON
+                            <textarea name="variables" spellcheck="false">${esc(JSON.stringify(template.variables || {}, null, 2))}</textarea>
+                        </label>
+                        <div class="form-actions">
+                            <button type="submit">Preview</button>
+                        </div>
+                    </form>
+                    <div id="preview-output-${safeId}" class="email-preview-output"></div>
+                </div>
+            </details>
+        `;
+    }
+
+    function renderEmailTemplateFormFields(template = null) {
+        const variables = template?.variables || {};
+        const isCreateForm = !template;
+        return `
+            <label>
+                Key
+                <input name="key" value="${esc(template?.key || "")}" placeholder="order-shipped" required>
+            </label>
+            <label>
+                Display name
+                <input name="displayName" value="${esc(template?.displayName || "")}" placeholder="Order shipped" required>
+            </label>
+            <label>
+                Subject template
+                <input name="subjectTemplate" value="${esc(template?.subjectTemplate || "")}" placeholder="Order {orderId} shipped" required>
+            </label>
+            <label>
+                HTML body template
+                <textarea name="htmlBodyTemplate" spellcheck="false" required>${esc(template?.htmlBodyTemplate ?? (isCreateForm ? "<p>Your order {orderId} shipped.</p>" : ""))}</textarea>
+            </label>
+            <label>
+                Text body template
+                <textarea name="textBodyTemplate" spellcheck="false" required>${esc(template?.textBodyTemplate ?? (isCreateForm ? "Your order {orderId} shipped." : ""))}</textarea>
+            </label>
+            <label>
+                Variables JSON
+                <textarea name="variables" spellcheck="false">${esc(JSON.stringify(variables, null, 2))}</textarea>
+            </label>
+            <label class="checkbox-row">
+                <input type="checkbox" name="isActive" ${template?.isActive === false ? "" : "checked"}>
+                Active
+            </label>
+        `;
+    }
+
+    function emailTemplatePayloadFromForm(form) {
+        return {
+            key: String(form.get("key") || ""),
+            displayName: String(form.get("displayName") || ""),
+            subjectTemplate: String(form.get("subjectTemplate") || ""),
+            htmlBodyTemplate: String(form.get("htmlBodyTemplate") || ""),
+            textBodyTemplate: String(form.get("textBodyTemplate") || ""),
+            variables: parseJsonObject(form.get("variables")),
+            isActive: form.get("isActive") === "on"
+        };
+    }
+
+    function bindEmailPreviewForm(templateId, safeId) {
+        const form = document.getElementById(`preview-email-template-${safeId}`);
+        const output = document.getElementById(`preview-output-${safeId}`);
+        if (!form || !output) {
+            return;
+        }
+
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+            output.innerHTML = `<div class="loading">Rendering preview...</div>`;
+
+            try {
+                const preview = await fetchJson(`${emailApiBasePath}/templates/${encodeURIComponent(templateId)}/preview`, {
+                    method: "POST",
+                    body: JSON.stringify({ variables: parseJsonObject(new FormData(form).get("variables")) })
+                });
+                output.innerHTML = `
+                    <div class="email-preview-card">
+                        <strong>${esc(preview.subject)}</strong>
+                        <div class="email-preview-html">${preview.htmlBody}</div>
+                        <pre class="json-preview">${esc(preview.textBody)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                output.innerHTML = `<div class="error-banner">${esc(error.message || String(error))}</div>`;
+            }
+        });
+    }
+
+    async function renderEmailMessages() {
+        renderLoading("Loading email messages...");
+        const pager = getPagerState("email-messages", 25);
+        const params = new URLSearchParams({
+            page: String(pager.page),
+            pageSize: String(pager.pageSize)
+        });
+
+        Object.entries(emailMessageFilters).forEach(([key, value]) => {
+            if (value) {
+                params.set(key, value);
+            }
+        });
+
+        const messages = await fetchJson(`${emailApiBasePath}/messages?${params.toString()}`);
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            ${renderEmailTabs("messages")}
+            <section class="panel">
+                <h2>Messages</h2>
+                <form id="email-message-filter-form" class="client-filter-form">
+                    <label>
+                        Status
+                        <select name="status">
+                            ${["all", "pending", "queued", "failed"].map(status => `<option value="${status}" ${emailMessageFilters.status === status ? "selected" : ""}>${status}</option>`).join("")}
+                        </select>
+                    </label>
+                    <label>
+                        Template key
+                        <input name="templateKey" value="${esc(emailMessageFilters.templateKey)}" placeholder="order-shipped">
+                    </label>
+                    <label>
+                        Recipient
+                        <input name="recipient" value="${esc(emailMessageFilters.recipient)}" placeholder="user@example.com">
+                    </label>
+                    <label>
+                        From
+                        <input name="from" type="datetime-local" value="${esc(emailMessageFilters.from)}">
+                    </label>
+                    <label>
+                        To
+                        <input name="to" type="datetime-local" value="${esc(emailMessageFilters.to)}">
+                    </label>
+                    <button type="submit">Filter</button>
+                </form>
+                ${renderList(
+                    messages.data || [],
+                    renderEmailMessageItem,
+                    "No email messages match the current filters."
+                )}
+                <div class="email-message-pagination">
+                    ${renderPagination(messages.page, messages.totalPages, messages.totalCount)}
+                </div>
+            </section>
+        `;
+
+        bindForm("email-message-filter-form", async form => {
+            emailMessageFilters.status = String(form.get("status") || "all");
+            emailMessageFilters.templateKey = String(form.get("templateKey") || "").trim();
+            emailMessageFilters.recipient = String(form.get("recipient") || "").trim();
+            emailMessageFilters.from = String(form.get("from") || "");
+            emailMessageFilters.to = String(form.get("to") || "");
+            setPagerPage("email-messages", 1);
+        });
+
+        bindPagination(".email-message-pagination", page => {
+            setPagerPage("email-messages", page);
+            render();
+        });
+    }
+
+    function renderEmailMessageItem(item) {
+        const badgeTone = item.status === "failed" ? "danger" : item.status === "queued" ? "success" : "muted";
+        return `
+            <div class="email-message-row">
+                <div class="list-item-header">
+                    <div>
+                        <strong>${esc(item.renderedSubject || item.templateKey)}</strong>
+                        <div>${esc(item.to)}</div>
+                    </div>
+                    <span class="client-badge client-badge--${badgeTone}">${esc(item.status)}</span>
+                </div>
+                ${renderMetadataRows([
+                    { label: "Template", value: `${item.templateKey} v${item.templateVersion}` },
+                    { label: "Created", value: formatDate(item.createdAt) },
+                    { label: "Sent", value: item.sentAt ? formatDate(item.sentAt) : "n/a" },
+                    { label: "Provider", value: item.providerMessageId || "n/a" },
+                    { label: "Error", value: item.sanitizedError || "n/a" }
+                ])}
+                <pre class="json-preview email-text-preview">${esc(item.renderedTextPreview || "")}</pre>
+            </div>
+        `;
+    }
+
+    function parseJsonObject(value) {
+        const raw = String(value || "").trim();
+        if (!raw) {
+            return {};
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Variables must be a JSON object.");
+        }
+
+        return parsed;
+    }
+
+    function domId(value) {
+        return String(value || "").replace(/[^A-Za-z0-9_-]/g, "-");
     }
 
     async function renderFgaRoute(view) {
