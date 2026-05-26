@@ -66,4 +66,6 @@ Use `options.Email.DeliveryRetention` as the retention policy value for host cle
 
 Email OTP, organization invitations, and password reset emails use the built-in transactional templates when transactional delivery is configured. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
 
-Existing custom `BuildMessage` hooks and custom `ISqlOSAuthEmailSender` implementations still work as escape hatches for advanced auth email behavior.
+Upgrade behavior is additive for normal AuthServer email configuration. Existing `AuthServer.ConfigureEmailOtp(...)` ACS settings continue to work; configuring `options.Email` is optional unless you want separate transactional email credentials.
+
+Existing custom `BuildMessage` hooks still send through `ISqlOSAuthEmailSender`. Existing custom `ISqlOSAuthEmailSender` implementations also remain usable as the default rendered-template sender when no `options.Email` ACS sender is configured. Hosts that want a separate provider for all transactional templates can register `ISqlOSEmailSender` directly.

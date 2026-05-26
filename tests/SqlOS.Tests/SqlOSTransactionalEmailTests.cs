@@ -107,7 +107,10 @@ public sealed class SqlOSTransactionalEmailTests
     public async Task TransactionalEmail_SendFailure_RecordsDeliveryAndAuditEvent()
     {
         using var context = CreateContext();
-        var sender = new FakeTransactionalEmailSender { ThrowOnSend = true };
+        var sender = new FakeTransactionalEmailSender
+        {
+            ExceptionOnSend = new InvalidOperationException("Provider rejected request with accesskey=secret-value")
+        };
         var service = CreateEmailService(context, sender);
         await AddTemplateAsync(context, "order-failed");
 
@@ -121,12 +124,12 @@ public sealed class SqlOSTransactionalEmailTests
             }));
 
         result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
-        result.SanitizedError.Should().Be("Email delivery failed. See server logs for provider details.");
+        result.SanitizedError.Should().Be("Email delivery failed: InvalidOperationException: Provider rejected request with accesskey=[redacted]");
 
         var delivery = await context.Set<SqlOSEmailDelivery>().SingleAsync();
         delivery.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
-        delivery.SanitizedError.Should().Be("Email delivery failed. See server logs for provider details.");
-        delivery.SanitizedError.Should().NotContain("secret");
+        delivery.SanitizedError.Should().Be("Email delivery failed: InvalidOperationException: Provider rejected request with accesskey=[redacted]");
+        delivery.SanitizedError.Should().NotContain("secret-value");
 
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x =>
             x.EventType == "email.send.failed"
@@ -163,6 +166,86 @@ public sealed class SqlOSTransactionalEmailTests
         result.SanitizedError.Should().Contain("Status 400");
         result.SanitizedError.Should().Contain("ErrorCode BadRequest");
         result.SanitizedError.Should().Contain("sender domain is not linked");
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_WrappedAzureSendFailure_RecordsProviderReason()
+    {
+        using var context = CreateContext();
+        var sender = new FakeTransactionalEmailSender
+        {
+            ExceptionOnSend = new InvalidOperationException(
+                "Azure email client failed.",
+                new RequestFailedException(
+                    401,
+                    "Authentication failed for accesskey=secret-value.",
+                    "Denied",
+                    null))
+        };
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "order-wrapped-azure-failed");
+
+        var result = await service.SendAsync(new SqlOSSendEmailRequest(
+            "order-wrapped-azure-failed",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            }));
+
+        result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Failed);
+        result.SanitizedError.Should().Contain("Azure Communication Email send failed");
+        result.SanitizedError.Should().Contain("Status 401");
+        result.SanitizedError.Should().Contain("ErrorCode Denied");
+        result.SanitizedError.Should().Contain("accesskey=[redacted]");
+        result.SanitizedError.Should().NotContain("secret-value");
+    }
+
+    [TestMethod]
+    public async Task AcsEmailSender_InvalidAccessKey_FailsWithActionableConfigurationError()
+    {
+        var sender = new SqlOSAcsEmailSender(
+            Options.Create(new SqlOSEmailOptions
+            {
+                AzureCommunicationServicesConnectionString = "endpoint=https://example.unitedstates.communication.azure.com/;accesskey=not-base64",
+                FromAddress = "hello@example.com"
+            }));
+
+        sender.IsConfigured.Should().BeTrue();
+
+        var act = async () => await sender.SendAsync(new SqlOSEmailMessage(
+            "user@example.com",
+            "Subject",
+            "<p>Body</p>",
+            "Body"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*accesskey must be a valid base64 value*primaryConnectionString*");
+    }
+
+    [TestMethod]
+    public async Task DefaultEmailSender_UsesLegacyAuthEmailSender_WhenAcsIsNotConfigured()
+    {
+        var legacySender = new LegacyAuthEmailSender { IsConfigured = true };
+        var sender = new SqlOSDefaultEmailSender(
+            new SqlOSAcsEmailSender(Options.Create(new SqlOSEmailOptions())),
+            legacySender);
+
+        sender.IsConfigured.Should().BeTrue();
+
+        var result = await sender.SendAsync(new SqlOSEmailMessage(
+            "user@example.com",
+            "Template subject",
+            "<p>Template body</p>",
+            "Template body"));
+
+        result.ProviderMessageId.Should().BeNull();
+        legacySender.Messages.Should().ContainSingle();
+        legacySender.Messages[0].To.Should().Be("user@example.com");
+        legacySender.Messages[0].Subject.Should().Be("Template subject");
+        legacySender.Messages[0].HtmlBody.Should().Be("<p>Template body</p>");
+        legacySender.Messages[0].TextBody.Should().Be("Template body");
     }
 
     [TestMethod]
@@ -391,6 +474,20 @@ public sealed class SqlOSTransactionalEmailTests
 
             Messages.Add(message);
             return Task.FromResult(new SqlOSEmailProviderResult($"provider-{Messages.Count}"));
+        }
+    }
+
+    private sealed class LegacyAuthEmailSender : ISqlOSAuthEmailSender
+    {
+        public bool IsConfigured { get; set; }
+        public List<SqlOSAuthEmailMessage> Messages { get; } = [];
+
+        public Task SendAsync(
+            SqlOSAuthEmailMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add(message);
+            return Task.CompletedTask;
         }
     }
 }

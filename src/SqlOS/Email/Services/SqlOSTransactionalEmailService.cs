@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Azure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -227,9 +228,10 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
 
     private static string BuildSanitizedProviderError(Exception exception)
     {
-        if (exception is RequestFailedException requestFailedException)
+        var requestFailedException = FindRequestFailedException(exception);
+        if (requestFailedException != null)
         {
-            var message = NormalizeProviderMessage(requestFailedException.Message);
+            var message = SanitizeProviderMessage(NormalizeProviderMessage(requestFailedException.Message));
             var status = requestFailedException.Status > 0
                 ? $"Status {requestFailedException.Status}"
                 : "Status unknown";
@@ -250,7 +252,67 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
                 500);
         }
 
-        return "Email delivery failed. See server logs for provider details.";
+        return TrimTo($"Email delivery failed: {BuildProviderExceptionSummary(exception)}", 500);
+    }
+
+    private static RequestFailedException? FindRequestFailedException(Exception exception)
+        => EnumerateExceptions(exception).OfType<RequestFailedException>().FirstOrDefault();
+
+    private static string BuildProviderExceptionSummary(Exception exception)
+    {
+        var messages = EnumerateExceptions(exception)
+            .Select(static ex => $"{ex.GetType().Name}: {SanitizeProviderMessage(NormalizeProviderMessage(ex.Message))}")
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return messages.Length == 0
+            ? "Unknown provider exception."
+            : string.Join(" | ", messages);
+    }
+
+    private static IEnumerable<Exception> EnumerateExceptions(Exception exception)
+    {
+        yield return exception;
+
+        if (exception is AggregateException aggregateException)
+        {
+            foreach (var innerException in aggregateException.Flatten().InnerExceptions)
+            {
+                foreach (var nestedException in EnumerateExceptions(innerException))
+                {
+                    yield return nestedException;
+                }
+            }
+
+            yield break;
+        }
+
+        if (exception.InnerException != null)
+        {
+            foreach (var innerException in EnumerateExceptions(exception.InnerException))
+            {
+                yield return innerException;
+            }
+        }
+    }
+
+    private static string SanitizeProviderMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = Regex.Replace(
+            message,
+            @"(?i)\b(accesskey|access_key|api[-_]?key|accountkey|sharedaccesskey|clientsecret|secret|password|sig|signature)=([^;\s&]+)",
+            "$1=[redacted]");
+
+        return Regex.Replace(
+            sanitized,
+            @"(?i)\b(Authorization:\s*)(Bearer|Basic)\s+[^\s,;]+",
+            "$1$2 [redacted]");
     }
 
     private static string NormalizeProviderMessage(string? message)

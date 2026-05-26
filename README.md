@@ -352,7 +352,11 @@ Use **Email code sign in** or **Email code sign up**. In this mode the Todo app 
 ## Running the Example App with Transactional Email
 
 ```bash
-AZURE_EMAIL_CONNECTION_STRING="endpoint=https://...." \
+AZURE_EMAIL_CONNECTION_STRING="$(az communication list-key \
+  --name <communication-service-name> \
+  --resource-group <resource-group> \
+  --query primaryConnectionString \
+  -o tsv)" \
 AZURE_EMAIL_SENDER_ADDRESS="hello@domain.com" \
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 ```

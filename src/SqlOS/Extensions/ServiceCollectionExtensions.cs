@@ -51,7 +51,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<SqlOSSettingsService>();
         services.AddSingleton<ISqlOSAuthEmailSender, SqlOSAcsAuthEmailSender>();
-        services.AddSingleton<ISqlOSEmailSender, SqlOSAcsEmailSender>();
+        services.AddSingleton<SqlOSAcsEmailSender>();
+        services.AddSingleton<ISqlOSEmailSender, SqlOSDefaultEmailSender>();
         services.AddSingleton<SqlOSEmailTemplateRenderer>();
         services.AddScoped<ISqlOSTransactionalEmailService, SqlOSTransactionalEmailService>();
         services.AddScoped<SqlOSEmailAdminService>();
