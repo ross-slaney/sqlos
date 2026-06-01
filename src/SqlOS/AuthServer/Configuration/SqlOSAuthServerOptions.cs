@@ -37,6 +37,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
     public SqlOSPhoneOtpOptions PhoneOtp { get; } = new();
+    public SqlOSPasswordResetOptions PasswordReset { get; } = new();
     public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
@@ -171,6 +172,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigurePhoneOtp(Action<SqlOSPhoneOtpOptions> configure)
     {
         configure(PhoneOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigurePasswordReset(Action<SqlOSPasswordResetOptions> configure)
+    {
+        configure(PasswordReset);
         return this;
     }
 

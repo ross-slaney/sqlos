@@ -50,6 +50,28 @@ internal static class SqlOSAuthEmailTemplateRenderer
         return $"You're invited to {context.OrganizationName} as {context.Role}. Accept the invitation for {context.MaskedEmail}: {context.AcceptUrl}. This link expires in {days} day{(days == 1 ? string.Empty : "s")}.";
     }
 
+    public static string BuildPasswordResetHtmlBody(SqlOSPasswordResetMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.TokenLifetime.TotalMinutes));
+        var resetUrl = WebUtility.HtmlEncode(context.ResetUrl);
+        var intro = $"Use this link to reset the password for {context.MaskedEmail}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
+        return BuildShell(
+            context.Branding,
+            "Reset your password",
+            WebUtility.HtmlEncode(intro),
+            $"""
+            <p style="margin:0 0 20px;"><a href="{resetUrl}" style="display:inline-block;background:{Css(context.Branding.PrimaryColor, "#2563eb")};color:{ButtonText(context.Branding.PrimaryColor)};text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Reset password</a></p>
+            <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {resetUrl}</p>
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request a password reset, you can ignore this email.</p>
+            """);
+    }
+
+    public static string BuildPasswordResetTextBody(SqlOSPasswordResetMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.TokenLifetime.TotalMinutes));
+        return $"Reset your {context.ApplicationName} password for {context.MaskedEmail}: {context.ResetUrl}. This link expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
+    }
+
     private static string BuildShell(SqlOSAuthEmailBranding branding, string heading, string intro, string body)
     {
         var background = Css(branding.BackgroundColor, "#f8fafc");

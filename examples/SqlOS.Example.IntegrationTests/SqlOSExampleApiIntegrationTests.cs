@@ -122,8 +122,22 @@ public sealed class SqlOSExampleApiIntegrationTests
     [TestMethod]
     public async Task PasswordResetAndRefresh_Work()
     {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
         var email = $"reset-{Guid.NewGuid():N}@example.com";
-        var signupResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/signup", new
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
         {
             displayName = "Reset User",
             email,
@@ -137,26 +151,28 @@ public sealed class SqlOSExampleApiIntegrationTests
         var refreshToken = tokens.GetProperty("refreshToken").GetString();
         var organizationId = tokens.GetProperty("organizationId").GetString();
 
-        var refreshResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
+        var refreshResponse = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
         {
             refreshToken,
             organizationId
         });
         refreshResponse.EnsureSuccessStatusCode();
 
-        var forgotResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/password/forgot", new { email });
+        var forgotResponse = await client.PostAsJsonAsync("/sqlos/auth/password/forgot", new { email, clientId = "example-web" });
         forgotResponse.EnsureSuccessStatusCode();
         var forgotJson = JsonDocument.Parse(await forgotResponse.Content.ReadAsStringAsync());
-        var resetToken = forgotJson.RootElement.GetProperty("token").GetString();
+        forgotJson.RootElement.TryGetProperty("token", out _).Should().BeFalse();
+        sender.Messages.Should().ContainSingle();
+        var resetToken = ExtractResetToken(sender.Messages.Single().TextBody);
 
-        var resetResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/password/reset", new
+        var resetResponse = await client.PostAsJsonAsync("/sqlos/auth/password/reset", new
         {
             token = resetToken,
             newPassword = "NewPassword123!"
         });
         resetResponse.EnsureSuccessStatusCode();
 
-        var loginResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/password/login", new
+        var loginResponse = await client.PostAsJsonAsync("/sqlos/auth/password/login", new
         {
             email,
             password = "NewPassword123!",
@@ -650,6 +666,13 @@ public sealed class SqlOSExampleApiIntegrationTests
             Content = JsonContent.Create(body)
         };
         return await ExampleApiFixture.Client.SendAsync(request);
+    }
+
+    private static string ExtractResetToken(string textBody)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(textBody, @"token=([A-Za-z0-9_-]+)");
+        match.Success.Should().BeTrue();
+        return match.Groups[1].Value;
     }
 
     private static string BuildSignedSamlResponse(

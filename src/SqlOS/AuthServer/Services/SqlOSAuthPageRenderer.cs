@@ -71,6 +71,9 @@ public static class SqlOSAuthPageRenderer
         var phoneOtpLink = supportsPhoneOtp
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Use a phone code instead</a>"
             : string.Empty;
+        var forgotPasswordLink = supportsPassword
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/password/forgot", model.AuthorizationRequestId, ("email", model.Email)))}\">Forgot password?</a>"
+            : string.Empty;
         var phoneOtpSignupLink = supportsPhoneOtpSignup
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/signup/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Create account with phone code</a>"
             : string.Empty;
@@ -301,10 +304,33 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Continue", "Signing in")}}
                 </form>
-                {{(string.IsNullOrWhiteSpace(emailOtpLink) ? string.Empty : RenderFooterLinks(emailOtpLink))}}
-                {{(string.IsNullOrWhiteSpace(phoneOtpLink) ? string.Empty : RenderFooterLinks(phoneOtpLink))}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { forgotPasswordLink, emailOtpLink, phoneOtpLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Don't have an account?", signupLink)}}
+                """,
+            "forgot-password" => $$"""
+                {{RenderPanelIntro("Reset Password", "Enter your email address and we'll send a reset link if the account can be reset.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/password/forgot/submit"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <label class="field">
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
+                  </label>
+                  {{RenderPrimaryAction("Send reset email", "Sending reset email")}}
+                </form>
+                {{RenderFooterLinks(loginLink)}}
+                """,
+            "forgot-password-sent" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>Check your email.</strong>
+                    <p>If the account can be reset, a password reset link is on the way.</p>
+                  </div>
+                </div>
+                {{RenderFooterLinks(loginLink)}}
                 """,
             "email-otp" => $$"""
                 {{RenderPanelIntro("Email Code", "Get a one-time code sent to your email address.")}}

@@ -66,6 +66,7 @@ public static class SqlOSBuiltInEmailTemplates
                 <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">Reset your password</h1>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this link to reset the password for {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>
                 <p style="margin:0 0 20px;"><a href="{resetUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Reset password</a></p>
+                <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {resetUrl}</p>
                 <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request a password reset, you can ignore this email.</p>
               </div>
             </body>

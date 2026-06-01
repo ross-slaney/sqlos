@@ -18,8 +18,13 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSAuthService
 {
+    private const string PasswordResetPurpose = "password_reset";
+    private const string PasswordResetRequestPurpose = "password_reset_request";
+    private const string PasswordResetGenericMessage = "If an account can be reset, you'll receive a password reset email shortly.";
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly SqlOSPasswordResetOptions _passwordResetOptions;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
@@ -28,6 +33,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
+    private readonly ISqlOSAuthEmailSender? _authEmailSender;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
@@ -39,10 +45,12 @@ public sealed class SqlOSAuthService
         SqlOSInvitationService? invitationService = null,
         SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null,
         ISqlOSTransactionalEmailService? transactionalEmailService = null,
-        SqlOSPhoneOtpService? phoneOtpService = null)
+        SqlOSPhoneOtpService? phoneOtpService = null,
+        ISqlOSAuthEmailSender? authEmailSender = null)
     {
         _context = context;
         _options = options.Value;
+        _passwordResetOptions = _options.PasswordReset;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _settingsService = settingsService;
@@ -52,6 +60,7 @@ public sealed class SqlOSAuthService
         _passwordLoginAbuseService = passwordLoginAbuseService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
         _transactionalEmailService = transactionalEmailService;
+        _authEmailSender = authEmailSender;
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -906,10 +915,117 @@ public sealed class SqlOSAuthService
     public async Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken cancellationToken = default)
     {
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
-        var email = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+        var email = await _context.Set<SqlOSUserEmail>()
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
-        return await CreatePasswordResetTokenForEmailAsync(email, cancellationToken);
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!await IsPasswordResetEligibleAsync(email, credentialSettings, cancellationToken))
+        {
+            throw new InvalidOperationException("Password reset is unavailable for this account.");
+        }
+
+        var client = await TryResolveClientApplicationAsync(request.ClientId, cancellationToken);
+        var (token, _) = await CreatePasswordResetTokenForEmailAsync(email, client?.Id, cancellationToken);
+        return token;
+    }
+
+    public async Task<SqlOSPasswordResetRequestResult> RequestPasswordResetEmailAsync(
+        SqlOSForgotPasswordRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequestPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(request.Email, ClientId: request.ClientId),
+            httpContext,
+            cancellationToken);
+
+    public async Task<SqlOSPasswordResetRequestResult> RequestPasswordResetEmailAsync(
+        SqlOSSendPasswordResetEmailRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var trimmedEmail = NormalizeEmailInput(request.Email);
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var maskedEmail = MaskEmail(trimmedEmail);
+        var ipAddress = GetIp(httpContext);
+        var client = await TryResolveClientApplicationAsync(request.ClientId, cancellationToken);
+        var clientKey = NormalizeClientKey(request.ClientId);
+
+        var email = await _context.Set<SqlOSUserEmail>()
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+
+        var rateLimit = await CheckPasswordResetRateLimitAsync(
+            normalizedEmail,
+            email?.UserId,
+            ipAddress,
+            clientKey,
+            now,
+            cancellationToken);
+
+        if (rateLimit.IsLimited)
+        {
+            await RecordPasswordResetAuditAsync(
+                "password_reset.rate_limit_rejected",
+                "system",
+                null,
+                email?.UserId,
+                maskedEmail,
+                ipAddress,
+                new
+                {
+                    scope = rateLimit.Scope,
+                    retryAfter = rateLimit.RetryAfter,
+                    clientKey
+                },
+                cancellationToken);
+            return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now, rateLimit.RetryAfter);
+        }
+
+        await RecordPasswordResetRequestMarkerAsync(
+            normalizedEmail,
+            email?.UserId,
+            client?.Id,
+            ipAddress,
+            clientKey,
+            "public",
+            cancellationToken);
+
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        var eligible = await IsPasswordResetEligibleAsync(email, credentialSettings, cancellationToken);
+
+        await RecordPasswordResetAuditAsync(
+            "password_reset.requested",
+            "system",
+            null,
+            email?.UserId,
+            maskedEmail,
+            ipAddress,
+            new { eligible, clientKey },
+            cancellationToken);
+
+        if (!eligible || email == null)
+        {
+            return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now);
+        }
+
+        try
+        {
+            await SendPasswordResetEmailToEligibleUserAsync(
+                email,
+                request.ResetUrlTemplate,
+                client?.Id,
+                httpContext,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now);
+        }
+
+        return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now);
     }
 
     public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailAsync(
@@ -923,7 +1039,14 @@ public sealed class SqlOSAuthService
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
-        return await SendPasswordResetEmailAsync(email, request.ResetUrlTemplate, httpContext, cancellationToken);
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!await IsPasswordResetEligibleAsync(email, credentialSettings, cancellationToken))
+        {
+            throw new InvalidOperationException("Password reset is unavailable for this account.");
+        }
+
+        var client = await TryResolveClientApplicationAsync(request.ClientId, cancellationToken);
+        return await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, client?.Id, httpContext, cancellationToken);
     }
 
     public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailForUserAsync(
@@ -944,122 +1067,224 @@ public sealed class SqlOSAuthService
             ?? throw new InvalidOperationException("User not found.");
 
         var email = await _context.Set<SqlOSUserEmail>()
+            .Include(x => x.User)
             .FirstOrDefaultAsync(x => x.UserId == user.Id && x.Email == user.DefaultEmail, cancellationToken)
             ?? await _context.Set<SqlOSUserEmail>()
+                .Include(x => x.User)
                 .OrderByDescending(x => x.IsVerified)
                 .ThenBy(x => x.CreatedAt)
                 .FirstOrDefaultAsync(x => x.UserId == user.Id, cancellationToken)
             ?? throw new InvalidOperationException("User does not have an email address.");
 
-        return await SendPasswordResetEmailAsync(email, request.ResetUrlTemplate, httpContext, cancellationToken);
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!await IsPasswordResetEligibleAsync(email, credentialSettings, cancellationToken))
+        {
+            throw new InvalidOperationException("Password reset is unavailable for this account.");
+        }
+
+        var result = await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, clientApplicationId: null, httpContext, cancellationToken);
+        await RecordPasswordResetAuditAsync(
+            "password_reset.admin_email_sent",
+            "admin",
+            null,
+            email.UserId,
+            result.MaskedEmail,
+            GetIp(httpContext),
+            new { result.DeliveryId, result.DeliveryStatus },
+            cancellationToken);
+        return result;
     }
 
-    private async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailAsync(
+    private async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailToEligibleUserAsync(
         SqlOSUserEmail email,
         string? resetUrlTemplate,
+        string? clientApplicationId,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        var transactionalEmailService = _transactionalEmailService
-            ?? throw new InvalidOperationException("Transactional email service is not registered.");
-
-        var token = await CreatePasswordResetTokenForEmailAsync(email, cancellationToken);
-        var resetUrl = BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
-        var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
-        var applicationName = string.IsNullOrWhiteSpace(branding.ApplicationName)
-            ? string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
-                ? "SqlOS"
-                : _options.EmailOtp.ApplicationName.Trim()
-            : branding.ApplicationName;
-        var lifetime = TimeSpan.FromHours(1);
-        var maskedEmail = MaskEmail(email.Email);
-        var variables = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["applicationName"] = applicationName,
-            ["logoBase64"] = branding.LogoBase64 ?? string.Empty,
-            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "none" : "block",
-            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "block" : "none",
-            ["maskedEmail"] = maskedEmail,
-            ["resetUrl"] = resetUrl,
-            ["expiresInMinutes"] = Math.Max(1, (int)Math.Ceiling(lifetime.TotalMinutes)),
-            ["primaryColor"] = branding.PrimaryColor,
-            ["accentColor"] = branding.AccentColor,
-            ["backgroundColor"] = branding.BackgroundColor
-        };
-
-        var result = await transactionalEmailService.SendAsync(
-            new SqlOSSendEmailRequest(
-                SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
-                email.Email,
-                variables,
-                IdempotencyKey: $"auth-password-reset:{email.UserId}:{_cryptoService.HashToken(token)[..32]}"),
+        var (token, expiresAt) = await CreatePasswordResetTokenForEmailAsync(email, clientApplicationId, cancellationToken);
+        var context = await BuildPasswordResetMessageContextAsync(
+            email.Email,
+            MaskEmail(email.Email),
+            token,
+            expiresAt,
+            resetUrlTemplate,
+            httpContext,
             cancellationToken);
 
-        if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+        try
         {
-            throw new InvalidOperationException(result.SanitizedError ?? "Password reset email delivery failed.");
+            if (_passwordResetOptions.BuildMessage != null)
+            {
+                var authEmailSender = _authEmailSender
+                    ?? throw new InvalidOperationException("Auth email sender is not registered.");
+                if (!authEmailSender.IsConfigured)
+                {
+                    throw new InvalidOperationException("Auth email delivery is not configured.");
+                }
+
+                var message = BuildLegacyPasswordResetMessage(context);
+                await authEmailSender.SendAsync(message, cancellationToken);
+                var deliveryId = _cryptoService.GenerateId("edl");
+                await RecordPasswordResetAuditAsync(
+                    "password_reset.email_sent",
+                    "user",
+                    email.UserId,
+                    email.UserId,
+                    context.MaskedEmail,
+                    GetIp(httpContext),
+                    new { deliveryId, customMessage = true },
+                    cancellationToken);
+                return new SqlOSPasswordResetEmailResult(
+                    email.Email,
+                    context.MaskedEmail,
+                    expiresAt,
+                    deliveryId,
+                    SqlOSEmailDeliveryStatuses.Queued,
+                    ProviderMessageId: null,
+                    SanitizedError: null,
+                    $"Password reset email queued for {context.MaskedEmail}.");
+            }
+
+            var transactionalEmailService = _transactionalEmailService
+                ?? throw new InvalidOperationException("Transactional email service is not registered.");
+            var result = await transactionalEmailService.SendAsync(
+                new SqlOSSendEmailRequest(
+                    SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
+                    email.Email,
+                    BuildPasswordResetTemplateVariables(context),
+                    IdempotencyKey: $"auth-password-reset:{email.UserId}:{_cryptoService.HashToken(token)[..32]}"),
+                cancellationToken);
+
+            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(result.SanitizedError ?? "Password reset email delivery failed.");
+            }
+
+            await RecordPasswordResetAuditAsync(
+                "password_reset.email_sent",
+                "user",
+                email.UserId,
+                email.UserId,
+                context.MaskedEmail,
+                GetIp(httpContext),
+                new { result.DeliveryId, DeliveryStatus = result.Status, result.ProviderMessageId },
+                cancellationToken);
+
+            return new SqlOSPasswordResetEmailResult(
+                email.Email,
+                context.MaskedEmail,
+                expiresAt,
+                result.DeliveryId,
+                result.Status,
+                result.ProviderMessageId,
+                result.SanitizedError,
+                $"Password reset email queued for {context.MaskedEmail}.");
         }
-
-        await _adminService.RecordAuditAsync(
-            "user.password-reset-email-sent",
-            "user",
-            email.UserId,
-            userId: email.UserId,
-            data: new { maskedEmail, deliveryId = result.DeliveryId },
-            cancellationToken: cancellationToken);
-
-        return new SqlOSPasswordResetEmailResult(
-            email.Email,
-            maskedEmail,
-            DateTime.UtcNow.Add(lifetime),
-            result.DeliveryId,
-            result.Status,
-            result.ProviderMessageId,
-            result.SanitizedError,
-            $"Password reset email queued for {maskedEmail}.");
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+            await RecordPasswordResetAuditAsync(
+                "password_reset.email_send_failed",
+                "system",
+                null,
+                email.UserId,
+                context.MaskedEmail,
+                GetIp(httpContext),
+                new { error = ex.Message },
+                cancellationToken);
+            throw;
+        }
     }
 
     public async Task ResetPasswordAsync(SqlOSResetPasswordRequest request, CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("password_reset", request.Token, cancellationToken)
-            ?? throw new InvalidOperationException("Password reset token is invalid or expired.");
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PasswordEnabled)
+        {
+            throw new InvalidOperationException("Local password authentication is disabled.");
+        }
+
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(PasswordResetPurpose, request.Token, cancellationToken);
+        if (token == null)
+        {
+            await RecordPasswordResetAuditAsync(
+                "password_reset.invalid_or_expired",
+                "system",
+                null,
+                null,
+                null,
+                null,
+                new { reason = "missing_or_consumed" },
+                cancellationToken);
+            throw new InvalidOperationException("Password reset token is invalid or expired.");
+        }
+
+        var user = await _context.Set<SqlOSUser>()
+            .FirstOrDefaultAsync(x => x.Id == token.UserId, cancellationToken);
+        if (user == null || !user.IsActive)
+        {
+            await RecordPasswordResetAuditAsync(
+                "password_reset.invalid_or_expired",
+                "system",
+                null,
+                token.UserId,
+                null,
+                null,
+                new { reason = user == null ? "missing_user" : "inactive_user" },
+                cancellationToken);
+            throw new InvalidOperationException("Password reset token is invalid or expired.");
+        }
 
         var credential = await _context.Set<SqlOSCredential>()
             .FirstOrDefaultAsync(x => x.UserId == token.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
 
         if (credential == null)
         {
-            credential = new SqlOSCredential
-            {
-                Id = _cryptoService.GenerateId("cred"),
-                UserId = token.UserId!,
-                Type = "password",
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.Set<SqlOSCredential>().Add(credential);
+            await RecordPasswordResetAuditAsync(
+                "password_reset.invalid_or_expired",
+                "system",
+                null,
+                token.UserId,
+                null,
+                null,
+                new { reason = "missing_password_credential" },
+                cancellationToken);
+            throw new InvalidOperationException("Password reset token is invalid or expired.");
         }
 
         credential.SecretHash = _cryptoService.HashPassword(request.NewPassword);
         credential.LastUsedAt = null;
         await _context.SaveChangesAsync(cancellationToken);
-        await _adminService.RecordAuditAsync("user.password-reset", "user", token.UserId, userId: token.UserId, cancellationToken: cancellationToken);
+        await RecordPasswordResetAuditAsync(
+            "password_reset.completed",
+            "user",
+            token.UserId,
+            token.UserId,
+            null,
+            null,
+            null,
+            cancellationToken);
     }
 
-    private async Task<string> CreatePasswordResetTokenForEmailAsync(
+    private async Task<(string Token, DateTime ExpiresAt)> CreatePasswordResetTokenForEmailAsync(
         SqlOSUserEmail email,
+        string? clientApplicationId,
         CancellationToken cancellationToken)
     {
+        await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+
+        var expiresAt = DateTime.UtcNow.Add(_passwordResetOptions.TokenLifetime);
         var token = await _cryptoService.CreateTemporaryTokenAsync(
-            "password_reset",
+            PasswordResetPurpose,
             email.UserId,
+            clientApplicationId,
             null,
-            null,
-            new PasswordResetPayload(email.Id),
-            TimeSpan.FromHours(1),
+            new PasswordResetPayload(email.Id, email.NormalizedEmail),
+            _passwordResetOptions.TokenLifetime,
             cancellationToken);
 
-        await _adminService.RecordAuditAsync("user.password-reset-token-created", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
-        return token;
+        return (token, expiresAt);
     }
 
     public async Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken cancellationToken = default)
@@ -1255,6 +1480,252 @@ public sealed class SqlOSAuthService
         return $"{GetPublicOrigin(httpContext)}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
     }
 
+    private async Task<SqlOSPasswordResetMessageContext> BuildPasswordResetMessageContextAsync(
+        string email,
+        string maskedEmail,
+        string token,
+        DateTime expiresAt,
+        string? resetUrlTemplate,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
+        var applicationName = string.IsNullOrWhiteSpace(branding.ApplicationName)
+            ? string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
+                ? "SqlOS"
+                : _options.EmailOtp.ApplicationName.Trim()
+            : branding.ApplicationName;
+        var resetUrl = _passwordResetOptions.BuildResetUrl?.Invoke(
+            new SqlOSPasswordResetUrlContext(
+                token,
+                email,
+                maskedEmail,
+                expiresAt,
+                _passwordResetOptions.TokenLifetime,
+                httpContext))
+            ?? BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
+
+        return new SqlOSPasswordResetMessageContext(
+            applicationName,
+            email,
+            maskedEmail,
+            resetUrl,
+            expiresAt,
+            _passwordResetOptions.TokenLifetime)
+        {
+            Branding = branding with { ApplicationName = applicationName }
+        };
+    }
+
+    private IReadOnlyDictionary<string, object?> BuildPasswordResetTemplateVariables(SqlOSPasswordResetMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.TokenLifetime.TotalMinutes));
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["applicationName"] = context.ApplicationName,
+            ["logoBase64"] = context.Branding.LogoBase64 ?? string.Empty,
+            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "none" : "block",
+            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(context.Branding.LogoBase64) ? "block" : "none",
+            ["maskedEmail"] = context.MaskedEmail,
+            ["resetUrl"] = context.ResetUrl,
+            ["expiresInMinutes"] = minutes,
+            ["primaryColor"] = context.Branding.PrimaryColor,
+            ["accentColor"] = context.Branding.AccentColor,
+            ["backgroundColor"] = context.Branding.BackgroundColor
+        };
+    }
+
+    private SqlOSAuthEmailMessage BuildLegacyPasswordResetMessage(SqlOSPasswordResetMessageContext context)
+    {
+        var subject = string.IsNullOrWhiteSpace(_passwordResetOptions.Subject)
+            ? "Reset your password"
+            : _passwordResetOptions.Subject
+                .Replace("{applicationName}", context.ApplicationName, StringComparison.Ordinal)
+                .Replace("{ApplicationName}", context.ApplicationName, StringComparison.Ordinal);
+
+        return _passwordResetOptions.BuildMessage?.Invoke(context)
+            ?? new SqlOSAuthEmailMessage(
+                context.Email,
+                subject,
+                SqlOSAuthEmailTemplateRenderer.BuildPasswordResetHtmlBody(context),
+                SqlOSAuthEmailTemplateRenderer.BuildPasswordResetTextBody(context));
+    }
+
+    private async Task<bool> IsPasswordResetEligibleAsync(
+        SqlOSUserEmail? email,
+        SqlOSResolvedCredentialSettings credentialSettings,
+        CancellationToken cancellationToken)
+    {
+        if (!credentialSettings.PasswordEnabled || email?.User == null || !email.User.IsActive)
+        {
+            return false;
+        }
+
+        return await _context.Set<SqlOSCredential>()
+            .AnyAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+    }
+
+    private async Task<SqlOSClientApplication?> TryResolveClientApplicationAsync(
+        string? clientId,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeClientKey(clientId);
+        if (normalized == null)
+        {
+            return null;
+        }
+
+        return await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClientId == normalized && x.IsActive && x.DisabledAt == null, cancellationToken);
+    }
+
+    private async Task RecordPasswordResetRequestMarkerAsync(
+        string normalizedEmail,
+        string? userId,
+        string? clientApplicationId,
+        string? ipAddress,
+        string? clientKey,
+        string surface,
+        CancellationToken cancellationToken)
+    {
+        await _cryptoService.CreateTemporaryTokenAsync(
+            PasswordResetRequestPurpose,
+            userId,
+            clientApplicationId,
+            organizationId: null,
+            payload: new PasswordResetRequestPayload(normalizedEmail, ipAddress, clientKey, surface),
+            lifetime: _passwordResetOptions.RateLimitWindow,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<PasswordResetRateLimitResult> CheckPasswordResetRateLimitAsync(
+        string normalizedEmail,
+        string? userId,
+        string? ipAddress,
+        string? clientKey,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var windowStart = now.Subtract(_passwordResetOptions.RateLimitWindow);
+        var recentRequests = await _context.Set<SqlOSTemporaryToken>()
+            .AsNoTracking()
+            .Where(x => x.Purpose == PasswordResetRequestPurpose && x.CreatedAt >= windowStart)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var requests = recentRequests
+            .Select(token => new
+            {
+                token.CreatedAt,
+                token.UserId,
+                token.ClientApplicationId,
+                Payload = _cryptoService.DeserializePayload<PasswordResetRequestPayload>(token)
+            })
+            .Where(x => x.Payload != null)
+            .ToList();
+
+        var emailMatches = requests
+            .Where(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
+            .ToList();
+        if (emailMatches.Count >= _passwordResetOptions.MaxRequestsPerEmailPerWindow)
+        {
+            return PasswordResetRateLimitResult.Limited("email", emailMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            var userMatches = requests
+                .Where(x => string.Equals(x.UserId, userId, StringComparison.Ordinal))
+                .ToList();
+            if (userMatches.Count >= _passwordResetOptions.MaxRequestsPerEmailPerWindow)
+            {
+                return PasswordResetRateLimitResult.Limited("user", userMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ipAddress))
+        {
+            var ipMatches = requests
+                .Where(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal))
+                .ToList();
+            if (ipMatches.Count >= _passwordResetOptions.MaxRequestsPerIpPerWindow)
+            {
+                return PasswordResetRateLimitResult.Limited("ip", ipMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(clientKey))
+        {
+            var clientMatches = requests
+                .Where(x => string.Equals(x.Payload!.ClientKey, clientKey, StringComparison.Ordinal))
+                .ToList();
+            if (clientMatches.Count >= _passwordResetOptions.MaxRequestsPerClientPerWindow)
+            {
+                return PasswordResetRateLimitResult.Limited("client", clientMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
+            }
+        }
+
+        return PasswordResetRateLimitResult.Allowed();
+    }
+
+    private async Task InvalidateActivePasswordResetTokensAsync(string userId, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var activeTokens = await _context.Set<SqlOSTemporaryToken>()
+            .Where(x => x.Purpose == PasswordResetPurpose
+                && x.UserId == userId
+                && x.ConsumedAt == null
+                && x.ExpiresAt > now)
+            .ToListAsync(cancellationToken);
+
+        if (activeTokens.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var activeToken in activeTokens)
+        {
+            activeToken.ConsumedAt = now;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RecordPasswordResetAuditAsync(
+        string eventType,
+        string actorType,
+        string? actorId,
+        string? userId,
+        string? maskedEmail,
+        string? ipAddress,
+        object? data,
+        CancellationToken cancellationToken)
+        => await _adminService.RecordAuditAsync(
+            eventType,
+            actorType,
+            actorId,
+            userId: userId,
+            ipAddress: ipAddress,
+            data: new
+            {
+                maskedEmail,
+                details = data
+            },
+            cancellationToken: cancellationToken);
+
+    private SqlOSPasswordResetRequestResult BuildPasswordResetRequestResult(
+        string email,
+        string maskedEmail,
+        DateTime now,
+        DateTime? nextAllowedSendAt = null)
+        => new(
+            email,
+            maskedEmail,
+            PasswordResetGenericMessage,
+            now.Add(_passwordResetOptions.TokenLifetime),
+            nextAllowedSendAt ?? now.Add(_passwordResetOptions.ResendCooldown));
+
     private string GetPublicOrigin(HttpContext? httpContext)
     {
         if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
@@ -1286,7 +1757,21 @@ public sealed class SqlOSAuthService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    private static string? GetIp(HttpContext httpContext) => httpContext.Connection.RemoteIpAddress?.ToString();
+    private static string NormalizeEmailInput(string? email)
+    {
+        var trimmed = email?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            throw new InvalidOperationException("Email address is required.");
+        }
+
+        return trimmed;
+    }
+
+    private static string? NormalizeClientKey(string? clientKey)
+        => string.IsNullOrWhiteSpace(clientKey) ? null : clientKey.Trim();
+
+    private static string? GetIp(HttpContext? httpContext) => httpContext?.Connection.RemoteIpAddress?.ToString();
 
     private static string ResolveEffectiveAudience(SqlOSClientApplication client, string? resource)
         => string.IsNullOrWhiteSpace(resource)
@@ -1527,7 +2012,17 @@ public sealed class SqlOSAuthService
 
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
-    private sealed record PasswordResetPayload(string EmailId);
+    private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
+    private sealed record PasswordResetRequestPayload(
+        string NormalizedEmail,
+        string? IpAddress,
+        string? ClientKey,
+        string Surface);
+    private sealed record PasswordResetRateLimitResult(bool IsLimited, string? Scope, DateTime? RetryAfter)
+    {
+        public static PasswordResetRateLimitResult Allowed() => new(false, null, null);
+        public static PasswordResetRateLimitResult Limited(string scope, DateTime retryAfter) => new(true, scope, retryAfter);
+    }
     private sealed record EmailVerificationPayload(string EmailId);
 
     private SqlOSInvitationService RequireInvitationService()

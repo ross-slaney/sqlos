@@ -52,6 +52,8 @@ public sealed class SqlOSAuthPageRendererTests
         html.Should().Contain("action=\"/sqlos/auth/login/password\"");
         html.Should().Contain("href=\"/sqlos/auth/login/oidc/oidc_contoso?request=req_password&amp;email=alice%40example.com\"");
         html.Should().Contain("href=\"/sqlos/auth/signup?request=req_password\"");
+        html.Should().Contain("href=\"/sqlos/auth/password/forgot?request=req_password&amp;email=alice%40example.com\"");
+        html.Should().Contain("Forgot password?");
     }
 
     [TestMethod]
@@ -70,11 +72,19 @@ public sealed class SqlOSAuthPageRendererTests
                 new SqlOSOrganizationOption("org_1", "contoso", "Contoso", "admin")
             }));
         var loggedOutHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "logged-out"));
+        var forgotHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(
+            mode: "forgot-password",
+            requestId: "req_forgot",
+            email: "alice@example.com"));
+        var forgotSentHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "forgot-password-sent"));
 
         signupHtml.Should().Contain("action=\"/sqlos/auth/signup/submit\"");
         signupHtml.Should().Contain("href=\"/sqlos/auth/login?request=req_signup\"");
         organizationHtml.Should().Contain("action=\"/sqlos/auth/login/select-organization\"");
         loggedOutHtml.Should().Contain("href=\"/sqlos/auth/login\"");
+        forgotHtml.Should().Contain("action=\"/sqlos/auth/password/forgot/submit\"");
+        forgotHtml.Should().Contain("value=\"alice@example.com\"");
+        forgotSentHtml.Should().Contain("Check your email.");
     }
 
     [TestMethod]

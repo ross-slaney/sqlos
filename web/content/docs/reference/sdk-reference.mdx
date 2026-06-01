@@ -89,10 +89,14 @@ var tokens = await authService.CreateSessionTokensForUserAsync(
     user, client, organizationId, "password", userAgent, ipAddress, ct);
 
 // Password reset
-await authService.SendPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(email), httpContext, ct);
+await authService.RequestPasswordResetEmailAsync(
+    new SqlOSSendPasswordResetEmailRequest(email, ClientId: clientId), httpContext, ct);
 
-// Custom reset-token flows can still generate and deliver the token directly.
+// Trusted server/admin flows can still request delivery details.
+await authService.SendPasswordResetEmailAsync(
+    new SqlOSSendPasswordResetEmailRequest(email, ClientId: clientId), httpContext, ct);
+
+// Custom server-side reset-token flows can still generate and deliver the token directly.
 var token = await authService.CreatePasswordResetTokenAsync(
     new SqlOSForgotPasswordRequest(email), ct);
 await authService.ResetPasswordAsync(
