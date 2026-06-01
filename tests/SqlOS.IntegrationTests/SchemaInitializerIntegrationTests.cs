@@ -26,6 +26,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSOrganizations",
                      "SqlOSUsers",
                      "SqlOSUserEmails",
+                     "SqlOSUserPhoneNumbers",
                      "SqlOSCredentials",
                      "SqlOSPasswordLoginBuckets",
                      "SqlOSMemberships",
@@ -37,6 +38,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSSigningKeys",
                      "SqlOSTemporaryTokens",
                      "SqlOSAuditEvents",
+                     "SqlOSPhoneOtpChallenges",
                      "SqlOSSchema"
                  })
         {

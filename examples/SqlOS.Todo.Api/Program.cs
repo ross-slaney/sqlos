@@ -61,6 +61,9 @@ var hostedCallbackUrl = $"{publicOrigin}/callback.html";
 var localClientRedirectUri = sampleConfig.LocalRedirectUri;
 var emcyClientRedirectUri = sampleConfig.EmcyRedirectUri;
 var portableClientUrl = $"{publicOrigin}{sampleConfig.PortableClientPath}";
+var enablePhoneOtp =
+    sampleConfig.EnablePhoneOtp
+    || builder.Configuration.GetValue<bool>("SqlOS:PhoneOtp:Enabled");
 var emcyLocalOrigins = new[]
 {
     new Uri(localClientRedirectUri).GetLeftPart(UriPartial.Authority),
@@ -96,12 +99,34 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
     var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
         ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
         ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
+    var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
+        ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
+    var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
+        ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
+    var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
+        ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
+    var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
+        ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
+    var enabledCredentialTypes = new List<string>();
+    if (sampleConfig.EnableEmailOtp)
+    {
+        enabledCredentialTypes.Add("email_otp");
+    }
+    if (enablePhoneOtp)
+    {
+        enabledCredentialTypes.Add("phone_otp");
+    }
+    if (enabledCredentialTypes.Count == 0)
+    {
+        enabledCredentialTypes.Add("password");
+    }
+    var passwordAuthEnabled = enabledCredentialTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
 
     var auth = options.AuthServer;
     auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
     auth.PublicOrigin = publicOrigin;
     auth.DefaultAudience = sampleConfig.Resource;
-    auth.EnableLocalPasswordAuth = !sampleConfig.EnableEmailOtp;
+    auth.EnableLocalPasswordAuth = passwordAuthEnabled;
     options.ConfigureEmail(email =>
     {
         email.AzureCommunicationServicesConnectionString = emailConnectionString;
@@ -113,19 +138,30 @@ builder.AddSqlOS<TodoSampleDbContext>(options =>
         email.FromAddress = emailFromAddress;
         email.ApplicationName = "SqlOS Todo";
     });
+    auth.ConfigurePhoneOtp(phone =>
+    {
+        phone.Enabled = enablePhoneOtp;
+        phone.TwilioAccountSid = twilioAccountSid;
+        phone.TwilioAuthToken = twilioAuthToken;
+        phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
+        if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+        {
+            phone.DefaultRegion = phoneOtpDefaultRegion;
+        }
+    });
 
     auth.SeedAuthPage(page =>
     {
-        page.PageTitle = sampleConfig.EnableEmailOtp ? "Check your email. Ship the Todo app." : "Ship the Todo app first.";
-        page.PageSubtitle = sampleConfig.EnableEmailOtp
-            ? "Use passwordless email codes for sign in and sign up, then land back in the hosted-first Todo sample."
+        page.PageTitle = sampleConfig.EnableEmailOtp || enablePhoneOtp ? "Check your code. Ship the Todo app." : "Ship the Todo app first.";
+        page.PageSubtitle = sampleConfig.EnableEmailOtp || enablePhoneOtp
+            ? "Use passwordless email or SMS codes for sign in and sign up, then land back in the hosted-first Todo sample."
             : "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
         page.PrimaryColor = "#0f172a";
         page.AccentColor = "#2563eb";
         page.BackgroundColor = "#f8fafc";
         page.Layout = "split";
-        page.EnablePasswordSignup = !sampleConfig.EnableEmailOtp;
-        page.EnabledCredentialTypes = sampleConfig.EnableEmailOtp ? ["email_otp"] : ["password"];
+        page.EnablePasswordSignup = passwordAuthEnabled;
+        page.EnabledCredentialTypes = enabledCredentialTypes;
     });
 
     auth.SeedAuthEmails(email =>
@@ -304,6 +340,7 @@ app.MapGet("/sample/config", async (
         },
         headlessEnabled = sample.EnableHeadless,
         emailOtpEnabled = sample.EnableEmailOtp && authPageSettings.EmailOtpRuntimeConfigured,
+        phoneOtpEnabled = enablePhoneOtp && authPageSettings.PhoneOtpRuntimeConfigured,
         dcrEnabled = authOptions.Value.ClientRegistration.Dcr.Enabled,
         cimdEnabled = authOptions.Value.ClientRegistration.Cimd.Enabled,
         allowedScopes = sample.AllowedScopes

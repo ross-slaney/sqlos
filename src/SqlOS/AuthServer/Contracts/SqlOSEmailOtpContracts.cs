@@ -45,4 +45,5 @@ public sealed record SqlOSResolvedCredentialSettings(
     string[] EnabledCredentialTypes,
     bool PasswordEnabled,
     bool PasswordSignupEnabled,
-    bool EmailOtpEnabled);
+    bool EmailOtpEnabled,
+    bool PhoneOtpEnabled);

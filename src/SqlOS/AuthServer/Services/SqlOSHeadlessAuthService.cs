@@ -20,6 +20,7 @@ public sealed class SqlOSHeadlessAuthService
     private readonly SqlOSSamlService _samlService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSPhoneOtpService? _phoneOtpService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSDeviceAuthorizationService? _deviceAuthorizationService;
     private readonly SqlOSAuthPageSessionService? _authPageSessionService;
@@ -37,7 +38,8 @@ public sealed class SqlOSHeadlessAuthService
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSInvitationService? invitationService = null,
         SqlOSDeviceAuthorizationService? deviceAuthorizationService = null,
-        SqlOSAuthPageSessionService? authPageSessionService = null)
+        SqlOSAuthPageSessionService? authPageSessionService = null,
+        SqlOSPhoneOtpService? phoneOtpService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -47,6 +49,7 @@ public sealed class SqlOSHeadlessAuthService
         _samlService = samlService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
         _deviceAuthorizationService = deviceAuthorizationService;
         _authPageSessionService = authPageSessionService;
@@ -796,6 +799,274 @@ public sealed class SqlOSHeadlessAuthService
                 organizationSelection: null,
                 challengeToken: request.ChallengeToken,
                 signupToken: request.SignupToken,
+            cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> RequestPhoneOtpAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessPhoneOtpStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+
+        try
+        {
+            var challenge = await RequirePhoneOtpService().StartForAuthorizationRequestAsync(
+                authorizationRequest,
+                request.PhoneNumber,
+                httpContext,
+                cancellationToken);
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp-verify",
+                error: null,
+                pendingToken: null,
+                email: null,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                info: challenge.Message,
+                challengeToken: challenge.ChallengeToken,
+                phoneNumber: challenge.PhoneNumber,
+                cancellationToken: cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp",
+                ex.Message,
+                pendingToken: null,
+                email: null,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                phoneNumber: request.PhoneNumber,
+                cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> VerifyPhoneOtpAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessPhoneOtpVerifyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+
+        try
+        {
+            var verification = await RequirePhoneOtpService().VerifyAsync(
+                new SqlOSPhoneOtpVerifyRequest(request.ChallengeToken, request.Code),
+                authorizationRequest.Id,
+                requireAuthorizationRequestMatch: true,
+                cancellationToken);
+
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                authorizationRequest,
+                verification.User,
+                verification.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            if (completion.RequiresOrganizationSelection)
+            {
+                return View(await BuildViewModelAsync(
+                    authorizationRequest,
+                    "organization",
+                    error: null,
+                    pendingToken: completion.PendingToken,
+                    email: null,
+                    displayName: null,
+                    fieldErrors: null,
+                    organizationSelection: completion.Organizations,
+                    info: null,
+                    challengeToken: null,
+                    cancellationToken: cancellationToken));
+            }
+
+            return Redirect(completion.RedirectUrl!);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp-verify",
+                ex.Message,
+                pendingToken: null,
+                email: null,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                challengeToken: request.ChallengeToken,
+                cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> RequestPhoneOtpSignupAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessPhoneOtpSignupStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+
+        try
+        {
+            if (await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null)
+            {
+                throw new InvalidOperationException("Phone signup is not available for email invitations.");
+            }
+
+            var signup = await RequirePhoneOtpService().StartSignupForAuthorizationRequestAsync(
+                authorizationRequest,
+                request.DisplayName,
+                request.PhoneNumber,
+                request.OrganizationName,
+                request.CustomFields,
+                httpContext,
+                cancellationToken);
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp-signup-verify",
+                error: null,
+                pendingToken: null,
+                email: null,
+                displayName: request.DisplayName,
+                fieldErrors: null,
+                organizationSelection: null,
+                info: signup.Message,
+                challengeToken: signup.ChallengeToken,
+                signupToken: signup.SignupToken,
+                phoneNumber: signup.PhoneNumber,
+                cancellationToken: cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp-signup",
+                ex.Message,
+                pendingToken: null,
+                email: null,
+                displayName: request.DisplayName,
+                fieldErrors: null,
+                organizationSelection: null,
+                phoneNumber: request.PhoneNumber,
+                cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> VerifyPhoneOtpSignupAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessPhoneOtpSignupVerifyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+        SqlOSPhoneOtpSignupVerificationResult? verification = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            if (await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken) != null)
+            {
+                throw new InvalidOperationException("Phone signup is not available for email invitations.");
+            }
+
+            verification = await RequirePhoneOtpService().VerifySignupAsync(
+                new SqlOSPhoneOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
+                authorizationRequest.Id,
+                requireAuthorizationRequestMatch: true,
+                cancellationToken);
+
+            signup = await _authorizationServerService.SignUpWithPhoneOtpAsync(
+                verification.DisplayName,
+                verification.PhoneNumber,
+                verification.OrganizationName,
+                authorizationRequest.OrganizationId ?? verification.OrganizationId,
+                cancellationToken);
+
+            var selectedOrganizationId = signup.Organizations.FirstOrDefault()?.Id;
+            SqlOSOrganization? organization = null;
+            if (!string.IsNullOrWhiteSpace(selectedOrganizationId))
+            {
+                organization = await _context.Set<SqlOSOrganization>()
+                    .FirstOrDefaultAsync(x => x.Id == selectedOrganizationId, cancellationToken);
+            }
+
+            if (_options.Headless.OnHeadlessSignupAsync != null)
+            {
+                await _options.Headless.OnHeadlessSignupAsync(
+                    new SqlOSHeadlessSignupHookContext(
+                        httpContext,
+                        authorizationRequest,
+                        signup.User,
+                        organization,
+                        verification.CustomFields ?? new JsonObject()),
+                    cancellationToken);
+            }
+
+            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                signup.User,
+                selectedOrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            await RequirePhoneOtpService().ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            await _adminService.RecordAuditAsync(
+                "user.signup.phone_otp",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: selectedOrganizationId,
+                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken: cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return Redirect(redirectUrl);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    authorizationRequest.OrganizationId ?? verification?.OrganizationId,
+                    verification?.OrganizationName,
+                    cancellationToken);
+            }
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "phone-otp-signup-verify",
+                ex.Message,
+                pendingToken: null,
+                email: null,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                challengeToken: request.ChallengeToken,
+                signupToken: request.SignupToken,
+                phoneNumber: verification?.PhoneNumber,
                 cancellationToken: cancellationToken));
         }
     }
@@ -1097,6 +1368,7 @@ public sealed class SqlOSHeadlessAuthService
         string? info = null,
         string? challengeToken = null,
         string? signupToken = null,
+        string? phoneNumber = null,
         CancellationToken cancellationToken = default)
     {
         var settings = await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
@@ -1131,7 +1403,8 @@ public sealed class SqlOSHeadlessAuthService
             providers,
             await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken),
             ParseUiContext(authorizationRequest.UiContextJson),
-            DeviceAuthorization: deviceAuthorization);
+            DeviceAuthorization: deviceAuthorization,
+            PhoneNumber: phoneNumber);
     }
 
     public static bool IsHeadlessRequest(SqlOSAuthorizationRequest authorizationRequest)
@@ -1196,37 +1469,32 @@ public sealed class SqlOSHeadlessAuthService
     }
 
     public static string NormalizeView(string? requestedView)
-        => string.Equals(requestedView, "signup", StringComparison.OrdinalIgnoreCase)
-            ? "signup"
-            : string.Equals(requestedView, "password", StringComparison.OrdinalIgnoreCase)
-                ? "password"
-                : string.Equals(requestedView, "email-otp", StringComparison.OrdinalIgnoreCase)
-                    ? "email-otp"
-                    : string.Equals(requestedView, "email-otp-verify", StringComparison.OrdinalIgnoreCase)
-                        ? "email-otp-verify"
-                        : string.Equals(requestedView, "email-otp-signup-verify", StringComparison.OrdinalIgnoreCase)
-                            ? "email-otp-signup-verify"
-                            : string.Equals(requestedView, "invite", StringComparison.OrdinalIgnoreCase)
-                                ? "invite"
-                                : string.Equals(requestedView, "invite-login", StringComparison.OrdinalIgnoreCase)
-                                    ? "invite-login"
-                                    : string.Equals(requestedView, "invite-email-otp-verify", StringComparison.OrdinalIgnoreCase)
-                                        ? "invite-email-otp-verify"
-                                        : string.Equals(requestedView, "invite-accepted", StringComparison.OrdinalIgnoreCase)
-                                            ? "invite-accepted"
-                                            : string.Equals(requestedView, "device", StringComparison.OrdinalIgnoreCase)
-                                                ? "device"
-                                                : string.Equals(requestedView, "device-approve", StringComparison.OrdinalIgnoreCase)
-                                                    ? "device-approve"
-                                                    : string.Equals(requestedView, "device-approved", StringComparison.OrdinalIgnoreCase)
-                                                        ? "device-approved"
-                                                        : string.Equals(requestedView, "device-denied", StringComparison.OrdinalIgnoreCase)
-                                                            ? "device-denied"
-                                                            : string.Equals(requestedView, "organization", StringComparison.OrdinalIgnoreCase)
-                                                                ? "organization"
-                                                                : string.Equals(requestedView, "logged-out", StringComparison.OrdinalIgnoreCase)
-                                                                    ? "logged-out"
-                                                                    : "login";
+    {
+        var normalized = requestedView?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "signup" => "signup",
+            "password" => "password",
+            "email-otp" => "email-otp",
+            "email-otp-verify" => "email-otp-verify",
+            "email-otp-signup-verify" => "email-otp-signup-verify",
+            "phone-otp" => "phone-otp",
+            "phone-otp-verify" => "phone-otp-verify",
+            "phone-otp-signup" => "phone-otp-signup",
+            "phone-otp-signup-verify" => "phone-otp-signup-verify",
+            "invite" => "invite",
+            "invite-login" => "invite-login",
+            "invite-email-otp-verify" => "invite-email-otp-verify",
+            "invite-accepted" => "invite-accepted",
+            "device" => "device",
+            "device-approve" => "device-approve",
+            "device-approved" => "device-approved",
+            "device-denied" => "device-denied",
+            "organization" => "organization",
+            "logged-out" => "logged-out",
+            _ => "login"
+        };
+    }
 
     private static SqlOSHeadlessActionResult Redirect(string url)
         => new("redirect", url, null);
@@ -1241,6 +1509,11 @@ public sealed class SqlOSHeadlessAuthService
             return "email-otp";
         }
 
+        if (credentialSettings.PhoneOtpEnabled)
+        {
+            return "phone-otp";
+        }
+
         if (credentialSettings.PasswordEnabled)
         {
             return "password";
@@ -1251,6 +1524,9 @@ public sealed class SqlOSHeadlessAuthService
 
     private bool SupportsDatabaseTransactions()
         => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
+
+    private SqlOSPhoneOtpService RequirePhoneOtpService()
+        => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
 
     private async Task BindInvitationIfPresentAsync(
         SqlOSAuthorizationRequest authorizationRequest,
@@ -1439,6 +1715,14 @@ public sealed class SqlOSHeadlessAuthService
             .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
         if (user != null)
         {
+            var phoneNumbers = await _context.Set<SqlOSUserPhoneNumber>()
+                .Where(x => x.UserId == user.Id)
+                .ToListAsync(cancellationToken);
+            if (phoneNumbers.Count > 0)
+            {
+                _context.Set<SqlOSUserPhoneNumber>().RemoveRange(phoneNumbers);
+            }
+
             _context.Set<SqlOSUser>().Remove(user);
         }
 

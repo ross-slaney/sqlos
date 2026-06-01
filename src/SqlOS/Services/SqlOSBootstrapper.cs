@@ -58,6 +58,7 @@ public sealed class SqlOSBootstrapper
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
         await _adminService.CleanupExpiredEmailOtpChallengesAsync(cancellationToken);
+        await _adminService.CleanupExpiredPhoneOtpChallengesAsync(cancellationToken);
         await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         await _adminService.CleanupStaleDynamicClientsAsync(cancellationToken);
 

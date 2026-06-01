@@ -36,6 +36,7 @@ async function initIndexPage() {
         resource: config.resource,
         hostedClient: config.hostedClient,
         emailOtpEnabled: config.emailOtpEnabled,
+        phoneOtpEnabled: config.phoneOtpEnabled,
         localClient: config.localClient,
         portableClient: config.portableClient,
         cimdEnabled: config.cimdEnabled,
@@ -49,7 +50,14 @@ async function initIndexPage() {
   const hostedLoginButton = document.getElementById("hosted-login-button");
   const hostedSignupButton = document.getElementById("hosted-signup-button");
 
-  if (config.emailOtpEnabled) {
+  if (config.phoneOtpEnabled) {
+    if (hostedLoginButton) {
+      hostedLoginButton.textContent = config.emailOtpEnabled ? "Code sign in" : "SMS code sign in";
+    }
+    if (hostedSignupButton) {
+      hostedSignupButton.textContent = config.emailOtpEnabled ? "Code sign up" : "SMS code sign up";
+    }
+  } else if (config.emailOtpEnabled) {
     if (hostedLoginButton) {
       hostedLoginButton.textContent = "Email code sign in";
     }
@@ -59,7 +67,7 @@ async function initIndexPage() {
   }
 
   hostedLoginButton?.addEventListener("click", async () => {
-    await startAuthorization(config.emailOtpEnabled ? "email-otp" : "login");
+    await startAuthorization(config.emailOtpEnabled ? "email-otp" : config.phoneOtpEnabled ? "phone-otp" : "login");
   });
 
   hostedSignupButton?.addEventListener("click", async () => {
@@ -305,7 +313,7 @@ async function startAuthorization(view) {
     view
   });
 
-  if (view === "signup" || view === "email-otp") {
+  if (view === "signup" || view === "email-otp" || view === "phone-otp") {
     params.set("prompt", "login");
   }
 

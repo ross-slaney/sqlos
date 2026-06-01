@@ -345,6 +345,67 @@ public sealed class SqlOSAuthorizationServerService
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
     }
 
+    public async Task<SqlOSPasswordAuthenticationResult> SignUpWithPhoneOtpAsync(
+        string displayName,
+        string phoneNumber,
+        string? organizationName,
+        string? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PhoneOtpEnabled)
+        {
+            throw new InvalidOperationException("Phone sign-in is unavailable.");
+        }
+
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
+
+        var phoneHash = _cryptoService.HashToken(phoneNumber);
+        var existingPhone = await _context.Set<SqlOSUserPhoneNumber>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.PhoneNumberHash == phoneHash && x.RemovedAt == null, cancellationToken);
+        if (existingPhone != null)
+        {
+            throw new InvalidOperationException("An account already exists for this phone number. Sign in with a phone code instead.");
+        }
+
+        var now = DateTime.UtcNow;
+        var user = new SqlOSUser
+        {
+            Id = _cryptoService.GenerateId("usr"),
+            DisplayName = displayName,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        _context.Set<SqlOSUser>().Add(user);
+        _context.Set<SqlOSUserPhoneNumber>().Add(new SqlOSUserPhoneNumber
+        {
+            Id = _cryptoService.GenerateId("phn"),
+            UserId = user.Id,
+            PhoneNumber = phoneNumber,
+            PhoneNumberHash = phoneHash,
+            DisplayValueEncrypted = _cryptoService.ProtectSecret(phoneNumber),
+            IsPrimary = true,
+            IsVerified = true,
+            VerifiedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+
+        if (!string.IsNullOrWhiteSpace(organizationName))
+        {
+            var createdOrganization = await _adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(organizationName, null),
+                cancellationToken);
+            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "phone_otp");
+    }
+
     public async Task<SqlOSPasswordAuthenticationResult> SignUpWithInvitationAsync(
         string displayName,
         string email,

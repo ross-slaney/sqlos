@@ -297,6 +297,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Configuration](https://sqlos.dev/docs/guides/configuration) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
 - [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
+- [SMS OTP](docs/SMS_OTP.md) — passwordless phone-code login/signup through Twilio Verify
 - [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
 - [Todo Sample](examples/SqlOS.Todo.Api/README.md) — hosted auth, simple FGA, and MCP-oriented protected-resource flows
 - [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
@@ -348,6 +349,39 @@ dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
 Then open `http://localhost:5080/`.
 
 Use **Email code sign in** or **Email code sign up**. In this mode the Todo app only starts the OAuth request; the SqlOS hosted auth page sends the OTP, verifies the code, creates the account on signup, and redirects back with the authorization code.
+
+## Testing SMS OTP in the Todo Sample
+
+Use a Twilio pay-as-you-go account before testing arbitrary user phone numbers. Twilio trial accounts can only send OTP messages to phone numbers that are already verified on the Twilio account.
+
+Set up Twilio Verify like this:
+
+1. Sign in to the [Twilio Console](https://console.twilio.com/).
+2. On the Console dashboard, open **Account Info**.
+3. Copy **Account SID**. It starts with `AC`.
+4. Click **Show** for **Auth Token**, then copy it. Treat this as a secret.
+5. Open **Verify** in the left navigation, then **Services**.
+6. Click **Create new Service**.
+7. Set the friendly name to `SqlOS Todo Dev`.
+8. Ensure SMS is enabled and the code length is 6 digits.
+9. Save the **Service SID**. It starts with `VA`.
+
+Run the Todo sample from the repo root:
+
+```bash
+TWILIO_ACCOUNT_SID=<account-sid> \
+TWILIO_AUTH_TOKEN=<auth-token> \
+TWILIO_VERIFY_SERVICE_SID=<verify-service-sid> \
+TWILIO_DEFAULT_REGION=US \
+TodoSample__EnablePhoneOtp=true \
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Open `http://localhost:5080/`. The home page should show **SMS code sign in** and **SMS code sign up**. `/sample/config` should report `"phoneOtpEnabled": true`.
+
+Start SMS testing from the Todo sample home page, not directly from `/sqlos/auth/login`. A direct AuthPage sign-in creates a SqlOS auth-page session and shows `/sqlos/auth/login?status=signed-in`, but it does not give the Todo SPA an OAuth access token. The Todo app gets its token only when the flow starts at `http://localhost:5080/` and returns through `/callback.html`.
+
+Do not buy or configure a Programmable Messaging phone number for this SqlOS integration. SqlOS calls Twilio Verify v2 with the Verify Service SID and `sms` channel; Verify manages the SMS sender path for the verification message.
 
 ## Running the Example App with Transactional Email
 

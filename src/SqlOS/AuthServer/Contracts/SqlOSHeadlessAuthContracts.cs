@@ -37,7 +37,8 @@ public sealed record SqlOSHeadlessViewModel(
     IReadOnlyList<SqlOSHeadlessProviderDto> Providers,
     SqlOSEmailInvitationResult? Invitation,
     JsonObject? UiContext,
-    SqlOSHeadlessDeviceAuthorizationDto? DeviceAuthorization = null);
+    SqlOSHeadlessDeviceAuthorizationDto? DeviceAuthorization = null,
+    string? PhoneNumber = null);
 
 public sealed record SqlOSHeadlessActionResult(
     string Type,
@@ -91,6 +92,32 @@ public sealed record SqlOSHeadlessEmailOtpSignupStartRequest(
     string? InvitationToken = null);
 
 public sealed record SqlOSHeadlessEmailOtpSignupVerifyRequest(
+    string RequestId,
+    string SignupToken,
+    string ChallengeToken,
+    string Code,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessPhoneOtpStartRequest(
+    string RequestId,
+    string PhoneNumber,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessPhoneOtpVerifyRequest(
+    string RequestId,
+    string ChallengeToken,
+    string Code,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessPhoneOtpSignupStartRequest(
+    string RequestId,
+    string DisplayName,
+    string PhoneNumber,
+    string? OrganizationName,
+    JsonObject? CustomFields,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessPhoneOtpSignupVerifyRequest(
     string RequestId,
     string SignupToken,
     string ChallengeToken,

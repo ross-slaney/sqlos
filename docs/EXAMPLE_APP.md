@@ -6,6 +6,7 @@ Use it when you want to explore:
 
 - local password login
 - hosted and headless auth UI
+- optional SMS OTP through Twilio Verify
 - Google, Microsoft, Apple, and custom OIDC login
 - org membership
 - organization email invitations
@@ -58,9 +59,10 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 4. Open the example web app and sign in through the hosted flow.
 5. Confirm the app shows session and token debug data.
 6. Switch to the headless route and compare the same auth server with app-owned UI.
-7. Optionally configure an OIDC connection and repeat the sign-in flow with provider buttons.
-8. Create and list workspaces through the protected app flow.
-9. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+7. Optionally enable [SMS OTP](SMS_OTP.md) and repeat sign in or signup with a phone code.
+8. Optionally configure an OIDC connection and repeat the sign-in flow with provider buttons.
+9. Create and list workspaces through the protected app flow.
+10. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
 
 For a customer-tenant SAML walkthrough with Microsoft Entra ID, use:
 

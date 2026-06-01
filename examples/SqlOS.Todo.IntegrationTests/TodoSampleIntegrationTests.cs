@@ -26,6 +26,24 @@ public sealed class TodoSampleIntegrationTests
     private const string TodoResource = "https://todo.example.test/api/todos";
 
     [TestMethod]
+    public async Task HostedAuthStandaloneStatus_ShowsSessionStateInsteadOfLoginForm()
+    {
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var response = await client.GetAsync("/sqlos/auth/login?status=signed-in");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var html = await response.Content.ReadAsStringAsync();
+        html.Should().Contain("You are signed in.");
+        html.Should().Contain("href=\"/sqlos/auth/logout\"");
+        html.Should().NotContain("action=\"/sqlos/auth/login/identify\"");
+    }
+
+    [TestMethod]
     public async Task HostedSignup_IssuesResourceBoundToken_AndReadsTodos()
     {
         await using var factory = TodoApiFixture.CreateFactory();
@@ -134,6 +152,72 @@ public sealed class TodoSampleIntegrationTests
         ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
 
         var createResponse = await CreateTodoAsync(client, tokens.AccessToken, "Ship passwordless Todo");
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        createJson.RootElement.GetProperty("resourceId").GetString().Should().StartWith("todo::");
+    }
+
+    [TestMethod]
+    public async Task HostedPhoneOtpSignup_DoesNotIssueTokenUntilCodeIsVerified()
+    {
+        await using var factory = TodoApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("TodoSample:EnablePhoneOtp", "true");
+            builder.UseSetting("SqlOS:PhoneOtp:TwilioAccountSid", "AC00000000000000000000000000000000");
+            builder.UseSetting("SqlOS:PhoneOtp:TwilioAuthToken", "test-token");
+            builder.UseSetting("SqlOS:PhoneOtp:TwilioVerifyServiceSid", "VA00000000000000000000000000000000");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSOtpDeliveryChannel>();
+                services.AddSingleton<TestOtpDeliveryChannel>();
+                services.AddSingleton<ISqlOSOtpDeliveryChannel>(provider => provider.GetRequiredService<TestOtpDeliveryChannel>());
+            });
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var authorize = await StartAuthorizationAsync(client, HostedClientId, HostedRedirectUri);
+        authorize.Html.Should().Contain("/sqlos/auth/signup/phone-otp/start");
+        authorize.Html.Should().NotContain("name=\"password\"");
+        var delivery = factory.Services.GetRequiredService<TestOtpDeliveryChannel>();
+        var phoneNumber = "+12025550177";
+
+        var startResponse = await client.PostAsync("/sqlos/auth/signup/phone-otp/start", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = authorize.RequestId,
+            ["displayName"] = "SMS Hosted User",
+            ["phoneNumber"] = phoneNumber,
+            ["organizationName"] = "SMS Hosted Org"
+        }));
+
+        startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        startResponse.Headers.Location.Should().BeNull("phone OTP signup must render code verification before issuing an authorization code");
+        delivery.StartRequests.Should().ContainSingle(x => x.PhoneNumber == phoneNumber);
+
+        var verifyHtml = await startResponse.Content.ReadAsStringAsync();
+        verifyHtml.Should().Contain("Verify and create account");
+        var challengeToken = ExtractHiddenInput(verifyHtml, "challengeToken");
+        var signupToken = ExtractHiddenInput(verifyHtml, "signupToken");
+
+        var verifyResponse = await client.PostAsync("/sqlos/auth/signup/phone-otp/verify", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = authorize.RequestId,
+            ["phoneNumber"] = phoneNumber,
+            ["challengeToken"] = challengeToken,
+            ["signupToken"] = signupToken,
+            ["code"] = TestOtpDeliveryChannel.ApprovedCode
+        }));
+
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var location = verifyResponse.Headers.Location!.ToString();
+        var authCode = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
+        authCode.Should().NotBeNullOrWhiteSpace();
+
+        var tokens = await ExchangeAuthorizationCodeAsync(client, authCode, HostedClientId, HostedRedirectUri, authorize.CodeVerifier);
+        ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
+
+        var createResponse = await CreateTodoAsync(client, tokens.AccessToken, "Ship SMS Todo");
         var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
         createJson.RootElement.GetProperty("resourceId").GetString().Should().StartWith("todo::");
     }
@@ -613,4 +697,36 @@ public sealed class TodoSampleIntegrationTests
     private sealed record AuthorizationStartResult(string RequestId, string CodeVerifier, Uri? HeadlessRedirect, string? Html);
     private sealed record HostedSignupResult(string Code, string CodeVerifier);
     private sealed record TokenResult(string AccessToken, string RefreshToken, string ClientId);
+
+    private sealed class TestOtpDeliveryChannel : ISqlOSOtpDeliveryChannel
+    {
+        public const string ApprovedCode = "123456";
+        public List<(string PhoneNumber, SqlOSOtpDeliveryContext Context)> StartRequests { get; } = [];
+        public List<(string PhoneNumber, string Code, SqlOSOtpDeliveryContext Context)> CheckRequests { get; } = [];
+
+        public Task<SqlOSOtpDeliveryStartResult> StartAsync(
+            string e164PhoneNumber,
+            SqlOSOtpDeliveryContext context,
+            CancellationToken cancellationToken = default)
+        {
+            StartRequests.Add((e164PhoneNumber, context));
+            return Task.FromResult(new SqlOSOtpDeliveryStartResult(true, "test_verify", $"ve-{StartRequests.Count}", "pending"));
+        }
+
+        public Task<SqlOSOtpDeliveryCheckResult> CheckAsync(
+            string e164PhoneNumber,
+            string code,
+            SqlOSOtpDeliveryContext context,
+            CancellationToken cancellationToken = default)
+        {
+            CheckRequests.Add((e164PhoneNumber, code, context));
+            var approved = string.Equals(code, ApprovedCode, StringComparison.Ordinal);
+            return Task.FromResult(new SqlOSOtpDeliveryCheckResult(
+                approved,
+                "test_verify",
+                $"ve-{CheckRequests.Count}",
+                approved ? "approved" : "denied",
+                approved ? null : "bad_code"));
+        }
+    }
 }
