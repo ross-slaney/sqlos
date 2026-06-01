@@ -237,8 +237,12 @@ public sealed class SqlOSSettingsService
             _options.AuthPageSeed != null,
             _options.Headless.BuildUiUrl != null,
             _options.EnableLocalPasswordAuth,
-            _emailSender.IsConfigured);
+            IsAuthEmailRuntimeConfigured,
+            _options.PhoneOtp.IsConfigured);
     }
+
+    private bool IsAuthEmailRuntimeConfigured
+        => _options.EmailOtp.BuildMessage == null || _emailSender.IsConfigured;
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
     {
@@ -325,17 +329,20 @@ public sealed class SqlOSSettingsService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(value =>
                 (string.Equals(value, "password", StringComparison.OrdinalIgnoreCase) && settings.LocalPasswordRuntimeEnabled)
-                || (string.Equals(value, "email_otp", StringComparison.OrdinalIgnoreCase) && settings.EmailOtpRuntimeConfigured))
+                || (string.Equals(value, "email_otp", StringComparison.OrdinalIgnoreCase) && settings.EmailOtpRuntimeConfigured)
+                || (string.Equals(value, "phone_otp", StringComparison.OrdinalIgnoreCase) && settings.PhoneOtpRuntimeConfigured))
             .ToArray();
 
         var passwordEnabled = effectiveTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
         var emailOtpEnabled = effectiveTypes.Contains("email_otp", StringComparer.OrdinalIgnoreCase);
+        var phoneOtpEnabled = effectiveTypes.Contains("phone_otp", StringComparer.OrdinalIgnoreCase);
 
         return new SqlOSResolvedCredentialSettings(
             effectiveTypes,
             passwordEnabled,
             passwordEnabled && settings.EnablePasswordSignup,
-            emailOtpEnabled);
+            emailOtpEnabled,
+            phoneOtpEnabled);
     }
 
     private static string[] DeserializeCredentialTypes(string json)

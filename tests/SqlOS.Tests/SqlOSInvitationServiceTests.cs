@@ -9,6 +9,8 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Configuration;
+using SqlOS.Email.Services;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -396,9 +398,15 @@ public sealed class SqlOSInvitationServiceTests
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
-            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitation);
+            var transactionalEmailService = new SqlOSTransactionalEmailService(
+                context,
+                crypto,
+                emailSender,
+                new SqlOSEmailTemplateRenderer(),
+                Options.Create(new SqlOSEmailOptions()));
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options, transactionalEmailService);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, invitation, transactionalEmailService: transactionalEmailService);
             var http = new DefaultHttpContext();
             http.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.42");
             http.Request.Scheme = "https";
@@ -408,6 +416,7 @@ public sealed class SqlOSInvitationServiceTests
             await admin.UpsertSeededClientsAsync();
             await settings.EnsureDefaultAuthPageSettingsAsync();
             await settings.UpsertSeededAuthEmailSettingsAsync();
+            await new SqlOSEmailAdminService(context, crypto, new SqlOSEmailTemplateRenderer()).EnsureBuiltInTemplatesAsync();
 
             return new InvitationHarness
             {

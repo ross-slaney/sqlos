@@ -26,6 +26,7 @@ public sealed class SqlOSUser
     public DateTime UpdatedAt { get; set; }
 
     public ICollection<SqlOSUserEmail> Emails { get; set; } = new List<SqlOSUserEmail>();
+    public ICollection<SqlOSUserPhoneNumber> PhoneNumbers { get; set; } = new List<SqlOSUserPhoneNumber>();
     public ICollection<SqlOSCredential> Credentials { get; set; } = new List<SqlOSCredential>();
     public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
@@ -46,6 +47,25 @@ public sealed class SqlOSUserEmail
     public SqlOSUser? User { get; set; }
 }
 
+public sealed class SqlOSUserPhoneNumber
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string PhoneNumber { get; set; } = string.Empty;
+    public string PhoneNumberHash { get; set; } = string.Empty;
+    public string? DisplayValueEncrypted { get; set; }
+    public bool IsPrimary { get; set; }
+    public bool IsVerified { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public string? RemovalReason { get; set; }
+
+    public SqlOSUser? User { get; set; }
+}
+
 public sealed class SqlOSCredential
 {
     public string Id { get; set; } = string.Empty;
@@ -56,6 +76,28 @@ public sealed class SqlOSCredential
     public DateTime? LastUsedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
+
+    public SqlOSUser? User { get; set; }
+}
+
+public sealed class SqlOSPasswordLoginBucket
+{
+    public string Id { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string BucketKey { get; set; } = string.Empty;
+    public string? NormalizedEmail { get; set; }
+    public string? UserId { get; set; }
+    public string? ClientKey { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgentHash { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime? WindowStartedAt { get; set; }
+    public DateTime? LastFailureAt { get; set; }
+    public DateTime? LastSuccessAt { get; set; }
+    public DateTime? LockedUntil { get; set; }
+    public string? LockoutReason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 
     public SqlOSUser? User { get; set; }
 }
@@ -430,6 +472,39 @@ public sealed class SqlOSEmailOtpChallenge
 
     public SqlOSUser? User { get; set; }
     public SqlOSUserEmail? UserEmail { get; set; }
+    public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
+}
+
+public sealed class SqlOSPhoneOtpChallenge
+{
+    public string Id { get; set; } = string.Empty;
+    public string ChallengeTokenHash { get; set; } = string.Empty;
+    public string PhoneNumberHash { get; set; } = string.Empty;
+    public string PhoneNumberEncrypted { get; set; } = string.Empty;
+    public string MaskedPhoneNumber { get; set; } = string.Empty;
+    public string Purpose { get; set; } = "login";
+    public string? UserId { get; set; }
+    public string? UserPhoneNumberId { get; set; }
+    public string? AuthorizationRequestId { get; set; }
+    public string? ClientApplicationId { get; set; }
+    public string? RequestedOrganizationId { get; set; }
+    public bool ProviderStarted { get; set; }
+    public string Provider { get; set; } = "twilio_verify";
+    public string? ProviderChallengeId { get; set; }
+    public string? ProviderStatus { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime LastSentAt { get; set; }
+    public DateTime? ConsumedAt { get; set; }
+    public DateTime? InvalidatedAt { get; set; }
+    public string? InvalidatedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+
+    public SqlOSUser? User { get; set; }
+    public SqlOSUserPhoneNumber? UserPhoneNumber { get; set; }
     public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
 }

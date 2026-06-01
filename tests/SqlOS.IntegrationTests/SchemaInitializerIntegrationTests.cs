@@ -26,7 +26,9 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSOrganizations",
                      "SqlOSUsers",
                      "SqlOSUserEmails",
+                     "SqlOSUserPhoneNumbers",
                      "SqlOSCredentials",
+                     "SqlOSPasswordLoginBuckets",
                      "SqlOSMemberships",
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
@@ -37,6 +39,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSSigningKeys",
                      "SqlOSTemporaryTokens",
                      "SqlOSAuditEvents",
+                     "SqlOSPhoneOtpChallenges",
                      "SqlOSSchema"
                  })
         {
@@ -98,6 +101,23 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync("SqlOSClientApplications", "RegistrationSource"));
         Assert.IsTrue(await ColumnExistsAsync("SqlOSClientApplications", "AccessMode"));
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "EffectiveAudience"));
+    }
+
+    [TestMethod]
+    public async Task EmailSchemaInitializer_CreatesTemplatesAndDeliveries()
+    {
+        var initializer = new SqlOSSchemaInitializer(
+            AspireFixture.SharedContext,
+            Options.Create(AspireFixture.Options),
+            LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+        await initializer.EnsureSchemaAsync();
+
+        Assert.IsTrue(await TableExistsAsync("SqlOSEmailTemplates"), "Table SqlOSEmailTemplates should exist.");
+        Assert.IsTrue(await TableExistsAsync("SqlOSEmailDeliveries"), "Table SqlOSEmailDeliveries should exist.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSEmailTemplates", "VariablesJson"));
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSEmailDeliveries", "RenderedTextPreview"));
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSEmailDeliveries", "IdempotencyKey"));
     }
 
     private static async Task<bool> TableExistsAsync(string tableName)

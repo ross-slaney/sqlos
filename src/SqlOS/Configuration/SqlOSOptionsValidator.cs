@@ -1,4 +1,5 @@
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Email.Configuration;
 
 namespace SqlOS.Configuration;
 
@@ -72,6 +73,9 @@ internal static class SqlOSOptionsValidator
 
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
+        ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
+        ValidateEmailOptions(options.Email, errors);
+        ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
@@ -123,6 +127,44 @@ internal static class SqlOSOptionsValidator
         if (options.OnHeadlessSignupAsync != null && !options.EnableApi)
         {
             errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.EnableApi.");
+        }
+    }
+
+    private static void ValidatePasswordLoginAbuseOptions(SqlOSPasswordLoginAbuseOptions options, List<string> errors)
+    {
+        if (!options.Enabled)
+        {
+            return;
+        }
+
+        if (options.MaxFailedAttemptsPerAccount <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerAccount must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerIp <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerIp must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerClient <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerClient must be greater than zero.");
+        }
+
+        if (options.MaxFailedAttemptsPerDevice <= 0)
+        {
+            errors.Add("AuthServer.PasswordLogin.MaxFailedAttemptsPerDevice must be greater than zero.");
+        }
+
+        if (options.FailureWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordLogin.FailureWindow must be greater than zero.");
+        }
+
+        if (options.LockoutDuration <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordLogin.LockoutDuration must be greater than zero.");
         }
     }
 
@@ -207,6 +249,96 @@ internal static class SqlOSOptionsValidator
         if (string.IsNullOrWhiteSpace(options.ApplicationName))
         {
             errors.Add("AuthServer.EmailOtp.ApplicationName is required.");
+        }
+    }
+
+    private static void ValidatePhoneOtpOptions(SqlOSPhoneOtpOptions options, List<string> errors)
+    {
+        if (options.Enabled && !options.HasCompleteTwilioConfiguration)
+        {
+            errors.Add("AuthServer.PhoneOtp requires TwilioAccountSid, TwilioAuthToken, and TwilioVerifyServiceSid when Enabled is true.");
+        }
+
+        if (options.ChallengeLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PhoneOtp.ChallengeLifetime must be greater than zero.");
+        }
+
+        if (options.ResendCooldown < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PhoneOtp.ResendCooldown must be zero or greater.");
+        }
+
+        if (options.RateLimitWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PhoneOtp.RateLimitWindow must be greater than zero.");
+        }
+
+        if (options.MaxSendsPerPhone <= 0)
+        {
+            errors.Add("AuthServer.PhoneOtp.MaxSendsPerPhone must be greater than zero.");
+        }
+
+        if (options.MaxSendsPerAccount <= 0)
+        {
+            errors.Add("AuthServer.PhoneOtp.MaxSendsPerAccount must be greater than zero.");
+        }
+
+        if (options.MaxSendsPerIp <= 0)
+        {
+            errors.Add("AuthServer.PhoneOtp.MaxSendsPerIp must be greater than zero.");
+        }
+
+        if (options.MaxSendsPerClient <= 0)
+        {
+            errors.Add("AuthServer.PhoneOtp.MaxSendsPerClient must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.DefaultRegion))
+        {
+            errors.Add("AuthServer.PhoneOtp.DefaultRegion is required.");
+        }
+
+        ValidateCountryList(options.CountryAllowList, "AuthServer.PhoneOtp.CountryAllowList", errors);
+        ValidateCountryList(options.CountryDenyList, "AuthServer.PhoneOtp.CountryDenyList", errors);
+    }
+
+    private static void ValidateCountryList(IEnumerable<string>? values, string name, List<string> errors)
+    {
+        foreach (var value in values ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.Length != 2 || !trimmed.All(char.IsLetter))
+            {
+                errors.Add($"{name} values must be ISO 3166-1 alpha-2 country codes.");
+                return;
+            }
+        }
+    }
+
+    private static void ValidateEmailOptions(SqlOSEmailOptions options, List<string> errors)
+    {
+        var hasConnectionString = !string.IsNullOrWhiteSpace(options.AzureCommunicationServicesConnectionString);
+        var hasFromAddress = !string.IsNullOrWhiteSpace(options.FromAddress);
+
+        if (hasConnectionString != hasFromAddress)
+        {
+            errors.Add("Email requires both AzureCommunicationServicesConnectionString and FromAddress when either is set.");
+        }
+
+        if (options.DeliveryRetention <= TimeSpan.Zero)
+        {
+            errors.Add("Email.DeliveryRetention must be greater than zero.");
+        }
+
+        if (options.RenderedTextPreviewMaxLength <= 0)
+        {
+            errors.Add("Email.RenderedTextPreviewMaxLength must be greater than zero.");
         }
     }
 

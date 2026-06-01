@@ -111,7 +111,9 @@ SqlOS checks the limits before creating or sending a challenge and records audit
 
 ## Custom email content
 
-For built-in branding, use [Email Branding](/docs/authserver/email-branding). For complete control, provide a message builder:
+SqlOS creates the default `auth.email-otp` template automatically. Edit it in **Dashboard > Communications > Templates** to customize the subject, HTML, and text while keeping the same runtime variables.
+
+For built-in branding, use [Email Branding](/docs/authserver/email-branding). For complete control outside the template system, provide a message builder:
 
 ```csharp
 options.AuthServer.ConfigureEmailOtp(email =>

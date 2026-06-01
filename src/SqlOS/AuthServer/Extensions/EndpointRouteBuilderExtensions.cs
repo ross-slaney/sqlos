@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -125,6 +126,8 @@ public static class EndpointRouteBuilderExtensions
                     "signup" => "signup",
                     "password" => "password",
                     "email-otp" => "email-otp",
+                    "phone-otp" => "phone-otp",
+                    "phone-otp-signup" => "phone-otp-signup",
                     _ when invitation != null => "invite",
                     _ => "login"
                 };
@@ -215,6 +218,13 @@ public static class EndpointRouteBuilderExtensions
         {
             var invitationToken = ReadInvitationToken(context);
             var deviceUserCode = ReadDeviceUserCode(context);
+            var statusMode = context.Request.Query["status"].ToString().Trim().ToLowerInvariant() switch
+            {
+                "signed-in" => "signed-in",
+                "signed-up" => "signed-up",
+                "invitation-accepted" => "invitation-accepted",
+                _ => null
+            };
             var invitation = !string.IsNullOrWhiteSpace(invitationToken)
                 ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
                 : null;
@@ -239,7 +249,7 @@ public static class EndpointRouteBuilderExtensions
             }
 
             var page = await BuildAuthPageViewModelAsync(
-                invitation == null ? "login" : "invite",
+                statusMode ?? (invitation == null ? "login" : "invite"),
                 context.Request.Query["request"].ToString(),
                 invitation?.Email ?? context.Request.Query["email"].ToString(),
                 null,
@@ -723,7 +733,11 @@ public static class EndpointRouteBuilderExtensions
                     email,
                     password,
                     cancellationToken,
-                    allowUnverifiedEmailForInvitation: invitation != null);
+                    allowUnverifiedEmailForInvitation: invitation != null,
+                    httpContext: context,
+                    clientKey: authorizationRequest?.ClientApplication?.ClientId ?? authorizationRequest?.ClientApplicationId,
+                    authorizationRequestId: authorizationRequest?.Id,
+                    surface: authorizationRequest == null ? "hosted_standalone" : "hosted");
                 if (authorizationRequest == null)
                 {
                     var organizationId = authentication.Organizations.FirstOrDefault()?.Id;
@@ -1013,6 +1027,179 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        auth.MapGet("/login/phone-otp", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var deviceUserCode = ReadDeviceUserCode(context);
+            var phoneNumber = context.Request.Query["phoneNumber"].ToString();
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
+                }
+
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "phone-otp",
+                    context.Request.Query["request"].ToString(),
+                    email: null,
+                    uiContext));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "phone-otp",
+                context.Request.Query["request"].ToString(),
+                email: null,
+                error: null,
+                displayName: null,
+                pendingToken: null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                deviceUserCode: deviceUserCode,
+                phoneNumber: phoneNumber);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/phone-otp/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSPhoneOtpService phoneOtpService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var phoneNumber = form["phoneNumber"].ToString();
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var challenge = await phoneOtpService.StartForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    phoneNumber,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp-verify",
+                    requestId,
+                    email: null,
+                    error: null,
+                    displayName: null,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: challenge.Message,
+                    challengeToken: challenge.ChallengeToken,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: challenge.PhoneNumber);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp",
+                    requestId,
+                    email: null,
+                    error: ex.Message,
+                    displayName: null,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: phoneNumber);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/login/phone-otp/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSPhoneOtpService phoneOtpService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var phoneNumber = form["phoneNumber"].ToString();
+            var challengeToken = form["challengeToken"].ToString();
+            var code = form["code"].ToString();
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var verification = await phoneOtpService.VerifyAsync(
+                    new SqlOSPhoneOtpVerifyRequest(challengeToken, code),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
+                    await authPageSessionService.SignInAsync(
+                        context,
+                        verification.User,
+                        organizationId,
+                        verification.AuthenticationMethod,
+                        cancellationToken);
+                    return RedirectAfterStandaloneSignIn(authPrefix, "signed-in", deviceUserCode);
+                }
+
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    authorizationRequest,
+                    verification.User,
+                    verification.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+
+                if (completion.RequiresOrganizationSelection)
+                {
+                    var organizationPage = await BuildAuthPageViewModelAsync(
+                        "organization",
+                        requestId,
+                        email: null,
+                        error: null,
+                        displayName: null,
+                        pendingToken: completion.PendingToken,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        completion.Organizations,
+                        phoneNumber: phoneNumber);
+                    return Html(organizationPage);
+                }
+
+                return Results.Redirect(completion.RedirectUrl!);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp-verify",
+                    requestId,
+                    email: null,
+                    error: ex.Message,
+                    displayName: null,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    challengeToken: challengeToken,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: phoneNumber);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
         auth.MapPost("/login/select-organization", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
@@ -1107,6 +1294,61 @@ public static class EndpointRouteBuilderExtensions
                 invitationToken: invitationToken,
                 invitation: invitation,
                 deviceUserCode: deviceUserCode);
+            return Html(page);
+        });
+
+        auth.MapGet("/signup/phone-otp", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var invitationToken = ReadInvitationToken(context);
+            var deviceUserCode = ReadDeviceUserCode(context);
+            var invitation = !string.IsNullOrWhiteSpace(invitationToken)
+                ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
+                : null;
+            var phoneNumber = context.Request.Query["phoneNumber"].ToString();
+
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    uiContext["invitationToken"] = invitationToken;
+                }
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
+                }
+                if (!string.IsNullOrWhiteSpace(phoneNumber))
+                {
+                    uiContext["phoneNumber"] = phoneNumber;
+                }
+
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "phone-otp-signup",
+                    context.Request.Query["request"].ToString(),
+                    email: null,
+                    uiContext));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "phone-otp-signup",
+                context.Request.Query["request"].ToString(),
+                email: null,
+                error: null,
+                displayName: context.Request.Query["displayName"].ToString(),
+                pendingToken: null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation,
+                deviceUserCode: deviceUserCode,
+                phoneNumber: phoneNumber);
             return Html(page);
         });
 
@@ -1522,6 +1764,198 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        auth.MapPost("/signup/phone-otp/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSPhoneOtpService phoneOtpService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var displayName = form["displayName"].ToString();
+            var phoneNumber = form["phoneNumber"].ToString();
+            var organizationName = form["organizationName"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                if (invitation != null)
+                {
+                    throw new InvalidOperationException("Phone signup is not available for email invitations.");
+                }
+
+                var signup = await phoneOtpService.StartSignupForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    displayName,
+                    phoneNumber,
+                    organizationName,
+                    customFields: null,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp-signup-verify",
+                    requestId,
+                    email: null,
+                    error: null,
+                    displayName: displayName,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: signup.Message,
+                    challengeToken: signup.ChallengeToken,
+                    signupToken: signup.SignupToken,
+                    invitationToken: invitationToken,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: signup.PhoneNumber);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp-signup",
+                    requestId,
+                    email: null,
+                    error: ex.Message,
+                    displayName: displayName,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: phoneNumber);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/signup/phone-otp/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSPhoneOtpService phoneOtpService,
+            ISqlOSAuthServerDbContext dbContext,
+            SqlOSInvitationService invitationService,
+            SqlOSAdminService adminService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var phoneNumber = form["phoneNumber"].ToString();
+            var signupToken = form["signupToken"].ToString();
+            var challengeToken = form["challengeToken"].ToString();
+            var code = form["code"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+            IDbContextTransaction? transaction = null;
+
+            try
+            {
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                if (invitation != null)
+                {
+                    throw new InvalidOperationException("Phone signup is not available for email invitations.");
+                }
+
+                var signupVerification = await phoneOtpService.VerifySignupAsync(
+                    new SqlOSPhoneOtpSignupVerifyRequest(signupToken, challengeToken, code),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
+                    cancellationToken);
+
+                var signup = await authorizationServerService.SignUpWithPhoneOtpAsync(
+                    signupVerification.DisplayName,
+                    signupVerification.PhoneNumber,
+                    signupVerification.OrganizationName,
+                    authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId,
+                    cancellationToken);
+
+                if (authorizationRequest == null)
+                {
+                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                    await authPageSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
+                    await phoneOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                    await adminService.RecordAuditAsync(
+                        "user.signup.phone_otp",
+                        "user",
+                        signup.User.Id,
+                        userId: signup.User.Id,
+                        organizationId: organizationId,
+                        ipAddress: context.Connection.RemoteIpAddress?.ToString(),
+                        cancellationToken: cancellationToken);
+                    if (transaction != null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+
+                    return RedirectAfterStandaloneSignIn(authPrefix, "signed-up", deviceUserCode);
+                }
+
+                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    authorizationRequest,
+                    signup.User,
+                    signup.Organizations.FirstOrDefault()?.Id,
+                    signup.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+
+                await phoneOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                await adminService.RecordAuditAsync(
+                    "user.signup.phone_otp",
+                    "user",
+                    signup.User.Id,
+                    userId: signup.User.Id,
+                    organizationId: signup.Organizations.FirstOrDefault()?.Id,
+                    ipAddress: context.Connection.RemoteIpAddress?.ToString(),
+                    cancellationToken: cancellationToken);
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "phone-otp-signup-verify",
+                    requestId,
+                    email: null,
+                    error: ex.Message,
+                    displayName: null,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    challengeToken: challengeToken,
+                    signupToken: signupToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode,
+                    phoneNumber: phoneNumber);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
         var headless = endpoints.MapGroup(resolvedHeadlessPath);
         headless.ExcludeFromDescription();
 
@@ -1860,6 +2294,90 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/phone-otp/start", async (
+            SqlOSHeadlessPhoneOtpStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestPhoneOtpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/phone-otp/verify", async (
+            SqlOSHeadlessPhoneOtpVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyPhoneOtpAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/phone-otp/start", async (
+            SqlOSHeadlessPhoneOtpSignupStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestPhoneOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/signup/phone-otp/verify", async (
+            SqlOSHeadlessPhoneOtpSignupVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyPhoneOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         headless.MapPost("/signup", async (
             SqlOSHeadlessSignupRequest request,
             HttpContext context,
@@ -2103,6 +2621,34 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
             Results.Ok(new { token = await authService.CreatePasswordResetTokenAsync(request, cancellationToken) }));
 
+        auth.MapPost("/password/reset-email", async (SqlOSSendPasswordResetEmailRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.SendPasswordResetEmailAsync(request, httpContext, cancellationToken)));
+
+        auth.MapGet("/password/reset", (HttpContext context) =>
+            Results.Content(
+                BuildPasswordResetPage(context.Request.Query["token"].ToString(), error: null, success: false),
+                contentType: "text/html"));
+
+        auth.MapPost("/password/reset/submit", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var token = form["token"].ToString();
+            var newPassword = form["newPassword"].ToString();
+
+            try
+            {
+                await authService.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, newPassword), cancellationToken);
+                return Results.Content(BuildPasswordResetPage(token: null, error: null, success: true), contentType: "text/html");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Content(
+                    BuildPasswordResetPage(token, ex.Message, success: false),
+                    contentType: "text/html",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
+
         auth.MapPost("/password/reset", async (SqlOSResetPasswordRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
             await authService.ResetPasswordAsync(request, cancellationToken);
@@ -2245,6 +2791,23 @@ public static class EndpointRouteBuilderExtensions
             try
             {
                 return Results.Ok(await adminService.ListApplicationsForUserAsync(userId, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/users/{userId}/password-reset-email", async (HttpContext context, string userId, SqlOSSendUserPasswordResetEmailRequest request, SqlOSAuthService authService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await authService.SendPasswordResetEmailForUserAsync(userId, request, context, cancellationToken));
             }
             catch (InvalidOperationException ex)
             {
@@ -3072,6 +3635,64 @@ public static class EndpointRouteBuilderExtensions
     private static IResult Html(SqlOSAuthPageViewModel model, int statusCode = StatusCodes.Status200OK)
         => Results.Content(SqlOSAuthPageRenderer.RenderPage(model), contentType: "text/html", statusCode: statusCode);
 
+    private static string BuildPasswordResetPage(string? token, string? error, bool success)
+    {
+        static string H(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+
+        var errorMarkup = string.IsNullOrWhiteSpace(error)
+            ? string.Empty
+            : $"""<div class="callout error">{H(error)}</div>""";
+        var body = success
+            ? """
+              <div class="state-card">
+                <strong>Password updated.</strong>
+                <p>You can close this tab and sign in with your new password.</p>
+              </div>
+              """
+            : $$"""
+              <form method="post" action="reset/submit">
+                <input type="hidden" name="token" value="{{H(token)}}" />
+                <label>
+                  <span>New password</span>
+                  <input name="newPassword" type="password" autocomplete="new-password" required />
+                </label>
+                <button type="submit">Reset password</button>
+              </form>
+              """;
+
+        return $$"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reset password</title>
+          <style>
+            body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
+            main { width:min(440px, calc(100vw - 32px)); background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:28px; box-shadow:0 24px 70px rgba(15,23,42,.10); }
+            h1 { margin:0 0 8px; font-size:28px; line-height:1.1; }
+            p { margin:0 0 20px; color:#475569; line-height:1.5; }
+            form { display:grid; gap:16px; }
+            label { display:grid; gap:8px; font-size:13px; font-weight:700; color:#334155; }
+            input { border:1px solid #cbd5e1; border-radius:10px; padding:12px; font:inherit; }
+            button { border:0; border-radius:10px; padding:12px 16px; font:inherit; font-weight:700; color:white; background:#2563eb; cursor:pointer; }
+            .callout { border-radius:12px; padding:12px; margin:0 0 16px; font-size:14px; line-height:1.4; }
+            .error { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; }
+            .state-card strong { display:block; margin:0 0 8px; font-size:20px; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Reset password</h1>
+            <p>Choose a new password for your account.</p>
+            {{errorMarkup}}
+            {{body}}
+          </main>
+        </body>
+        </html>
+        """;
+    }
+
     private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(
         string mode,
         string? authorizationRequestId,
@@ -3090,7 +3711,8 @@ public static class EndpointRouteBuilderExtensions
         SqlOSEmailInvitationResult? invitation = null,
         SqlOSInvitationService? invitationService = null,
         string? deviceUserCode = null,
-        SqlOSDeviceAuthorizationResolveResult? deviceAuthorization = null)
+        SqlOSDeviceAuthorizationResolveResult? deviceAuthorization = null,
+        string? phoneNumber = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
         var isDeviceView = string.Equals(mode, "device", StringComparison.OrdinalIgnoreCase)
@@ -3151,7 +3773,8 @@ public static class EndpointRouteBuilderExtensions
             invitationToken,
             invitation,
             effectiveDeviceUserCode,
-            deviceAuthorization);
+            deviceAuthorization,
+            phoneNumber);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)
@@ -3159,6 +3782,11 @@ public static class EndpointRouteBuilderExtensions
         if (credentialSettings.EmailOtpEnabled)
         {
             return "email-otp";
+        }
+
+        if (credentialSettings.PhoneOtpEnabled)
+        {
+            return "phone-otp";
         }
 
         if (credentialSettings.PasswordEnabled)

@@ -9,6 +9,10 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
+using SqlOS.Email.Models;
+using SqlOS.Email.Services;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -20,7 +24,10 @@ public sealed class SqlOSAuthService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSPhoneOtpService? _phoneOtpService;
     private readonly SqlOSInvitationService? _invitationService;
+    private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
+    private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
 
     public SqlOSAuthService(
         ISqlOSAuthServerDbContext context,
@@ -29,7 +36,10 @@ public sealed class SqlOSAuthService
         SqlOSCryptoService cryptoService,
         SqlOSSettingsService settingsService,
         SqlOSEmailOtpService emailOtpService,
-        SqlOSInvitationService? invitationService = null)
+        SqlOSInvitationService? invitationService = null,
+        SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null,
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        SqlOSPhoneOtpService? phoneOtpService = null)
     {
         _context = context;
         _options = options.Value;
@@ -37,7 +47,11 @@ public sealed class SqlOSAuthService
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
+        _passwordLoginAbuseService = passwordLoginAbuseService
+            ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
+        _transactionalEmailService = transactionalEmailService;
     }
 
     public async Task<SqlOSLoginResult> SignUpAsync(SqlOSSignupRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -76,9 +90,23 @@ public sealed class SqlOSAuthService
         }
 
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
+        var attempt = _passwordLoginAbuseService.CreateAttempt(
+            normalizedEmail,
+            httpContext,
+            clientKey: request.ClientId,
+            surface: "api");
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
+
         var email = await _context.Set<SqlOSUserEmail>()
-            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (email == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "unknown_email", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        attempt = attempt with { UserId = email.UserId };
+        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
 
         if (_options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
         {
@@ -86,18 +114,24 @@ public sealed class SqlOSAuthService
         }
 
         var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken)
-            ?? throw new InvalidOperationException("Invalid email or password.");
+            .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        if (credential == null)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "missing_password_credential", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
 
         if (!_cryptoService.VerifyPassword(credential.SecretHash, request.Password))
         {
-            throw new InvalidOperationException("Invalid email or password.");
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "invalid_password", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
         credential.LastUsedAt = DateTime.UtcNow;
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == email.UserId, cancellationToken);
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
     }
@@ -113,6 +147,18 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
         => await _emailOtpService.StartSignupForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSPhoneOtpStartResult> RequestPhoneOtpAsync(
+        SqlOSPhoneOtpStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequirePhoneOtpService().StartForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSPhoneOtpSignupStartResult> RequestPhoneOtpSignupAsync(
+        SqlOSPhoneOtpSignupStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequirePhoneOtpService().StartSignupForClientAsync(request, httpContext, cancellationToken);
 
     public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
         SqlOSCreateEmailInvitationRequest request,
@@ -281,6 +327,111 @@ public sealed class SqlOSAuthService
             verification.AuthenticationMethod,
             httpContext,
             cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> VerifyPhoneOtpAsync(
+        SqlOSPhoneOtpVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await RequirePhoneOtpService().VerifyAsync(request, cancellationToken);
+        if (verification.Challenge.ClientApplicationId == null)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstAsync(x => x.Id == verification.Challenge.ClientApplicationId, cancellationToken);
+
+        return await FinalizeClientLoginAsync(
+            verification.User,
+            client,
+            verification.Challenge.RequestedOrganizationId,
+            verification.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> VerifyPhoneOtpSignupAsync(
+        SqlOSPhoneOtpSignupVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+        SqlOSPhoneOtpSignupVerificationResult? verification = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            verification = await RequirePhoneOtpService().VerifySignupAsync(
+                request,
+                expectedAuthorizationRequestId: null,
+                requireAuthorizationRequestMatch: false,
+                cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
+            {
+                throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            }
+
+            var client = await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
+
+            signup = await CreatePhoneOtpSignupUserAsync(
+                verification.DisplayName,
+                verification.PhoneNumber,
+                verification.OrganizationName,
+                verification.OrganizationId,
+                cancellationToken);
+
+            var selectedOrganizationId = verification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+            var result = await FinalizeClientLoginAsync(
+                signup.User,
+                client,
+                selectedOrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            await RequirePhoneOtpService().ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            await _adminService.RecordAuditAsync(
+                "user.signup.phone_otp",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: selectedOrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return result;
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    verification?.OrganizationId,
+                    verification?.OrganizationName,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSLoginResult> VerifyEmailOtpSignupAsync(
@@ -758,17 +909,114 @@ public sealed class SqlOSAuthService
         var email = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
             ?? throw new InvalidOperationException("Unknown email address.");
 
-        var token = await _cryptoService.CreateTemporaryTokenAsync(
-            "password_reset",
-            email.UserId,
-            null,
-            null,
-            new PasswordResetPayload(email.Id),
-            TimeSpan.FromHours(1),
+        return await CreatePasswordResetTokenForEmailAsync(email, cancellationToken);
+    }
+
+    public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailAsync(
+        SqlOSSendPasswordResetEmailRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
+        var email = await _context.Set<SqlOSUserEmail>()
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken)
+            ?? throw new InvalidOperationException("Unknown email address.");
+
+        return await SendPasswordResetEmailAsync(email, request.ResetUrlTemplate, httpContext, cancellationToken);
+    }
+
+    public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailForUserAsync(
+        string userId,
+        SqlOSSendUserPasswordResetEmailRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedUserId = userId?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedUserId))
+        {
+            throw new InvalidOperationException("User id is required.");
+        }
+
+        var user = await _context.Set<SqlOSUser>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == normalizedUserId, cancellationToken)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var email = await _context.Set<SqlOSUserEmail>()
+            .FirstOrDefaultAsync(x => x.UserId == user.Id && x.Email == user.DefaultEmail, cancellationToken)
+            ?? await _context.Set<SqlOSUserEmail>()
+                .OrderByDescending(x => x.IsVerified)
+                .ThenBy(x => x.CreatedAt)
+                .FirstOrDefaultAsync(x => x.UserId == user.Id, cancellationToken)
+            ?? throw new InvalidOperationException("User does not have an email address.");
+
+        return await SendPasswordResetEmailAsync(email, request.ResetUrlTemplate, httpContext, cancellationToken);
+    }
+
+    private async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailAsync(
+        SqlOSUserEmail email,
+        string? resetUrlTemplate,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        var transactionalEmailService = _transactionalEmailService
+            ?? throw new InvalidOperationException("Transactional email service is not registered.");
+
+        var token = await CreatePasswordResetTokenForEmailAsync(email, cancellationToken);
+        var resetUrl = BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
+        var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
+        var applicationName = string.IsNullOrWhiteSpace(branding.ApplicationName)
+            ? string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
+                ? "SqlOS"
+                : _options.EmailOtp.ApplicationName.Trim()
+            : branding.ApplicationName;
+        var lifetime = TimeSpan.FromHours(1);
+        var maskedEmail = MaskEmail(email.Email);
+        var variables = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["applicationName"] = applicationName,
+            ["logoBase64"] = branding.LogoBase64 ?? string.Empty,
+            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "none" : "block",
+            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "block" : "none",
+            ["maskedEmail"] = maskedEmail,
+            ["resetUrl"] = resetUrl,
+            ["expiresInMinutes"] = Math.Max(1, (int)Math.Ceiling(lifetime.TotalMinutes)),
+            ["primaryColor"] = branding.PrimaryColor,
+            ["accentColor"] = branding.AccentColor,
+            ["backgroundColor"] = branding.BackgroundColor
+        };
+
+        var result = await transactionalEmailService.SendAsync(
+            new SqlOSSendEmailRequest(
+                SqlOSBuiltInEmailTemplates.AuthPasswordResetKey,
+                email.Email,
+                variables,
+                IdempotencyKey: $"auth-password-reset:{email.UserId}:{_cryptoService.HashToken(token)[..32]}"),
             cancellationToken);
 
-        await _adminService.RecordAuditAsync("user.password-reset-token-created", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
-        return token;
+        if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(result.SanitizedError ?? "Password reset email delivery failed.");
+        }
+
+        await _adminService.RecordAuditAsync(
+            "user.password-reset-email-sent",
+            "user",
+            email.UserId,
+            userId: email.UserId,
+            data: new { maskedEmail, deliveryId = result.DeliveryId },
+            cancellationToken: cancellationToken);
+
+        return new SqlOSPasswordResetEmailResult(
+            email.Email,
+            maskedEmail,
+            DateTime.UtcNow.Add(lifetime),
+            result.DeliveryId,
+            result.Status,
+            result.ProviderMessageId,
+            result.SanitizedError,
+            $"Password reset email queued for {maskedEmail}.");
     }
 
     public async Task ResetPasswordAsync(SqlOSResetPasswordRequest request, CancellationToken cancellationToken = default)
@@ -795,6 +1043,23 @@ public sealed class SqlOSAuthService
         credential.LastUsedAt = null;
         await _context.SaveChangesAsync(cancellationToken);
         await _adminService.RecordAuditAsync("user.password-reset", "user", token.UserId, userId: token.UserId, cancellationToken: cancellationToken);
+    }
+
+    private async Task<string> CreatePasswordResetTokenForEmailAsync(
+        SqlOSUserEmail email,
+        CancellationToken cancellationToken)
+    {
+        var token = await _cryptoService.CreateTemporaryTokenAsync(
+            "password_reset",
+            email.UserId,
+            null,
+            null,
+            new PasswordResetPayload(email.Id),
+            TimeSpan.FromHours(1),
+            cancellationToken);
+
+        await _adminService.RecordAuditAsync("user.password-reset-token-created", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
+        return token;
     }
 
     public async Task<string> CreateEmailVerificationTokenAsync(SqlOSCreateVerificationTokenRequest request, CancellationToken cancellationToken = default)
@@ -972,6 +1237,55 @@ public sealed class SqlOSAuthService
             refreshToken.ExpiresAt);
     }
 
+    private string BuildPasswordResetUrl(string token, string? resetUrlTemplate, HttpContext? httpContext)
+    {
+        var escapedToken = Uri.EscapeDataString(token);
+        if (!string.IsNullOrWhiteSpace(resetUrlTemplate))
+        {
+            var template = resetUrlTemplate.Trim();
+            if (template.Contains("{token}", StringComparison.Ordinal))
+            {
+                return template.Replace("{token}", escapedToken, StringComparison.Ordinal);
+            }
+
+            var separator = template.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+            return $"{template}{separator}token={escapedToken}";
+        }
+
+        return $"{GetPublicOrigin(httpContext)}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
+    }
+
+    private string GetPublicOrigin(HttpContext? httpContext)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
+        {
+            return _options.PublicOrigin.TrimEnd('/');
+        }
+
+        if (httpContext != null)
+        {
+            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
+        }
+
+        return _options.Issuer.TrimEnd('/').EndsWith(_options.BasePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+            ? _options.Issuer.TrimEnd('/')[..^_options.BasePath.TrimEnd('/').Length]
+            : _options.Issuer.TrimEnd('/');
+    }
+
+    private static string MaskEmail(string email)
+    {
+        var atIndex = email.IndexOf('@');
+        if (atIndex <= 1 || atIndex == email.Length - 1)
+        {
+            return email;
+        }
+
+        var local = email[..atIndex];
+        var domain = email[(atIndex + 1)..];
+        var visibleCount = Math.Min(2, local.Length);
+        return $"{local[..visibleCount]}***@{domain}";
+    }
+
     private static string? GetIp(HttpContext httpContext) => httpContext.Connection.RemoteIpAddress?.ToString();
 
     private static string ResolveEffectiveAudience(SqlOSClientApplication client, string? resource)
@@ -1020,6 +1334,44 @@ public sealed class SqlOSAuthService
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
+    }
+
+    private async Task<SqlOSPasswordAuthenticationResult> CreatePhoneOtpSignupUserAsync(
+        string displayName,
+        string phoneNumber,
+        string? organizationName,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PhoneOtpEnabled)
+        {
+            throw new InvalidOperationException("Phone sign-in is unavailable.");
+        }
+
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
+
+        var user = new SqlOSUser
+        {
+            Id = _cryptoService.GenerateId("usr"),
+            DisplayName = displayName,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _context.Set<SqlOSUser>().Add(user);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RequirePhoneOtpService().AddVerifiedPhoneNumberAsync(user, phoneNumber, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(organizationName))
+        {
+            var createdOrganization = await _adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(organizationName, null),
+                cancellationToken);
+            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
+        }
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "phone_otp");
     }
 
     private async Task<SqlOSPasswordAuthenticationResult> CreateInvitationSignupUserAsync(
@@ -1080,11 +1432,22 @@ public sealed class SqlOSAuthService
             .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
         if (user != null)
         {
+            var phoneNumbers = await _context.Set<SqlOSUserPhoneNumber>()
+                .Where(x => x.UserId == user.Id)
+                .ToListAsync(cancellationToken);
+            if (phoneNumbers.Count > 0)
+            {
+                _context.Set<SqlOSUserPhoneNumber>().RemoveRange(phoneNumbers);
+            }
+
             _context.Set<SqlOSUser>().Remove(user);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
     }
+
+    private SqlOSPhoneOtpService RequirePhoneOtpService()
+        => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
 
     private async Task<SqlOSLoginResult> FinalizeClientLoginAsync(
         SqlOSUser user,

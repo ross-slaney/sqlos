@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Services;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.Services;
@@ -13,6 +14,7 @@ public sealed class SqlOSBootstrapper
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSSettingsService _settingsService;
+    private readonly SqlOSEmailAdminService _emailAdminService;
     private readonly SqlOSFgaSchemaInitializer _fgaSchemaInitializer;
     private readonly SqlOSFgaFunctionInitializer _fgaFunctionInitializer;
     private readonly SqlOSFgaSeedService _fgaSeedService;
@@ -24,6 +26,7 @@ public sealed class SqlOSBootstrapper
         SqlOSCryptoService cryptoService,
         SqlOSAdminService adminService,
         SqlOSSettingsService settingsService,
+        SqlOSEmailAdminService emailAdminService,
         SqlOSFgaSchemaInitializer fgaSchemaInitializer,
         SqlOSFgaFunctionInitializer fgaFunctionInitializer,
         SqlOSFgaSeedService fgaSeedService,
@@ -34,6 +37,7 @@ public sealed class SqlOSBootstrapper
         _cryptoService = cryptoService;
         _adminService = adminService;
         _settingsService = settingsService;
+        _emailAdminService = emailAdminService;
         _fgaSchemaInitializer = fgaSchemaInitializer;
         _fgaFunctionInitializer = fgaFunctionInitializer;
         _fgaSeedService = fgaSeedService;
@@ -50,9 +54,11 @@ public sealed class SqlOSBootstrapper
         await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
         await _settingsService.UpsertSeededAuthEmailSettingsAsync(cancellationToken);
+        await _emailAdminService.EnsureBuiltInTemplatesAsync(cancellationToken);
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);
         await _adminService.CleanupExpiredEmailOtpChallengesAsync(cancellationToken);
+        await _adminService.CleanupExpiredPhoneOtpChallengesAsync(cancellationToken);
         await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         await _adminService.CleanupStaleDynamicClientsAsync(cancellationToken);
 

@@ -36,6 +36,8 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
+    public SqlOSPhoneOtpOptions PhoneOtp { get; } = new();
+    public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
@@ -166,6 +168,18 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigurePhoneOtp(Action<SqlOSPhoneOtpOptions> configure)
+    {
+        configure(PhoneOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigurePasswordLoginAbuse(Action<SqlOSPasswordLoginAbuseOptions> configure)
+    {
+        configure(PasswordLogin);
+        return this;
+    }
+
     public SqlOSAuthServerOptions ConfigureInvitations(Action<SqlOSInvitationOptions> configure)
     {
         configure(Invitations);
@@ -287,4 +301,15 @@ public class SqlOSAuthServerOptions
 
     private static bool ReadBool(IConfigurationSection section, string key, bool defaultValue)
         => bool.TryParse(section[key], out var parsed) ? parsed : defaultValue;
+}
+
+public sealed class SqlOSPasswordLoginAbuseOptions
+{
+    public bool Enabled { get; set; } = true;
+    public int MaxFailedAttemptsPerAccount { get; set; } = 5;
+    public int MaxFailedAttemptsPerIp { get; set; } = 20;
+    public int MaxFailedAttemptsPerClient { get; set; } = 50;
+    public int MaxFailedAttemptsPerDevice { get; set; } = 20;
+    public TimeSpan FailureWindow { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
 }

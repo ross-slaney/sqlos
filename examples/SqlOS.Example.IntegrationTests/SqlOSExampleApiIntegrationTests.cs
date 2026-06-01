@@ -6,8 +6,13 @@ using System.Text;
 using System.Text.Json;
 using System.Xml;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
 using SqlOS.Example.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Example.IntegrationTests;
@@ -273,6 +278,7 @@ public sealed class SqlOSExampleApiIntegrationTests
     [DataRow("/sqlos/admin/auth/users/example/general")]
     [DataRow("/sqlos/admin/auth/clients")]
     [DataRow("/sqlos/admin/fga/resources")]
+    [DataRow("/sqlos/admin/email/templates")]
     public async Task DashboardShell_PageRoutes_Render(string path)
     {
         var response = await ExampleApiFixture.Client.GetAsync(path);
@@ -319,6 +325,9 @@ public sealed class SqlOSExampleApiIntegrationTests
         var fgaStatsUnauthorized = await client.GetAsync("/sqlos/admin/fga/api/stats");
         fgaStatsUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
 
+        var emailTemplatesUnauthorized = await client.GetAsync("/sqlos/admin/email/api/templates");
+        emailTemplatesUnauthorized.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+
         var invalidLoginResponse = await client.PostAsJsonAsync("/sqlos/dashboard-auth/login", new { password = "wrong-password" });
         invalidLoginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
 
@@ -331,11 +340,144 @@ public sealed class SqlOSExampleApiIntegrationTests
         var fgaStatsResponse = await client.GetAsync("/sqlos/admin/fga/api/stats");
         fgaStatsResponse.EnsureSuccessStatusCode();
 
+        var emailTemplatesResponse = await client.GetAsync("/sqlos/admin/email/api/templates");
+        emailTemplatesResponse.EnsureSuccessStatusCode();
+
         var logoutResponse = await client.PostAsync("/sqlos/dashboard-auth/logout", null);
         logoutResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
 
         var authStatsAfterLogout = await client.GetAsync("/sqlos/admin/auth/api/stats");
         authStatsAfterLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_AdminApi_CrudTemplateAndPreview()
+    {
+        var templateKey = $"order-shipped-{Guid.NewGuid():N}"[..28];
+        var createResponse = await AdminPostAsync("/sqlos/admin/email/api/templates", new
+        {
+            key = templateKey,
+            displayName = "Order shipped",
+            subjectTemplate = "Order {orderId} shipped",
+            htmlBodyTemplate = "<p>Track <strong>{orderId}</strong> at {trackingUrl}</p>",
+            textBodyTemplate = "Track {orderId} at {trackingUrl}",
+            variables = new
+            {
+                orderId = new { description = "Order id" },
+                trackingUrl = new { description = "Tracking URL" }
+            },
+            isActive = true
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var templateId = createJson.RootElement.GetProperty("id").GetString();
+        createJson.RootElement.GetProperty("version").GetInt32().Should().Be(1);
+
+        var previewResponse = await AdminPostAsync($"/sqlos/admin/email/api/templates/{templateId}/preview", new
+        {
+            variables = new
+            {
+                orderId = "<123>",
+                trackingUrl = "https://tracking.example.test/123"
+            }
+        });
+        previewResponse.EnsureSuccessStatusCode();
+        var previewJson = JsonDocument.Parse(await previewResponse.Content.ReadAsStringAsync());
+        previewJson.RootElement.GetProperty("subject").GetString().Should().Be("Order <123> shipped");
+        previewJson.RootElement.GetProperty("htmlBody").GetString().Should().Contain("&lt;123&gt;");
+        previewJson.RootElement.GetProperty("textBody").GetString().Should().Contain("<123>");
+
+        var updateResponse = await ExampleApiFixture.Client.PutAsJsonAsync($"/sqlos/admin/email/api/templates/{templateId}", new
+        {
+            key = templateKey,
+            displayName = "Order shipped updated",
+            subjectTemplate = "Order {orderId} is on the way",
+            htmlBodyTemplate = "<p>Updated {orderId}</p>",
+            textBodyTemplate = "Updated {orderId}",
+            variables = new { orderId = new { description = "Order id" } },
+            isActive = false
+        });
+        updateResponse.EnsureSuccessStatusCode();
+        var updateJson = JsonDocument.Parse(await updateResponse.Content.ReadAsStringAsync());
+        updateJson.RootElement.GetProperty("displayName").GetString().Should().Be("Order shipped updated");
+        updateJson.RootElement.GetProperty("isActive").GetBoolean().Should().BeFalse();
+        updateJson.RootElement.GetProperty("version").GetInt32().Should().Be(2);
+
+        var listResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/email/api/templates?search={templateKey}");
+        listResponse.EnsureSuccessStatusCode();
+        var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
+
+        var deleteResponse = await ExampleApiFixture.Client.DeleteAsync($"/sqlos/admin/email/api/templates/{templateId}");
+        deleteResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_BuiltInAuthTemplates_AreAvailable()
+    {
+        var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/email/api/templates?search=auth.&pageSize=20");
+        response.EnsureSuccessStatusCode();
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var keys = json.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("key").GetString())
+            .ToArray();
+
+        keys.Should().Contain([
+            "auth.email-otp",
+            "auth.invitation",
+            "auth.password-reset"
+        ]);
+
+        var passwordResetTemplate = json.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("key").GetString() == "auth.password-reset");
+        passwordResetTemplate.GetProperty("subjectTemplate").GetString().Should().Be("Reset your {applicationName} password");
+        passwordResetTemplate.GetProperty("htmlBodyTemplate").GetString().Should().Contain("{resetUrl}");
+        passwordResetTemplate.GetProperty("textBodyTemplate").GetString().Should().Contain("{resetUrl}");
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_AdminApi_QueuesBuiltInTemplate()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+
+        var userResponse = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new
+        {
+            displayName = "Reset Email User",
+            email = $"reset-email-{Guid.NewGuid():N}@example.com",
+            password = "P@ssword123!"
+        });
+        userResponse.EnsureSuccessStatusCode();
+        var userJson = JsonDocument.Parse(await userResponse.Content.ReadAsStringAsync());
+        var userId = userJson.RootElement.GetProperty("id").GetString();
+
+        var resetResponse = await client.PostAsJsonAsync($"/sqlos/admin/auth/api/users/{userId}/password-reset-email", new
+        {
+            resetUrlTemplate = "https://app.example.test/reset?token={token}"
+        });
+        resetResponse.EnsureSuccessStatusCode();
+
+        var resetJson = JsonDocument.Parse(await resetResponse.Content.ReadAsStringAsync());
+        resetJson.RootElement.GetProperty("deliveryStatus").GetString().Should().Be("queued");
+        sender.Messages.Should().ContainSingle();
+        sender.Messages[0].Subject.Should().StartWith("Reset your ");
+        sender.Messages[0].Subject.Should().EndWith(" password");
+        sender.Messages[0].TextBody.Should().Contain("https://app.example.test/reset?token=");
     }
 
     [TestMethod]
@@ -557,5 +699,19 @@ public sealed class SqlOSExampleApiIntegrationTests
         signedXml.ComputeSignature();
         responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
+    }
+
+    private sealed class CapturingTransactionalEmailSender : ISqlOSEmailSender
+    {
+        public bool IsConfigured => true;
+        public List<SqlOSEmailMessage> Messages { get; } = [];
+
+        public Task<SqlOSEmailProviderResult> SendAsync(
+            SqlOSEmailMessage message,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add(message);
+            return Task.FromResult(new SqlOSEmailProviderResult($"provider-{Messages.Count}"));
+        }
     }
 }

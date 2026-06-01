@@ -622,8 +622,67 @@ nav a.active {
     background: var(--zinc-950);
     color: var(--zinc-100);
     overflow: auto;
+    white-space: pre-wrap;
     font-size: 12px;
     line-height: 1.5;
+}
+
+.email-tab-strip {
+    margin-bottom: 16px;
+}
+
+.email-template-grid {
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+}
+
+.email-template-item summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    cursor: pointer;
+}
+
+.email-template-item summary span:first-child {
+    display: grid;
+    gap: 4px;
+}
+
+.email-template-body {
+    display: grid;
+    gap: 16px;
+    margin-top: 14px;
+}
+
+.email-preview-output {
+    display: grid;
+    gap: 10px;
+}
+
+.email-preview-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    background: var(--zinc-50);
+}
+
+.email-preview-html {
+    padding: 14px;
+    border: 1px solid var(--zinc-200);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--zinc-900);
+}
+
+.email-message-row {
+    display: grid;
+    gap: 10px;
+}
+
+.email-text-preview {
+    max-height: 220px;
 }
 
 .provider-guide {

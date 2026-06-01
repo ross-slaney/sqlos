@@ -4,11 +4,14 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Net;
 using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Email.Configuration;
+using SqlOS.Email.Services;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -48,6 +51,207 @@ public sealed class SqlOSAuthServiceTests
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();
         result.Tokens.Should().BeNull();
         result.Organizations.Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public async Task LoginWithPasswordAsync_RepeatedFailures_LocksAccountOrBacksOff()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 2;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(10);
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Lockout User",
+            $"lockout-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var act = async () => await harness.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", "test-client", null),
+                CreatePasswordHttpContext("203.0.113.10"));
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        var lockedAct = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.10"));
+
+        await lockedAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var emailBucket = await harness.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "email" && x.BucketKey == SqlOSAdminService.NormalizeEmail(user.DefaultEmail!));
+        emailBucket.LockedUntil.Should().BeAfter(DateTime.UtcNow);
+    }
+
+    [TestMethod]
+    public async Task AuthenticatePasswordAsync_UnknownEmailAndWrongPassword_ReturnUniformPublicFailure()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Uniform User",
+            $"uniform-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var unknownAct = async () => await harness.Authorization.AuthenticatePasswordAsync(
+            $"unknown-{Guid.NewGuid():N}@example.com",
+            "anything",
+            cancellationToken: default,
+            httpContext: CreatePasswordHttpContext("203.0.113.20"),
+            clientKey: "test-client",
+            surface: "hosted");
+        var wrongAct = async () => await harness.Authorization.AuthenticatePasswordAsync(
+            user.DefaultEmail!,
+            "wrong-password",
+            cancellationToken: default,
+            httpContext: CreatePasswordHttpContext("203.0.113.21"),
+            clientKey: "test-client",
+            surface: "hosted");
+
+        var unknownFailure = await unknownAct.Should().ThrowAsync<InvalidOperationException>();
+        var wrongFailure = await wrongAct.Should().ThrowAsync<InvalidOperationException>();
+
+        unknownFailure.Which.Message.Should().Be(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        wrongFailure.Which.Message.Should().Be(unknownFailure.Which.Message);
+    }
+
+    [TestMethod]
+    public async Task PasswordLogin_PerIpLimit_BlocksPasswordSprayAcrossAccounts()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 10;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 2;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(10);
+        });
+        var users = new[]
+        {
+            await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Spray One", $"spray-1-{Guid.NewGuid():N}@example.com", "P@ssword123!")),
+            await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Spray Two", $"spray-2-{Guid.NewGuid():N}@example.com", "P@ssword123!")),
+            await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Spray Three", $"spray-3-{Guid.NewGuid():N}@example.com", "P@ssword123!"))
+        };
+
+        foreach (var user in users.Take(2))
+        {
+            var fail = async () => await harness.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", "test-client", null),
+                CreatePasswordHttpContext("203.0.113.30"));
+
+            await fail.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        var blocked = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(users[2].DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.30"));
+
+        await blocked.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var ipBucket = await harness.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "ip" && x.BucketKey == "203.0.113.30");
+        ipBucket.LockedUntil.Should().BeAfter(DateTime.UtcNow);
+    }
+
+    [TestMethod]
+    public async Task HostedPasswordLogin_UsesSameThrottleStateAsApiLogin()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(10);
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Hosted Shared",
+            $"hosted-shared-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var apiFailure = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.40"));
+        await apiFailure.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var hostedSuccessBypass = async () => await harness.Authorization.AuthenticatePasswordAsync(
+            user.DefaultEmail!,
+            "P@ssword123!",
+            cancellationToken: default,
+            httpContext: CreatePasswordHttpContext("203.0.113.40"),
+            clientKey: "test-client",
+            surface: "hosted");
+
+        await hostedSuccessBypass.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+    }
+
+    [TestMethod]
+    public async Task PasswordLogin_SuccessAfterFailures_RecordsSuccessAndResetsOrDecaysCounters()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 3;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Reset User",
+            $"reset-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var failure = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.50"));
+        await failure.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var success = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.50"));
+        success.Tokens.Should().NotBeNull();
+
+        var emailBucket = await harness.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "email" && x.BucketKey == SqlOSAdminService.NormalizeEmail(user.DefaultEmail!));
+        emailBucket.FailureCount.Should().Be(0);
+        emailBucket.LockedUntil.Should().BeNull();
+        emailBucket.LastSuccessAt.Should().NotBeNull();
+
+        (await harness.Context.Set<SqlOSAuditEvent>()
+            .AnyAsync(x => x.EventType == "password.login.succeeded" && x.UserId == user.Id)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task PasswordLogin_LockoutAndFailure_WriteAuditEvents()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(10);
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Audit User",
+            $"audit-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var failure = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.60"));
+        await failure.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var rejected = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.60"));
+        await rejected.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
+        var eventTypes = await harness.Context.Set<SqlOSAuditEvent>()
+            .Select(x => x.EventType)
+            .ToListAsync();
+        eventTypes.Should().Contain("password.login.failed");
+        eventTypes.Should().Contain("password.login.locked");
+        eventTypes.Should().Contain("password.login.rate_limit_rejected");
     }
 
     [TestMethod]
@@ -123,8 +327,10 @@ public sealed class SqlOSAuthServiceTests
         var crypto = new SqlOSCryptoService(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, emailSender);
-        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
 
+        await CreateEmailAdmin(context, crypto).EnsureBuiltInTemplatesAsync();
         await settings.UpsertSeededAuthPageSettingsAsync();
         await admin.CreateUserAsync(new SqlOSCreateUserRequest("Alice", "alice@example.com", "P@ssword123!"));
 
@@ -709,11 +915,35 @@ public sealed class SqlOSAuthServiceTests
         return new TestSqlOSInMemoryDbContext(options);
     }
 
+    private static DefaultHttpContext CreatePasswordHttpContext(string ipAddress)
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse(ipAddress);
+        context.Request.Headers.UserAgent = "SqlOSTest";
+        return context;
+    }
+
     private static string GetLatestCode(TestAuthEmailSender sender, string email)
     {
         var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
         return Regex.Match(message.TextBody ?? string.Empty, @"\b\d{4,8}\b").Value;
     }
+
+    private static SqlOSTransactionalEmailService CreateTransactionalEmailService(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSCryptoService crypto,
+        TestAuthEmailSender sender)
+        => new(
+            context,
+            crypto,
+            sender,
+            new SqlOSEmailTemplateRenderer(),
+            Options.Create(new SqlOSEmailOptions()));
+
+    private static SqlOSEmailAdminService CreateEmailAdmin(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSCryptoService crypto)
+        => new(context, crypto, new SqlOSEmailTemplateRenderer());
 
     private sealed class EmailOtpHarness : IDisposable
     {
@@ -744,13 +974,15 @@ public sealed class SqlOSAuthServiceTests
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
-            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+            var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, transactionalEmailService: transactionalEmailService);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
             await settings.UpsertSeededAuthPageSettingsAsync();
             await settings.UpsertSeededAuthEmailSettingsAsync();
+            await CreateEmailAdmin(context, crypto).EnsureBuiltInTemplatesAsync();
 
             return new EmailOtpHarness
             {
@@ -774,11 +1006,14 @@ public sealed class SqlOSAuthServiceTests
     {
         public required TestSqlOSInMemoryDbContext Context { get; init; }
         public required SqlOSAuthService Auth { get; init; }
+        public required SqlOSAuthorizationServerService Authorization { get; init; }
         public required SqlOSAdminService Admin { get; init; }
         public required SqlOSCryptoService Crypto { get; init; }
         public required SqlOSAuthServerOptions Options { get; init; }
 
-        public static async Task<TestHarness> CreateAsync(int graceWindowSeconds = 30)
+        public static async Task<TestHarness> CreateAsync(
+            int graceWindowSeconds = 30,
+            Action<SqlOSAuthServerOptions>? configure = null)
         {
             var context = new TestSqlOSInMemoryDbContext(
                 new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
@@ -790,6 +1025,7 @@ public sealed class SqlOSAuthServiceTests
                 RefreshTokenGraceWindowSeconds = graceWindowSeconds
             };
             authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+            configure?.Invoke(authOptions);
             var options = Microsoft.Extensions.Options.Options.Create(authOptions);
 
             // Inject a real ephemeral data protection provider so the
@@ -799,7 +1035,25 @@ public sealed class SqlOSAuthServiceTests
             var emailSender = new TestAuthEmailSender();
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+            var passwordAbuse = new SqlOSPasswordLoginAbuseService(context, admin, crypto, options);
+            var auth = new SqlOSAuthService(
+                context,
+                options,
+                admin,
+                crypto,
+                settings,
+                emailOtp,
+                passwordLoginAbuseService: passwordAbuse);
+            var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
+            var authorization = new SqlOSAuthorizationServerService(
+                context,
+                admin,
+                auth,
+                crypto,
+                settings,
+                authPageSession,
+                options,
+                passwordLoginAbuseService: passwordAbuse);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
@@ -808,6 +1062,7 @@ public sealed class SqlOSAuthServiceTests
             {
                 Context = context,
                 Auth = auth,
+                Authorization = authorization,
                 Admin = admin,
                 Crypto = crypto,
                 Options = authOptions
