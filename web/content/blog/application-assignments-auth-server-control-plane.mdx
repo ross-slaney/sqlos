@@ -1,0 +1,144 @@
+---
+title: "Application Assignments: The Missing Layer Between Clients and Audiences"
+description: "SqlOS application assignments answer who can use each app, without confusing that decision with OAuth clients or token audiences."
+date: "2026-06-01"
+author: "SqlOS Team"
+tags: ["AuthServer", "OAuth", "Applications", "SqlOS"]
+---
+
+Once an auth server manages more than one app, a basic question appears:
+
+> Can this user, in this organization, use this application?
+
+OAuth clients do not fully answer that. Audiences do not answer it either.
+
+SqlOS application assignments add that missing layer.
+
+## The three things people mix up
+
+SqlOS now separates:
+
+| Concept | What it answers |
+| --- | --- |
+| Application / client | Which app is asking for sign in? |
+| Audience / resource | Where is the token meant to be accepted? |
+| Assignment | Who is allowed to use that app? |
+
+That distinction matters in real products.
+
+An admin console and a customer portal might both mint tokens for the same API. The API audience says where the token is valid. It does not say whether a tenant or user should be allowed into the admin console.
+
+Assignments answer that product question directly.
+
+## Access modes
+
+Each SqlOS application has an access mode:
+
+- `all_organizations`: any authenticated user and active organization context can use the app.
+- `selected_organizations`: only assigned organizations can use the app.
+- `selected_users_groups_roles`: explicit user, group, role, service account, or agent assignments are required.
+- `internal_only`: explicit trusted assignments only.
+- `disabled`: the app cannot be used.
+
+The migration and single-app default is `all_organizations`, so existing apps keep working after upgrade.
+
+That default is deliberate. Assignment controls are powerful, but they should not break a working single-app install just because SqlOS gained a richer control plane.
+
+## Assignment targets
+
+Admins can assign access to:
+
+- organizations
+- users
+- FGA user groups
+- organization roles, such as `admin` or `member`
+- service-account and agent identifiers for machine-oriented flows
+
+The assignment model also supports explicit deny records. That gives operators a way to block a specific target even when broader access would otherwise allow it.
+
+## Enforcement points
+
+Assignments are checked when SqlOS has both an application and a concrete user or organization context:
+
+- hosted OAuth authorization after login and organization selection
+- headless authorization after login and organization selection
+- signup and OTP completion paths before tokens or codes are issued
+- SAML/OIDC callback completion
+- device authorization approval
+- refresh token rotation when access has been revoked
+
+Public errors stay generic:
+
+```text
+Application access is not allowed.
+```
+
+The user does not learn whether a specific org or user assignment exists. Audit logs and admin explain APIs carry the detail operators need.
+
+## Admin API shape
+
+Application access is available through admin APIs:
+
+```bash
+curl -X POST /sqlos/admin/auth/api/applications/todo-local/access-mode \
+  -H "content-type: application/json" \
+  -d '{ "accessMode": "selected_organizations" }'
+```
+
+Assign an organization:
+
+```bash
+curl -X POST /sqlos/admin/auth/api/applications/todo-local/assignments \
+  -H "content-type: application/json" \
+  -d '{
+    "principalType": "organization",
+    "organizationId": "org_123",
+    "reason": "Pilot tenant"
+  }'
+```
+
+Explain the decision:
+
+```bash
+curl "/sqlos/admin/auth/api/applications/todo-local/access/check?userId=usr_123&organizationId=org_123"
+```
+
+The response includes an allow/deny decision, access mode, source, assignment ID when one matched, and the client/application identifiers.
+
+## Dashboard workflow
+
+The dashboard presents this as application administration, not raw OAuth plumbing.
+
+Applications expose access mode and assignment controls. Organization and user detail views expose available applications and why access exists, such as open access, direct organization assignment, user assignment, group membership, or role match.
+
+That is the point of the feature: an operator should be able to answer "why can Jane use Admin Console?" without reading an OAuth spec or an FGA graph.
+
+## Where this fits
+
+Use assignments when you have more than one meaningful application surface:
+
+- customer portal
+- admin console
+- internal ops tool
+- CLI
+- partner or MCP integration
+
+Do not use assignments as a replacement for audience/resource validation. The protected resource still validates issuer, signature, expiry, and audience. Assignments decide whether the user should reach the application in the first place.
+
+## Start simple
+
+If you have one app, stay on `all_organizations`.
+
+When you add a second app, narrow only the apps that need control. For example:
+
+1. Keep Customer Portal open to all organizations.
+2. Set Admin Console to `selected_users_groups_roles`.
+3. Assign tenant admins by role or internal operators by user/group.
+
+That keeps the default path small and gives SqlOS an Okta/Entra-style control plane when your product actually needs one.
+
+Next reading:
+
+- [Application Access](/docs/authserver/application-access)
+- [Single-Application Setup](/docs/authserver/single-application)
+- [Clients and Applications](/docs/authserver/clients)

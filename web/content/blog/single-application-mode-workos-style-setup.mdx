@@ -1,0 +1,161 @@
+---
+title: "Single-Application Mode: WorkOS-Style Defaults Without Giving Up SqlOS"
+description: "Most teams start with one app. SqlOS single-application mode creates the safe client, audience, redirect, scopes, and branding defaults from one product-level declaration."
+date: "2026-06-01"
+author: "SqlOS Team"
+tags: ["AuthServer", "OAuth", "Developer Experience", "SqlOS"]
+---
+
+Most teams do not start with an Okta-style control plane.
+
+They start with one SaaS app.
+
+They want organizations, users, sessions, SSO, invitations, and permissions. They do not want their first task to be choosing client IDs, audiences, redirect URI lists, PKCE settings, and AuthPage branding.
+
+SqlOS single-application mode is for that first version.
+
+## The one-call setup
+
+The simple path is one product-level declaration:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication("Todo", app =>
+    {
+        app.Origin = "https://todo.example.com";
+    });
+});
+```
+
+SqlOS expands that into normal auth-server primitives. There is no parallel runtime path.
+
+It seeds one first-party public PKCE application/client with predictable defaults.
+
+## What SqlOS creates
+
+For the example above, SqlOS derives:
+
+| Setting | Default |
+| --- | --- |
+| Application name | `Todo` |
+| Client ID | `todo` |
+| Audience | `todo` |
+| Redirect URI | `https://todo.example.com/auth/callback` |
+| Client type | `public_pkce` |
+| PKCE | required |
+| Scopes | `openid`, `profile`, `email`, `offline_access` |
+| AuthPage title | `Sign in to Todo` |
+| Email branding app name | `Todo` |
+| Application access | `all_organizations` |
+
+That is the WorkOS-style starting point: one app, one declaration, safe defaults.
+
+## Override only what matters
+
+When the defaults are not enough, override the product-specific pieces:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication("Todo", app =>
+    {
+        app.Origin = "https://todo.example.com";
+        app.ClientId = "todo-web";
+        app.Audience = "https://todo.example.com/api";
+        app.RedirectPath = "/auth/callback";
+        app.AllowedScopes =
+        [
+            "openid",
+            "profile",
+            "email",
+            "offline_access",
+            "todos.read",
+            "todos.write"
+        ];
+        app.EnabledCredentialTypes = ["password", "email_otp"];
+    });
+});
+```
+
+You can also bind from configuration:
+
+```json
+{
+  "SqlOS": {
+    "Application": {
+      "Name": "Todo",
+      "Origin": "https://todo.example.com",
+      "ClientId": "todo-web",
+      "Audience": "https://todo.example.com/api",
+      "RedirectPath": "/auth/callback"
+    }
+  }
+}
+```
+
+Then:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.UseSingleApplication(builder.Configuration);
+});
+```
+
+## What this avoids
+
+The one-app path removes common setup footguns:
+
+- forgetting to seed any client
+- confusing app name, client ID, resource, and audience
+- allowing redirect URI drift between app and auth server
+- forgetting PKCE for a browser app
+- starting with DCR, CIMD, or resource indicators before they are needed
+- thinking application assignments are required before there are multiple apps
+
+Advanced OAuth features still exist. They just are not the first thing a new project has to understand.
+
+## How it relates to assignments
+
+Single-application mode defaults access to `all_organizations`.
+
+That means every user and organization that can authenticate can use the app. This is the right default for a one-app SaaS project.
+
+When the product grows into multiple applications, you can graduate to explicit clients and [Application Access](/docs/authserver/application-access):
+
+- keep the customer app open
+- restrict the admin app to selected roles or groups
+- restrict a CLI or integration app to selected organizations
+
+The single-app record migrates cleanly because it is just a normal SqlOS application/client under the hood.
+
+## When to graduate
+
+Move from single-app mode to explicit multi-application setup when you have separate app experiences:
+
+- a customer portal plus an admin console
+- a web app plus a CLI
+- partner integrations
+- MCP or portable public clients
+- different audiences/resources that need separate policy
+
+At that point, use seeded clients, the dashboard, CIMD, DCR, and application assignments intentionally.
+
+## The principle
+
+SqlOS should let a team start with:
+
+> I have one app.
+
+And later grow into:
+
+> I run an authorization server for many apps, clients, organizations, and resources.
+
+Single-application mode makes the first sentence small without blocking the second.
+
+Next reading:
+
+- [Single-Application Setup](/docs/authserver/single-application)
+- [Application Access](/docs/authserver/application-access)
+- [Clients and Applications](/docs/authserver/clients)

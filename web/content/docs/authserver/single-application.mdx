@@ -86,8 +86,9 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 Move to explicit multi-application setup when you have more than one app experience, such as a customer portal, an admin console, a CLI, and a partner integration. At that point, use seeded clients or the dashboard to manage each application and use [Application Access](/docs/authserver/application-access) to control who can use each one.
 
+For the product framing behind the simple path, read [Single-Application Mode: WorkOS-Style Defaults Without Giving Up SqlOS](/blog/single-application-mode-workos-style-setup).
+
 Audience and application assignment stay separate:
 
 - Audience controls where a token is accepted.
 - Application assignment controls who can use an application.
-
