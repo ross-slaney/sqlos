@@ -141,6 +141,46 @@ public sealed class SqlOSSsoPortalServiceTests
         result.IdentityProviderEntityId.Should().BeNull();
     }
 
+    [TestMethod]
+    public void RenderShell_ReturnsPortalUi()
+    {
+        var html = SqlOSSsoPortalPageRenderer.RenderShell();
+
+        html.Should().Contain("<!doctype html>");
+        html.Should().Contain("SqlOS SSO Portal");
+        html.Should().Contain("./api");
+        html.Should().Contain("Validate metadata");
+        html.Should().Contain("Activate connection");
+        html.Should().Contain("Run test");
+        html.Should().Contain("Open IdP test redirect");
+    }
+
+    [TestMethod]
+    public void RenderStartError_HtmlEncodesMessage()
+    {
+        var html = SqlOSSsoPortalPageRenderer.RenderStartError("<script>alert('x')</script>");
+
+        html.Should().Contain("Setup link unavailable");
+        html.Should().Contain("&lt;script&gt;alert");
+        html.Should().NotContain("<script>alert");
+    }
+
+    [TestMethod]
+    public void ConfigureSsoPortal_AllowsPortalOptionsToBeCustomized()
+    {
+        var options = new SqlOSAuthServerOptions()
+            .ConfigureSsoPortal(portal =>
+            {
+                portal.DefaultLinkLifetime = TimeSpan.FromHours(12);
+                portal.SessionIdleTimeout = TimeSpan.FromMinutes(45);
+                portal.CookieName = "custom_sso_portal";
+            });
+
+        options.SsoPortal.DefaultLinkLifetime.Should().Be(TimeSpan.FromHours(12));
+        options.SsoPortal.SessionIdleTimeout.Should().Be(TimeSpan.FromMinutes(45));
+        options.SsoPortal.CookieName.Should().Be("custom_sso_portal");
+    }
+
     private static string ExtractToken(string setupUrl)
     {
         var marker = "token=";
