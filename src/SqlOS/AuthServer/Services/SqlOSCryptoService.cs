@@ -149,7 +149,15 @@ public sealed class SqlOSCryptoService
         }
 
         token.ConsumedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return null;
+        }
+
         return token;
     }
 

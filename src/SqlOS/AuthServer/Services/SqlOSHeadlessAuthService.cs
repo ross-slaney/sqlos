@@ -1475,6 +1475,9 @@ public sealed class SqlOSHeadlessAuthService
         {
             "signup" => "signup",
             "password" => "password",
+            "forgot-password" => "forgot-password",
+            "forgot-password-sent" => "forgot-password-sent",
+            "password-reset" => "password-reset",
             "email-otp" => "email-otp",
             "email-otp-verify" => "email-otp-verify",
             "email-otp-signup-verify" => "email-otp-signup-verify",

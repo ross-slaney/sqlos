@@ -82,13 +82,16 @@ public sealed record SqlOSExchangeCodeRequest(
     string Code,
     string ClientId);
 
-public sealed record SqlOSForgotPasswordRequest(string Email);
+public sealed record SqlOSForgotPasswordRequest(
+    string Email,
+    string? ClientId = null);
 
 public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
 
 public sealed record SqlOSSendPasswordResetEmailRequest(
     string Email,
-    string? ResetUrlTemplate = null);
+    string? ResetUrlTemplate = null,
+    string? ClientId = null);
 
 public sealed record SqlOSSendUserPasswordResetEmailRequest(
     string? ResetUrlTemplate = null);
@@ -102,6 +105,13 @@ public sealed record SqlOSPasswordResetEmailResult(
     string? ProviderMessageId,
     string? SanitizedError,
     string Message);
+
+public sealed record SqlOSPasswordResetRequestResult(
+    string Email,
+    string MaskedEmail,
+    string Message,
+    DateTime ExpiresAt,
+    DateTime NextAllowedSendAt);
 
 public sealed record SqlOSCreateVerificationTokenRequest(string Email);
 

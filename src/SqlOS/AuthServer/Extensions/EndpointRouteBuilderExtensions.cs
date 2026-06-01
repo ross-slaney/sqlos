@@ -125,6 +125,7 @@ public static class EndpointRouteBuilderExtensions
                     "login" => "login",
                     "signup" => "signup",
                     "password" => "password",
+                    "forgot-password" => "forgot-password",
                     "email-otp" => "email-otp",
                     "phone-otp" => "phone-otp",
                     "phone-otp-signup" => "phone-otp-signup",
@@ -262,6 +263,83 @@ public static class EndpointRouteBuilderExtensions
                 invitation: invitation,
                 deviceUserCode: deviceUserCode);
             return Html(page);
+        });
+
+        auth.MapGet("/password/forgot", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "forgot-password",
+                    context.Request.Query["request"].ToString(),
+                    context.Request.Query["email"].ToString(),
+                    uiContext: null));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "forgot-password",
+                context.Request.Query["request"].ToString(),
+                context.Request.Query["email"].ToString(),
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/password/forgot/submit", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = ReadRequestId(context, form);
+            var email = form["email"].ToString();
+            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+
+            try
+            {
+                await authService.RequestPasswordResetEmailAsync(
+                    new SqlOSSendPasswordResetEmailRequest(
+                        email,
+                        ResetUrlTemplate: null,
+                        ClientId: authorizationRequest?.ClientApplication?.ClientId),
+                    context,
+                    cancellationToken);
+
+                return Html(await BuildAuthPageViewModelAsync(
+                    "forgot-password-sent",
+                    requestId,
+                    email,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Html(await BuildAuthPageViewModelAsync(
+                    "forgot-password",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken),
+                    StatusCodes.Status400BadRequest);
+            }
         });
 
         auth.MapGet("/invitations/accept", async (
@@ -2189,6 +2267,60 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/password/forgot", async (
+            SqlOSHeadlessPasswordResetEmailRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var authorizationRequest = string.IsNullOrWhiteSpace(request.RequestId)
+                    ? null
+                    : await authorizationServerService.TryGetActiveAuthorizationRequestAsync(request.RequestId, cancellationToken);
+                return Results.Ok(await authService.RequestPasswordResetEmailAsync(
+                    new SqlOSSendPasswordResetEmailRequest(
+                        request.Email,
+                        request.ResetUrlTemplate,
+                        authorizationRequest?.ClientApplication?.ClientId),
+                    context,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/password/reset", async (
+            SqlOSResetPasswordRequest request,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                await authService.ResetPasswordAsync(request, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         headless.MapPost("/email-otp/start", async (
             SqlOSHeadlessEmailOtpStartRequest request,
             HttpContext context,
@@ -2618,11 +2750,11 @@ public static class EndpointRouteBuilderExtensions
             return Results.NoContent();
         });
 
-        auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
-            Results.Ok(new { token = await authService.CreatePasswordResetTokenAsync(request, cancellationToken) }));
+        auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/password/reset-email", async (SqlOSSendPasswordResetEmailRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.SendPasswordResetEmailAsync(request, httpContext, cancellationToken)));
+            Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 
         auth.MapGet("/password/reset", (HttpContext context) =>
             Results.Content(
@@ -2634,9 +2766,15 @@ public static class EndpointRouteBuilderExtensions
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var token = form["token"].ToString();
             var newPassword = form["newPassword"].ToString();
+            var confirmPassword = form["confirmPassword"].ToString();
 
             try
             {
+                if (!string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Passwords do not match.");
+                }
+
                 await authService.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, newPassword), cancellationToken);
                 return Results.Content(BuildPasswordResetPage(token: null, error: null, success: true), contentType: "text/html");
             }
@@ -3655,6 +3793,10 @@ public static class EndpointRouteBuilderExtensions
                 <label>
                   <span>New password</span>
                   <input name="newPassword" type="password" autocomplete="new-password" required />
+                </label>
+                <label>
+                  <span>Confirm password</span>
+                  <input name="confirmPassword" type="password" autocomplete="new-password" required />
                 </label>
                 <button type="submit">Reset password</button>
               </form>

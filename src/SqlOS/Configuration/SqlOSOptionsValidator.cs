@@ -74,6 +74,7 @@ internal static class SqlOSOptionsValidator
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
         ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
+        ValidatePasswordResetOptions(options.AuthServer.PasswordReset, errors);
         ValidateEmailOptions(options.Email, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
@@ -165,6 +166,39 @@ internal static class SqlOSOptionsValidator
         if (options.LockoutDuration <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.PasswordLogin.LockoutDuration must be greater than zero.");
+        }
+    }
+
+    private static void ValidatePasswordResetOptions(SqlOSPasswordResetOptions options, List<string> errors)
+    {
+        if (options.TokenLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordReset.TokenLifetime must be greater than zero.");
+        }
+
+        if (options.ResendCooldown <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordReset.ResendCooldown must be greater than zero.");
+        }
+
+        if (options.RateLimitWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.PasswordReset.RateLimitWindow must be greater than zero.");
+        }
+
+        if (options.MaxRequestsPerEmailPerWindow <= 0)
+        {
+            errors.Add("AuthServer.PasswordReset.MaxRequestsPerEmailPerWindow must be greater than zero.");
+        }
+
+        if (options.MaxRequestsPerIpPerWindow <= 0)
+        {
+            errors.Add("AuthServer.PasswordReset.MaxRequestsPerIpPerWindow must be greater than zero.");
+        }
+
+        if (options.MaxRequestsPerClientPerWindow <= 0)
+        {
+            errors.Add("AuthServer.PasswordReset.MaxRequestsPerClientPerWindow must be greater than zero.");
         }
     }
 
