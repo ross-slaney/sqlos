@@ -165,6 +165,34 @@ public sealed class SqlOSSsoConnection
 
     public SqlOSOrganization? Organization { get; set; }
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
+    public ICollection<SqlOSSsoPortalSession> PortalSessions { get; set; } = new List<SqlOSSsoPortalSession>();
+}
+
+public sealed class SqlOSSsoPortalSession
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string? ConnectionId { get; set; }
+    public string LinkTokenHash { get; set; } = string.Empty;
+    public string? SessionTokenHash { get; set; }
+    public string? Provider { get; set; }
+    public string? ReturnUrl { get; set; }
+    public string ActorType { get; set; } = "platform_admin";
+    public string? CreatedByUserId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? OpenedAt { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevokedReason { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+    public DateTime? LastTestedAt { get; set; }
+    public string? LastTestStatus { get; set; }
+    public string? LastTestMessage { get; set; }
+
+    public SqlOSOrganization? Organization { get; set; }
+    public SqlOSSsoConnection? Connection { get; set; }
 }
 
 public sealed class SqlOSOidcConnection

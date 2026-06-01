@@ -76,6 +76,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSOidcBrowserAuthService>();
         services.AddScoped<SqlOSSamlService>();
         services.AddScoped<SqlOSSsoAuthorizationService>();
+        services.AddScoped<SqlOSSsoPortalService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();

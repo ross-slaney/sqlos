@@ -31,7 +31,9 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 ## What SqlOS Expects
 
-For the intended setup flow, the SqlOS admin creates an SSO draft first, then imports the Entra federation metadata XML.
+For the delegated setup flow, the SqlOS admin creates the organization and a portal setup link. The customer Entra admin opens the portal, copies the SqlOS service provider values, imports Entra federation metadata XML, reviews the connection, and activates it.
+
+The platform-admin dashboard can still create an SSO draft and import metadata directly when your own operators manage the setup.
 
 SqlOS stores and validates:
 
@@ -60,20 +62,23 @@ In the dashboard:
 
 1. Create the organization.
 2. Set the organization's `Primary domain` to the customer's login domain, for example `customer.com`.
-3. Open the `SSO` section and create an SSO draft for that organization.
+3. Open the `SSO` section.
+4. Create a delegated setup link for the customer IT admin, or create an SSO draft if your platform team is configuring Entra directly.
 
 Recommended draft settings:
 
 - `Auto provision users`: enabled
 - `Auto link by email`: disabled for the first test unless you intentionally want linking behavior
 
-After draft creation, the dashboard shows:
+After draft or setup-link creation, SqlOS shows:
 
 - `SP Entity ID`
 - `ACS URL`
 - `Org primary domain`
 
 These are the values you give to the customer's Entra admin.
+
+For delegated onboarding, send the setup URL to the customer IT admin through your own mailer or ticketing system. The first open consumes the URL token and stores a hardened server-side portal session in an HttpOnly cookie scoped to `/sqlos/admin/auth/sso-portal`.
 
 ## Step 2: What The Customer Entra Admin Configures
 
@@ -97,7 +102,15 @@ That is what SqlOS imports.
 
 ## Step 3: Import The Entra Metadata Into SqlOS
 
-Back in the SqlOS dashboard:
+In the delegated portal:
+
+1. Choose `Microsoft Entra`.
+2. Paste or upload the full federation metadata XML from Entra.
+3. Click `Validate metadata`.
+4. Click `Save metadata`, review the parsed IdP Entity ID and SSO URL, then click `Activate connection`.
+5. Optionally enter the test client id `example-web` and redirect URI `https://client.example.local/callback`, then run the test to generate a SAML redirect.
+
+If the platform admin is doing the setup directly in the dashboard:
 
 1. Open the `Import Entra Metadata` form.
 2. Paste the SSO connection ID from the draft you created.
@@ -106,7 +119,8 @@ Back in the SqlOS dashboard:
 
 After import:
 
-- the SSO connection should be enabled
+- portal setup shows the connection as `ready_to_activate` until activation
+- dashboard direct import enables the connection immediately
 - the organization should still have the intended primary domain
 
 At this point the org is ready for SSO testing.

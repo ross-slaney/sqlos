@@ -11,6 +11,7 @@ Use it when you want to explore:
 - org membership
 - organization email invitations
 - SAML SSO initiation and callback flow
+- delegated organization-admin SSO setup links
 - refresh/logout
 - FGA-protected workspace access
 - shared dashboard administration
@@ -49,6 +50,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 - FGA admin: `http://localhost:5062/sqlos/admin/fga/`
 - API swagger: `http://localhost:5062/swagger`
 - web app: `http://localhost:3010/`
+- host-launched SSO portal demo: `http://localhost:3010/retail/sso`
 - todo app: `http://localhost:5080/`
 
 ## Validation flow
@@ -61,8 +63,12 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 6. Switch to the headless route and compare the same auth server with app-owned UI.
 7. Optionally enable [SMS OTP](SMS_OTP.md) and repeat sign in or signup with a phone code.
 8. Optionally configure an OIDC connection and repeat the sign-in flow with provider buttons.
-9. Create and list workspaces through the protected app flow.
-10. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+9. Open `/retail/sso`, create a delegated SSO setup link for the signed-in organization, and open the portal.
+10. In the portal, choose Entra, Okta, Google Workspace, or Generic SAML, paste/upload metadata XML, activate, and run a test redirect.
+11. Create and list workspaces through the protected app flow.
+12. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+
+The host-launched path calls the sample API endpoint `POST /api/sso-portal-links`, which wraps the SqlOS portal-session service for the current `org_id`. Platform admins can create and revoke the same delegated links from the dashboard organization SSO tab.
 
 For a customer-tenant SAML walkthrough with Microsoft Entra ID, use:
 

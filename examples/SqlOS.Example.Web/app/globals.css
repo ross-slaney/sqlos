@@ -493,6 +493,15 @@ input::placeholder { color: var(--color-text-tertiary); }
   text-decoration: none;
 }
 
+.data-table-wrap {
+  overflow-x: auto;
+}
+
+.mono-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
 /* ── Toolbar ── */
 
 .toolbar {

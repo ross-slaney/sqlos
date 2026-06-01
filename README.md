@@ -31,6 +31,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **Password Credentials** — secure local authentication with session management
 - **Social Login** — Google, Microsoft, Apple, and any custom OIDC provider
 - **SAML SSO** — enterprise single sign-on with home realm discovery by email domain
+- **Delegated SSO Portal** — one-organization setup links for customer IT admins, with provider guides and metadata import
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
 - **Signing Key Rotation** — automatic RS256 key rotation with configurable intervals
 - **Email OTP** — passwordless sign-in with Azure Communication Services Email
@@ -45,7 +46,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 
 ### Embedded Admin Dashboard
 
-- **Auth Admin** — manage organizations, users, clients, OIDC/SAML connections, security settings, sessions, and audit events
+- **Auth Admin** — manage organizations, users, clients, OIDC/SAML connections, delegated SSO setup links, security settings, sessions, and audit events
 - **FGA Admin** — manage resources, grants, roles, permissions, and test access decisions
 - **Password-Protected** — optional password auth mode with dashboard-specific throttling
 
@@ -253,6 +254,8 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 That starts SQL Server, the sample API, the Todo sample, and the web frontends in one stack. Use it when you want breadth: password login, headless auth, OIDC, SAML, sessions, org workflows, FGA, and the hosted-first MCP-oriented Todo flow side by side.
 
 If you build headless auth on a different browser origin than the SqlOS host, make those browser requests credentialed so SqlOS can persist and reuse its auth-page session cookie. Follow-up `/sqlos/auth/authorize?prompt=none` requests should then silently succeed when that session exists, or return `login_required` when it does not.
+
+For enterprise SSO onboarding, open an organization in the dashboard, choose **SSO**, and create a delegated setup link. The link opens `/sqlos/admin/auth/sso-portal`, where the customer IT admin can choose Microsoft Entra, Okta, Google Workspace, or generic SAML, copy SP values, paste or upload metadata XML, activate the connection, and start a test redirect. The example web app also has a host-launched flow at `/retail/sso` backed by `POST /api/sso-portal-links`.
 
 |            | URL                                       |
 | ---------- | ----------------------------------------- |

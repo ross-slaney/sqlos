@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Models;
 using SqlOS.Example.Api.Services;
@@ -78,6 +79,35 @@ public static class ExampleEndpoints
             });
         });
 
+        example.MapPost("/sso-portal-links", async (
+            ExampleSsoPortalLinkRequest request,
+            SqlOSSsoPortalService portalService,
+            HttpContext httpContext,
+            CancellationToken cancellationToken) =>
+        {
+            var organizationId = httpContext.User.FindFirst("org_id")?.Value;
+            var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(organizationId) || string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.BadRequest(new { error = "Token must include sub and org_id to create an SSO setup link." });
+            }
+
+            try
+            {
+                return Results.Ok(await portalService.CreateSessionAsync(
+                    new SqlOSCreateSsoPortalSessionRequest(
+                        organizationId,
+                        CreatedByUserId: subjectId,
+                        Provider: request.Provider),
+                    httpContext,
+                    cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         example.MapGet("/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;
@@ -134,4 +164,6 @@ public static class ExampleEndpoints
             return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
         });
     }
+
+    private sealed record ExampleSsoPortalLinkRequest(string? Provider);
 }

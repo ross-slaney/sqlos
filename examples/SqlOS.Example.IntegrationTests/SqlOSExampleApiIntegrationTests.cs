@@ -278,6 +278,82 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task DelegatedSsoPortal_CanImportActivateAndStartTest()
+    {
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Portal Org {Guid.NewGuid():N}",
+            primaryDomain = $"portal-{Guid.NewGuid():N}.test"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/sso-portal/sessions", new
+        {
+            organizationId,
+            provider = "microsoft-entra"
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var setupUrl = createJson.RootElement.GetProperty("setupUrl").GetString();
+        setupUrl.Should().Contain("/sqlos/admin/auth/sso-portal/start?token=");
+
+        var startResponse = await ExampleApiFixture.Client.GetAsync(new Uri(setupUrl!).PathAndQuery);
+        startResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        var portalCookie = startResponse.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0];
+        portalCookie.Should().StartWith("sqlos_sso_portal=");
+
+        var stateResponse = await PortalGetAsync("/sqlos/admin/auth/sso-portal/api/state", portalCookie);
+        stateResponse.EnsureSuccessStatusCode();
+        var stateJson = JsonDocument.Parse(await stateResponse.Content.ReadAsStringAsync());
+        var connectionId = stateJson.RootElement.GetProperty("connection").GetProperty("id").GetString();
+        stateJson.RootElement.GetProperty("organization").GetProperty("id").GetString().Should().Be(organizationId);
+        stateJson.RootElement.GetProperty("provider").GetString().Should().Be("microsoft-entra");
+        stateJson.RootElement.GetProperty("serviceProviderEntityId").GetString().Should().Be("https://localhost/sqlos/auth");
+        stateJson.RootElement.GetProperty("assertionConsumerServiceUrl").GetString()
+            .Should().Be($"https://localhost/sqlos/auth/saml/acs/{connectionId}");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSPortalIntegrationIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var metadataXml = BuildFederationMetadata("urn:portal:idp", "https://idp.portal.test/sso", certificate);
+
+        var validateResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/metadata/validate", portalCookie, new
+        {
+            metadataXml
+        });
+        validateResponse.EnsureSuccessStatusCode();
+        var validateJson = JsonDocument.Parse(await validateResponse.Content.ReadAsStringAsync());
+        validateJson.RootElement.GetProperty("isValid").GetBoolean().Should().BeTrue();
+
+        var importResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/metadata", portalCookie, new
+        {
+            metadataXml
+        });
+        importResponse.EnsureSuccessStatusCode();
+        var importJson = JsonDocument.Parse(await importResponse.Content.ReadAsStringAsync());
+        importJson.RootElement.GetProperty("connection").GetProperty("setupStatus").GetString().Should().Be("ready_to_activate");
+        importJson.RootElement.GetProperty("connection").GetProperty("isEnabled").GetBoolean().Should().BeFalse();
+
+        var activateResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/activate", portalCookie, new { });
+        activateResponse.EnsureSuccessStatusCode();
+        var activateJson = JsonDocument.Parse(await activateResponse.Content.ReadAsStringAsync());
+        activateJson.RootElement.GetProperty("connection").GetProperty("setupStatus").GetString().Should().Be("active");
+
+        var testResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/test", portalCookie, new
+        {
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/callback"
+        });
+        testResponse.EnsureSuccessStatusCode();
+        var testJson = JsonDocument.Parse(await testResponse.Content.ReadAsStringAsync());
+        testJson.RootElement.GetProperty("status").GetString().Should().Be("started");
+        testJson.RootElement.GetProperty("authorizationUrl").GetString()
+            .Should().Contain($"/sqlos/auth/saml/login/{connectionId}");
+    }
+
+    [TestMethod]
     public async Task DashboardStats_AreAvailableInDevelopment()
     {
         var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/stats");
@@ -668,6 +744,23 @@ public sealed class SqlOSExampleApiIntegrationTests
         return await ExampleApiFixture.Client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> PortalGetAsync(string path, string cookie)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("Cookie", cookie);
+        return await ExampleApiFixture.Client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> PortalPostAsync(string path, string cookie, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(body)
+        };
+        request.Headers.Add("Cookie", cookie);
+        return await ExampleApiFixture.Client.SendAsync(request);
+    }
+
     private static string ExtractResetToken(string textBody)
     {
         var match = System.Text.RegularExpressions.Regex.Match(textBody, @"token=([A-Za-z0-9_-]+)");
@@ -722,6 +815,25 @@ public sealed class SqlOSExampleApiIntegrationTests
         signedXml.ComputeSignature();
         responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
+    }
+
+    private static string BuildFederationMetadata(string entityId, string singleSignOnUrl, X509Certificate2 certificate)
+    {
+        var rawCertificate = Convert.ToBase64String(certificate.Export(X509ContentType.Cert));
+        return $"""
+        <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="{entityId}">
+          <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+            <KeyDescriptor use="signing">
+              <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+                <X509Data>
+                  <X509Certificate>{rawCertificate}</X509Certificate>
+                </X509Data>
+              </KeyInfo>
+            </KeyDescriptor>
+            <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="{singleSignOnUrl}" />
+          </IDPSSODescriptor>
+        </EntityDescriptor>
+        """;
     }
 
     private sealed class CapturingTransactionalEmailSender : ISqlOSEmailSender

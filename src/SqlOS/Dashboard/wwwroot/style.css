@@ -346,6 +346,22 @@ nav a.active {
     width: auto;
 }
 
+.button-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    background: var(--zinc-900);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.button-link:hover {
+    background: var(--zinc-800);
+}
+
 .meta-list {
     display: grid;
     gap: 6px;

@@ -120,6 +120,26 @@ curl -X POST http://localhost:5062/api/v1/auth/sso/start \
   -d '{"email": "user@acme.com"}'
 ```
 
+### Host-launched SSO Portal Link
+
+The example API demonstrates how a host app can launch the delegated org-admin portal for the current `org_id` instead of exposing the full dashboard admin API to its frontend.
+
+```bash
+curl -X POST http://localhost:5062/api/sso-portal-links \
+  -H "Authorization: Bearer eyJhbG..." \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "microsoft-entra"}'
+```
+
+```json
+{
+  "id": "ssp_...",
+  "organizationId": "org_...",
+  "status": "pending",
+  "setupUrl": "https://localhost/sqlos/admin/auth/sso-portal/start?token=..."
+}
+```
+
 ---
 
 ## Dashboard Admin API
@@ -178,6 +198,36 @@ curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
 ```bash
 curl http://localhost:5062/sqlos/admin/auth/api/sessions
 ```
+
+### Delegated SSO Portal Sessions
+
+```bash
+# Create a one-organization setup link
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"organizationId": "org_...", "provider": "okta"}'
+
+# List setup links for an organization
+curl http://localhost:5062/sqlos/admin/auth/api/organizations/org_.../sso-portal/sessions
+
+# Revoke a setup link or opened portal session
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions/ssp_.../revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "rotated"}'
+```
+
+The setup URL opens `/sqlos/admin/auth/sso-portal/start?token=...`. The first open consumes the URL token and sets a server-side portal session cookie. Portal APIs under `/sqlos/admin/auth/sso-portal/api` require that cookie and are scoped to the linked organization:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/state` | Organization, provider guides, SP values, connection status |
+| PUT | `/provider` | Choose `microsoft-entra`, `okta`, `google-workspace`, or `generic-saml` |
+| POST | `/metadata/validate` | Validate pasted or uploaded metadata XML |
+| POST | `/metadata` | Save metadata and hold the connection for activation |
+| POST | `/activate` | Enable the SAML connection after review |
+| POST | `/disable` | Disable the organization SAML connection |
+| POST | `/test` | Validate readiness or create a SAML redirect when `clientId` and `redirectUri` are supplied |
+| POST | `/signout` | Clear the portal session cookie |
 
 ---
 

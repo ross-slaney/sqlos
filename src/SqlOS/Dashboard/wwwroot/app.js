@@ -19,6 +19,7 @@
 
     let flashMessage = null;
     let latestSsoDraft = null;
+    let latestSsoPortalSession = null;
     const pagerState = new Map();
     let selectedClientId = null;
     let clientDraftState = null;
@@ -1312,17 +1313,21 @@
         const usersPager = getPagerState(`auth-org-${organizationId}-users`);
         const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`);
         const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
-        const [organization, users, memberships, invitations, ssoConnections] = await Promise.all([
+        const ssoPortalPager = getPagerState(`auth-org-${organizationId}-sso-portal`);
+        const [organization, users, memberships, invitations, ssoConnections, ssoPortalSessions] = await Promise.all([
             fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
             fetchJson(`${authApiBasePath}/users?page=1&pageSize=500`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?page=${invitationsPager.page}&pageSize=${invitationsPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`)
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?page=${ssoPortalPager.page}&pageSize=${ssoPortalPager.pageSize}`)
         ]);
         const organizationSsoConnections = Array.isArray(ssoConnections?.data) ? ssoConnections.data : [];
+        const organizationSsoPortalSessions = Array.isArray(ssoPortalSessions?.data) ? ssoPortalSessions.data : [];
         const organizationInvitations = Array.isArray(invitations?.data) ? invitations.data : [];
         const pendingInvitations = organizationInvitations.filter(invitation => invitation.status === "pending").length;
         const latestOrganizationDraft = latestSsoDraft && latestSsoDraft.organizationId === organizationId ? latestSsoDraft : null;
+        const latestOrganizationPortalSession = latestSsoPortalSession && latestSsoPortalSession.organizationId === organizationId ? latestSsoPortalSession : null;
 
         const summaryHtml = `
             <div class="detail-summary-grid">
@@ -1485,7 +1490,36 @@
                             </div>
                         </section>
                     ` : ""}
+                    ${latestOrganizationPortalSession?.setupUrl ? `
+                        <section class="panel">
+                            <h2>Latest Delegated Setup Link</h2>
+                            <div class="callout">
+                                <div><strong>Portal session:</strong> ${esc(latestOrganizationPortalSession.id)}</div>
+                                <div><strong>Expires</strong><br>${esc(formatDate(latestOrganizationPortalSession.expiresAt))}</div>
+                                <div><strong>Setup URL</strong><br><span class="inline-code">${esc(latestOrganizationPortalSession.setupUrl)}</span></div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="js-copy-sso-portal-link" data-url="${esc(latestOrganizationPortalSession.setupUrl)}">Copy setup link</button>
+                                <a class="button-link" href="${esc(latestOrganizationPortalSession.setupUrl)}" target="_blank" rel="noreferrer">Open portal</a>
+                            </div>
+                        </section>
+                    ` : ""}
                     <div class="panel-grid">
+                        <section class="panel">
+                            <h2>Invite IT Admin</h2>
+                            <p>Create a one-time setup link scoped to this organization. The first open establishes a server-side portal session.</p>
+                            <form id="create-sso-portal-session-form">
+                                <select name="provider">
+                                    <option value="">Let admin choose provider</option>
+                                    <option value="microsoft-entra">Microsoft Entra</option>
+                                    <option value="okta">Okta</option>
+                                    <option value="google-workspace">Google Workspace</option>
+                                    <option value="generic-saml">Generic SAML</option>
+                                </select>
+                                <input name="createdByUserId" placeholder="Optional platform user id">
+                                <button type="submit">Create setup link</button>
+                            </form>
+                        </section>
                         <section class="panel">
                             <h2>Create SSO Draft</h2>
                             <p>Create the SAML draft directly from this organization, then import Entra metadata on the resulting connection.</p>
@@ -1502,10 +1536,36 @@
                             ${renderMetadataRows([
                                 { label: "Primary domain", value: organization.primaryDomain || "n/a" },
                                 { label: "Total connections", value: organization.ssoConnectionCount || ssoConnections.totalCount || 0 },
-                                { label: "Enabled connections", value: organization.enabledSsoConnections ?? 0 }
+                                { label: "Enabled connections", value: organization.enabledSsoConnections ?? 0 },
+                                { label: "Portal sessions", value: ssoPortalSessions.totalCount || 0 }
                             ])}
                         </section>
                     </div>
+                    <section class="panel">
+                        <h2>Delegated Portal Sessions</h2>
+                        <div id="organization-sso-portal-pagination-top">${renderPagination(ssoPortalSessions.page, ssoPortalSessions.totalPages, ssoPortalSessions.totalCount)}</div>
+                        ${renderList(
+                            organizationSsoPortalSessions,
+                            item => `
+                                <div class="list-item-header">
+                                    <strong>${esc(item.id)}</strong>
+                                    <span class="inline-code">${esc(item.status)}</span>
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "Provider", value: item.provider || "Admin chooses" },
+                                    { label: "Connection ID", value: item.connectionId || "n/a" },
+                                    { label: "Created", value: formatDate(item.createdAt) },
+                                    { label: "Expires", value: formatDate(item.expiresAt) },
+                                    { label: "Opened", value: item.openedAt ? formatDate(item.openedAt) : "No" },
+                                    { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "No" }
+                                ])}
+                                <div class="form-actions">
+                                    ${item.status !== "revoked" && item.status !== "expired" ? `<button type="button" class="js-revoke-sso-portal-session" data-id="${esc(item.id)}">Revoke</button>` : ""}
+                                </div>
+                            `,
+                            "No delegated portal sessions yet."
+                        )}
+                    </section>
                     <section class="panel">
                         <h2>Organization SSO Connections</h2>
                         <div id="organization-sso-pagination-top">${renderPagination(ssoConnections.page, ssoConnections.totalPages, ssoConnections.totalCount)}</div>
@@ -1645,6 +1705,42 @@
                 await render();
             });
         } else {
+            document.querySelectorAll(".js-copy-sso-portal-link").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const url = button.dataset.url;
+                    if (!url) {
+                        return;
+                    }
+
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(url);
+                        setFlash("success", "SSO setup link copied.");
+                    } else {
+                        window.prompt("SSO setup link", url);
+                    }
+                    await render();
+                });
+            });
+
+            bindForm("create-sso-portal-session-form", async form => {
+                const result = await fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        organizationId,
+                        provider: form.get("provider") || null,
+                        createdByUserId: form.get("createdByUserId") || null,
+                        expiresAt: null,
+                        returnUrl: null
+                    })
+                });
+
+                latestSsoPortalSession = result;
+                if (result.setupUrl && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(result.setupUrl);
+                }
+                setFlash("success", "SSO setup link created.");
+            });
+
             bindForm("create-org-sso-draft-form", async form => {
                 const result = await fetchJson(`${authApiBasePath}/sso-connections/draft`, {
                     method: "POST",
@@ -1677,8 +1773,24 @@
                 });
             });
 
+            document.querySelectorAll(".js-revoke-sso-portal-session").forEach(button => {
+                button.addEventListener("click", async () => {
+                    await fetchJson(`${authApiBasePath}/sso-portal/sessions/${encodeURIComponent(button.dataset.id)}/revoke`, {
+                        method: "POST",
+                        body: JSON.stringify({ reason: "revoked_from_dashboard" })
+                    });
+                    setFlash("success", "SSO portal session revoked.");
+                    await render();
+                });
+            });
+
             bindPagination("#organization-sso-pagination-top", async page => {
                 setPagerPage(`auth-org-${organizationId}-sso`, page);
+                await render();
+            });
+
+            bindPagination("#organization-sso-portal-pagination-top", async page => {
+                setPagerPage(`auth-org-${organizationId}-sso-portal`, page);
                 await render();
             });
         }

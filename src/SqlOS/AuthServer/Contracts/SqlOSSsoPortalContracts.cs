@@ -1,0 +1,81 @@
+namespace SqlOS.AuthServer.Contracts;
+
+public sealed record SqlOSCreateSsoPortalSessionRequest(
+    string OrganizationId,
+    string? CreatedByUserId = null,
+    DateTime? ExpiresAt = null,
+    string? ReturnUrl = null,
+    string? Provider = null);
+
+public sealed record SqlOSRevokeSsoPortalSessionRequest(string? Reason = null);
+
+public sealed record SqlOSUpdateSsoPortalProviderRequest(string Provider);
+
+public sealed record SqlOSSsoPortalMetadataRequest(string MetadataXml);
+
+public sealed record SqlOSSsoPortalTestRequest(string? ClientId = null, string? RedirectUri = null);
+
+public sealed record SqlOSSsoPortalSessionResult(
+    string Id,
+    string OrganizationId,
+    string OrganizationName,
+    string? PrimaryDomain,
+    string Status,
+    string? Provider,
+    string? ConnectionId,
+    string? SetupUrl,
+    string PortalUrl,
+    DateTime CreatedAt,
+    DateTime ExpiresAt,
+    DateTime? OpenedAt,
+    DateTime? LastSeenAt,
+    DateTime? RevokedAt,
+    string? RevokedReason);
+
+public sealed record SqlOSSsoPortalStateResult(
+    SqlOSSsoPortalOrganizationResult Organization,
+    SqlOSSsoPortalConnectionResult Connection,
+    string? Provider,
+    string ServiceProviderEntityId,
+    string AssertionConsumerServiceUrl,
+    IReadOnlyList<SqlOSSsoProviderGuide> Providers,
+    SqlOSSsoPortalTestResult? LatestTest);
+
+public sealed record SqlOSSsoPortalOrganizationResult(
+    string Id,
+    string Name,
+    string Slug,
+    string? PrimaryDomain);
+
+public sealed record SqlOSSsoPortalConnectionResult(
+    string Id,
+    string DisplayName,
+    bool IsEnabled,
+    string SetupStatus,
+    string? IdentityProviderEntityId,
+    string? SingleSignOnUrl,
+    bool AutoProvisionUsers,
+    bool AutoLinkByEmail,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record SqlOSSsoProviderGuide(
+    string Key,
+    string Label,
+    string MetadataLabel,
+    string EntityIdLabel,
+    string AcsUrlLabel,
+    IReadOnlyList<string> Steps);
+
+public sealed record SqlOSSsoMetadataValidationResult(
+    bool IsValid,
+    string? Error,
+    string? IdentityProviderEntityId,
+    string? SingleSignOnUrl,
+    bool HasSigningCertificate);
+
+public sealed record SqlOSSsoPortalTestResult(
+    string Status,
+    string Message,
+    string? AuthorizationUrl,
+    DateTime TestedAt);

@@ -40,6 +40,7 @@ public class SqlOSAuthServerOptions
     public SqlOSPasswordResetOptions PasswordReset { get; } = new();
     public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
+    public SqlOSSsoPortalOptions SsoPortal { get; } = new();
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
@@ -193,6 +194,12 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigureSsoPortal(Action<SqlOSSsoPortalOptions> configure)
+    {
+        configure(SsoPortal);
+        return this;
+    }
+
     public SqlOSAuthServerOptions ConfigureDeviceAuthorization(Action<SqlOSDeviceAuthorizationOptions> configure)
     {
         configure(DeviceAuthorization);
@@ -319,4 +326,11 @@ public sealed class SqlOSPasswordLoginAbuseOptions
     public int MaxFailedAttemptsPerDevice { get; set; } = 20;
     public TimeSpan FailureWindow { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
+}
+
+public sealed class SqlOSSsoPortalOptions
+{
+    public TimeSpan DefaultLinkLifetime { get; set; } = TimeSpan.FromDays(7);
+    public TimeSpan SessionIdleTimeout { get; set; } = TimeSpan.FromHours(2);
+    public string CookieName { get; set; } = "sqlos_sso_portal";
 }

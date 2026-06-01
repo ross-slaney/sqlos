@@ -30,7 +30,7 @@ Password mode includes dashboard-specific per-IP throttling, global backoff for 
 | Memberships | `/sqlos/admin/auth/memberships` | Link users to organizations with roles and manage invitations |
 | Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs |
 | OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |
-| SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO |
+| SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO and delegated org-admin setup links |
 | Auth Page | `/sqlos/admin/auth/settings` | Configure hosted/headless credential types, AuthPage branding, and email branding |
 | Security | `/sqlos/admin/auth/security` | Configure session and token lifetimes |
 | Sessions | `/sqlos/admin/auth/sessions` | View and manage active sessions |
@@ -41,6 +41,14 @@ Password mode includes dashboard-specific per-IP throttling, global backoff for 
 The Auth Page settings screen includes email branding for built-in OTP and invitation emails. It stores the application name, logo data URL, primary color, accent color, and background color used by the default templates.
 
 For setup details, see [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/authserver/invitations), and [Email Branding](/docs/authserver/email-branding).
+
+## Delegated SSO setup
+
+Open an organization, choose the **SSO** tab, and create a setup link when a customer IT admin should configure SAML themselves. The link is scoped to one organization, can be revoked from the same tab, and opens `/sqlos/admin/auth/sso-portal` instead of the full dashboard.
+
+The portal shows Microsoft Entra, Okta, Google Workspace, and generic SAML setup paths. It displays copy-ready SP Entity ID and ACS URL values, accepts pasted or uploaded metadata XML, validates the IdP entity ID, SSO URL, and signing certificate, then lets the customer activate, disable, replace metadata, and run a SAML test redirect.
+
+Portal launch, open, revoke, provider selection, metadata import, activation, disable, and test actions are audit logged with the organization id.
 
 ## FGA pages
 

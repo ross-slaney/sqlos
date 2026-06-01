@@ -9,6 +9,11 @@ SqlOS supports SAML 2.0 enterprise SSO. Each organization can have its own SSO c
 
 ## Setup
 
+You can configure SAML in two ways:
+
+- **Platform-admin setup**: your operator creates the draft and imports metadata from the dashboard or admin API.
+- **Delegated org-admin setup**: your operator or host app creates a one-organization portal session, sends the setup link to the customer IT admin, and lets that admin complete the same SAML setup without access to the global dashboard.
+
 ### 1. Create an SSO draft
 
 **SDK**:
@@ -64,12 +69,58 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-connections/{connect
 
 The connection is now active. Users with `@acme.com` emails will be routed to Entra for authentication.
 
+## Delegated org-admin portal
+
+Create a portal session from the dashboard organization SSO tab or through the admin API:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_...",
+    "provider": "microsoft-entra"
+  }'
+```
+
+The response includes a `setupUrl`. Send that URL with your own mailer or admin workflow. The first browser open consumes the URL token and stores an HttpOnly server-side portal session cookie. Reuse requires a new setup link.
+
+The portal is scoped to one organization and supports:
+
+- provider guides for Microsoft Entra, Okta, Google Workspace, and generic SAML
+- copy-ready SP Entity ID and ACS URL values
+- metadata XML paste or file upload
+- validation before activation
+- activation, disable, metadata replacement, and retest
+
+Hosts can expose the same launch behavior from their own admin surfaces by wrapping `SqlOSSsoPortalService.CreateSessionAsync`, as the example app does with `POST /api/sso-portal-links`.
+
+Revoke a setup link or portal session:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions/{sessionId}/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "customer_cancelled"}'
+```
+
+Portal-scoped APIs live under `/sqlos/admin/auth/sso-portal/api` and require the portal session cookie. They cannot list users, clients, other organizations, or global dashboard pages.
+
 ## Options
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `autoProvisionUsers` | `false` | Create SqlOS users from SAML assertions on first login |
 | `autoLinkByEmail` | `false` | Link SAML logins to existing users by email match |
+
+## Provider notes
+
+| Provider | SP Entity ID field | ACS field | Metadata source |
+| --- | --- | --- | --- |
+| Microsoft Entra | Identifier (Entity ID) | Reply URL | Federation Metadata XML |
+| Okta | Audience URI (SP Entity ID) | Single sign-on URL | IdP metadata |
+| Google Workspace | Entity ID | ACS URL | IdP metadata |
+| Generic SAML | SP Entity ID | ACS URL | SAML metadata XML |
+
+For metadata rotation, open the delegated portal again or use the dashboard, paste or upload the new XML, review the parsed IdP values, and activate. New metadata is validated before it replaces the active configuration.
 
 ## SSO login flow
 

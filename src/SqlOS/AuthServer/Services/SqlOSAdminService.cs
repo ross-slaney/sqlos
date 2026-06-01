@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml;
 using Microsoft.AspNetCore.Http;
@@ -537,6 +538,13 @@ public sealed class SqlOSAdminService
         string connectionId,
         SqlOSImportSsoMetadataRequest request,
         CancellationToken cancellationToken = default)
+        => await ImportSsoMetadataAsync(connectionId, request, enableConnection: true, cancellationToken);
+
+    public async Task<SqlOSSsoConnection> ImportSsoMetadataAsync(
+        string connectionId,
+        SqlOSImportSsoMetadataRequest request,
+        bool enableConnection,
+        CancellationToken cancellationToken = default)
     {
         var connection = await _context.Set<SqlOSSsoConnection>()
             .Include(x => x.Organization)
@@ -547,11 +555,29 @@ public sealed class SqlOSAdminService
         connection.IdentityProviderEntityId = metadata.IdentityProviderEntityId;
         connection.SingleSignOnUrl = metadata.SingleSignOnUrl;
         connection.X509CertificatePem = metadata.X509CertificatePem;
-        connection.IsEnabled = true;
+        connection.IsEnabled = enableConnection;
         connection.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
         return connection;
+    }
+
+    public SqlOSSsoMetadataValidationResult ValidateSsoMetadata(SqlOSImportSsoMetadataRequest request)
+    {
+        try
+        {
+            var metadata = ParseFederationMetadata(request.MetadataXml);
+            return new SqlOSSsoMetadataValidationResult(
+                true,
+                null,
+                metadata.IdentityProviderEntityId,
+                metadata.SingleSignOnUrl,
+                !string.IsNullOrWhiteSpace(metadata.X509CertificatePem));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or XmlException or FormatException or CryptographicException)
+        {
+            return new SqlOSSsoMetadataValidationResult(false, ex.Message, null, null, false);
+        }
     }
 
     public async Task<SqlOSClientApplication> RequireClientAsync(
@@ -1416,9 +1442,7 @@ public sealed class SqlOSAdminService
                 x.Organization!.PrimaryDomain,
                 x.AutoProvisionUsers,
                 x.AutoLinkByEmail,
-                SetupStatus = string.IsNullOrWhiteSpace(x.IdentityProviderEntityId) || string.IsNullOrWhiteSpace(x.SingleSignOnUrl) || string.IsNullOrWhiteSpace(x.X509CertificatePem)
-                    ? "draft"
-                    : "configured",
+                SetupStatus = GetSsoSetupStatus(x),
                 ServiceProviderEntityId = GetServiceProviderEntityId(),
                 AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)
             })
@@ -1448,7 +1472,7 @@ public sealed class SqlOSAdminService
                 x.AutoLinkByEmail,
                 SetupStatus = string.IsNullOrWhiteSpace(x.IdentityProviderEntityId) || string.IsNullOrWhiteSpace(x.SingleSignOnUrl) || string.IsNullOrWhiteSpace(x.X509CertificatePem)
                     ? "draft"
-                    : "configured"
+                    : x.IsEnabled ? "active" : "ready_to_activate"
             });
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -1908,6 +1932,18 @@ public sealed class SqlOSAdminService
     }
 
     public string GetServiceProviderEntityId() => _options.Issuer;
+
+    public static string GetSsoSetupStatus(SqlOSSsoConnection connection)
+    {
+        if (string.IsNullOrWhiteSpace(connection.IdentityProviderEntityId)
+            || string.IsNullOrWhiteSpace(connection.SingleSignOnUrl)
+            || string.IsNullOrWhiteSpace(connection.X509CertificatePem))
+        {
+            return "draft";
+        }
+
+        return connection.IsEnabled ? "active" : "ready_to_activate";
+    }
 
     public string GetAssertionConsumerServiceUrl(string connectionId)
     {
