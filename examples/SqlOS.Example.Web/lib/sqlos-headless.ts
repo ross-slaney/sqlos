@@ -12,8 +12,10 @@ export type HeadlessViewModel = {
   error?: string | null;
   info?: string | null;
   challengeToken?: string | null;
+  signupToken?: string | null;
   pendingToken?: string | null;
   email?: string | null;
+  phoneNumber?: string | null;
   displayName?: string | null;
   uiContext?: Record<string, unknown> | null;
   providers?: HeadlessProvider[];
@@ -46,6 +48,7 @@ export type HeadlessSettings = {
   enabledCredentialTypes?: string[];
   localPasswordRuntimeEnabled?: boolean;
   emailOtpRuntimeConfigured?: boolean;
+  phoneOtpRuntimeConfigured?: boolean;
 };
 
 export type HeadlessActionResult = {
@@ -112,6 +115,14 @@ export async function headlessVerifyEmailOtp(requestId: string, challengeToken: 
   return headlessPost("/email-otp/verify", { requestId, challengeToken, code });
 }
 
+export async function headlessRequestPhoneOtp(requestId: string, phoneNumber: string): Promise<HeadlessActionResult> {
+  return headlessPost("/phone-otp/start", { requestId, phoneNumber });
+}
+
+export async function headlessVerifyPhoneOtp(requestId: string, challengeToken: string, code: string): Promise<HeadlessActionResult> {
+  return headlessPost("/phone-otp/verify", { requestId, challengeToken, code });
+}
+
 export async function headlessSignup(
   requestId: string,
   displayName: string,
@@ -128,6 +139,31 @@ export async function headlessSignup(
     organizationName,
     customFields: customFields ?? {},
   });
+}
+
+export async function headlessRequestPhoneOtpSignup(
+  requestId: string,
+  displayName: string,
+  phoneNumber: string,
+  organizationName: string,
+  customFields?: Record<string, string>,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/signup/phone-otp/start", {
+    requestId,
+    displayName,
+    phoneNumber,
+    organizationName,
+    customFields: customFields ?? {},
+  });
+}
+
+export async function headlessVerifyPhoneOtpSignup(
+  requestId: string,
+  signupToken: string,
+  challengeToken: string,
+  code: string,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/signup/phone-otp/verify", { requestId, signupToken, challengeToken, code });
 }
 
 export async function headlessSelectOrganization(pendingToken: string, organizationId: string): Promise<HeadlessActionResult> {

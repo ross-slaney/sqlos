@@ -24,6 +24,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSPhoneOtpService? _phoneOtpService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
@@ -37,7 +38,8 @@ public sealed class SqlOSAuthService
         SqlOSEmailOtpService emailOtpService,
         SqlOSInvitationService? invitationService = null,
         SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        SqlOSPhoneOtpService? phoneOtpService = null)
     {
         _context = context;
         _options = options.Value;
@@ -45,6 +47,7 @@ public sealed class SqlOSAuthService
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
         _passwordLoginAbuseService = passwordLoginAbuseService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
@@ -144,6 +147,18 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
         => await _emailOtpService.StartSignupForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSPhoneOtpStartResult> RequestPhoneOtpAsync(
+        SqlOSPhoneOtpStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequirePhoneOtpService().StartForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSPhoneOtpSignupStartResult> RequestPhoneOtpSignupAsync(
+        SqlOSPhoneOtpSignupStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequirePhoneOtpService().StartSignupForClientAsync(request, httpContext, cancellationToken);
 
     public async Task<SqlOSEmailInvitationResult> CreateEmailInvitationAsync(
         SqlOSCreateEmailInvitationRequest request,
@@ -312,6 +327,111 @@ public sealed class SqlOSAuthService
             verification.AuthenticationMethod,
             httpContext,
             cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> VerifyPhoneOtpAsync(
+        SqlOSPhoneOtpVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await RequirePhoneOtpService().VerifyAsync(request, cancellationToken);
+        if (verification.Challenge.ClientApplicationId == null)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstAsync(x => x.Id == verification.Challenge.ClientApplicationId, cancellationToken);
+
+        return await FinalizeClientLoginAsync(
+            verification.User,
+            client,
+            verification.Challenge.RequestedOrganizationId,
+            verification.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> VerifyPhoneOtpSignupAsync(
+        SqlOSPhoneOtpSignupVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+        SqlOSPhoneOtpSignupVerificationResult? verification = null;
+
+        try
+        {
+            if (SupportsDatabaseTransactions())
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            verification = await RequirePhoneOtpService().VerifySignupAsync(
+                request,
+                expectedAuthorizationRequestId: null,
+                requireAuthorizationRequestMatch: false,
+                cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(verification.ClientApplicationId))
+            {
+                throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            }
+
+            var client = await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
+
+            signup = await CreatePhoneOtpSignupUserAsync(
+                verification.DisplayName,
+                verification.PhoneNumber,
+                verification.OrganizationName,
+                verification.OrganizationId,
+                cancellationToken);
+
+            var selectedOrganizationId = verification.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+            var result = await FinalizeClientLoginAsync(
+                signup.User,
+                client,
+                selectedOrganizationId,
+                signup.AuthenticationMethod,
+                httpContext,
+                cancellationToken);
+
+            await RequirePhoneOtpService().ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            await _adminService.RecordAuditAsync(
+                "user.signup.phone_otp",
+                "user",
+                signup.User.Id,
+                userId: signup.User.Id,
+                organizationId: selectedOrganizationId,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return result;
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            else
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    verification?.OrganizationId,
+                    verification?.OrganizationName,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSLoginResult> VerifyEmailOtpSignupAsync(
@@ -1200,6 +1320,44 @@ public sealed class SqlOSAuthService
         return new SqlOSPasswordAuthenticationResult(user, organizations, "email_otp");
     }
 
+    private async Task<SqlOSPasswordAuthenticationResult> CreatePhoneOtpSignupUserAsync(
+        string displayName,
+        string phoneNumber,
+        string? organizationName,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
+        if (!credentialSettings.PhoneOtpEnabled)
+        {
+            throw new InvalidOperationException("Phone sign-in is unavailable.");
+        }
+
+        SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
+
+        var user = new SqlOSUser
+        {
+            Id = _cryptoService.GenerateId("usr"),
+            DisplayName = displayName,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _context.Set<SqlOSUser>().Add(user);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RequirePhoneOtpService().AddVerifiedPhoneNumberAsync(user, phoneNumber, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(organizationName))
+        {
+            var createdOrganization = await _adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(organizationName, null),
+                cancellationToken);
+            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
+        }
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "phone_otp");
+    }
+
     private async Task<SqlOSPasswordAuthenticationResult> CreateInvitationSignupUserAsync(
         string displayName,
         string email,
@@ -1258,11 +1416,22 @@ public sealed class SqlOSAuthService
             .FirstOrDefaultAsync(x => x.Id == signup.User.Id, cancellationToken);
         if (user != null)
         {
+            var phoneNumbers = await _context.Set<SqlOSUserPhoneNumber>()
+                .Where(x => x.UserId == user.Id)
+                .ToListAsync(cancellationToken);
+            if (phoneNumbers.Count > 0)
+            {
+                _context.Set<SqlOSUserPhoneNumber>().RemoveRange(phoneNumbers);
+            }
+
             _context.Set<SqlOSUser>().Remove(user);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
     }
+
+    private SqlOSPhoneOtpService RequirePhoneOtpService()
+        => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
 
     private async Task<SqlOSLoginResult> FinalizeClientLoginAsync(
         SqlOSUser user,

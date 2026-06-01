@@ -41,6 +41,24 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSUserPhoneNumber>(entity =>
+        {
+            entity.ToTable("SqlOSUserPhoneNumbers", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.PhoneNumberHash)
+                .IsUnique()
+                .HasFilter("[RemovedAt] IS NULL");
+            entity.HasIndex(x => new { x.UserId, x.RemovedAt });
+            entity.Property(x => x.PhoneNumber).HasMaxLength(32);
+            entity.Property(x => x.PhoneNumberHash).HasMaxLength(128);
+            entity.Property(x => x.DisplayValueEncrypted).HasMaxLength(2048);
+            entity.Property(x => x.RemovalReason).HasMaxLength(120);
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.PhoneNumbers)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSCredential>(entity =>
         {
             entity.ToTable("SqlOSCredentials", schema, t => t.ExcludeFromMigrations());
@@ -357,6 +375,45 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasOne(x => x.UserEmail)
                 .WithMany()
                 .HasForeignKey(x => x.UserEmailId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AuthorizationRequest)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorizationRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany()
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSPhoneOtpChallenge>(entity =>
+        {
+            entity.ToTable("SqlOSPhoneOtpChallenges", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ChallengeTokenHash).IsUnique();
+            entity.HasIndex(x => new { x.PhoneNumberHash, x.CreatedAt });
+            entity.HasIndex(x => new { x.UserId, x.CreatedAt });
+            entity.HasIndex(x => new { x.IpAddress, x.CreatedAt });
+            entity.HasIndex(x => new { x.ClientApplicationId, x.CreatedAt });
+            entity.Property(x => x.ChallengeTokenHash).HasMaxLength(128);
+            entity.Property(x => x.PhoneNumberHash).HasMaxLength(128);
+            entity.Property(x => x.PhoneNumberEncrypted).HasMaxLength(2048);
+            entity.Property(x => x.MaskedPhoneNumber).HasMaxLength(32);
+            entity.Property(x => x.Purpose).HasMaxLength(32);
+            entity.Property(x => x.Provider).HasMaxLength(40);
+            entity.Property(x => x.ProviderChallengeId).HasMaxLength(128);
+            entity.Property(x => x.ProviderStatus).HasMaxLength(80);
+            entity.Property(x => x.InvalidatedReason).HasMaxLength(120);
+            entity.Property(x => x.IpAddress).HasMaxLength(128);
+            entity.Property(x => x.UserAgent).HasMaxLength(512);
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.UserPhoneNumber)
+                .WithMany()
+                .HasForeignKey(x => x.UserPhoneNumberId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.AuthorizationRequest)
                 .WithMany()

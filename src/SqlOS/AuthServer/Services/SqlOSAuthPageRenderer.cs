@@ -51,10 +51,13 @@ public static class SqlOSAuthPageRenderer
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "password");
         var supportsEmailOtp = model.Settings.EmailOtpRuntimeConfigured
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "email_otp");
+        var supportsPhoneOtp = model.Settings.PhoneOtpRuntimeConfigured
+            && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "phone_otp");
         var supportsPasswordSignup = supportsPassword && model.Settings.EnablePasswordSignup;
         var supportsEmailOtpSignup = supportsEmailOtp;
+        var supportsPhoneOtpSignup = model.Invitation == null && supportsPhoneOtp;
         var supportsInvitationSignup = model.Invitation != null && supportsEmailOtpSignup;
-        var supportsSignup = supportsPasswordSignup || supportsEmailOtpSignup;
+        var supportsSignup = supportsPasswordSignup || supportsEmailOtpSignup || supportsPhoneOtpSignup;
         var signupLink = supportsSignup
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Get started</a>"
             : string.Empty;
@@ -65,7 +68,14 @@ public static class SqlOSAuthPageRenderer
         var emailOtpLink = supportsEmailOtp
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Use an email code instead</a>"
             : string.Empty;
+        var phoneOtpLink = supportsPhoneOtp
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Use a phone code instead</a>"
+            : string.Empty;
+        var phoneOtpSignupLink = supportsPhoneOtpSignup
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/signup/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Create account with phone code</a>"
+            : string.Empty;
         var signInAgainLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login"))}\">Sign in again</a>";
+        var signOutLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/logout"))}\">Sign out</a>";
         var errorMarkup = BuildCallout("error", model.Error);
         var infoMarkup = BuildCallout("info", model.Info);
         var invitationMarkup = RenderInvitationSummary(model.Invitation);
@@ -123,6 +133,7 @@ public static class SqlOSAuthPageRenderer
                 {{RenderPrimaryAction("Create account", "Creating account")}}
                 </form>
                 {{RenderProvidersSection(model)}}
+                {{RenderFooterLinks(phoneOtpSignupLink)}}
                 {{RenderFooterPrompt("Already have an account?", loginLink)}}
                 """
             : supportsEmailOtpSignup
@@ -143,6 +154,29 @@ public static class SqlOSAuthPageRenderer
                       </label>
                       {{organizationField}}
                       {{RenderPrimaryAction("Email me a code", "Sending code")}}
+                    </form>
+                    {{RenderProvidersSection(model)}}
+                    {{RenderFooterLinks(phoneOtpSignupLink)}}
+                    {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                    """
+            : supportsPhoneOtpSignup
+                ? $$"""
+                    {{RenderPanelIntro("Create account", "Verify your phone with a one-time code to create your account.")}}
+                    <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/phone-otp/start"))}}">
+                      {{requestIdInput}}
+                      {{invitationTokenInput}}
+                      {{deviceUserCodeInput}}
+                      <input type="hidden" name="mode" value="{{encodedMode}}" />
+                      <label class="field">
+                        <span>Display name</span>
+                        <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                      </label>
+                      <label class="field">
+                        <span>Phone</span>
+                        <input name="phoneNumber" type="tel" value="{{Html(model.PhoneNumber ?? string.Empty)}}" placeholder="+1 202 555 0105" autocomplete="tel" required />
+                      </label>
+                      {{organizationField}}
+                      {{RenderPrimaryAction("Text me a code", "Sending code")}}
                     </form>
                     {{RenderProvidersSection(model)}}
                     {{RenderFooterPrompt("Already have an account?", loginLink)}}
@@ -268,6 +302,7 @@ public static class SqlOSAuthPageRenderer
                   {{RenderPrimaryAction("Continue", "Signing in")}}
                 </form>
                 {{(string.IsNullOrWhiteSpace(emailOtpLink) ? string.Empty : RenderFooterLinks(emailOtpLink))}}
+                {{(string.IsNullOrWhiteSpace(phoneOtpLink) ? string.Empty : RenderFooterLinks(phoneOtpLink))}}
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Don't have an account?", signupLink)}}
                 """,
@@ -283,8 +318,80 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Email me a code", "Sending code")}}
                 </form>
-                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, phoneOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderProvidersSection(model)}}
+                """,
+            "phone-otp" => $$"""
+                {{RenderPanelIntro("Phone Code", "Get a one-time code sent to your phone.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/phone-otp/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <label class="field">
+                    <span>Phone</span>
+                    <input name="phoneNumber" type="tel" value="{{Html(model.PhoneNumber ?? string.Empty)}}" placeholder="+1 202 555 0105" autocomplete="tel" required />
+                  </label>
+                  {{RenderPrimaryAction("Text me a code", "Sending code")}}
+                </form>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, emailOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderProvidersSection(model)}}
+                """,
+            "phone-otp-verify" => $$"""
+                {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your phone.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/phone-otp/verify"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
+                  <input type="hidden" name="phoneNumber" value="{{Html(model.PhoneNumber ?? string.Empty)}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify code", "Verifying code")}}
+                </form>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] {
+                    $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Send a new code</a>",
+                    passwordLink,
+                    emailOtpLink
+                }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                """,
+            "phone-otp-signup" => $$"""
+                {{RenderPanelIntro("Create account", "Verify your phone with a one-time code to create your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/phone-otp/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <input type="hidden" name="mode" value="{{encodedMode}}" />
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required />
+                  </label>
+                  <label class="field">
+                    <span>Phone</span>
+                    <input name="phoneNumber" type="tel" value="{{Html(model.PhoneNumber ?? string.Empty)}}" placeholder="+1 202 555 0105" autocomplete="tel" required />
+                  </label>
+                  {{organizationField}}
+                  {{RenderPrimaryAction("Text me a code", "Sending code")}}
+                </form>
+                {{RenderFooterPrompt("Already have an account?", loginLink)}}
+                """,
+            "phone-otp-signup-verify" => $$"""
+                {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your phone to create your account.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/phone-otp/verify"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <input type="hidden" name="signupToken" value="{{Html(model.SignupToken ?? string.Empty)}}" />
+                  <input type="hidden" name="challengeToken" value="{{Html(model.ChallengeToken ?? string.Empty)}}" />
+                  <input type="hidden" name="phoneNumber" value="{{Html(model.PhoneNumber ?? string.Empty)}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify and create account", "Verifying code")}}
+                </form>
+                {{RenderFooterLinks($"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/signup/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Start over</a>")}}
                 """,
             "email-otp-verify" => $$"""
                 {{RenderPanelIntro("Enter Code", "Use the one-time code we sent to your email address.")}}
@@ -302,7 +409,8 @@ public static class SqlOSAuthPageRenderer
                 </form>
                 {{RenderFooterLinks(string.Join(string.Empty, new[] {
                     $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Send a new code</a>",
-                    passwordLink
+                    passwordLink,
+                    phoneOtpLink
                 }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 """,
             "email-otp-signup-verify" => $$"""
@@ -340,6 +448,36 @@ public static class SqlOSAuthPageRenderer
                 </div>
                 {{RenderFooterLinks(signInAgainLink)}}
                 """,
+            "signed-in" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>You are signed in.</strong>
+                    <p>Your SqlOS auth session is active. Return to the application that sent you here to continue.</p>
+                  </div>
+                </div>
+                {{RenderFooterLinks(signOutLink)}}
+                """,
+            "signed-up" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>Your account is ready.</strong>
+                    <p>Your SqlOS auth session is active. Return to the application that sent you here to continue.</p>
+                  </div>
+                </div>
+                {{RenderFooterLinks(signOutLink)}}
+                """,
+            "invitation-accepted" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>Invitation accepted.</strong>
+                    <p>Your SqlOS auth session is active. Return to the application that sent you here to continue.</p>
+                  </div>
+                </div>
+                {{RenderFooterLinks(signOutLink)}}
+                """,
             _ => $$"""
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/identify"))}}" data-flow-kind="hrd">
                   {{requestIdInput}}
@@ -356,6 +494,7 @@ public static class SqlOSAuthPageRenderer
                   </div>
                 </form>
                 {{RenderProvidersSection(model)}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { phoneOtpLink, emailOtpLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderFooterPrompt("Don't have an account?", signupLink)}}
                 """
         };
@@ -1292,6 +1431,7 @@ public sealed record SqlOSAuthPageViewModel(
     string? InvitationToken = null,
     SqlOSEmailInvitationResult? Invitation = null,
     string? DeviceUserCode = null,
-    SqlOSDeviceAuthorizationResolveResult? DeviceAuthorization = null);
+    SqlOSDeviceAuthorizationResolveResult? DeviceAuthorization = null,
+    string? PhoneNumber = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

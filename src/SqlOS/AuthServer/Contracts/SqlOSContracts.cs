@@ -456,7 +456,8 @@ public sealed record SqlOSAuthPageSettingsDto(
     bool ManagedByStartupSeed,
     bool HeadlessCapabilityRegistered,
     bool LocalPasswordRuntimeEnabled,
-    bool EmailOtpRuntimeConfigured);
+    bool EmailOtpRuntimeConfigured,
+    bool PhoneOtpRuntimeConfigured = false);
 
 public sealed record SqlOSAuthEmailBrandingSettingsDto(
     string ApplicationName,

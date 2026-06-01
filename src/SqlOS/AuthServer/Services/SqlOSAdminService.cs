@@ -66,6 +66,20 @@ public sealed class SqlOSAdminService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task CleanupExpiredPhoneOtpChallengesAsync(CancellationToken cancellationToken = default)
+    {
+        var expired = await _context.Set<SqlOSPhoneOtpChallenge>()
+            .Where(x => x.ExpiresAt < DateTime.UtcNow || x.ConsumedAt != null || x.InvalidatedAt != null)
+            .ToListAsync(cancellationToken);
+        if (expired.Count == 0)
+        {
+            return;
+        }
+
+        _context.Set<SqlOSPhoneOtpChallenge>().RemoveRange(expired);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task CleanupExpiredRefreshTokensAsync(CancellationToken cancellationToken = default)
     {
         var expired = await _context.Set<SqlOSRefreshToken>()

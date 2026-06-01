@@ -41,6 +41,15 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
     var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
         ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
         ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
+    var enablePhoneOtp = builder.Configuration.GetValue<bool>("SqlOS:PhoneOtp:Enabled");
+    var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
+        ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
+    var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
+        ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
+    var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
+        ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
+    var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
+        ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
 
     if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
     {
@@ -74,6 +83,17 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
         emailOtp.FromAddress = emailFromAddress;
         emailOtp.ApplicationName = "SqlOS Example";
     });
+    auth.ConfigurePhoneOtp(phone =>
+    {
+        phone.Enabled = enablePhoneOtp;
+        phone.TwilioAccountSid = twilioAccountSid;
+        phone.TwilioAuthToken = twilioAuthToken;
+        phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
+        if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+        {
+            phone.DefaultRegion = phoneOtpDefaultRegion;
+        }
+    });
 
     var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
         ?? builder.Configuration["ExampleFrontend:Origin"]
@@ -89,7 +109,9 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
         page.BackgroundColor = "#f8fafc";
         page.Layout = "split";
         page.EnablePasswordSignup = true;
-        page.EnabledCredentialTypes = ["password", "email_otp"];
+        page.EnabledCredentialTypes = enablePhoneOtp
+            ? ["password", "email_otp", "phone_otp"]
+            : ["password", "email_otp"];
     });
     auth.SeedAuthEmails(email =>
     {

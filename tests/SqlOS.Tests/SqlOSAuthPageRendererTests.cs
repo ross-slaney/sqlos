@@ -78,6 +78,22 @@ public sealed class SqlOSAuthPageRendererTests
     }
 
     [TestMethod]
+    public void RenderPage_StandaloneStatusModes_DoNotShowLoginForm()
+    {
+        var signedInHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "signed-in"));
+        var signedUpHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "signed-up"));
+        var invitationHtml = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "invitation-accepted"));
+
+        signedInHtml.Should().Contain("You are signed in.");
+        signedUpHtml.Should().Contain("Your account is ready.");
+        invitationHtml.Should().Contain("Invitation accepted.");
+        signedInHtml.Should().Contain("href=\"/sqlos/auth/logout\"");
+        signedInHtml.Should().NotContain("action=\"/sqlos/auth/login/identify\"");
+        signedUpHtml.Should().NotContain("action=\"/sqlos/auth/login/identify\"");
+        invitationHtml.Should().NotContain("action=\"/sqlos/auth/login/identify\"");
+    }
+
+    [TestMethod]
     public void RenderPage_StackedLayout_UsesConfiguredBrandingWithoutSecondaryPanel()
     {
         var settings = new SqlOSAuthPageSettingsDto(
