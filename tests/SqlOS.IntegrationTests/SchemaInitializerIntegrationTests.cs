@@ -33,6 +33,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
                      "SqlOSClientApplications",
+                     "SqlOSApplicationAssignments",
                      "SqlOSSessions",
                      "SqlOSRefreshTokens",
                      "SqlOSSigningKeys",
@@ -74,7 +75,8 @@ public sealed class SchemaInitializerIntegrationTests
                      "MetadataLastModifiedAt",
                      "LastSeenAt",
                      "DisabledAt",
-                     "DisabledReason"
+                     "DisabledReason",
+                     "AccessMode"
                  })
         {
             Assert.IsTrue(await ColumnExistsAsync("SqlOSClientApplications", column), $"Column SqlOSClientApplications.{column} should exist.");
@@ -82,6 +84,7 @@ public sealed class SchemaInitializerIntegrationTests
 
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "Resource"), "Column SqlOSSessions.Resource should exist.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "EffectiveAudience"), "Column SqlOSSessions.EffectiveAudience should exist.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "OrganizationId"), "Column SqlOSSessions.OrganizationId should exist.");
     }
 
     [TestMethod]
@@ -96,6 +99,7 @@ public sealed class SchemaInitializerIntegrationTests
         await initializer.EnsureSchemaAsync();
 
         Assert.IsTrue(await ColumnExistsAsync("SqlOSClientApplications", "RegistrationSource"));
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSClientApplications", "AccessMode"));
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "EffectiveAudience"));
     }
 

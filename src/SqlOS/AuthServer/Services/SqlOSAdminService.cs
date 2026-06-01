@@ -8,6 +8,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -96,16 +97,24 @@ public sealed class SqlOSAdminService
 
     public async Task UpsertSeededClientsAsync(CancellationToken cancellationToken = default)
     {
-        if (_options.ClientSeeds.Count == 0)
+        var seeds = BuildStartupClientSeeds();
+        if (seeds.Count == 0)
         {
             return;
         }
 
-        foreach (var seed in _options.ClientSeeds)
+        foreach (var seed in seeds)
         {
             var normalized = NormalizeSeededClient(seed);
             var existing = await _context.Set<SqlOSClientApplication>()
                 .FirstOrDefaultAsync(x => x.ClientId == normalized.ClientId, cancellationToken);
+
+            if (_options.SingleApplication != null
+                && existing != null
+                && !string.Equals(existing.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Single-application client id '{normalized.ClientId}' already exists. Choose a different ClientId or remove the existing manual client.");
+            }
 
             if (existing == null)
             {
@@ -128,7 +137,8 @@ public sealed class SqlOSAdminService
                     RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
                     CreatedAt = DateTime.UtcNow,
                     IsFirstParty = normalized.IsFirstParty,
-                    IsActive = normalized.IsActive
+                    IsActive = normalized.IsActive,
+                    AccessMode = SqlOSApplicationAccessModes.AllOrganizations
                 });
                 continue;
             }
@@ -149,6 +159,7 @@ public sealed class SqlOSAdminService
             existing.AllowDeviceAuthorization = normalized.AllowDeviceAuthorization;
             existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
             existing.IsFirstParty = normalized.IsFirstParty;
+            existing.AccessMode = NormalizeAccessMode(existing.AccessMode);
             if (existing.DisabledAt != null)
             {
                 existing.IsActive = false;
@@ -741,10 +752,7 @@ public sealed class SqlOSAdminService
         CancellationToken cancellationToken = default)
     {
         var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var managedClientIds = _options.ClientSeeds
-            .Select(static seed => seed.ClientId)
-            .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
-            .ToHashSet(StringComparer.Ordinal);
+        var managedClientIds = GetStartupManagedClientIds();
 
         var clients = await _context.Set<SqlOSClientApplication>()
             .AsNoTracking()
@@ -802,10 +810,7 @@ public sealed class SqlOSAdminService
 
     public async Task<object> GetClientDetailAsync(string clientApplicationId, CancellationToken cancellationToken = default)
     {
-        var managedClientIds = _options.ClientSeeds
-            .Select(static seed => seed.ClientId)
-            .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
-            .ToHashSet(StringComparer.Ordinal);
+        var managedClientIds = GetStartupManagedClientIds();
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
         var duplicateFingerprint = CalculateDuplicateFingerprint(client);
         var duplicateCount = 0;
@@ -844,6 +849,7 @@ public sealed class SqlOSAdminService
             item.Name,
             item.Description,
             item.Audience,
+            item.AccessMode,
             item.ClientType,
             item.RegistrationSource,
             item.SourceLabel,
@@ -948,6 +954,365 @@ public sealed class SqlOSAdminService
             },
             cancellationToken: cancellationToken);
         return revokedCount;
+    }
+
+    public async Task<SqlOSClientApplication> SetApplicationAccessModeAsync(
+        string clientApplicationId,
+        SqlOSSetApplicationAccessModeRequest request,
+        string actorType = "admin",
+        string? actorId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var accessMode = NormalizeAccessMode(request.AccessMode);
+        var previousMode = NormalizeAccessMode(client.AccessMode);
+        client.AccessMode = accessMode;
+
+        if (accessMode == SqlOSApplicationAccessModes.Disabled)
+        {
+            client.IsActive = false;
+            client.DisabledAt ??= DateTime.UtcNow;
+            client.DisabledReason ??= "application_access_disabled";
+            await RevokeClientSessionsInternalAsync(client.Id, "application_access_disabled", cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "application.access_mode.changed",
+            actorType,
+            actorId,
+            data: new
+            {
+                client_application_id = client.Id,
+                client_id = client.ClientId,
+                previous_access_mode = previousMode,
+                access_mode = accessMode
+            },
+            cancellationToken: cancellationToken);
+        return client;
+    }
+
+    public async Task<object> ListApplicationAssignmentsAsync(
+        string clientApplicationId,
+        bool includeRevoked = false,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var query = _context.Set<SqlOSApplicationAssignment>()
+            .AsNoTracking()
+            .Include(x => x.Organization)
+            .Where(x => x.ClientApplicationId == client.Id);
+
+        if (!includeRevoked)
+        {
+            query = query.Where(x => x.RevokedAt == null);
+        }
+
+        var assignments = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new
+            {
+                x.Id,
+                x.ClientApplicationId,
+                x.OrganizationId,
+                Organization = x.Organization == null ? null : x.Organization.Name,
+                x.PrincipalType,
+                x.PrincipalId,
+                x.RoleKey,
+                x.Access,
+                x.Reason,
+                x.CreatedAt,
+                x.CreatedByActorType,
+                x.CreatedByActorId,
+                x.RevokedAt,
+                x.RevokedByActorType,
+                x.RevokedByActorId
+            })
+            .ToListAsync(cancellationToken);
+
+        return new
+        {
+            client.Id,
+            client.ClientId,
+            client.Name,
+            AccessMode = NormalizeAccessMode(client.AccessMode),
+            Assignments = assignments
+        };
+    }
+
+    public async Task<SqlOSApplicationAssignment> AssignApplicationAsync(
+        string clientApplicationId,
+        SqlOSCreateApplicationAssignmentRequest request,
+        string actorType = "admin",
+        string? actorId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var normalized = NormalizeAssignmentRequest(request);
+
+        var assignment = new SqlOSApplicationAssignment
+        {
+            Id = _cryptoService.GenerateId("asa"),
+            ClientApplicationId = client.Id,
+            OrganizationId = normalized.OrganizationId,
+            PrincipalType = normalized.PrincipalType,
+            PrincipalId = normalized.PrincipalId,
+            RoleKey = normalized.RoleKey,
+            Access = normalized.Access,
+            Reason = normalized.Reason,
+            CreatedAt = DateTime.UtcNow,
+            CreatedByActorType = actorType,
+            CreatedByActorId = actorId
+        };
+
+        _context.Set<SqlOSApplicationAssignment>().Add(assignment);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "application.assignment.created",
+            actorType,
+            actorId,
+            organizationId: assignment.OrganizationId,
+            data: new
+            {
+                client_application_id = client.Id,
+                client_id = client.ClientId,
+                assignment_id = assignment.Id,
+                assignment.PrincipalType,
+                assignment.PrincipalId,
+                assignment.RoleKey,
+                assignment.Access
+            },
+            cancellationToken: cancellationToken);
+        return assignment;
+    }
+
+    public async Task<SqlOSApplicationAssignment> RevokeApplicationAssignmentAsync(
+        string clientApplicationId,
+        string assignmentId,
+        SqlOSRevokeApplicationAssignmentRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        var assignment = await _context.Set<SqlOSApplicationAssignment>()
+            .FirstOrDefaultAsync(x => x.Id == assignmentId && x.ClientApplicationId == client.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Application assignment was not found.");
+
+        if (assignment.RevokedAt == null)
+        {
+            assignment.RevokedAt = DateTime.UtcNow;
+            assignment.RevokedByActorType = string.IsNullOrWhiteSpace(request?.ActorType) ? "admin" : request.ActorType!.Trim();
+            assignment.RevokedByActorId = string.IsNullOrWhiteSpace(request?.ActorId) ? null : request.ActorId!.Trim();
+            await _context.SaveChangesAsync(cancellationToken);
+            await RecordAuditAsync(
+                "application.assignment.revoked",
+                assignment.RevokedByActorType,
+                assignment.RevokedByActorId,
+                organizationId: assignment.OrganizationId,
+                data: new
+                {
+                    client_application_id = client.Id,
+                    client_id = client.ClientId,
+                    assignment_id = assignment.Id,
+                    assignment.PrincipalType,
+                    assignment.PrincipalId,
+                    assignment.RoleKey,
+                    assignment.Access,
+                    reason = request?.Reason
+                },
+                cancellationToken: cancellationToken);
+        }
+
+        return assignment;
+    }
+
+    public async Task<SqlOSApplicationAccessCheckResult> CheckApplicationAccessAsync(
+        string clientApplicationId,
+        string? userId,
+        string? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        return await CheckApplicationAccessAsync(client, userId, organizationId, cancellationToken: cancellationToken);
+    }
+
+    public async Task EnsureApplicationAccessAsync(
+        SqlOSClientApplication client,
+        string? userId,
+        string? organizationId,
+        string eventType,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var decision = await CheckApplicationAccessAsync(client, userId, organizationId, recordDeniedAudit: true, eventType, ipAddress, cancellationToken);
+        if (!decision.Allowed)
+        {
+            throw new InvalidOperationException("Application access is not allowed.");
+        }
+    }
+
+    public async Task<SqlOSApplicationAccessCheckResult> CheckApplicationAccessAsync(
+        SqlOSClientApplication client,
+        string? userId,
+        string? organizationId,
+        bool recordDeniedAudit = false,
+        string eventType = "application.access.checked",
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await EvaluateApplicationAccessAsync(client, userId, organizationId, cancellationToken);
+        if (!result.Allowed && recordDeniedAudit)
+        {
+            await RecordAuditAsync(
+                eventType,
+                "client",
+                client.Id,
+                userId: userId,
+                organizationId: organizationId,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    client_application_id = client.Id,
+                    client_id = client.ClientId,
+                    result.AccessMode,
+                    result.Source,
+                    result.AssignmentId,
+                    result.Reason
+                },
+                cancellationToken: cancellationToken);
+        }
+
+        return result;
+    }
+
+    public async Task<object> ListApplicationsForOrganizationAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        var organization = await _context.Set<SqlOSOrganization>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+
+        var clients = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+        var results = new List<object>();
+        foreach (var client in clients)
+        {
+            var decision = await CheckApplicationAccessAsync(client, userId: null, organizationId, cancellationToken: cancellationToken);
+            if (decision.Allowed)
+            {
+                results.Add(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.Name,
+                    client.Audience,
+                    AccessMode = decision.AccessMode,
+                    decision.Source,
+                    decision.AssignmentId
+                });
+            }
+        }
+
+        return new
+        {
+            organization.Id,
+            organization.Name,
+            Applications = results
+        };
+    }
+
+    public async Task<object> ListApplicationsForUserAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Set<SqlOSUser>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var memberships = await _context.Set<SqlOSMembership>()
+            .AsNoTracking()
+            .Include(x => x.Organization)
+            .Where(x => x.UserId == userId && x.IsActive)
+            .OrderBy(x => x.Organization!.Name)
+            .ToListAsync(cancellationToken);
+        var clients = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var rows = new List<object>();
+        foreach (var client in clients)
+        {
+            if (memberships.Count == 0)
+            {
+                var decision = await CheckApplicationAccessAsync(client, userId, organizationId: null, cancellationToken: cancellationToken);
+                if (decision.Allowed)
+                {
+                    rows.Add(new
+                    {
+                        client.Id,
+                        client.ClientId,
+                        client.Name,
+                        client.Audience,
+                        OrganizationId = (string?)null,
+                        Organization = (string?)null,
+                        AccessMode = decision.AccessMode,
+                        decision.Source,
+                        decision.AssignmentId
+                    });
+                }
+            }
+
+            foreach (var membership in memberships)
+            {
+                var decision = await CheckApplicationAccessAsync(client, userId, membership.OrganizationId, cancellationToken: cancellationToken);
+                if (!decision.Allowed)
+                {
+                    continue;
+                }
+
+                rows.Add(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.Name,
+                    client.Audience,
+                    membership.OrganizationId,
+                    Organization = membership.Organization?.Name,
+                    AccessMode = decision.AccessMode,
+                    decision.Source,
+                    decision.AssignmentId
+                });
+            }
+        }
+
+        var sessions = await _context.Set<SqlOSSession>()
+            .AsNoTracking()
+            .Include(x => x.ClientApplication)
+            .Where(x => x.UserId == userId)
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(20)
+            .Select(x => new
+            {
+                x.Id,
+                x.ClientApplicationId,
+                ClientId = x.ClientApplication == null ? null : x.ClientApplication.ClientId,
+                ClientName = x.ClientApplication == null ? null : x.ClientApplication.Name,
+                x.OrganizationId,
+                x.CreatedAt,
+                x.LastSeenAt,
+                x.RevokedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        return new
+        {
+            user.Id,
+            user.DisplayName,
+            user.DefaultEmail,
+            Applications = rows,
+            RecentSessions = sessions
+        };
     }
 
     public async Task<int> CleanupStaleDynamicClientsAsync(CancellationToken cancellationToken = default)
@@ -1247,6 +1612,281 @@ public sealed class SqlOSAdminService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task<SqlOSApplicationAccessCheckResult> EvaluateApplicationAccessAsync(
+        SqlOSClientApplication client,
+        string? userId,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        var accessMode = NormalizeAccessMode(client.AccessMode);
+        if (!client.IsActive || client.DisabledAt != null || accessMode == SqlOSApplicationAccessModes.Disabled)
+        {
+            return Denied(client, userId, organizationId, accessMode, "application_disabled", "Application is disabled.");
+        }
+
+        var assignments = await _context.Set<SqlOSApplicationAssignment>()
+            .AsNoTracking()
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+
+        var denied = await FirstMatchingAssignmentAsync(assignments, userId, organizationId, SqlOSApplicationAssignmentAccess.Denied, cancellationToken);
+        if (denied != null)
+        {
+            return Denied(client, userId, organizationId, accessMode, "assignment_denied", denied.Reason ?? "Explicit deny assignment matched.", denied.Id);
+        }
+
+        if (accessMode == SqlOSApplicationAccessModes.AllOrganizations)
+        {
+            return Allowed(client, userId, organizationId, accessMode, "all_organizations", "Application is open to all organizations.");
+        }
+
+        var allowedAssignments = assignments
+            .Where(x => string.Equals(x.Access, SqlOSApplicationAssignmentAccess.Allowed, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (accessMode == SqlOSApplicationAccessModes.SelectedOrganizations)
+        {
+            var orgAssignment = allowedAssignments.FirstOrDefault(x => OrganizationAssignmentMatches(x, organizationId));
+            return orgAssignment == null
+                ? Denied(client, userId, organizationId, accessMode, "no_organization_assignment", "Organization is not assigned to this application.")
+                : Allowed(client, userId, organizationId, accessMode, "organization_assignment", orgAssignment.Reason, orgAssignment.Id);
+        }
+
+        if (accessMode == SqlOSApplicationAccessModes.SelectedUsersGroupsRoles
+            || accessMode == SqlOSApplicationAccessModes.InternalOnly)
+        {
+            var assignment = await FirstMatchingAssignmentAsync(allowedAssignments, userId, organizationId, SqlOSApplicationAssignmentAccess.Allowed, cancellationToken);
+            return assignment == null
+                ? Denied(client, userId, organizationId, accessMode, "no_principal_assignment", "No user, group, role, or service assignment matched.")
+                : Allowed(client, userId, organizationId, accessMode, $"{assignment.PrincipalType}_assignment", assignment.Reason, assignment.Id);
+        }
+
+        return Denied(client, userId, organizationId, accessMode, "unsupported_access_mode", "Application access mode is not supported.");
+    }
+
+    private async Task<SqlOSApplicationAssignment?> FirstMatchingAssignmentAsync(
+        IReadOnlyList<SqlOSApplicationAssignment> assignments,
+        string? userId,
+        string? organizationId,
+        string access,
+        CancellationToken cancellationToken)
+    {
+        foreach (var assignment in assignments.Where(x => string.Equals(x.Access, access, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (await AssignmentMatchesAsync(assignment, userId, organizationId, cancellationToken))
+            {
+                return assignment;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<bool> AssignmentMatchesAsync(
+        SqlOSApplicationAssignment assignment,
+        string? userId,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        return assignment.PrincipalType switch
+        {
+            SqlOSApplicationAssignmentPrincipalTypes.Organization => OrganizationAssignmentMatches(assignment, organizationId),
+            SqlOSApplicationAssignmentPrincipalTypes.User => !string.IsNullOrWhiteSpace(userId)
+                && string.Equals(assignment.PrincipalId, userId, StringComparison.Ordinal),
+            SqlOSApplicationAssignmentPrincipalTypes.Role => await RoleAssignmentMatchesAsync(assignment, userId, organizationId, cancellationToken),
+            SqlOSApplicationAssignmentPrincipalTypes.Group => await GroupAssignmentMatchesAsync(assignment, userId, cancellationToken),
+            SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount => !string.IsNullOrWhiteSpace(userId)
+                && string.Equals(assignment.PrincipalId, userId, StringComparison.Ordinal),
+            SqlOSApplicationAssignmentPrincipalTypes.Agent => !string.IsNullOrWhiteSpace(userId)
+                && string.Equals(assignment.PrincipalId, userId, StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
+    private static bool OrganizationAssignmentMatches(SqlOSApplicationAssignment assignment, string? organizationId)
+    {
+        if (string.IsNullOrWhiteSpace(organizationId))
+        {
+            return false;
+        }
+
+        return string.Equals(assignment.OrganizationId, organizationId, StringComparison.Ordinal)
+            || string.Equals(assignment.PrincipalId, organizationId, StringComparison.Ordinal);
+    }
+
+    private async Task<bool> RoleAssignmentMatchesAsync(
+        SqlOSApplicationAssignment assignment,
+        string? userId,
+        string? organizationId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userId)
+            || string.IsNullOrWhiteSpace(organizationId)
+            || string.IsNullOrWhiteSpace(assignment.RoleKey))
+        {
+            return false;
+        }
+
+        return await _context.Set<SqlOSMembership>()
+            .AnyAsync(x => x.UserId == userId
+                && x.OrganizationId == organizationId
+                && x.IsActive
+                && x.Role == assignment.RoleKey, cancellationToken);
+    }
+
+    private async Task<bool> GroupAssignmentMatchesAsync(
+        SqlOSApplicationAssignment assignment,
+        string? userId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(assignment.PrincipalId))
+        {
+            return false;
+        }
+
+        var subjectIds = await ResolveFgaSubjectIdsForAuthUserAsync(userId, cancellationToken);
+        if (subjectIds.Count == 0)
+        {
+            return false;
+        }
+
+        return await _context.Set<SqlOSFgaUserGroupMembership>()
+            .Join(
+                _context.Set<SqlOSFgaUserGroup>(),
+                membership => membership.UserGroupId,
+                group => group.Id,
+                (membership, group) => new { membership.SubjectId, GroupId = group.Id, GroupSubjectId = group.SubjectId })
+            .AnyAsync(x => subjectIds.Contains(x.SubjectId)
+                && (x.GroupId == assignment.PrincipalId || x.GroupSubjectId == assignment.PrincipalId), cancellationToken);
+    }
+
+    private async Task<List<string>> ResolveFgaSubjectIdsForAuthUserAsync(string userId, CancellationToken cancellationToken)
+    {
+        var subjectIds = new HashSet<string>(StringComparer.Ordinal) { userId };
+
+        var directSubjectIds = await _context.Set<SqlOSFgaSubject>()
+            .Where(x => x.Id == userId || x.ExternalRef == userId)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var subjectId in directSubjectIds)
+        {
+            subjectIds.Add(subjectId);
+        }
+
+        var fgaUserSubjectIds = await _context.Set<SqlOSFgaUser>()
+            .Where(x => x.Id == userId || x.SubjectId == userId)
+            .Select(x => x.SubjectId)
+            .ToListAsync(cancellationToken);
+        foreach (var subjectId in fgaUserSubjectIds)
+        {
+            subjectIds.Add(subjectId);
+        }
+
+        return subjectIds.ToList();
+    }
+
+    private static SqlOSApplicationAccessCheckResult Allowed(
+        SqlOSClientApplication client,
+        string? userId,
+        string? organizationId,
+        string accessMode,
+        string source,
+        string? reason,
+        string? assignmentId = null)
+        => new(true, "allowed", accessMode, source, assignmentId, reason, client.Id, client.ClientId, organizationId, userId);
+
+    private static SqlOSApplicationAccessCheckResult Denied(
+        SqlOSClientApplication client,
+        string? userId,
+        string? organizationId,
+        string accessMode,
+        string source,
+        string? reason,
+        string? assignmentId = null)
+        => new(false, "denied", accessMode, source, assignmentId, reason, client.Id, client.ClientId, organizationId, userId);
+
+    private static NormalizedAssignmentRequest NormalizeAssignmentRequest(SqlOSCreateApplicationAssignmentRequest request)
+    {
+        var principalType = NormalizePrincipalType(request.PrincipalType);
+        var access = NormalizeAssignmentAccess(request.Access);
+        var principalId = string.IsNullOrWhiteSpace(request.PrincipalId) ? null : request.PrincipalId.Trim();
+        var organizationId = string.IsNullOrWhiteSpace(request.OrganizationId) ? null : request.OrganizationId.Trim();
+        var roleKey = string.IsNullOrWhiteSpace(request.RoleKey) ? null : request.RoleKey.Trim();
+
+        switch (principalType)
+        {
+            case SqlOSApplicationAssignmentPrincipalTypes.Organization:
+                organizationId ??= principalId;
+                principalId = null;
+                if (string.IsNullOrWhiteSpace(organizationId))
+                {
+                    throw new InvalidOperationException("Organization assignments require organizationId or principalId.");
+                }
+                break;
+            case SqlOSApplicationAssignmentPrincipalTypes.User:
+            case SqlOSApplicationAssignmentPrincipalTypes.Group:
+            case SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount:
+            case SqlOSApplicationAssignmentPrincipalTypes.Agent:
+                if (string.IsNullOrWhiteSpace(principalId))
+                {
+                    throw new InvalidOperationException($"{principalType} assignments require principalId.");
+                }
+                break;
+            case SqlOSApplicationAssignmentPrincipalTypes.Role:
+                if (string.IsNullOrWhiteSpace(organizationId))
+                {
+                    throw new InvalidOperationException("Role assignments require organizationId.");
+                }
+                if (string.IsNullOrWhiteSpace(roleKey))
+                {
+                    throw new InvalidOperationException("Role assignments require roleKey.");
+                }
+                break;
+        }
+
+        return new NormalizedAssignmentRequest(
+            principalType,
+            principalId,
+            organizationId,
+            roleKey,
+            access,
+            string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim());
+    }
+
+    private static string NormalizePrincipalType(string value)
+        => (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            SqlOSApplicationAssignmentPrincipalTypes.Organization => SqlOSApplicationAssignmentPrincipalTypes.Organization,
+            SqlOSApplicationAssignmentPrincipalTypes.User => SqlOSApplicationAssignmentPrincipalTypes.User,
+            "user_group" => SqlOSApplicationAssignmentPrincipalTypes.Group,
+            SqlOSApplicationAssignmentPrincipalTypes.Group => SqlOSApplicationAssignmentPrincipalTypes.Group,
+            SqlOSApplicationAssignmentPrincipalTypes.Role => SqlOSApplicationAssignmentPrincipalTypes.Role,
+            SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount => SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount,
+            SqlOSApplicationAssignmentPrincipalTypes.Agent => SqlOSApplicationAssignmentPrincipalTypes.Agent,
+            _ => throw new InvalidOperationException("Unsupported application assignment principal type.")
+        };
+
+    private static string NormalizeAssignmentAccess(string value)
+        => (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "" => SqlOSApplicationAssignmentAccess.Allowed,
+            SqlOSApplicationAssignmentAccess.Allowed => SqlOSApplicationAssignmentAccess.Allowed,
+            SqlOSApplicationAssignmentAccess.Denied => SqlOSApplicationAssignmentAccess.Denied,
+            _ => throw new InvalidOperationException("Application assignment access must be allowed or denied.")
+        };
+
+    private static string NormalizeAccessMode(string? value)
+        => (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "" => SqlOSApplicationAccessModes.AllOrganizations,
+            SqlOSApplicationAccessModes.AllOrganizations => SqlOSApplicationAccessModes.AllOrganizations,
+            SqlOSApplicationAccessModes.SelectedOrganizations => SqlOSApplicationAccessModes.SelectedOrganizations,
+            SqlOSApplicationAccessModes.SelectedUsersGroupsRoles => SqlOSApplicationAccessModes.SelectedUsersGroupsRoles,
+            SqlOSApplicationAccessModes.InternalOnly => SqlOSApplicationAccessModes.InternalOnly,
+            SqlOSApplicationAccessModes.Disabled => SqlOSApplicationAccessModes.Disabled,
+            _ => throw new InvalidOperationException("Unsupported application access mode.")
+        };
+
     public static string NormalizeEmail(string email) => email.Trim().ToUpperInvariant();
 
     public static string? NormalizeDomain(string? value)
@@ -1544,6 +2184,122 @@ public sealed class SqlOSAdminService
             null);
     }
 
+    private List<SqlOSClientSeedOptions> BuildStartupClientSeeds()
+    {
+        if (_options.SingleApplication == null)
+        {
+            return _options.ClientSeeds;
+        }
+
+        if (_options.ClientSeeds.Count > 0)
+        {
+            throw new InvalidOperationException("Single-application mode cannot be combined with explicit startup client seeds. Remove SeedClient/SeedBrowserClient calls or use the advanced multi-application setup path.");
+        }
+
+        return [BuildSingleApplicationSeed(_options.SingleApplication)];
+    }
+
+    private SqlOSClientSeedOptions BuildSingleApplicationSeed(SqlOSSingleApplicationOptions application)
+    {
+        var name = RequireText(application.Name, "Single application name");
+        var clientId = string.IsNullOrWhiteSpace(application.ClientId)
+            ? Slugify(name)
+            : application.ClientId.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            throw new InvalidOperationException("Single-application mode could not derive a valid client id from the application name.");
+        }
+
+        var redirectUris = NormalizeSingleApplicationRedirectUris(application);
+        var allowedScopes = application.AllowedScopes
+            .Where(static scope => !string.IsNullOrWhiteSpace(scope))
+            .Select(static scope => scope.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (allowedScopes.Count == 0)
+        {
+            allowedScopes = ["openid", "profile", "email", "offline_access"];
+        }
+
+        return new SqlOSClientSeedOptions
+        {
+            ClientId = clientId,
+            Name = name,
+            Audience = string.IsNullOrWhiteSpace(application.Audience)
+                ? clientId
+                : application.Audience.Trim(),
+            RedirectUris = redirectUris,
+            AllowedScopes = allowedScopes,
+            ClientType = "public_pkce",
+            RequirePkce = true,
+            IsFirstParty = true,
+            IsActive = true
+        };
+    }
+
+    private static List<string> NormalizeSingleApplicationRedirectUris(SqlOSSingleApplicationOptions application)
+    {
+        var redirectUris = application.RedirectUris
+            .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+            .Select(static uri => uri.Trim())
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(application.Origin))
+        {
+            var origin = NormalizeOrigin(application.Origin);
+            var redirectPath = string.IsNullOrWhiteSpace(application.RedirectPath)
+                ? "/auth/callback"
+                : application.RedirectPath.Trim();
+            if (!redirectPath.StartsWith("/", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Single-application RedirectPath must start with '/'.");
+            }
+
+            redirectUris.Add($"{origin}{redirectPath}");
+        }
+
+        redirectUris = redirectUris
+            .Select(NormalizeRedirectUri)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (redirectUris.Count == 0)
+        {
+            throw new InvalidOperationException("Single-application mode requires Origin or at least one RedirectUri.");
+        }
+
+        return redirectUris;
+    }
+
+    private static string NormalizeOrigin(string origin)
+    {
+        if (!Uri.TryCreate(origin.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrWhiteSpace(uri.Query)
+            || !string.IsNullOrWhiteSpace(uri.Fragment))
+        {
+            throw new InvalidOperationException("Single-application Origin must be an absolute http(s) origin without query or fragment.");
+        }
+
+        var authority = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        var path = uri.AbsolutePath == "/" ? string.Empty : uri.AbsolutePath.TrimEnd('/');
+        return $"{authority}{path}";
+    }
+
+    private static string NormalizeRedirectUri(string redirectUri)
+    {
+        if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrWhiteSpace(uri.Fragment))
+        {
+            throw new InvalidOperationException($"Redirect URI '{redirectUri}' must be an absolute http(s) URI without a fragment.");
+        }
+
+        return redirectUri;
+    }
+
     private NormalizedClientDefinition NormalizeSeededClient(SqlOSClientSeedOptions seed)
         => NormalizeClientDefinition(
             seed.ClientId,
@@ -1573,6 +2329,7 @@ public sealed class SqlOSAdminService
             client.Name,
             client.Description,
             client.Audience,
+            NormalizeAccessMode(client.AccessMode),
             client.ClientType,
             client.RegistrationSource,
             GetSourceLabel(client.RegistrationSource),
@@ -1688,6 +2445,28 @@ public sealed class SqlOSAdminService
         var clientUri = client.ClientUri ?? string.Empty;
         return string.Join("|", redirectUris.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
             + $"|{softwareId}|{softwareVersion}|{clientUri}";
+    }
+
+    private HashSet<string> GetStartupManagedClientIds()
+    {
+        var ids = _options.ClientSeeds
+            .Select(static seed => seed.ClientId)
+            .Where(static clientId => !string.IsNullOrWhiteSpace(clientId))
+            .Select(static clientId => clientId.Trim())
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (_options.SingleApplication != null)
+        {
+            var singleClientId = string.IsNullOrWhiteSpace(_options.SingleApplication.ClientId)
+                ? Slugify(_options.SingleApplication.Name)
+                : _options.SingleApplication.ClientId.Trim();
+            if (!string.IsNullOrWhiteSpace(singleClientId))
+            {
+                ids.Add(singleClientId);
+            }
+        }
+
+        return ids;
     }
 
     private async Task<SqlOSClientApplication> GetRequiredClientByIdAsync(string clientApplicationId, CancellationToken cancellationToken)
@@ -1850,6 +2629,7 @@ public sealed class SqlOSAdminService
         string Name,
         string? Description,
         string Audience,
+        string AccessMode,
         string ClientType,
         string RegistrationSource,
         string SourceLabel,
@@ -1915,4 +2695,12 @@ public sealed class SqlOSAdminService
         bool AllowDeviceAuthorization,
         List<string> GrantTypes,
         bool IsActive);
+
+    private sealed record NormalizedAssignmentRequest(
+        string PrincipalType,
+        string? PrincipalId,
+        string? OrganizationId,
+        string? RoleKey,
+        string Access,
+        string? Reason);
 }

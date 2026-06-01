@@ -145,6 +145,17 @@ public sealed class SqlOSSamlService
                 cancellationToken);
         }
 
+        var client = authorizationRequest.ClientApplication
+            ?? await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        await _adminService.EnsureApplicationAccessAsync(
+            client,
+            user.Id,
+            organizationId,
+            "application.access.authorization_denied",
+            httpContext?.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
         var rawCode = _cryptoService.GenerateOpaqueToken();
         _context.Set<SqlOSAuthorizationCode>().Add(new SqlOSAuthorizationCode
         {

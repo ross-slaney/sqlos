@@ -128,6 +128,58 @@ public sealed record SqlOSCreateClientRequest(
     bool AllowDeviceAuthorization = false,
     string ClientType = "public_pkce");
 
+public static class SqlOSApplicationAccessModes
+{
+    public const string AllOrganizations = "all_organizations";
+    public const string SelectedOrganizations = "selected_organizations";
+    public const string SelectedUsersGroupsRoles = "selected_users_groups_roles";
+    public const string InternalOnly = "internal_only";
+    public const string Disabled = "disabled";
+}
+
+public static class SqlOSApplicationAssignmentPrincipalTypes
+{
+    public const string Organization = "organization";
+    public const string User = "user";
+    public const string Group = "group";
+    public const string Role = "role";
+    public const string ServiceAccount = "service_account";
+    public const string Agent = "agent";
+}
+
+public static class SqlOSApplicationAssignmentAccess
+{
+    public const string Allowed = "allowed";
+    public const string Denied = "denied";
+}
+
+public sealed record SqlOSSetApplicationAccessModeRequest(string AccessMode);
+
+public sealed record SqlOSCreateApplicationAssignmentRequest(
+    string PrincipalType,
+    string? PrincipalId = null,
+    string? OrganizationId = null,
+    string? RoleKey = null,
+    string Access = SqlOSApplicationAssignmentAccess.Allowed,
+    string? Reason = null);
+
+public sealed record SqlOSRevokeApplicationAssignmentRequest(
+    string? Reason = null,
+    string? ActorType = null,
+    string? ActorId = null);
+
+public sealed record SqlOSApplicationAccessCheckResult(
+    bool Allowed,
+    string Decision,
+    string AccessMode,
+    string Source,
+    string? AssignmentId,
+    string? Reason,
+    string ClientApplicationId,
+    string ClientId,
+    string? OrganizationId,
+    string? UserId);
+
 public static class SqlOSOAuthGrantTypes
 {
     public const string AuthorizationCode = "authorization_code";

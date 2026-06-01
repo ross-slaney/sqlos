@@ -1,0 +1,132 @@
+---
+title: "Application Access"
+description: "Assign applications to organizations, users, groups, and roles."
+order: 21
+section: authserver
+---
+
+Application access answers a different question than OAuth audience.
+
+| Concept | Question |
+| --- | --- |
+| Application / client | What app is trying to sign in? |
+| Audience / resource | What API or resource is the token for? |
+| Application assignment | Who is allowed to use this app? |
+
+Two apps can mint tokens for the same API audience. Assignments decide whether a user acting in an organization may use a specific app.
+
+## Access modes
+
+| Mode | Behavior |
+| --- | --- |
+| `all_organizations` | Any authenticated user and active organization context can use the app. This is the migration and single-app default. |
+| `selected_organizations` | Only directly assigned organizations can use the app. |
+| `selected_users_groups_roles` | Explicit user, FGA user group, organization role, service account, or agent assignments are required. |
+| `internal_only` | Explicit assignments are required. Use this for trusted/internal apps until richer internal-user policy exists. |
+| `disabled` | The app cannot be used. Existing sessions are revoked when the mode is set. |
+
+Explicit `denied` assignments take precedence over allowed assignments.
+
+## Admin API
+
+Set an application access mode:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/access-mode \
+  -H "Content-Type: application/json" \
+  -d '{ "accessMode": "selected_organizations" }'
+```
+
+Assign an organization:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/assignments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principalType": "organization",
+    "organizationId": "org_123",
+    "access": "allowed",
+    "reason": "Customer portal pilot"
+  }'
+```
+
+Assign a user:
+
+```json
+{
+  "principalType": "user",
+  "principalId": "usr_123",
+  "access": "allowed"
+}
+```
+
+Assign a group:
+
+```json
+{
+  "principalType": "group",
+  "principalId": "grp_support",
+  "access": "allowed"
+}
+```
+
+Assign an organization role:
+
+```json
+{
+  "principalType": "role",
+  "organizationId": "org_123",
+  "roleKey": "admin",
+  "access": "allowed"
+}
+```
+
+Explain a decision:
+
+```bash
+curl "http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/access/check?organizationId=org_123&userId=usr_123"
+```
+
+The response includes `allowed`, `decision`, `accessMode`, `source`, `assignmentId`, and `reason`. It is intended for admin support and debugging, not public login pages.
+
+## Enforcement
+
+SqlOS checks application access when a concrete user and organization context is known:
+
+- hosted authorization before issuing an auth code
+- headless authorization before issuing an auth code
+- Email OTP and signup token issuance through the shared session path
+- SAML and OIDC callbacks before issuing an auth code
+- device authorization approval before marking the request approved
+- refresh token rotation before minting a new access token
+
+Refresh uses the original session application and organization binding. If the app is disabled or the relevant assignment is revoked, refresh fails and an audit event is written.
+
+Public failures use the generic message `Application access is not allowed.` so login pages do not reveal whether a user, organization, or assignment exists.
+
+## Audit
+
+SqlOS writes audit events for:
+
+- `application.access_mode.changed`
+- `application.assignment.created`
+- `application.assignment.revoked`
+- `application.access.authorization_denied`
+- `application.access.device_denied`
+- `application.access.refresh_denied`
+- `application.access.token_denied`
+
+Events include the client application ID, public client ID, user ID, organization ID where known, and decision metadata.
+
+## Dashboard
+
+Open **Auth Server > Clients**, inspect an application, then use the **Access** section to change access mode, create assignments, and revoke assignments.
+
+Organization and user application availability is available through:
+
+- `GET /sqlos/admin/auth/api/organizations/{organizationId}/applications`
+- `GET /sqlos/admin/auth/api/users/{userId}/applications`
+
+Single-app projects can stay on `all_organizations` until they need narrower app availability.
+
+For the product framing behind this model, read [Application Assignments: The Missing Layer Between Clients and Audiences](/blog/application-assignments-auth-server-control-plane).

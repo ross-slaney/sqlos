@@ -34,6 +34,22 @@ Swagger UI is available at `http://localhost:5080/swagger`, and the generated sp
 
 If you already ran an older version of the sample, reset the Todo sample SQL database or persistent volume once before rerunning. Existing todos are **not** backfilled into the FGA graph.
 
+## Single-app quickstart
+
+The Todo sample intentionally demonstrates advanced client setup for local web, CLI, MCP, CIMD, and DCR flows. A new one-app project can start smaller:
+
+```csharp
+builder.AddSqlOS<TodoSampleDbContext>(options =>
+{
+    options.UseSingleApplication("Todo", app =>
+    {
+        app.Origin = "https://todo.example.com";
+    });
+});
+```
+
+That creates one first-party public PKCE application with `openid`, `profile`, `email`, and `offline_access` scopes, a `{Origin}/auth/callback` redirect URI, and open `all_organizations` application access. Add explicit clients later when you need CLI, MCP, or portable public-client demos.
+
 ## FGA model
 
 Resource hierarchy:

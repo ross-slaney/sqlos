@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Email.Configuration;
 using SqlOS.Fga.Configuration;
@@ -24,6 +25,18 @@ public sealed class SqlOSOptions
     public SqlOSFgaOptions Fga { get; } = new();
     public SqlOSAuthServerOptions AuthServer { get; } = new();
     public SqlOSEmailOptions Email { get; } = new();
+
+    public SqlOSOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
+    {
+        AuthServer.UseSingleApplication(name, configure);
+        return this;
+    }
+
+    public SqlOSOptions UseSingleApplication(IConfiguration configuration, string sectionName = "SqlOS:Application")
+    {
+        AuthServer.UseSingleApplication(configuration, sectionName);
+        return this;
+    }
 
     public SqlOSOptions ConfigureEmail(Action<SqlOSEmailOptions> configure)
     {
