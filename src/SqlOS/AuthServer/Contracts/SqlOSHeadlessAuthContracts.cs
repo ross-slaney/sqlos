@@ -38,7 +38,11 @@ public sealed record SqlOSHeadlessViewModel(
     SqlOSEmailInvitationResult? Invitation,
     JsonObject? UiContext,
     SqlOSHeadlessDeviceAuthorizationDto? DeviceAuthorization = null,
-    string? PhoneNumber = null);
+    string? PhoneNumber = null,
+    string? MfaToken = null,
+    bool RequiresMfaEnrollment = false,
+    IReadOnlyList<string>? MfaMethods = null,
+    SqlOSTotpEnrollmentStartResult? TotpEnrollment = null);
 
 public sealed record SqlOSHeadlessActionResult(
     string Type,
@@ -141,6 +145,22 @@ public sealed record SqlOSHeadlessSignupRequest(
 public sealed record SqlOSHeadlessOrganizationSelectionRequest(
     string PendingToken,
     string OrganizationId);
+
+public sealed record SqlOSHeadlessMfaVerifyRequest(
+    string RequestId,
+    string MfaToken,
+    string Code);
+
+public sealed record SqlOSHeadlessMfaTotpEnrollmentStartRequest(
+    string RequestId,
+    string MfaToken,
+    string? DisplayName = null);
+
+public sealed record SqlOSHeadlessMfaTotpEnrollmentVerifyRequest(
+    string RequestId,
+    string MfaToken,
+    string EnrollmentToken,
+    string Code);
 
 public sealed record SqlOSHeadlessDeviceAuthorizationResolveRequest(
     string? UserCode,

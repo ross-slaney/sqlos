@@ -1,0 +1,185 @@
+---
+title: "MFA Policy: The Auth Server Has to Own the Second Step"
+description: "SqlOS MFA starts optional, can be disabled, and can be required globally or per tenant without making every app rebuild the same TOTP state machine."
+date: "2026-06-05T12:00:00-07:00"
+author: "Ross Slaney"
+tags: ["AuthServer", "MFA", "Security", "SqlOS"]
+---
+
+Authenticator-app MFA looks small until you try to productize it.
+
+The first screen is easy: show a QR code, ask for a 6-digit code.
+
+The hard part is deciding who is allowed to enroll, who is required to enroll, what happens when policy changes, what a headless login page should render, and how a tenant admin can enforce the rule without rewriting the application.
+
+SqlOS now treats MFA as auth-server policy, not as a one-off form.
+
+## Optional by default
+
+Most products should not start by forcing every user through MFA.
+
+They should start by allowing it.
+
+SqlOS defaults to:
+
+| Setting | Default |
+| --- | --- |
+| MFA available | yes |
+| User self-enrollment | yes |
+| Recovery codes | yes |
+| Required for every user | no |
+| Required for owners/admins | no |
+| Factor | authenticator app TOTP |
+
+That gives users the security option without surprising every tenant on day one.
+
+Admins can still disable MFA completely. A developer can also disable it in startup code if the product is not ready to expose it.
+
+## Policy before tokens
+
+MFA is enforced at the auth server boundary.
+
+After the primary credential succeeds, SqlOS evaluates policy before it issues an authorization code or token.
+
+That matters because every login surface gets the same decision:
+
+- hosted OAuth pages
+- headless authorize pages
+- direct password APIs
+- organization selection
+- signup and OTP completion paths
+
+The app should not have to remember to check MFA in five different places.
+
+## Global and tenant policy
+
+There are two policy levels:
+
+| Level | Use it for |
+| --- | --- |
+| Global MFA settings | Product-wide defaults and availability |
+| Organization MFA policy | Tenant-specific enforcement |
+
+A tenant can require MFA for everyone. Another tenant can require it only for owners and admins. A third tenant can leave it optional.
+
+That is the shape SaaS products usually need.
+
+## The two runtime states
+
+Required MFA has two different states.
+
+The user may already have a confirmed authenticator:
+
+```json
+{
+  "requiresMfa": true,
+  "requiresMfaEnrollment": false,
+  "mfaMethods": ["totp", "recovery_code"]
+}
+```
+
+That becomes a challenge screen.
+
+Or the user may have no factor yet:
+
+```json
+{
+  "requiresMfa": true,
+  "requiresMfaEnrollment": true,
+  "mfaMethods": ["totp"]
+}
+```
+
+That becomes forced enrollment. Hosted auth renders the QR code. Headless auth returns the same enrollment payload so the app can render it.
+
+## Headless still means state machine
+
+Headless auth does not mean your React app owns authentication rules.
+
+It means your app owns the pixels.
+
+SqlOS still owns the state machine:
+
+```text
+login -> password -> mfa
+login -> password -> mfa-enroll
+login -> password -> organization -> mfa
+```
+
+The headless page renders `mfa` or `mfa-enroll` when the view model says so. It posts the code back to SqlOS. SqlOS decides whether to redirect back to the OAuth client.
+
+That is the same contract as password, Email OTP, SSO, invitations, and organization selection.
+
+## Recovery codes are not a reset plan
+
+Recovery codes are single-use bypass codes for a user who loses access to the authenticator app.
+
+They are not a reason to re-display the original TOTP secret.
+
+For a new phone, the clean paths are:
+
+- transfer codes inside the authenticator app when the old phone is available;
+- sign in with an existing factor and enroll a replacement;
+- sign in with a recovery code and re-secure the account;
+- have an administrator reset MFA if the user has neither the authenticator nor recovery codes.
+
+SqlOS V1 lands the challenge, forced enrollment, recovery-code login, and policy foundation. Richer factor management -- add another device, remove a device, admin reset, and forced re-enrollment after recovery-code login -- belongs on top of this foundation.
+
+## The developer path
+
+The simple configuration is small:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureMfa(mfa =>
+    {
+        mfa.Enabled = true;
+        mfa.AllowUserSelfEnrollmentByDefault = true;
+        mfa.RecoveryCodesEnabledByDefault = true;
+        mfa.Totp.Issuer = "Acme";
+    });
+});
+```
+
+Require it for privileged users:
+
+```csharp
+options.AuthServer.SeedMfaPolicy(mfa =>
+{
+    mfa.Enabled = true;
+    mfa.UserSelfEnrollmentEnabled = true;
+    mfa.RecoveryCodesEnabled = true;
+    mfa.RequireForOwnersAndAdmins = true;
+    mfa.RequiredRoles = ["owner", "admin"];
+});
+```
+
+Tenant-specific policy is available through the admin API.
+
+## Why this belongs in SqlOS
+
+An auth server already knows:
+
+- which client is asking for login
+- which user authenticated
+- which organization was selected
+- which roles the user has in that organization
+- which credential method was used
+- whether tokens or auth codes are about to be issued
+
+MFA policy needs all of that context.
+
+Putting the decision in SqlOS keeps the application side small:
+
+1. Configure policy.
+2. Render the state SqlOS returns.
+3. Never issue tokens before the second step is complete.
+
+That is the right boundary for an embedded auth server.
+
+Next reading:
+
+- [MFA and TOTP](/docs/authserver/mfa-totp)
+- [Require Authenticator MFA](/docs/guides/mfa-totp)
+- [Headless Auth How-To](/docs/authserver/headless-auth-how-to)

@@ -94,6 +94,13 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
             phone.DefaultRegion = phoneOtpDefaultRegion;
         }
     });
+    auth.ConfigureMfa(mfa =>
+    {
+        mfa.Enabled = true;
+        mfa.AllowUserSelfEnrollmentByDefault = true;
+        mfa.RecoveryCodesEnabledByDefault = true;
+        mfa.Totp.Issuer = "SqlOS Example";
+    });
 
     var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
         ?? builder.Configuration["ExampleFrontend:Origin"]

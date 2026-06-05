@@ -22,6 +22,27 @@ export type HeadlessViewModel = {
   organizationSelection?: HeadlessOrganizationOption[];
   settings?: HeadlessSettings | null;
   fieldErrors?: Record<string, string>;
+  mfaToken?: string | null;
+  requiresMfaEnrollment?: boolean;
+  mfaMethods?: string[] | null;
+  totpEnrollment?: HeadlessTotpEnrollment | null;
+};
+
+export type HeadlessTotpEnrollment = {
+  enrollmentToken: string;
+  authenticatorId: string;
+  secret: string;
+  provisioningUri: string;
+  qrCodeDataUrl: string;
+  expiresAt: string;
+};
+
+export type HeadlessPasswordResetRequestResult = {
+  email: string;
+  maskedEmail: string;
+  message: string;
+  expiresAt: string;
+  nextAllowedSendAt: string;
 };
 
 export type HeadlessProvider = {
@@ -57,7 +78,7 @@ export type HeadlessActionResult = {
   viewModel?: HeadlessViewModel;
 };
 
-async function headlessPost(path: string, body: unknown): Promise<HeadlessActionResult> {
+async function headlessPostJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${headlessBase()}${path}`, {
     method: "POST",
     credentials: "include",
@@ -70,7 +91,15 @@ async function headlessPost(path: string, body: unknown): Promise<HeadlessAction
     throw new Error(text || `Headless API error: ${res.status}`);
   }
 
-  return res.json();
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  return res.json() as Promise<T>;
+}
+
+async function headlessPost(path: string, body: unknown): Promise<HeadlessActionResult> {
+  return headlessPostJson<HeadlessActionResult>(path, body);
 }
 
 export async function getHeadlessRequest(
@@ -105,6 +134,18 @@ export async function headlessIdentify(requestId: string, email: string): Promis
 
 export async function headlessPasswordLogin(requestId: string, email: string, password: string): Promise<HeadlessActionResult> {
   return headlessPost("/password/login", { requestId, email, password });
+}
+
+export async function headlessRequestPasswordResetEmail(
+  email: string,
+  requestId?: string | null,
+  resetUrlTemplate?: string | null,
+): Promise<HeadlessPasswordResetRequestResult> {
+  return headlessPostJson<HeadlessPasswordResetRequestResult>("/password/forgot", { email, requestId, resetUrlTemplate });
+}
+
+export async function headlessResetPassword(token: string, newPassword: string): Promise<void> {
+  await headlessPostJson<void>("/password/reset", { token, newPassword });
 }
 
 export async function headlessRequestEmailOtp(requestId: string, email: string): Promise<HeadlessActionResult> {
@@ -172,4 +213,25 @@ export async function headlessSelectOrganization(pendingToken: string, organizat
 
 export async function headlessStartProvider(requestId: string, connectionId: string, email?: string): Promise<HeadlessActionResult> {
   return headlessPost("/provider/start", { requestId, connectionId, email });
+}
+
+export async function headlessVerifyMfa(requestId: string, mfaToken: string, code: string): Promise<HeadlessActionResult> {
+  return headlessPost("/mfa/verify", { requestId, mfaToken, code });
+}
+
+export async function headlessStartMfaTotpEnrollment(
+  requestId: string,
+  mfaToken: string,
+  displayName?: string,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/mfa/totp/enroll/start", { requestId, mfaToken, displayName });
+}
+
+export async function headlessVerifyMfaTotpEnrollment(
+  requestId: string,
+  mfaToken: string,
+  enrollmentToken: string,
+  code: string,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/mfa/totp/enroll/verify", { requestId, mfaToken, enrollmentToken, code });
 }

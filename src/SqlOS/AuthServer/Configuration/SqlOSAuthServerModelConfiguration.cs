@@ -373,6 +373,75 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasKey(x => x.Id);
         });
 
+        modelBuilder.Entity<SqlOSMfaSettings>(entity =>
+        {
+            entity.ToTable("SqlOSMfaSettings", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.RequiredRolesJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.AvailableFactorsJson).HasColumnType("nvarchar(max)");
+        });
+
+        modelBuilder.Entity<SqlOSOrganizationMfaPolicy>(entity =>
+        {
+            entity.ToTable("SqlOSOrganizationMfaPolicies", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.OrganizationId);
+            entity.Property(x => x.OrganizationId).HasMaxLength(64);
+            entity.Property(x => x.RequiredRolesJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.AvailableFactorsJson).HasColumnType("nvarchar(max)");
+            entity.HasOne(x => x.Organization)
+                .WithOne(x => x.MfaPolicy)
+                .HasForeignKey<SqlOSOrganizationMfaPolicy>(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSUserMfaPolicyOverride>(entity =>
+        {
+            entity.ToTable("SqlOSUserMfaPolicyOverrides", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.UserId);
+            entity.Property(x => x.UserId).HasMaxLength(64);
+            entity.HasOne(x => x.User)
+                .WithOne(x => x.MfaPolicyOverride)
+                .HasForeignKey<SqlOSUserMfaPolicyOverride>(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSUserAuthenticator>(entity =>
+        {
+            entity.ToTable("SqlOSUserAuthenticators", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.UserId, x.Type, x.RevokedAt });
+            entity.HasIndex(x => new { x.UserId, x.IsConfirmed, x.RevokedAt });
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.UserId).HasMaxLength(64);
+            entity.Property(x => x.Type).HasMaxLength(40);
+            entity.Property(x => x.DisplayName).HasMaxLength(120);
+            entity.Property(x => x.SecretProtected).HasMaxLength(2048);
+            entity.Property(x => x.Algorithm).HasMaxLength(20);
+            entity.Property(x => x.RevocationReason).HasMaxLength(120);
+            entity.Property(x => x.LastAcceptedTimeStep).IsConcurrencyToken();
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.Authenticators)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSRecoveryCode>(entity =>
+        {
+            entity.ToTable("SqlOSRecoveryCodes", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.CodeHash).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.ConsumedAt, x.RevokedAt });
+            entity.Property(x => x.Id).HasMaxLength(64);
+            entity.Property(x => x.UserId).HasMaxLength(64);
+            entity.Property(x => x.CodeHash).HasMaxLength(128);
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.RecoveryCodes)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSAuthPageSettings>(entity =>
         {
             entity.ToTable("SqlOSAuthPageSettings", schema, t => t.ExcludeFromMigrations());

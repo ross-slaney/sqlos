@@ -26,6 +26,28 @@ Call `app.MapSqlOS()` to mount OAuth. Default base: `{DashboardBasePath}/auth` (
 | POST | `/sqlos/auth/token` | Token exchange (code or refresh) |
 | GET | `/sqlos/auth/login` | Hosted login page |
 | GET | `/sqlos/auth/signup` | Hosted signup page |
+| POST | `/sqlos/auth/mfa/challenge/verify` | Verify TOTP or recovery code for a direct MFA challenge |
+| POST | `/sqlos/auth/mfa/challenge/totp/enroll/start` | Start TOTP enrollment for a direct MFA challenge |
+| POST | `/sqlos/auth/mfa/challenge/totp/enroll/verify` | Verify TOTP enrollment for a direct MFA challenge |
+
+## Headless Auth Endpoints
+
+Base path: `/sqlos/auth/headless`.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/requests/{requestId}` | Load the current authorization request view model |
+| POST | `/identify` | Submit email for home realm discovery |
+| POST | `/password/login` | Submit email and password |
+| POST | `/email-otp/start` | Start email OTP sign-in |
+| POST | `/email-otp/verify` | Verify email OTP sign-in |
+| POST | `/signup` | Create a password user and complete authorization |
+| POST | `/signup/email-otp/start` | Start passwordless signup |
+| POST | `/signup/email-otp/verify` | Verify passwordless signup |
+| POST | `/organization/select` | Select an organization after primary login |
+| POST | `/mfa/verify` | Verify TOTP or recovery code |
+| POST | `/mfa/totp/enroll/start` | Start forced TOTP enrollment |
+| POST | `/mfa/totp/enroll/verify` | Verify forced TOTP enrollment and continue authorization |
 
 ## Auth API (Example)
 
@@ -171,6 +193,40 @@ curl http://localhost:5062/sqlos/admin/auth/api/settings/security
 # Update
 curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
   -d '{"refreshTokenLifetimeMinutes": 10080, "sessionIdleTimeoutMinutes": 1440, "sessionAbsoluteLifetimeMinutes": 43200}'
+```
+
+### MFA Settings
+
+```bash
+# Get global MFA settings
+curl http://localhost:5062/sqlos/admin/auth/api/settings/mfa
+
+# Update global MFA settings
+curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/mfa \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "totpEnabled": true,
+    "userSelfEnrollmentEnabled": true,
+    "recoveryCodesEnabled": true,
+    "requireForAllUsers": false,
+    "requireForOwnersAndAdmins": true,
+    "requiredRoles": ["owner", "admin"],
+    "availableFactors": ["totp", "recovery_code"]
+  }'
+
+# Update one organization's MFA policy
+curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
+  -H "Content-Type: application/json" \
+  -d '{
+    "isEnabled": true,
+    "requireMfaForAllUsers": true,
+    "requireMfaForOwnersAndAdmins": false,
+    "userSelfEnrollmentEnabled": true,
+    "recoveryCodesEnabled": true,
+    "requiredRoles": ["owner", "admin"],
+    "availableFactors": ["totp", "recovery_code"]
+  }'
 ```
 
 ### Sessions

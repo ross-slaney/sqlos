@@ -14,6 +14,7 @@ public sealed class SqlOSHeadlessAuthService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
+    private readonly SqlOSAuthService? _authService;
     private readonly SqlOSAuthorizationServerService _authorizationServerService;
     private readonly SqlOSHomeRealmDiscoveryService _discoveryService;
     private readonly SqlOSOidcBrowserAuthService _oidcBrowserAuthService;
@@ -39,10 +40,12 @@ public sealed class SqlOSHeadlessAuthService
         SqlOSInvitationService? invitationService = null,
         SqlOSDeviceAuthorizationService? deviceAuthorizationService = null,
         SqlOSAuthPageSessionService? authPageSessionService = null,
-        SqlOSPhoneOtpService? phoneOtpService = null)
+        SqlOSPhoneOtpService? phoneOtpService = null,
+        SqlOSAuthService? authService = null)
     {
         _context = context;
         _adminService = adminService;
+        _authService = authService;
         _authorizationServerService = authorizationServerService;
         _discoveryService = discoveryService;
         _oidcBrowserAuthService = oidcBrowserAuthService;
@@ -425,23 +428,11 @@ public sealed class SqlOSHeadlessAuthService
                 httpContext,
                 cancellationToken);
 
-            if (completion.RequiresOrganizationSelection)
-            {
-                return View(await BuildViewModelAsync(
-                    authorizationRequest,
-                    "organization",
-                    error: null,
-                    pendingToken: completion.PendingToken,
-                    email: email,
-                    displayName: null,
-                    fieldErrors: null,
-                    organizationSelection: completion.Organizations,
-                    info: null,
-                    challengeToken: null,
-                    cancellationToken: cancellationToken));
-            }
-
-            return Redirect(completion.RedirectUrl!);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                email,
+                cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -632,23 +623,11 @@ public sealed class SqlOSHeadlessAuthService
                 httpContext,
                 cancellationToken);
 
-            if (completion.RequiresOrganizationSelection)
-            {
-                return View(await BuildViewModelAsync(
-                    authorizationRequest,
-                    "organization",
-                    error: null,
-                    pendingToken: completion.PendingToken,
-                    email: verification.Challenge.Email,
-                    displayName: null,
-                    fieldErrors: null,
-                    organizationSelection: completion.Organizations,
-                    info: null,
-                    challengeToken: null,
-                    cancellationToken: cancellationToken));
-            }
-
-            return Redirect(completion.RedirectUrl!);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                verification.Challenge.Email,
+                cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -870,23 +849,11 @@ public sealed class SqlOSHeadlessAuthService
                 httpContext,
                 cancellationToken);
 
-            if (completion.RequiresOrganizationSelection)
-            {
-                return View(await BuildViewModelAsync(
-                    authorizationRequest,
-                    "organization",
-                    error: null,
-                    pendingToken: completion.PendingToken,
-                    email: null,
-                    displayName: null,
-                    fieldErrors: null,
-                    organizationSelection: completion.Organizations,
-                    info: null,
-                    challengeToken: null,
-                    cancellationToken: cancellationToken));
-            }
-
-            return Redirect(completion.RedirectUrl!);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                email: null,
+                cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -1329,11 +1296,137 @@ public sealed class SqlOSHeadlessAuthService
         HttpContext httpContext,
         SqlOSHeadlessOrganizationSelectionRequest request,
         CancellationToken cancellationToken = default)
-        => Redirect(await _authorizationServerService.CompletePendingOrganizationSelectionAsync(
+    {
+        var completion = await _authorizationServerService.CompletePendingOrganizationSelectionForLoginAsync(
             request.PendingToken,
             request.OrganizationId,
             httpContext,
-            cancellationToken));
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(completion.AuthorizationRequestId))
+        {
+            return Redirect(completion.RedirectUrl!);
+        }
+
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(
+            completion.AuthorizationRequestId,
+            cancellationToken);
+        return await BuildCompletionActionResultAsync(
+            authorizationRequest,
+            completion,
+            email: null,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSHeadlessActionResult> VerifyMfaAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessMfaVerifyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        try
+        {
+            return Redirect(await _authorizationServerService.CompleteMfaChallengeAsync(
+                request.MfaToken,
+                request.Code,
+                httpContext,
+                cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "mfa",
+                ex.Message,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                mfaToken: request.MfaToken,
+                mfaMethods: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode],
+                cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> StartMfaTotpEnrollmentAsync(
+        SqlOSHeadlessMfaTotpEnrollmentStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        try
+        {
+            var enrollment = await RequireAuthService().StartTotpEnrollmentForChallengeAsync(
+                request.MfaToken,
+                new SqlOSTotpEnrollmentStartRequest(request.DisplayName),
+                cancellationToken);
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "mfa-enroll",
+                error: null,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                mfaToken: request.MfaToken,
+                requiresMfaEnrollment: true,
+                mfaMethods: [SqlOSMfaFactorTypes.Totp],
+                totpEnrollment: enrollment,
+                cancellationToken: cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "mfa-enroll",
+                ex.Message,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                mfaToken: request.MfaToken,
+                requiresMfaEnrollment: true,
+                mfaMethods: [SqlOSMfaFactorTypes.Totp],
+                cancellationToken: cancellationToken));
+        }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> VerifyMfaTotpEnrollmentAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessMfaTotpEnrollmentVerifyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        try
+        {
+            await RequireAuthService().VerifyTotpEnrollmentAsync(
+                new SqlOSTotpEnrollmentVerifyRequest(request.EnrollmentToken, request.Code),
+                httpContext,
+                cancellationToken);
+            return Redirect(await _authorizationServerService.CompleteMfaChallengeWithoutCodeAsync(
+                request.MfaToken,
+                SqlOSMfaFactorTypes.Totp,
+                httpContext,
+                cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "mfa-enroll",
+                ex.Message,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                mfaToken: request.MfaToken,
+                requiresMfaEnrollment: true,
+                mfaMethods: [SqlOSMfaFactorTypes.Totp],
+                cancellationToken: cancellationToken));
+        }
+    }
 
     public async Task<SqlOSHeadlessActionResult> StartProviderAsync(
         HttpContext httpContext,
@@ -1369,6 +1462,10 @@ public sealed class SqlOSHeadlessAuthService
         string? challengeToken = null,
         string? signupToken = null,
         string? phoneNumber = null,
+        string? mfaToken = null,
+        bool requiresMfaEnrollment = false,
+        IReadOnlyList<string>? mfaMethods = null,
+        SqlOSTotpEnrollmentStartResult? totpEnrollment = null,
         CancellationToken cancellationToken = default)
     {
         var settings = await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
@@ -1404,7 +1501,11 @@ public sealed class SqlOSHeadlessAuthService
             await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken),
             ParseUiContext(authorizationRequest.UiContextJson),
             DeviceAuthorization: deviceAuthorization,
-            PhoneNumber: phoneNumber);
+            PhoneNumber: phoneNumber,
+            MfaToken: mfaToken,
+            RequiresMfaEnrollment: requiresMfaEnrollment,
+            MfaMethods: mfaMethods ?? Array.Empty<string>(),
+            TotpEnrollment: totpEnrollment);
     }
 
     public static bool IsHeadlessRequest(SqlOSAuthorizationRequest authorizationRequest)
@@ -1493,10 +1594,64 @@ public sealed class SqlOSHeadlessAuthService
             "device-approve" => "device-approve",
             "device-approved" => "device-approved",
             "device-denied" => "device-denied",
+            "mfa" => "mfa",
+            "mfa-enroll" => "mfa-enroll",
             "organization" => "organization",
             "logged-out" => "logged-out",
             _ => "login"
         };
+    }
+
+    private async Task<SqlOSHeadlessActionResult> BuildCompletionActionResultAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSAuthorizationRequestLoginResult completion,
+        string? email,
+        CancellationToken cancellationToken)
+    {
+        if (completion.RequiresOrganizationSelection)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "organization",
+                error: null,
+                pendingToken: completion.PendingToken,
+                email: email,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: completion.Organizations,
+                info: null,
+                challengeToken: null,
+                cancellationToken: cancellationToken));
+        }
+
+        if (completion.RequiresMfa)
+        {
+            SqlOSTotpEnrollmentStartResult? totpEnrollment = null;
+            if (completion.RequiresMfaEnrollment && !string.IsNullOrWhiteSpace(completion.MfaToken))
+            {
+                totpEnrollment = await RequireAuthService().StartTotpEnrollmentForChallengeAsync(
+                    completion.MfaToken,
+                    new SqlOSTotpEnrollmentStartRequest(),
+                    cancellationToken);
+            }
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
+                error: null,
+                pendingToken: null,
+                email: email,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: completion.Organizations,
+                mfaToken: completion.MfaToken,
+                requiresMfaEnrollment: completion.RequiresMfaEnrollment,
+                mfaMethods: completion.MfaMethods ?? Array.Empty<string>(),
+                totpEnrollment: totpEnrollment,
+                cancellationToken: cancellationToken));
+        }
+
+        return Redirect(completion.RedirectUrl!);
     }
 
     private static SqlOSHeadlessActionResult Redirect(string url)
@@ -1530,6 +1685,9 @@ public sealed class SqlOSHeadlessAuthService
 
     private SqlOSPhoneOtpService RequirePhoneOtpService()
         => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
+
+    private SqlOSAuthService RequireAuthService()
+        => _authService ?? throw new InvalidOperationException("Auth service is not registered.");
 
     private async Task BindInvitationIfPresentAsync(
         SqlOSAuthorizationRequest authorizationRequest,

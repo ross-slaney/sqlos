@@ -46,6 +46,7 @@
         clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
         oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
+        mfa: { title: "MFA", description: "Configure authenticator app enrollment and second-factor requirements." },
         authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
         audit: { title: "Audit Events", description: "Review recent auth and admin activity." }
@@ -1112,6 +1113,7 @@
                         ${quickLink("auth-users", "Users")}
                         ${quickLink("auth-oidc", "OIDC")}
                         ${quickLink("auth-security", "Security")}
+                        ${quickLink("auth-mfa", "MFA")}
                         ${quickLink("auth-authpage", "Auth Page")}
                     </div>
                 </section>
@@ -1179,6 +1181,11 @@
 
         if (view === "security") {
             await renderAuthSecurity();
+            return;
+        }
+
+        if (view === "mfa") {
+            await renderAuthMfa();
             return;
         }
 
@@ -2905,6 +2912,71 @@
                 })
             });
             setFlash("success", "Security settings saved.");
+        });
+    }
+
+    async function renderAuthMfa() {
+        const config = authViews.mfa;
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading MFA settings...");
+
+        const settings = await fetchJson(`${authApiBasePath}/settings/mfa`);
+        const factors = Array.isArray(settings.availableFactors) ? settings.availableFactors.join(", ") : "totp, recovery_code";
+        const roles = Array.isArray(settings.requiredRoles) ? settings.requiredRoles.join(", ") : "owner, admin";
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <div class="panel-grid">
+                <section class="panel">
+                    <h2>MFA Settings</h2>
+                    ${settings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                    <form id="mfa-settings-form">
+                        <label><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> Enable MFA</label>
+                        <label><input type="checkbox" name="totpEnabled" ${settings.totpEnabled ? "checked" : ""}> Enable authenticator apps</label>
+                        <label><input type="checkbox" name="userSelfEnrollmentEnabled" ${settings.userSelfEnrollmentEnabled ? "checked" : ""}> Allow users to add MFA voluntarily</label>
+                        <label><input type="checkbox" name="recoveryCodesEnabled" ${settings.recoveryCodesEnabled ? "checked" : ""}> Issue recovery codes</label>
+                        <label><input type="checkbox" name="requireForAllUsers" ${settings.requireForAllUsers ? "checked" : ""}> Require MFA for all users</label>
+                        <label><input type="checkbox" name="requireForOwnersAndAdmins" ${settings.requireForOwnersAndAdmins ? "checked" : ""}> Require MFA for owners and admins</label>
+                        <input name="requiredRoles" placeholder="Required roles, comma separated" value="${esc(roles)}">
+                        <input name="availableFactors" placeholder="Available factors, comma separated" value="${esc(factors)}">
+                        <button type="submit">Save MFA settings</button>
+                    </form>
+                </section>
+                <section class="panel">
+                    <h2>Current Policy</h2>
+                    ${renderMetadataRows([
+                        { label: "MFA", value: settings.enabled ? "Enabled" : "Disabled" },
+                        { label: "Authenticator apps", value: settings.totpEnabled ? "Enabled" : "Disabled" },
+                        { label: "User self-enrollment", value: settings.userSelfEnrollmentEnabled ? "Enabled" : "Disabled" },
+                        { label: "Recovery codes", value: settings.recoveryCodesEnabled ? "Enabled" : "Disabled" },
+                        { label: "All users required", value: settings.requireForAllUsers ? "Yes" : "No" },
+                        { label: "Privileged roles required", value: settings.requireForOwnersAndAdmins ? "Yes" : "No" },
+                        { label: "Updated", value: formatDate(settings.updatedAt) }
+                    ])}
+                </section>
+            </div>
+        `;
+
+        bindForm("mfa-settings-form", async form => {
+            const splitList = value => String(value || "")
+                .split(",")
+                .map(item => item.trim())
+                .filter(Boolean);
+
+            await fetchJson(`${authApiBasePath}/settings/mfa`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    enabled: form.get("enabled") === "on",
+                    totpEnabled: form.get("totpEnabled") === "on",
+                    userSelfEnrollmentEnabled: form.get("userSelfEnrollmentEnabled") === "on",
+                    recoveryCodesEnabled: form.get("recoveryCodesEnabled") === "on",
+                    requireForAllUsers: form.get("requireForAllUsers") === "on",
+                    requireForOwnersAndAdmins: form.get("requireForOwnersAndAdmins") === "on",
+                    requiredRoles: splitList(form.get("requiredRoles")),
+                    availableFactors: splitList(form.get("availableFactors"))
+                })
+            });
+            setFlash("success", "MFA settings saved.");
         });
     }
 

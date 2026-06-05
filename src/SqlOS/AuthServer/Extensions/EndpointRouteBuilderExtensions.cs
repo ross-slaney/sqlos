@@ -775,6 +775,7 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/login/password", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSInvitationService invitationService,
             SqlOSHomeRealmDiscoveryService discoveryService,
@@ -855,6 +856,20 @@ public static class EndpointRouteBuilderExtensions
                         invitation: invitation,
                         invitationService: invitationService);
                     return Html(organizationPage);
+                }
+
+                if (completion.RequiresMfa)
+                {
+                    return await RenderMfaChallengeAsync(
+                        completion,
+                        requestId,
+                        email,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken,
+                        invitationToken: invitationToken,
+                        invitationService: invitationService);
                 }
 
                 return Results.Redirect(completion.RedirectUrl!);
@@ -1007,6 +1022,7 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
+            SqlOSAuthService authService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
@@ -1081,6 +1097,20 @@ public static class EndpointRouteBuilderExtensions
                         invitation: invitation,
                         invitationService: invitationService);
                     return Html(organizationPage);
+                }
+
+                if (completion.RequiresMfa)
+                {
+                    return await RenderMfaChallengeAsync(
+                        completion,
+                        requestId,
+                        verification.Challenge.Email,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken,
+                        invitationToken: invitationToken,
+                        invitationService: invitationService);
                 }
 
                 return Results.Redirect(completion.RedirectUrl!);
@@ -1202,6 +1232,7 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSPhoneOtpService phoneOtpService,
+            SqlOSAuthService authService,
             SqlOSAuthPageSessionService authPageSessionService,
             CancellationToken cancellationToken) =>
         {
@@ -1257,6 +1288,19 @@ public static class EndpointRouteBuilderExtensions
                     return Html(organizationPage);
                 }
 
+                if (completion.RequiresMfa)
+                {
+                    return await RenderMfaChallengeAsync(
+                        completion,
+                        requestId,
+                        email: null,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken,
+                        phoneNumber: phoneNumber);
+                }
+
                 return Results.Redirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
@@ -1281,17 +1325,116 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/login/select-organization", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
             var pendingToken = form["pendingToken"].ToString();
             var organizationId = form["organizationId"].ToString();
-            var redirectUrl = await authorizationServerService.CompletePendingOrganizationSelectionAsync(
+            var completion = await authorizationServerService.CompletePendingOrganizationSelectionForLoginAsync(
                 pendingToken,
                 organizationId,
                 context,
                 cancellationToken);
-            return Results.Redirect(redirectUrl);
+            if (completion.RequiresMfa)
+            {
+                return await RenderMfaChallengeAsync(
+                    completion,
+                    requestId,
+                    email: null,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
+            }
+
+            return Results.Redirect(completion.RedirectUrl!);
+        });
+
+        auth.MapPost("/mfa/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var mfaToken = form["mfaToken"].ToString();
+            var code = form["code"].ToString();
+
+            try
+            {
+                var redirectUrl = await authorizationServerService.CompleteMfaChallengeAsync(
+                    mfaToken,
+                    code,
+                    context,
+                    cancellationToken);
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "mfa",
+                    requestId,
+                    email: null,
+                    error: ex.Message,
+                    displayName: null,
+                    pendingToken: null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    mfaToken: mfaToken);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapPost("/mfa/totp/enroll/verify", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var mfaToken = form["mfaToken"].ToString();
+            var enrollmentToken = form["enrollmentToken"].ToString();
+            var code = form["code"].ToString();
+
+            try
+            {
+                await authService.VerifyTotpEnrollmentAsync(
+                    new SqlOSTotpEnrollmentVerifyRequest(enrollmentToken, code),
+                    context,
+                    cancellationToken);
+                var redirectUrl = await authorizationServerService.CompleteMfaChallengeWithoutCodeAsync(
+                    mfaToken,
+                    SqlOSMfaFactorTypes.Totp,
+                    context,
+                    cancellationToken);
+                return Results.Redirect(redirectUrl);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var completion = new SqlOSAuthorizationRequestLoginResult(
+                    null,
+                    false,
+                    null,
+                    Array.Empty<SqlOSOrganizationOption>(),
+                    RequiresMfa: true,
+                    MfaToken: mfaToken,
+                    RequiresMfaEnrollment: true,
+                    MfaMethods: [SqlOSMfaFactorTypes.Totp]);
+                return await RenderMfaChallengeAsync(
+                    completion,
+                    requestId,
+                    email: null,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken,
+                    error: ex.Message);
+            }
         });
 
         auth.MapGet("/login/oidc/{connectionId}", async (
@@ -2552,6 +2695,68 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/mfa/verify", async (
+            SqlOSHeadlessMfaVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyMfaAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/mfa/totp/enroll/start", async (
+            SqlOSHeadlessMfaTotpEnrollmentStartRequest request,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.StartMfaTotpEnrollmentAsync(request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/mfa/totp/enroll/verify", async (
+            SqlOSHeadlessMfaTotpEnrollmentVerifyRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.VerifyMfaTotpEnrollmentAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         headless.MapPost("/provider/start", async (
             SqlOSHeadlessProviderStartRequest request,
             HttpContext context,
@@ -2729,7 +2934,19 @@ public static class EndpointRouteBuilderExtensions
             Results.Ok(await authService.VerifyEmailOtpAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/select-organization", async (SqlOSSelectOrganizationRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.SelectOrganizationAsync(request, httpContext, cancellationToken)));
+            Results.Ok(await authService.SelectOrganizationForLoginAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/mfa/challenge/verify", async (SqlOSMfaChallengeVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.VerifyMfaChallengeAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/mfa/challenge/totp/enroll/start", async (SqlOSTotpChallengeEnrollmentStartRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.StartTotpEnrollmentForChallengeAsync(
+                request.MfaToken,
+                new SqlOSTotpEnrollmentStartRequest(request.DisplayName),
+                cancellationToken)));
+
+        auth.MapPost("/mfa/challenge/totp/enroll/verify", async (SqlOSTotpEnrollmentVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.VerifyTotpEnrollmentAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/token/exchange", async (SqlOSExchangeCodeRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.ExchangeCodeAsync(request, httpContext, cancellationToken)));
@@ -3628,6 +3845,46 @@ public static class EndpointRouteBuilderExtensions
             return Results.Ok(await settingsService.UpdateSecuritySettingsAsync(request, cancellationToken));
         });
 
+        api.MapGet("/settings/mfa", async (HttpContext context, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.GetMfaSettingsAsync(cancellationToken));
+        });
+
+        api.MapPut("/settings/mfa", async (HttpContext context, SqlOSUpdateMfaSettingsRequest request, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.UpdateMfaSettingsAsync(request, cancellationToken));
+        });
+
+        api.MapGet("/organizations/{organizationId}/mfa-policy", async (HttpContext context, string organizationId, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.GetOrganizationMfaPolicyAsync(organizationId, cancellationToken));
+        });
+
+        api.MapPut("/organizations/{organizationId}/mfa-policy", async (HttpContext context, string organizationId, SqlOSUpdateOrganizationMfaPolicyRequest request, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await settingsService.UpdateOrganizationMfaPolicyAsync(organizationId, request, cancellationToken));
+        });
+
         api.MapGet("/signing-keys", async (HttpContext context, SqlOSCryptoService cryptoService, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -3835,6 +4092,70 @@ public static class EndpointRouteBuilderExtensions
         """;
     }
 
+    private static async Task<IResult> RenderMfaChallengeAsync(
+        SqlOSAuthorizationRequestLoginResult completion,
+        string? authorizationRequestId,
+        string? email,
+        string authPrefix,
+        SqlOSAuthorizationServerService authorizationServerService,
+        SqlOSAuthService authService,
+        CancellationToken cancellationToken,
+        string? error = null,
+        string? invitationToken = null,
+        SqlOSInvitationService? invitationService = null,
+        string? phoneNumber = null)
+    {
+        if (string.IsNullOrWhiteSpace(completion.MfaToken))
+        {
+            throw new InvalidOperationException("MFA challenge is invalid.");
+        }
+
+        if (completion.RequiresMfaEnrollment)
+        {
+            var enrollment = await authService.StartTotpEnrollmentForChallengeAsync(
+                completion.MfaToken,
+                new SqlOSTotpEnrollmentStartRequest(),
+                cancellationToken);
+            var enrollmentPage = await BuildAuthPageViewModelAsync(
+                "mfa-enroll",
+                authorizationRequestId,
+                email,
+                error,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitationService: invitationService,
+                phoneNumber: phoneNumber,
+                mfaToken: completion.MfaToken,
+                mfaMethods: completion.MfaMethods,
+                enrollmentToken: enrollment.EnrollmentToken,
+                totpSecret: enrollment.Secret,
+                totpProvisioningUri: enrollment.ProvisioningUri,
+                totpQrCodeDataUrl: enrollment.QrCodeDataUrl);
+            return Html(enrollmentPage, string.IsNullOrWhiteSpace(error) ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+        }
+
+        var page = await BuildAuthPageViewModelAsync(
+            "mfa",
+            authorizationRequestId,
+            email,
+            error,
+            null,
+            null,
+            authPrefix,
+            authorizationServerService,
+            cancellationToken,
+            invitationToken: invitationToken,
+            invitationService: invitationService,
+            phoneNumber: phoneNumber,
+            mfaToken: completion.MfaToken,
+            mfaMethods: completion.MfaMethods);
+        return Html(page, string.IsNullOrWhiteSpace(error) ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+    }
+
     private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(
         string mode,
         string? authorizationRequestId,
@@ -3854,7 +4175,13 @@ public static class EndpointRouteBuilderExtensions
         SqlOSInvitationService? invitationService = null,
         string? deviceUserCode = null,
         SqlOSDeviceAuthorizationResolveResult? deviceAuthorization = null,
-        string? phoneNumber = null)
+        string? phoneNumber = null,
+        string? mfaToken = null,
+        IReadOnlyList<string>? mfaMethods = null,
+        string? enrollmentToken = null,
+        string? totpSecret = null,
+        string? totpProvisioningUri = null,
+        string? totpQrCodeDataUrl = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
         var isDeviceView = string.Equals(mode, "device", StringComparison.OrdinalIgnoreCase)
@@ -3916,7 +4243,13 @@ public static class EndpointRouteBuilderExtensions
             invitation,
             effectiveDeviceUserCode,
             deviceAuthorization,
-            phoneNumber);
+            phoneNumber,
+            mfaToken,
+            mfaMethods,
+            enrollmentToken,
+            totpSecret,
+            totpProvisioningUri,
+            totpQrCodeDataUrl);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)

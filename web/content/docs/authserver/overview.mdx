@@ -19,8 +19,9 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 <Callout type="info" title="Recommended reading order">
   1. [Dashboard](/docs/authserver/dashboard-overview) → [Organizations](/docs/authserver/organizations) → [Hosted vs headless](/docs/authserver/hosted-vs-headless)
   2. [Password login](/docs/authserver/password-login) or [Email OTP](/docs/authserver/email-otp) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso)
-  3. One app: [Single-Application Setup](/docs/authserver/single-application)
-  4. Advanced: [Clients](/docs/authserver/clients), [Application Access](/docs/authserver/application-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
+  3. Security policy: [MFA and TOTP](/docs/authserver/mfa-totp) and [Security Settings](/docs/authserver/security-settings)
+  4. One app: [Single-Application Setup](/docs/authserver/single-application)
+  5. Advanced: [Clients](/docs/authserver/clients), [Application Access](/docs/authserver/application-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
 </Callout>
 
 ## What you get
@@ -29,6 +30,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
   <Card title="Organizations" description="Multi-tenant orgs, memberships, and roles." />
   <Card title="Users" description="Email/password, email OTP, SSO-provisioned, or OIDC-linked identities." />
   <Card title="Sessions" description="JWT access tokens, refresh token rotation, and replay detection." />
+  <Card title="MFA and recovery codes" description="Optional self-enrollment, tenant-required TOTP, and recovery-code challenges." />
   <Card title="OIDC" description="Google, Microsoft, Apple, and custom providers." />
   <Card title="SAML SSO" description="Enterprise SSO with provisioning and hosted flows." />
   <Card title="Invitations" description="Email-bound organization invites with hosted, headless, and SDK acceptance." />
@@ -53,8 +55,9 @@ Typical browser login:
 2. User enters email. [Home realm discovery](/docs/authserver/home-realm-discovery) picks password, Email OTP, or SSO.
 3. User signs in (password, Email OTP, OIDC, or SAML).
 4. Multiple orgs? User picks one.
-5. SqlOS returns an auth code.
-6. App trades the code for access and refresh tokens.
+5. MFA required? SqlOS renders or returns a TOTP challenge or forced enrollment step.
+6. SqlOS returns an auth code.
+7. App trades the code for access and refresh tokens.
 
 <Callout type="tip" title="Start with owned clients first">
   For most teams, the first production flow should use a seeded or dashboard-created owned client. Add `CIMD`, `DCR`, and resource indicators only when you actually need portable or compatibility clients.
@@ -94,7 +97,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 

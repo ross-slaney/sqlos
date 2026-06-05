@@ -44,6 +44,15 @@ public static class SqlOSAuthPageRenderer
         var deviceUserCodeInput = string.IsNullOrWhiteSpace(model.DeviceUserCode)
             ? string.Empty
             : $"<input type=\"hidden\" name=\"deviceUserCode\" value=\"{Html(model.DeviceUserCode)}\" />";
+        var mfaTokenInput = string.IsNullOrWhiteSpace(model.MfaToken)
+            ? string.Empty
+            : $"<input type=\"hidden\" name=\"mfaToken\" value=\"{Html(model.MfaToken)}\" />";
+        var mfaMethodValues = model.MfaMethods ?? Array.Empty<string>();
+        var mfaMethods = mfaMethodValues.Count == 0
+            ? "an authenticator app or recovery code"
+            : string.Join(" or ", mfaMethodValues.Select(static method => string.Equals(method, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)
+                ? "an authenticator app"
+                : "a recovery code"));
         var emailValue = Html(model.Email ?? string.Empty);
         var emailReadonly = model.Invitation == null ? string.Empty : " readonly";
         var encodedMode = Html(normalizedMode);
@@ -459,10 +468,52 @@ public static class SqlOSAuthPageRenderer
             "organization" => $$"""
                 {{RenderPanelIntro("Organization", "Choose the workspace you want to continue into.")}}
                 <form class="auth-form organization-form" method="post" action="{{Html(AuthPath(model, "/login/select-organization"))}}">
+                  {{requestIdInput}}
                   <input type="hidden" name="pendingToken" value="{{Html(model.PendingToken ?? string.Empty)}}" />
                   <div class="organization-list">{{RenderOrganizationOptions(model.OrganizationSelection)}}</div>
                 </form>
                 {{RenderFooterLinks(loginLink)}}
+                """,
+            "mfa" => $$"""
+                {{RenderPanelIntro("Two-step verification", $"Enter a code from {mfaMethods}.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/mfa/verify"))}}">
+                  {{requestIdInput}}
+                  {{mfaTokenInput}}
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify", "Verifying")}}
+                </form>
+                {{RenderFooterLinks(loginLink)}}
+                """,
+            "mfa-enroll" => $$"""
+                {{RenderPanelIntro("Add authenticator app", "Use an authenticator app to add a second step before continuing.")}}
+                <div class="qr-panel">
+                  <img class="qr-code" src="{{Html(model.TotpQrCodeDataUrl ?? string.Empty)}}" alt="Authenticator setup QR code" />
+                  <p>Scan this QR code with your authenticator app.</p>
+                </div>
+                <details class="manual-setup">
+                  <summary>Use manual setup</summary>
+                  <div class="secret-panel">
+                    <span>Setup key</span>
+                    <code>{{Html(model.TotpSecret ?? string.Empty)}}</code>
+                  </div>
+                  <div class="secret-panel">
+                    <span>Provisioning URI</span>
+                    <code>{{Html(model.TotpProvisioningUri ?? string.Empty)}}</code>
+                  </div>
+                </details>
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/mfa/totp/enroll/verify"))}}">
+                  {{requestIdInput}}
+                  {{mfaTokenInput}}
+                  <input type="hidden" name="enrollmentToken" value="{{Html(model.EnrollmentToken ?? string.Empty)}}" />
+                  <label class="field">
+                    <span>Code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" required autofocus />
+                  </label>
+                  {{RenderPrimaryAction("Verify and continue", "Verifying")}}
+                </form>
                 """,
             "logged-out" => $$"""
                 <div class="state-card">
@@ -684,6 +735,58 @@ public static class SqlOSAuthPageRenderer
               background: color-mix(in srgb, var(--primary) 6%, var(--panel));
               font-size: 14px;
               line-height: 1.45;
+            }
+            .secret-panel {
+              display: grid;
+              gap: 6px;
+              padding: 12px;
+              border: 1px solid var(--border);
+              border-radius: 10px;
+              background: color-mix(in srgb, var(--primary) 5%, var(--panel));
+            }
+            .secret-panel span {
+              color: var(--muted);
+              font-size: 12px;
+              font-weight: 700;
+              text-transform: uppercase;
+            }
+            .secret-panel code {
+              overflow-wrap: anywhere;
+              font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              font-size: 12px;
+              line-height: 1.45;
+            }
+            .qr-panel {
+              display: grid;
+              justify-items: center;
+              gap: 10px;
+              margin-bottom: 14px;
+              color: var(--muted);
+              font-size: 13px;
+              line-height: 1.5;
+              text-align: center;
+            }
+            .qr-code {
+              width: min(220px, 100%);
+              aspect-ratio: 1;
+              border: 1px solid var(--border);
+              border-radius: 12px;
+              background: #ffffff;
+              padding: 10px;
+            }
+            .manual-setup {
+              display: grid;
+              gap: 10px;
+              margin-bottom: 14px;
+            }
+            .manual-setup summary {
+              color: color-mix(in srgb, var(--primary) 80%, var(--text));
+              cursor: pointer;
+              font-size: 13px;
+              font-weight: 600;
+            }
+            .manual-setup[open] {
+              gap: 10px;
             }
             .invite-summary strong {
               font-size: 15px;
@@ -1458,6 +1561,12 @@ public sealed record SqlOSAuthPageViewModel(
     SqlOSEmailInvitationResult? Invitation = null,
     string? DeviceUserCode = null,
     SqlOSDeviceAuthorizationResolveResult? DeviceAuthorization = null,
-    string? PhoneNumber = null);
+    string? PhoneNumber = null,
+    string? MfaToken = null,
+    IReadOnlyList<string>? MfaMethods = null,
+    string? EnrollmentToken = null,
+    string? TotpSecret = null,
+    string? TotpProvisioningUri = null,
+    string? TotpQrCodeDataUrl = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

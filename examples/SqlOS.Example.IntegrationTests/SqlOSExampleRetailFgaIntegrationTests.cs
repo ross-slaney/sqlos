@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -11,6 +14,9 @@ namespace SqlOS.Example.IntegrationTests;
 [TestClass]
 public sealed class SqlOSExampleRetailFgaIntegrationTests
 {
+    private static readonly ConcurrentDictionary<string, string> TotpSecretByEmail = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, string> AccessTokenByEmail = new(StringComparer.OrdinalIgnoreCase);
+
     [TestMethod]
     public async Task CompanyAdmin_CanListAndCreateChains()
     {
@@ -253,10 +259,76 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
 
     private static async Task<string> GetAccessTokenAsync(string email)
     {
+        if (AccessTokenByEmail.TryGetValue(email, out var cachedAccessToken))
+        {
+            return cachedAccessToken;
+        }
+
         var response = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/demo/switch", new { email });
         response.EnsureSuccessStatusCode();
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return json.RootElement.GetProperty("accessToken").GetString()!;
+        if (json.RootElement.TryGetProperty("accessToken", out var accessToken))
+        {
+            var token = accessToken.GetString()!;
+            AccessTokenByEmail[email] = token;
+            return token;
+        }
+
+        json.RootElement.GetProperty("requiresMfa").GetBoolean().Should().BeTrue();
+        var mfaToken = json.RootElement.GetProperty("mfaToken").GetString()
+            ?? throw new InvalidOperationException("Demo switch MFA response did not include an MFA token.");
+        var requiresEnrollment = json.RootElement.GetProperty("requiresMfaEnrollment").GetBoolean();
+        if (requiresEnrollment)
+        {
+            var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync(
+                "/sqlos/auth/mfa/challenge/totp/enroll/start",
+                new { mfaToken, displayName = "Integration test authenticator" });
+            startResponse.EnsureSuccessStatusCode();
+            var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+            var enrollmentToken = startJson.RootElement.GetProperty("enrollmentToken").GetString()
+                ?? throw new InvalidOperationException("TOTP enrollment did not include an enrollment token.");
+            var secret = startJson.RootElement.GetProperty("secret").GetString()
+                ?? throw new InvalidOperationException("TOTP enrollment did not include a secret.");
+            TotpSecretByEmail[email] = secret;
+
+            var verifyResponse = await ExampleApiFixture.Client.PostAsJsonAsync(
+                "/sqlos/auth/mfa/challenge/totp/enroll/verify",
+                new
+                {
+                    enrollmentToken,
+                    code = GenerateTotp(secret),
+                    mfaToken
+                });
+            verifyResponse.EnsureSuccessStatusCode();
+            var verifyJson = JsonDocument.Parse(await verifyResponse.Content.ReadAsStringAsync());
+            var token = verifyJson.RootElement
+                .GetProperty("tokens")
+                .GetProperty("accessToken")
+                .GetString()!;
+            AccessTokenByEmail[email] = token;
+            return token;
+        }
+
+        if (!TotpSecretByEmail.TryGetValue(email, out var existingSecret))
+        {
+            throw new InvalidOperationException($"MFA is required for {email}, but the test helper does not have that user's TOTP secret.");
+        }
+
+        var challengeResponse = await ExampleApiFixture.Client.PostAsJsonAsync(
+            "/sqlos/auth/mfa/challenge/verify",
+            new
+            {
+                mfaToken,
+                code = GenerateTotp(existingSecret)
+            });
+        challengeResponse.EnsureSuccessStatusCode();
+        var challengeJson = JsonDocument.Parse(await challengeResponse.Content.ReadAsStringAsync());
+        var challengeToken = challengeJson.RootElement
+            .GetProperty("tokens")
+            .GetProperty("accessToken")
+            .GetString()!;
+        AccessTokenByEmail[email] = challengeToken;
+        return challengeToken;
     }
 
     private static async Task<HttpResponseMessage> GetAsUserAsync(string path, string email)
@@ -309,4 +381,54 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
         string? Description,
         string Type,
         string? Credential);
+
+    private static string GenerateTotp(string secret)
+    {
+        var timeStep = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
+        Span<byte> counter = stackalloc byte[8];
+        BitConverter.TryWriteBytes(counter, timeStep);
+        if (BitConverter.IsLittleEndian)
+        {
+            counter.Reverse();
+        }
+
+        var hash = HMACSHA1.HashData(DecodeBase32(secret), counter);
+        var offset = hash[^1] & 0x0f;
+        var binary =
+            ((hash[offset] & 0x7f) << 24)
+            | ((hash[offset + 1] & 0xff) << 16)
+            | ((hash[offset + 2] & 0xff) << 8)
+            | (hash[offset + 3] & 0xff);
+
+        return (binary % 1_000_000).ToString().PadLeft(6, '0');
+    }
+
+    private static byte[] DecodeBase32(string input)
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        var cleaned = new string((input ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+        var bytes = new List<byte>();
+        var buffer = 0;
+        var bitsLeft = 0;
+        foreach (var character in cleaned)
+        {
+            var value = alphabet.IndexOf(character, StringComparison.Ordinal);
+            if (value < 0)
+                throw new InvalidOperationException("TOTP secret contains an invalid Base32 character.");
+
+            buffer <<= 5;
+            buffer |= value & 0x1f;
+            bitsLeft += 5;
+            if (bitsLeft >= 8)
+            {
+                bytes.Add((byte)(buffer >> (bitsLeft - 8)));
+                bitsLeft -= 8;
+            }
+        }
+
+        return bytes.ToArray();
+    }
 }

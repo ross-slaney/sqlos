@@ -45,7 +45,11 @@ public sealed record SqlOSLoginResult(
     bool RequiresOrganizationSelection,
     string? PendingAuthToken,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,
-    SqlOSTokenResponse? Tokens);
+    SqlOSTokenResponse? Tokens,
+    bool RequiresMfa = false,
+    string? MfaToken = null,
+    bool RequiresMfaEnrollment = false,
+    IReadOnlyList<string>? MfaMethods = null);
 
 public sealed record SqlOSValidatedToken(
     ClaimsPrincipal Principal,

@@ -197,6 +197,17 @@ public static class ExampleDemoEndpoints
                     httpContext,
                     cancellationToken);
 
+                if (result.RequiresMfa && !string.IsNullOrWhiteSpace(result.MfaToken))
+                {
+                    return Results.Ok(new
+                    {
+                        requiresMfa = true,
+                        mfaToken = result.MfaToken,
+                        requiresMfaEnrollment = result.RequiresMfaEnrollment,
+                        mfaMethods = result.MfaMethods ?? Array.Empty<string>()
+                    });
+                }
+
                 if (result.Tokens == null)
                     return Results.BadRequest(new { error = "Login did not produce tokens." });
 
