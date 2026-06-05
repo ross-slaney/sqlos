@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Models;
@@ -16,6 +17,7 @@ public class RetailSeedService
     private readonly SqlOSFgaSeedService _seedService;
     private readonly ISqlOSFgaSubjectService _subjectService;
     private readonly SqlOSAdminService _adminService;
+    private readonly SqlOSSettingsService _settingsService;
     private readonly ExampleFgaService _fgaService;
 
     public const string DemoPassword = "RetailDemo1!";
@@ -50,19 +52,24 @@ public class RetailSeedService
         SqlOSFgaSeedService seedService,
         ISqlOSFgaSubjectService subjectService,
         SqlOSAdminService adminService,
+        SqlOSSettingsService settingsService,
         ExampleFgaService fgaService)
     {
         _context = context;
         _seedService = seedService;
         _subjectService = subjectService;
         _adminService = adminService;
+        _settingsService = settingsService;
         _fgaService = fgaService;
     }
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
         if (await _context.Chains.AnyAsync(ct))
+        {
+            await EnsureRetailMfaPolicyAsync(ct);
             return;
+        }
 
         await _seedService.SeedAuthorizationDataAsync(new SqlOSFgaSeedData
         {
@@ -100,6 +107,7 @@ public class RetailSeedService
         var org = await _adminService.CreateOrganizationAsync(
             new SqlOSCreateOrganizationRequest("Retail Demo", RetailOrgSlug), ct);
         var orgId = org.Id;
+        await EnsureRetailMfaPolicyAsync(ct);
 
         var companyAdminId = await CreateDemoUserAsync("Company Admin", CompanyAdminEmail, "owner", orgId, ct);
         var chainMgrWalmartId = await CreateDemoUserAsync("Walmart Chain Manager", ChainManagerWalmartEmail, "member", orgId, ct);
@@ -223,5 +231,27 @@ public class RetailSeedService
         await _adminService.CreateMembershipAsync(orgId, new SqlOSCreateMembershipRequest(user.Id, role), ct);
         await _fgaService.EnsureUserAccessAsync(user.Id, orgId, ct);
         return user.Id;
+    }
+
+    private async Task EnsureRetailMfaPolicyAsync(CancellationToken ct)
+    {
+        var org = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(x => x.Slug == RetailOrgSlug, ct);
+        if (org == null)
+        {
+            return;
+        }
+
+        await _settingsService.UpdateOrganizationMfaPolicyAsync(
+            org.Id,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: true,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]),
+            ct);
     }
 }

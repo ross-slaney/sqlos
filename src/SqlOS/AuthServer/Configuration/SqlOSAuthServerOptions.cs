@@ -37,6 +37,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
     public SqlOSPhoneOtpOptions PhoneOtp { get; } = new();
+    public SqlOSMfaOptions Mfa { get; } = new();
     public SqlOSPasswordResetOptions PasswordReset { get; } = new();
     public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
@@ -47,6 +48,7 @@ public class SqlOSAuthServerOptions
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public SqlOSAuthEmailSeedOptions? AuthEmailSeed { get; private set; }
+    public SqlOSMfaSeedOptions? MfaSeed { get; private set; }
     public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
 
@@ -69,6 +71,14 @@ public class SqlOSAuthServerOptions
         var seed = AuthEmailSeed ?? new SqlOSAuthEmailSeedOptions();
         configure(seed);
         AuthEmailSeed = seed;
+        return this;
+    }
+
+    public SqlOSAuthServerOptions SeedMfaPolicy(Action<SqlOSMfaSeedOptions> configure)
+    {
+        var seed = MfaSeed ?? new SqlOSMfaSeedOptions();
+        configure(seed);
+        MfaSeed = seed;
         return this;
     }
 
@@ -172,6 +182,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigurePhoneOtp(Action<SqlOSPhoneOtpOptions> configure)
     {
         configure(PhoneOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureMfa(Action<SqlOSMfaOptions> configure)
+    {
+        configure(Mfa);
         return this;
     }
 

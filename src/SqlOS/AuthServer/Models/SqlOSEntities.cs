@@ -14,6 +14,7 @@ public sealed class SqlOSOrganization
     public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
     public ICollection<SqlOSSsoConnection> SsoConnections { get; set; } = new List<SqlOSSsoConnection>();
     public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
+    public SqlOSOrganizationMfaPolicy? MfaPolicy { get; set; }
 }
 
 public sealed class SqlOSUser
@@ -31,6 +32,9 @@ public sealed class SqlOSUser
     public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
     public ICollection<SqlOSSession> Sessions { get; set; } = new List<SqlOSSession>();
+    public ICollection<SqlOSUserAuthenticator> Authenticators { get; set; } = new List<SqlOSUserAuthenticator>();
+    public ICollection<SqlOSRecoveryCode> RecoveryCodes { get; set; } = new List<SqlOSRecoveryCode>();
+    public SqlOSUserMfaPolicyOverride? MfaPolicyOverride { get; set; }
 }
 
 public sealed class SqlOSUserEmail
@@ -425,6 +429,79 @@ public sealed class SqlOSSettings
     /// </summary>
     public int RefreshTokenGraceWindowSeconds { get; set; } = 30;
     public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class SqlOSMfaSettings
+{
+    public string Id { get; set; } = "default";
+    public bool Enabled { get; set; } = true;
+    public bool TotpEnabled { get; set; } = true;
+    public bool UserSelfEnrollmentEnabled { get; set; } = true;
+    public bool RecoveryCodesEnabled { get; set; } = true;
+    public bool RequireForAllUsers { get; set; }
+    public bool RequireForOwnersAndAdmins { get; set; }
+    public string RequiredRolesJson { get; set; } = "[\"owner\",\"admin\"]";
+    public string AvailableFactorsJson { get; set; } = "[\"totp\",\"recovery_code\"]";
+    public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class SqlOSOrganizationMfaPolicy
+{
+    public string OrganizationId { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public bool RequireMfaForAllUsers { get; set; }
+    public bool RequireMfaForOwnersAndAdmins { get; set; }
+    public bool UserSelfEnrollmentEnabled { get; set; } = true;
+    public bool RecoveryCodesEnabled { get; set; } = true;
+    public string RequiredRolesJson { get; set; } = "[\"owner\",\"admin\"]";
+    public string AvailableFactorsJson { get; set; } = "[\"totp\",\"recovery_code\"]";
+    public DateTime UpdatedAt { get; set; }
+
+    public SqlOSOrganization? Organization { get; set; }
+}
+
+public sealed class SqlOSUserMfaPolicyOverride
+{
+    public string UserId { get; set; } = string.Empty;
+    public bool? RequireMfa { get; set; }
+    public bool? UserSelfEnrollmentEnabled { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public SqlOSUser? User { get; set; }
+}
+
+public sealed class SqlOSUserAuthenticator
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string Type { get; set; } = "totp";
+    public string DisplayName { get; set; } = "Authenticator app";
+    public string SecretProtected { get; set; } = string.Empty;
+    public int SecretVersion { get; set; } = 1;
+    public string Algorithm { get; set; } = "SHA1";
+    public int Digits { get; set; } = 6;
+    public int PeriodSeconds { get; set; } = 30;
+    public bool IsConfirmed { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? ConfirmedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevocationReason { get; set; }
+    public long? LastAcceptedTimeStep { get; set; }
+
+    public SqlOSUser? User { get; set; }
+}
+
+public sealed class SqlOSRecoveryCode
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string CodeHash { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? ConsumedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+
+    public SqlOSUser? User { get; set; }
 }
 
 public sealed class SqlOSAuthPageSettings

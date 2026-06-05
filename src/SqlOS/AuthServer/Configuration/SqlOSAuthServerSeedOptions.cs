@@ -37,6 +37,32 @@ public sealed class SqlOSAuthEmailSeedOptions
     public string BackgroundColor { get; set; } = "#f8fafc";
 }
 
+public sealed class SqlOSMfaSeedOptions
+{
+    public bool Enabled { get; set; } = true;
+    public bool TotpEnabled { get; set; } = true;
+    public bool UserSelfEnrollmentEnabled { get; set; } = true;
+    public bool RecoveryCodesEnabled { get; set; } = true;
+    public bool RequireForAllUsers { get; set; }
+    public bool RequireForOwnersAndAdmins { get; set; }
+    public List<string> RequiredRoles { get; set; } = ["owner", "admin"];
+    public List<string> AvailableFactors { get; set; } = ["totp", "recovery_code"];
+    public List<SqlOSOrganizationMfaPolicySeedOptions> Organizations { get; } = [];
+}
+
+public sealed class SqlOSOrganizationMfaPolicySeedOptions
+{
+    public string OrganizationId { get; set; } = string.Empty;
+    public string? OrganizationSlug { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public bool RequireMfaForAllUsers { get; set; }
+    public bool RequireMfaForOwnersAndAdmins { get; set; }
+    public bool UserSelfEnrollmentEnabled { get; set; } = true;
+    public bool RecoveryCodesEnabled { get; set; } = true;
+    public List<string> RequiredRoles { get; set; } = ["owner", "admin"];
+    public List<string> AvailableFactors { get; set; } = ["totp", "recovery_code"];
+}
+
 public sealed class SqlOSClientSeedOptions
 {
     public string ClientId { get; set; } = string.Empty;

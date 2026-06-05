@@ -32,6 +32,7 @@ Password mode includes dashboard-specific per-IP throttling, global backoff for 
 | OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |
 | SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO |
 | Auth Page | `/sqlos/admin/auth/settings` | Configure hosted/headless credential types, AuthPage branding, and email branding |
+| MFA | `/sqlos/admin/auth/mfa` | Configure global MFA availability, TOTP, self-enrollment, recovery codes, and global requirement policy |
 | Security | `/sqlos/admin/auth/security` | Configure session and token lifetimes |
 | Sessions | `/sqlos/admin/auth/sessions` | View and manage active sessions |
 | Audit Events | `/sqlos/admin/auth/audit` | Review authentication events |
@@ -41,6 +42,24 @@ Password mode includes dashboard-specific per-IP throttling, global backoff for 
 The Auth Page settings screen includes email branding for built-in OTP and invitation emails. It stores the application name, logo data URL, primary color, accent color, and background color used by the default templates.
 
 For setup details, see [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/authserver/invitations), and [Email Branding](/docs/authserver/email-branding).
+
+## MFA policy
+
+The MFA page controls application-wide authenticator-app policy:
+
+- enable or disable MFA;
+- enable authenticator apps;
+- allow voluntary user self-enrollment;
+- issue recovery codes;
+- require MFA for all users;
+- require MFA for owners, admins, or custom role names;
+- edit the available factor list.
+
+If MFA settings are managed by a startup seed, the dashboard shows a startup-managed callout because code/config will reapply those values on restart.
+
+Organization-specific MFA policy is available through the admin API and startup seeding in this release. Use it when one tenant requires MFA and another tenant leaves it optional.
+
+For setup details, see [MFA and TOTP](/docs/authserver/mfa-totp) and [Require Authenticator MFA](/docs/guides/mfa-totp).
 
 ## FGA pages
 

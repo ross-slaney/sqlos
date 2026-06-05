@@ -52,8 +52,10 @@ public sealed class SqlOSBootstrapper
         await _cryptoService.EnsureActiveSigningKeyAsync(cancellationToken);
         await _settingsService.EnsureDefaultSettingsAsync(cancellationToken);
         await _settingsService.EnsureDefaultAuthPageSettingsAsync(cancellationToken);
+        await _settingsService.EnsureDefaultMfaSettingsAsync(cancellationToken);
         await _settingsService.UpsertSeededAuthPageSettingsAsync(cancellationToken);
         await _settingsService.UpsertSeededAuthEmailSettingsAsync(cancellationToken);
+        await _settingsService.UpsertSeededMfaSettingsAsync(cancellationToken);
         await _emailAdminService.EnsureBuiltInTemplatesAsync(cancellationToken);
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _adminService.CleanupExpiredTemporaryTokensAsync(cancellationToken);

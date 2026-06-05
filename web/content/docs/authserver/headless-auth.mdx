@@ -79,6 +79,9 @@ Your UI calls these SqlOS endpoints:
 | `POST /sqlos/auth/headless/device/approve` | Approve a CLI device request after sign-in |
 | `POST /sqlos/auth/headless/device/deny` | Deny a CLI device request |
 | `POST /sqlos/auth/headless/organization/select` | Select org for multi-org users |
+| `POST /sqlos/auth/headless/mfa/verify` | Verify a TOTP or recovery-code challenge |
+| `POST /sqlos/auth/headless/mfa/totp/enroll/start` | Start forced TOTP enrollment for an MFA challenge |
+| `POST /sqlos/auth/headless/mfa/totp/enroll/verify` | Verify forced TOTP enrollment and continue authorization |
 | `POST /sqlos/auth/headless/provider/start` | Start OIDC or SSO flow |
 
 ## CLI device flow
@@ -157,8 +160,20 @@ if (result.requiresOrganizationSelection) {
   await headlessSelectOrganization(requestId, orgId);
 }
 
-// 6. SqlOS issues the auth code and redirects back to the OAuth client
+// 6. If policy requires MFA, render request.view === "mfa" or "mfa-enroll"
+
+// 7. SqlOS issues the auth code and redirects back to the OAuth client
 ```
+
+## MFA views
+
+Headless MFA uses the same result contract as every other step.
+
+When `viewModel.view` is `mfa`, render an input for a 6-digit authenticator code or a recovery code. Post it to `/headless/mfa/verify` with `requestId`, `mfaToken`, and `code`.
+
+When `viewModel.view` is `mfa-enroll`, render authenticator setup. The view model includes `totpEnrollment` with `qrCodeDataUrl`, `secret`, `provisioningUri`, `enrollmentToken`, and `expiresAt`. Post the verification code to `/headless/mfa/totp/enroll/verify`.
+
+If your headless app does not render these views, required-MFA users will authenticate their primary credential and then stop at an unhandled state.
 
 ## Invitations
 
