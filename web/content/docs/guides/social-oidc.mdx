@@ -42,6 +42,52 @@ See [Google OIDC](/docs/authserver/google-oidc) for curl-based setup and failure
 
 See [Microsoft OIDC](/docs/authserver/microsoft-oidc).
 
+## Seed from startup
+
+Instead of clicking through the dashboard, you can seed a connection from code so it exists on a fresh database. This is consistent with `SeedAuthPage`, `SeedAuthEmails`, and client seeding: the bootstrapper reconciles the connection on startup, matched by provider type (and display name for custom providers).
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+
+    // "Continue with Microsoft". Keep secrets in configuration/user-secrets, never in source.
+    auth.SeedMicrosoftConnection(
+        clientId: builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]!,
+        clientSecret: builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"]!,
+        tenant: "common",
+        // {connectionId} is replaced with the generated connection id at seed time.
+        "https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}");
+
+    // "Continue with Google".
+    auth.SeedGoogleConnection(
+        clientId: builder.Configuration["SqlOS:Oidc:Google:ClientId"]!,
+        clientSecret: builder.Configuration["SqlOS:Oidc:Google:ClientSecret"]!,
+        "https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}");
+});
+```
+
+For Apple or fully custom providers, use the general form:
+
+```csharp
+auth.SeedOidcConnection(oidc =>
+{
+    oidc.ProviderType = SqlOSOidcProviderType.Custom;
+    oidc.DisplayName = "Acme Identity";
+    oidc.ClientId = builder.Configuration["SqlOS:Oidc:Acme:ClientId"]!;
+    oidc.ClientSecret = builder.Configuration["SqlOS:Oidc:Acme:ClientSecret"];
+    oidc.DiscoveryUrl = "https://id.acme.com/.well-known/openid-configuration";
+    oidc.AllowedCallbackUris = ["https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}"];
+});
+```
+
+<Callout type="info" title="Seeding behavior">
+  - Seeds are reconciled on every startup. Client id, callbacks, scopes, and endpoints are kept in sync with your code.
+  - A client secret is only overwritten when the seed supplies one, so configuration without a secret never clears a stored credential.
+  - Enable/disable is owner-managed once the connection exists: a manual disable from the dashboard survives restarts.
+  - Add the same SqlOS-owned callback URI to the provider (Entra, Google, etc.). The connection id is shown in the dashboard after the first boot.
+</Callout>
+
 ## Test
 
 1. Open your app’s login entry point (or `/sqlos/auth/login`).

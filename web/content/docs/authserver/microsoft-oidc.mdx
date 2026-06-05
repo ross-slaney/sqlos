@@ -34,4 +34,18 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
 ```
 
+## Seed from code
+
+To create the connection from a fresh database without the dashboard or curl, seed it at startup:
+
+```csharp
+options.AuthServer.SeedMicrosoftConnection(
+    clientId: builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]!,
+    clientSecret: builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"]!,
+    tenant: "common",
+    "http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}");
+```
+
+See [Google and Microsoft sign-in](/docs/guides/social-oidc#seed-from-startup) for seeding behavior and the general `SeedOidcConnection` form.
+
 See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
