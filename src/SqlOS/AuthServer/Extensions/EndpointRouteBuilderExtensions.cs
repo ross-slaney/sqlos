@@ -4454,6 +4454,7 @@ public static class EndpointRouteBuilderExtensions
     {
         connection.Id,
         ProviderType = connection.ProviderType.ToString(),
+        Protocol = connection.Protocol.ToString(),
         connection.DisplayName,
         connection.LogoDataUrl,
         EffectiveLogoDataUrl = SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(connection.ProviderType, connection.LogoDataUrl),

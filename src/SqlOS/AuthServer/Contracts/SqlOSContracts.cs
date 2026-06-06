@@ -9,7 +9,15 @@ public enum SqlOSOidcProviderType
     Google,
     Microsoft,
     Apple,
+    GitHub,
     Custom
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SqlOSSocialProviderProtocol
+{
+    Oidc,
+    OAuthProfile
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -398,7 +406,8 @@ public sealed record SqlOSOidcProviderSummary(
     string ProviderType,
     string DisplayName,
     bool IsEnabled,
-    string? LogoDataUrl = null);
+    string? LogoDataUrl = null,
+    string Protocol = nameof(SqlOSSocialProviderProtocol.Oidc));
 
 public sealed record SqlOSOidcAuthorizationUrlRequest(
     string ConnectionId,
@@ -481,7 +490,10 @@ public sealed record SqlOSCompleteOidcAuthorizationResult(
     string DisplayName,
     string? OrganizationId,
     string AuthenticationMethod,
-    int OrganizationCount);
+    int OrganizationCount)
+{
+    public bool UserCreated { get; init; }
+}
 
 public sealed record SqlOSPkceExchangeRequest(
     string Code,

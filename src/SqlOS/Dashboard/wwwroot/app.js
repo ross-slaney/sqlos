@@ -44,7 +44,7 @@
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
-        oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
+        oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, GitHub, and custom providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         mfa: { title: "MFA", description: "Configure authenticator app enrollment and second-factor requirements." },
         authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
@@ -189,6 +189,28 @@
                 { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" }
             ],
             integration: "Apple redirects back to SqlOS, then SqlOS redirects back to your app callback with the final code."
+        },
+        GitHub: {
+            heading: "GitHub Setup",
+            description: "Create a GitHub OAuth app and let SqlOS fetch the verified primary email through GitHub's user APIs.",
+            docsLabel: "GitHub OAuth app",
+            docsUrl: "https://github.com/settings/developers",
+            steps: [
+                "Create or open a GitHub OAuth App.",
+                "Set Authorization callback URL to: {callback}.",
+                "Copy Client ID + Client Secret from GitHub into SqlOS, then save the connection.",
+                "Use the default scopes so SqlOS can read the profile and verified primary email."
+            ],
+            rows: [
+                { label: "Provider type", value: "GitHub" },
+                { label: "Protocol", value: "OAuth profile" },
+                { label: "Authorization endpoint", value: "https://github.com/login/oauth/authorize" },
+                { label: "Token endpoint", value: "https://github.com/login/oauth/access_token" },
+                { label: "Profile endpoints", value: "/user and /user/emails" },
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Suggested scopes", value: "read:user, user:email" }
+            ],
+            integration: "GitHub returns an OAuth access token. SqlOS uses it to load GitHub profile/email data, links by numeric GitHub user id, and then completes the normal social login redirect."
         },
         Custom: {
             heading: "Custom OIDC Setup",
@@ -741,6 +763,10 @@
 
         if (raw === "apple") {
             return "Apple";
+        }
+
+        if (raw === "github") {
+            return "GitHub";
         }
 
         return "Custom";
@@ -2576,12 +2602,13 @@
                 <div class="panel-grid">
                     <section class="panel">
                         <h2>Configure Social Provider</h2>
-                        <p>SqlOS owns the provider callback for social login. Register this exact callback URI with Google, Microsoft, Apple, or your custom OIDC provider, then save the provider configuration here.</p>
+                        <p>SqlOS owns the provider callback for social login. Register this exact callback URI with Google, Microsoft, Apple, GitHub, or your custom provider, then save the provider configuration here.</p>
                         <form id="create-oidc-connection-form">
                             <select id="oidc-provider-type" name="providerType" required>
                                 <option value="Google">Google</option>
                                 <option value="Microsoft">Microsoft</option>
                                 <option value="Apple">Apple</option>
+                                <option value="GitHub">GitHub</option>
                                 <option value="Custom">Custom</option>
                             </select>
                             <input name="displayName" placeholder="Display name" required>
@@ -2609,7 +2636,7 @@
                             <textarea name="allowedCallbackUris" required readonly>${esc(callbackTemplate)}</textarea>
                             <textarea name="scopes" placeholder="Optional scopes, one per line"></textarea>
                             <textarea name="claimMapping" placeholder='Claim mapping JSON, for example {\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}'></textarea>
-                            <button type="submit">Create OIDC connection</button>
+                            <button type="submit">Create social connection</button>
                         </form>
                     </section>
                     <section class="panel">
@@ -2628,12 +2655,13 @@
                                     ${renderOidcProviderLogo(item.effectiveLogoDataUrl || item.logoDataUrl, item.displayName)}
                                     <div>
                                         <strong>${esc(item.displayName)}</strong>
-                                        <div class="oidc-provider-subtitle">${esc(item.providerType)} social login</div>
+                                        <div class="oidc-provider-subtitle">${esc(item.providerType)} social login${item.protocol ? ` · ${esc(item.protocol)}` : ""}</div>
                                     </div>
                                 </div>
                             </div>
                             ${renderMetadataRows([
                                 { label: "Provider", value: item.providerType },
+                                { label: "Protocol", value: item.protocol || "Oidc" },
                                 { label: "Connection ID", value: item.id },
                                 {
                                     label: "Effective logo",

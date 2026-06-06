@@ -175,6 +175,7 @@ public sealed class SqlOSOidcConnection
 {
     public string Id { get; set; } = string.Empty;
     public SqlOSOidcProviderType ProviderType { get; set; }
+    public SqlOSSocialProviderProtocol Protocol { get; set; } = SqlOSSocialProviderProtocol.Oidc;
     public string DisplayName { get; set; } = string.Empty;
     public string? LogoDataUrl { get; set; }
     public string ClientId { get; set; } = string.Empty;

@@ -17,6 +17,7 @@ public sealed class SqlOSOidcAuthService
 {
     private static readonly IReadOnlyList<string> DefaultOidcScopes = ["openid", "email", "profile"];
     private static readonly IReadOnlyList<string> DefaultAppleScopes = ["name", "email"];
+    private static readonly IReadOnlyList<string> DefaultGitHubScopes = ["read:user", "user:email"];
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -52,7 +53,8 @@ public sealed class SqlOSOidcAuthService
                 x.ProviderType.ToString(),
                 x.DisplayName,
                 x.IsEnabled,
-                SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl)))
+                SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl),
+                x.Protocol.ToString()))
             .ToList();
     }
 
@@ -70,12 +72,20 @@ public sealed class SqlOSOidcAuthService
             ["redirect_uri"] = request.CallbackUri,
             ["response_type"] = "code",
             ["scope"] = string.Join(' ', resolved.Scopes),
-            ["state"] = request.State,
-            ["nonce"] = request.Nonce,
-            ["code_challenge"] = request.CodeChallenge,
-            ["code_challenge_method"] = request.CodeChallengeMethod,
-            ["login_hint"] = request.Email
+            ["state"] = request.State
         };
+
+        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc)
+        {
+            authorizationParameters["nonce"] = request.Nonce;
+            authorizationParameters["code_challenge"] = request.CodeChallenge;
+            authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
+            authorizationParameters["login_hint"] = request.Email;
+        }
+        else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
+        {
+            authorizationParameters["login"] = request.Email;
+        }
 
         if (connection.ProviderType == SqlOSOidcProviderType.Apple)
         {
@@ -118,21 +128,18 @@ public sealed class SqlOSOidcAuthService
             connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
 
             var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
-            var tokenPayload = await ExchangeCodeAsync(connection, resolved, request, cancellationToken);
-            var idTokenPrincipal = await ValidateIdTokenAsync(connection, resolved, tokenPayload.IdToken, request.Nonce, cancellationToken);
-            var userInfoClaims = resolved.UseUserInfo && !string.IsNullOrWhiteSpace(resolved.UserInfoEndpoint)
-                ? await LoadUserInfoClaimsAsync(resolved.UserInfoEndpoint!, tokenPayload.AccessToken, cancellationToken)
-                : new Dictionary<string, string>(StringComparer.Ordinal);
-            var callbackClaims = ParseCallbackPayloadClaims(request.UserPayloadJson);
-            var providerUser = MapProviderUser(connection, resolved, idTokenPrincipal, userInfoClaims, callbackClaims);
-            var user = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, cancellationToken);
-            var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+            var providerUser = resolved.Protocol == SqlOSSocialProviderProtocol.OAuthProfile
+                ? await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken)
+                : await CompleteOidcAuthorizationAsync(connection, resolved, request, cancellationToken);
+            var provisioned = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, cancellationToken);
+            var organizations = await _adminService.GetUserOrganizationsAsync(provisioned.User.Id, cancellationToken);
             var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
             var authMethod = connection.ProviderType switch
             {
                 SqlOSOidcProviderType.Google => "google",
                 SqlOSOidcProviderType.Microsoft => "microsoft",
                 SqlOSOidcProviderType.Apple => "apple",
+                SqlOSOidcProviderType.GitHub => "github",
                 SqlOSOidcProviderType.Custom => "oidc",
                 _ => "oidc"
             };
@@ -140,13 +147,14 @@ public sealed class SqlOSOidcAuthService
             await _adminService.RecordAuditAsync(
                 "user.login.oidc.success",
                 "user",
-                user.Id,
-                userId: user.Id,
+                provisioned.User.Id,
+                userId: provisioned.User.Id,
                 organizationId: organizationId,
                 ipAddress: ipAddress,
                 data: new
                 {
                     provider = connection.ProviderType.ToString(),
+                    protocol = resolved.Protocol.ToString(),
                     oidcConnectionId = connection.Id
                 },
                 cancellationToken: cancellationToken);
@@ -154,12 +162,15 @@ public sealed class SqlOSOidcAuthService
             return new SqlOSCompleteOidcAuthorizationResult(
                 connection.Id,
                 connection.ProviderType,
-                user.Id,
-                user.DefaultEmail ?? providerUser.Email,
-                user.DisplayName,
+                provisioned.User.Id,
+                provisioned.User.DefaultEmail ?? providerUser.Email,
+                provisioned.User.DisplayName,
                 organizationId,
                 authMethod,
-                organizations.Count);
+                organizations.Count)
+            {
+                UserCreated = provisioned.Created
+            };
         }
         catch (Exception ex)
         {
@@ -176,6 +187,77 @@ public sealed class SqlOSOidcAuthService
                 cancellationToken: cancellationToken);
             throw;
         }
+    }
+
+    private async Task<ProviderUser> CompleteOidcAuthorizationAsync(
+        SqlOSOidcConnection connection,
+        ResolvedOidcConfiguration resolved,
+        SqlOSCompleteOidcAuthorizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tokenPayload = await ExchangeCodeAsync(connection, resolved, request, cancellationToken);
+        var idToken = tokenPayload.IdToken
+            ?? throw new InvalidOperationException("The OIDC provider token response did not include an ID token.");
+        var idTokenPrincipal = await ValidateIdTokenAsync(connection, resolved, idToken, request.Nonce, cancellationToken);
+        var userInfoClaims = resolved.UseUserInfo && !string.IsNullOrWhiteSpace(resolved.UserInfoEndpoint)
+            ? await LoadUserInfoClaimsAsync(resolved.UserInfoEndpoint!, tokenPayload.AccessToken, cancellationToken)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+        var callbackClaims = ParseCallbackPayloadClaims(request.UserPayloadJson);
+        return MapProviderUser(connection, resolved, idTokenPrincipal, userInfoClaims, callbackClaims);
+    }
+
+    private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
+        SqlOSOidcConnection connection,
+        ResolvedOidcConfiguration resolved,
+        SqlOSCompleteOidcAuthorizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (connection.ProviderType != SqlOSOidcProviderType.GitHub)
+        {
+            throw new InvalidOperationException($"Unsupported OAuth profile provider '{connection.ProviderType}'.");
+        }
+
+        var tokenPayload = await ExchangeOAuthProfileCodeAsync(connection, resolved, request, cancellationToken);
+        return await LoadGitHubUserAsync(tokenPayload.AccessToken, cancellationToken);
+    }
+
+    private async Task<ProviderTokenPayload> ExchangeOAuthProfileCodeAsync(
+        SqlOSOidcConnection connection,
+        ResolvedOidcConfiguration resolved,
+        SqlOSCompleteOidcAuthorizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, resolved.TokenEndpoint);
+        tokenRequest.Headers.Accept.ParseAdd("application/json");
+
+        tokenRequest.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = connection.ClientId,
+            ["client_secret"] = CreateClientSecret(connection),
+            ["code"] = request.Code,
+            ["redirect_uri"] = request.CallbackUri
+        });
+
+        using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
+        using var payload = await ReadJsonAsync(response, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(payload.RootElement.TryGetProperty("error_description", out var description)
+                ? description.GetString() ?? "The OAuth provider rejected the authorization code."
+                : "The OAuth provider rejected the authorization code.");
+        }
+
+        var accessToken = payload.RootElement.TryGetProperty("access_token", out var accessTokenElement)
+            ? accessTokenElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new InvalidOperationException("The OAuth provider token response did not include an access token.");
+        }
+
+        return new ProviderTokenPayload(accessToken!, null);
     }
 
     private async Task<ProviderTokenPayload> ExchangeCodeAsync(
@@ -243,7 +325,7 @@ public sealed class SqlOSOidcAuthService
         CancellationToken cancellationToken)
     {
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
-        using var jwksResponse = await httpClient.GetAsync(resolved.JwksUri, cancellationToken);
+        using var jwksResponse = await httpClient.GetAsync(resolved.JwksUri!, cancellationToken);
         using var jwksPayload = await ReadJsonAsync(jwksResponse, cancellationToken);
         if (!jwksResponse.IsSuccessStatusCode)
         {
@@ -292,6 +374,79 @@ public sealed class SqlOSOidcAuthService
         }
 
         return FlattenJson(payload.RootElement);
+    }
+
+    private async Task<ProviderUser> LoadGitHubUserAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
+
+        using var profileRequest = CreateGitHubApiRequest("https://api.github.com/user", accessToken);
+        using var profileResponse = await httpClient.SendAsync(profileRequest, cancellationToken);
+        using var profilePayload = await ReadJsonAsync(profileResponse, cancellationToken);
+        if (!profileResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The GitHub profile request failed.");
+        }
+
+        var root = profilePayload.RootElement;
+        var subject = root.TryGetProperty("id", out var idElement) ? idElement.ToString() : null;
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            throw new InvalidOperationException("GitHub did not return a stable user id.");
+        }
+
+        var login = root.TryGetProperty("login", out var loginElement) && loginElement.ValueKind == JsonValueKind.String
+            ? loginElement.GetString()
+            : null;
+        var name = root.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String
+            ? nameElement.GetString()
+            : null;
+
+        using var emailRequest = CreateGitHubApiRequest("https://api.github.com/user/emails", accessToken);
+        using var emailResponse = await httpClient.SendAsync(emailRequest, cancellationToken);
+        using var emailPayload = await ReadJsonAsync(emailResponse, cancellationToken);
+        if (!emailResponse.IsSuccessStatusCode || emailPayload.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("The GitHub email request failed.");
+        }
+
+        string? primaryVerifiedEmail = null;
+        foreach (var emailElement in emailPayload.RootElement.EnumerateArray())
+        {
+            var isPrimary = emailElement.TryGetProperty("primary", out var primaryElement) && primaryElement.GetBoolean();
+            var isVerified = emailElement.TryGetProperty("verified", out var verifiedElement) && verifiedElement.GetBoolean();
+            if (!isPrimary || !isVerified)
+            {
+                continue;
+            }
+
+            primaryVerifiedEmail = emailElement.TryGetProperty("email", out var emailValue) && emailValue.ValueKind == JsonValueKind.String
+                ? emailValue.GetString()
+                : null;
+            break;
+        }
+
+        if (string.IsNullOrWhiteSpace(primaryVerifiedEmail))
+        {
+            throw new InvalidOperationException("GitHub did not return a verified primary email address.");
+        }
+
+        return new ProviderUser(
+            subject!,
+            primaryVerifiedEmail!,
+            string.IsNullOrWhiteSpace(name) ? login ?? primaryVerifiedEmail! : name!,
+            EmailVerified: true,
+            CanAutoLinkByEmail: true);
+    }
+
+    private static HttpRequestMessage CreateGitHubApiRequest(string url, string accessToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        request.Headers.UserAgent.ParseAdd("SqlOS");
+        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+        return request;
     }
 
     private ProviderUser MapProviderUser(
@@ -356,7 +511,7 @@ public sealed class SqlOSOidcAuthService
             canAutoLinkByEmail);
     }
 
-    private async Task<SqlOSUser> ResolveOrProvisionUserAsync(
+    private async Task<ProvisionedProviderUser> ResolveOrProvisionUserAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         ProviderUser providerUser,
@@ -364,7 +519,7 @@ public sealed class SqlOSOidcAuthService
     {
         if (string.IsNullOrWhiteSpace(providerUser.Email))
         {
-            throw new InvalidOperationException("The OIDC provider did not return a usable email address.");
+            throw new InvalidOperationException("The social login provider did not return a usable email address.");
         }
 
         if (resolved.RequireVerifiedEmail && !providerUser.EmailVerified)
@@ -379,10 +534,12 @@ public sealed class SqlOSOidcAuthService
 
         if (externalIdentity != null)
         {
-            return await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
+            var existingUser = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
+            return new ProvisionedProviderUser(existingUser, Created: false);
         }
 
         SqlOSUser? user = null;
+        var created = false;
         if (providerUser.CanAutoLinkByEmail)
         {
             var normalizedEmail = SqlOSAdminService.NormalizeEmail(providerUser.Email);
@@ -432,6 +589,8 @@ public sealed class SqlOSOidcAuthService
                     oidcConnectionId = connection.Id
                 },
                 cancellationToken: cancellationToken);
+
+            created = true;
         }
 
         _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
@@ -446,7 +605,7 @@ public sealed class SqlOSOidcAuthService
         });
 
         await _context.SaveChangesAsync(cancellationToken);
-        return user;
+        return new ProvisionedProviderUser(user, created);
     }
 
     private async Task<SqlOSOidcConnection> RequireEnabledConnectionAsync(string connectionId, CancellationToken cancellationToken)
@@ -462,15 +621,18 @@ public sealed class SqlOSOidcAuthService
         if (!connection.UseDiscovery)
         {
             return new ResolvedOidcConfiguration(
+                connection.Protocol,
                 connection.ProviderType,
-                connection.Issuer ?? throw new InvalidOperationException("The OIDC connection is missing an issuer."),
-                connection.AuthorizationEndpoint ?? throw new InvalidOperationException("The OIDC connection is missing an authorization endpoint."),
-                connection.TokenEndpoint ?? throw new InvalidOperationException("The OIDC connection is missing a token endpoint."),
+                connection.Issuer ?? throw new InvalidOperationException("The social login connection is missing an issuer."),
+                connection.AuthorizationEndpoint ?? throw new InvalidOperationException("The social login connection is missing an authorization endpoint."),
+                connection.TokenEndpoint ?? throw new InvalidOperationException("The social login connection is missing a token endpoint."),
                 connection.UserInfoEndpoint,
-                connection.JwksUri ?? throw new InvalidOperationException("The OIDC connection is missing a JWKS URI."),
+                connection.Protocol == SqlOSSocialProviderProtocol.Oidc
+                    ? connection.JwksUri ?? throw new InvalidOperationException("The OIDC connection is missing a JWKS URI.")
+                    : connection.JwksUri,
                 scopes,
                 claimMapping,
-                RequireVerifiedEmail: connection.ProviderType == SqlOSOidcProviderType.Google,
+                RequireVerifiedEmail: connection.ProviderType is SqlOSOidcProviderType.Google or SqlOSOidcProviderType.GitHub,
                 AllowEmailLinkWithoutVerifiedClaim: connection.ProviderType is SqlOSOidcProviderType.Microsoft or SqlOSOidcProviderType.Apple,
                 UseUserInfo: connection.UseUserInfo && !string.IsNullOrWhiteSpace(connection.UserInfoEndpoint));
         }
@@ -498,6 +660,7 @@ public sealed class SqlOSOidcAuthService
             : connection.UserInfoEndpoint;
 
         return new ResolvedOidcConfiguration(
+            connection.Protocol,
             connection.ProviderType,
             issuer,
             authorizationEndpoint,
@@ -641,7 +804,12 @@ public sealed class SqlOSOidcAuthService
             return configured;
         }
 
-        return connection.ProviderType == SqlOSOidcProviderType.Apple ? DefaultAppleScopes : DefaultOidcScopes;
+        return connection.ProviderType switch
+        {
+            SqlOSOidcProviderType.Apple => DefaultAppleScopes,
+            SqlOSOidcProviderType.GitHub => DefaultGitHubScopes,
+            _ => DefaultOidcScopes
+        };
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -738,7 +906,7 @@ public sealed class SqlOSOidcAuthService
         }
     }
 
-    private sealed record ProviderTokenPayload(string AccessToken, string IdToken);
+    private sealed record ProviderTokenPayload(string AccessToken, string? IdToken);
 
     private sealed record ProviderUser(
         string Subject,
@@ -747,13 +915,16 @@ public sealed class SqlOSOidcAuthService
         bool EmailVerified,
         bool CanAutoLinkByEmail);
 
+    private sealed record ProvisionedProviderUser(SqlOSUser User, bool Created);
+
     private sealed record ResolvedOidcConfiguration(
+        SqlOSSocialProviderProtocol Protocol,
         SqlOSOidcProviderType ProviderType,
         string Issuer,
         string AuthorizationEndpoint,
         string TokenEndpoint,
         string? UserInfoEndpoint,
-        string JwksUri,
+        string? JwksUri,
         IReadOnlyList<string> Scopes,
         SqlOSOidcClaimMapping ClaimMapping,
         bool RequireVerifiedEmail,
