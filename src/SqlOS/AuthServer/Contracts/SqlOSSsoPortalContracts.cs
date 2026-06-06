@@ -11,6 +11,8 @@ public sealed record SqlOSRevokeSsoPortalSessionRequest(string? Reason = null);
 
 public sealed record SqlOSUpdateSsoPortalProviderRequest(string Provider);
 
+public sealed record SqlOSSsoPortalDomainRequest(string Domain);
+
 public sealed record SqlOSSsoPortalMetadataRequest(string MetadataXml);
 
 public sealed record SqlOSSsoPortalTestRequest(string? ClientId = null, string? RedirectUri = null);
@@ -39,7 +41,9 @@ public sealed record SqlOSSsoPortalStateResult(
     string ServiceProviderEntityId,
     string AssertionConsumerServiceUrl,
     IReadOnlyList<SqlOSSsoProviderGuide> Providers,
-    SqlOSSsoPortalTestResult? LatestTest);
+    SqlOSSsoPortalTestResult? LatestTest,
+    SqlOSOrganizationDomainResult? Domain = null,
+    SqlOSSsoSetupAllowedActions? AllowedActions = null);
 
 public sealed record SqlOSSsoPortalOrganizationResult(
     string Id,
@@ -73,6 +77,58 @@ public sealed record SqlOSSsoMetadataValidationResult(
     string? IdentityProviderEntityId,
     string? SingleSignOnUrl,
     bool HasSigningCertificate);
+
+public sealed record SqlOSDomainOwnershipRecord(
+    string Type,
+    string Name,
+    string Value);
+
+public sealed record SqlOSOrganizationDomainResult(
+    string Id,
+    string OrganizationId,
+    string Domain,
+    string Status,
+    SqlOSDomainOwnershipRecord? OwnershipRecord,
+    DateTime CreatedAt,
+    DateTime? VerifiedAt,
+    DateTime? LastCheckedAt,
+    DateTime? RevokedAt,
+    string? LastError);
+
+public sealed record SqlOSSsoSetupServiceProvider(
+    string EntityId,
+    string AssertionConsumerServiceUrl);
+
+public sealed record SqlOSSsoSetupAllowedActions(
+    bool CanSelectProvider,
+    bool CanStartDomainVerification,
+    bool CanConfirmDomainVerification,
+    bool CanValidateMetadata,
+    bool CanImportMetadata,
+    bool CanActivate,
+    bool CanDisable,
+    bool CanTest,
+    bool CanSignOut);
+
+public sealed record SqlOSSsoSetupViewModel(
+    string View,
+    string SetupApiBasePath,
+    string PortalUrl,
+    SqlOSSsoPortalOrganizationResult Organization,
+    SqlOSSsoPortalConnectionResult Connection,
+    SqlOSOrganizationDomainResult? Domain,
+    string? Provider,
+    SqlOSSsoSetupServiceProvider ServiceProvider,
+    IReadOnlyList<SqlOSSsoProviderGuide> Providers,
+    SqlOSSsoPortalTestResult? LatestTest,
+    SqlOSSsoSetupAllowedActions AllowedActions,
+    string? Error,
+    IReadOnlyDictionary<string, string> FieldErrors);
+
+public sealed record SqlOSSsoSetupActionResult(
+    string Type,
+    string? RedirectUrl,
+    SqlOSSsoSetupViewModel? ViewModel);
 
 public sealed record SqlOSSsoPortalTestResult(
     string Status,

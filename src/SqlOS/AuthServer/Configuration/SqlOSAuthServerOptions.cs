@@ -333,4 +333,29 @@ public sealed class SqlOSSsoPortalOptions
     public TimeSpan DefaultLinkLifetime { get; set; } = TimeSpan.FromDays(7);
     public TimeSpan SessionIdleTimeout { get; set; } = TimeSpan.FromHours(2);
     public string CookieName { get; set; } = "sqlos_sso_portal";
+    public bool EnableApi { get; set; } = true;
+    public bool UseHostedPortal { get; set; } = true;
+    public bool RequireVerifiedDomainForActivation { get; set; } = true;
+    public bool AllowLocalhostDomainVerification { get; set; }
+    public string? HeadlessApiBasePath { get; set; }
+    public Func<SqlOSSsoSetupUiRouteContext, string>? BuildUiUrl { get; set; }
+    public string DomainVerificationRecordPrefix { get; set; } = "_sqlos-verify";
+    public List<string> ReservedDomainRoots { get; } = [];
+
+    public string ResolveHeadlessApiBasePath(string adminBasePath)
+    {
+        if (string.IsNullOrWhiteSpace(HeadlessApiBasePath))
+        {
+            return $"{adminBasePath.TrimEnd('/')}/sso-portal/api/setup";
+        }
+
+        var normalized = HeadlessApiBasePath.Trim();
+        return normalized.StartsWith("/", StringComparison.Ordinal) ? normalized.TrimEnd('/') : $"/{normalized.TrimEnd('/')}";
+    }
 }
+
+public sealed record SqlOSSsoSetupUiRouteContext(
+    HttpContext HttpContext,
+    string SessionId,
+    string OrganizationId,
+    string View);

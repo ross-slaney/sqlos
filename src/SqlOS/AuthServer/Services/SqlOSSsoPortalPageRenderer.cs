@@ -127,6 +127,19 @@ public static class SqlOSSsoPortalPageRenderer
                             <ol id="guide-steps"></ol>
                         </section>
                         <section class="panel">
+                            <h2>Domain Verification</h2>
+                            <div class="field-grid">
+                                <label>Organization email domain
+                                    <input id="domain" placeholder="acme.com">
+                                </label>
+                                <div class="row">
+                                    <button id="domain-start" type="button" class="secondary">Start verification</button>
+                                    <button id="domain-confirm" type="button">Confirm TXT record</button>
+                                </div>
+                                <div id="domain-record" class="notice hidden"></div>
+                            </div>
+                        </section>
+                        <section class="panel">
                             <h2>Metadata</h2>
                             <div class="field-grid">
                                 <label>Upload metadata XML
@@ -240,9 +253,43 @@ public static class SqlOSSsoPortalPageRenderer
 
                     $("guide-title").textContent = `${selected.label} setup`;
                     $("guide-steps").innerHTML = selected.steps.map((step) => `<li>${esc(step)}</li>`).join("");
+                    renderDomain();
+                    $("activate").disabled = !(state.allowedActions?.canActivate ?? true);
+                    $("disable").disabled = !(state.allowedActions?.canDisable ?? false);
+                    $("test").disabled = !(state.allowedActions?.canTest ?? false);
                     if (state.latestTest) {
                         showTest(state.latestTest);
                     }
+                }
+
+                function renderDomain() {
+                    const domain = state.domain;
+                    $("domain").value = domain?.domain || state.organization.primaryDomain || "";
+                    $("domain-confirm").disabled = !(state.allowedActions?.canConfirmDomainVerification ?? false);
+                    const box = $("domain-record");
+                    if (!domain) {
+                        box.classList.add("hidden");
+                        box.innerHTML = "";
+                        return;
+                    }
+
+                    const statusClass = domain.status === "active" ? "ok" : domain.lastError ? "bad" : "warn";
+                    const record = domain.ownershipRecord
+                        ? `
+                            ${metaRows([
+                                ["Type", domain.ownershipRecord.type],
+                                ["Name", domain.ownershipRecord.name],
+                                ["Value", domain.ownershipRecord.value]
+                            ])}
+                        `
+                        : "";
+                    box.className = `notice ${statusClass}`;
+                    box.innerHTML = `
+                        <strong>${esc(domain.domain)} ${esc(domain.status.replaceAll("_", " "))}</strong>
+                        ${record}
+                        ${domain.lastError ? `<p>${esc(domain.lastError)}</p>` : ""}
+                    `;
+                    box.classList.remove("hidden");
                 }
 
                 function metaRows(rows) {
@@ -276,6 +323,18 @@ public static class SqlOSSsoPortalPageRenderer
                 $("import").addEventListener("click", async () => {
                     state = await request("/metadata", { method: "POST", body: JSON.stringify(metadataPayload()) });
                     showBanner("Metadata saved. Review before activation.");
+                    render();
+                });
+                $("domain-start").addEventListener("click", async () => {
+                    state = await request("/domain", { method: "POST", body: JSON.stringify({ domain: $("domain").value }) });
+                    showBanner("Domain verification record created.");
+                    render();
+                });
+                $("domain-confirm").addEventListener("click", async () => {
+                    if (!state.domain?.id) return;
+                    state = await request(`/domains/${encodeURIComponent(state.domain.id)}/confirm`, { method: "POST", body: "{}" });
+                    if (state.domain?.status === "active") showBanner("Domain verified.");
+                    else showBanner(state.domain?.lastError || "Domain record was not found yet.", "bad");
                     render();
                 });
                 $("activate").addEventListener("click", async () => {

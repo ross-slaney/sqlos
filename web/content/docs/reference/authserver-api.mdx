@@ -938,6 +938,8 @@ var email = SqlOSAdminService.NormalizeEmail("  Jane@ACME.com ");
 
 Determines how a user should authenticate based on their email domain.
 
+Home realm discovery checks active verified organization domains first. If no verified claim matches, it falls back to the legacy operator-managed `PrimaryDomain` value. This lets self-serve delegated SSO setup prove ownership through DNS without breaking existing dashboard-managed tenants.
+
 ---
 
 ### DiscoverAsync
@@ -970,6 +972,47 @@ var result = await hrdService.DiscoverAsync(
 | `OrganizationName` | `string?` | Organization display name. |
 | `PrimaryDomain` | `string?` | The matched domain. |
 | `ConnectionId` | `string?` | SSO or OIDC connection ID to use. |
+
+---
+
+## SqlOSOrganizationDomainService
+
+Manages self-serve organization domain claims for delegated SSO setup. The default verification path is DNS TXT through `ISqlOSDomainDnsVerifier`; hosts can replace that interface without depending on Azure or any specific DNS provider.
+
+### StartVerificationAsync
+
+Create or reuse a pending domain claim and return the TXT ownership record.
+
+```csharp
+var domain = await organizationDomainService.StartVerificationAsync(
+    organizationId,
+    new SqlOSSsoPortalDomainRequest("acme.com"),
+    httpContext,
+    userId,
+    ct);
+```
+
+The ownership record is shaped as:
+
+| Field | Example |
+|-------|---------|
+| `Type` | `TXT` |
+| `Name` | `_sqlos-verify.acme.com` |
+| `Value` | `sqlos-domain-verification=...` |
+
+### ConfirmOwnershipAsync
+
+Check the TXT record and mark the claim active when the expected value is present.
+
+```csharp
+var active = await organizationDomainService.ConfirmOwnershipAsync(
+    organizationId,
+    domainId,
+    httpContext,
+    ct);
+```
+
+`SqlOSOrganizationDomainResult.Status` is `pending_ownership`, `active`, or `revoked`.
 
 ---
 

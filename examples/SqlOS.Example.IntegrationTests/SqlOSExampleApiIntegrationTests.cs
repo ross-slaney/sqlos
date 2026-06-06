@@ -354,6 +354,57 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task DelegatedSsoPortal_HeadlessSetupApi_ReturnsViewModelAndDomainRecord()
+    {
+        var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = $"Headless Portal Org {Guid.NewGuid():N}"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        var createResponse = await AdminPostAsync("/sqlos/admin/auth/api/sso-portal/sessions", new
+        {
+            organizationId,
+            provider = "okta"
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var setupUrl = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("setupUrl").GetString();
+
+        var startResponse = await ExampleApiFixture.Client.GetAsync(new Uri(setupUrl!).PathAndQuery);
+        startResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        var portalCookie = startResponse.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0];
+
+        var setupResponse = await PortalGetAsync("/sqlos/admin/auth/sso-portal/api/setup?view=domain", portalCookie);
+        setupResponse.EnsureSuccessStatusCode();
+        var setupJson = JsonDocument.Parse(await setupResponse.Content.ReadAsStringAsync());
+        setupJson.RootElement.GetProperty("type").GetString().Should().Be("view");
+        var view = setupJson.RootElement.GetProperty("viewModel");
+        view.GetProperty("view").GetString().Should().Be("domain");
+        view.GetProperty("setupApiBasePath").GetString().Should().Be("/sqlos/admin/auth/sso-portal/api/setup");
+        view.GetProperty("provider").GetString().Should().Be("okta");
+        view.GetProperty("allowedActions").GetProperty("canStartDomainVerification").GetBoolean().Should().BeTrue();
+
+        var domain = $"customer-{Guid.NewGuid():N}.test";
+        var domainResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/setup/domain", portalCookie, new
+        {
+            domain
+        });
+        domainResponse.EnsureSuccessStatusCode();
+        var domainJson = JsonDocument.Parse(await domainResponse.Content.ReadAsStringAsync());
+        var domainView = domainJson.RootElement.GetProperty("viewModel");
+        var domainState = domainView.GetProperty("domain");
+        domainState.GetProperty("domain").GetString().Should().Be(domain);
+        domainState.GetProperty("status").GetString().Should().Be("pending_ownership");
+        domainState.GetProperty("ownershipRecord").GetProperty("name").GetString()
+            .Should().Be($"_sqlos-verify.{domain}");
+        domainView.GetProperty("allowedActions").GetProperty("canConfirmDomainVerification").GetBoolean().Should().BeTrue();
+        domainView.GetProperty("allowedActions").GetProperty("canActivate").GetBoolean().Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task DashboardStats_AreAvailableInDevelopment()
     {
         var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/stats");

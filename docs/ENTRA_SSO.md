@@ -37,7 +37,7 @@ The platform-admin dashboard can still create an SSO draft and import metadata d
 
 SqlOS stores and validates:
 
-- org primary domain
+- verified org domain claim or operator-managed primary domain
 - IdP entity ID
 - IdP SSO URL
 - IdP signing certificate
@@ -61,9 +61,10 @@ For the cleanest first test, configure NameID and email so they line up with the
 In the dashboard:
 
 1. Create the organization.
-2. Set the organization's `Primary domain` to the customer's login domain, for example `customer.com`.
-3. Open the `SSO` section.
-4. Create a delegated setup link for the customer IT admin, or create an SSO draft if your platform team is configuring Entra directly.
+2. For platform-managed setup, set the organization's `Primary domain` to the customer's login domain, for example `customer.com`.
+3. For self-serve delegated setup, leave the primary domain empty and let the customer admin verify their domain in the portal through DNS TXT.
+4. Open the `SSO` section.
+5. Create a delegated setup link for the customer IT admin, or create an SSO draft if your platform team is configuring Entra directly.
 
 Recommended draft settings:
 
@@ -79,6 +80,14 @@ After draft or setup-link creation, SqlOS shows:
 These are the values you give to the customer's Entra admin.
 
 For delegated onboarding, send the setup URL to the customer IT admin through your own mailer or ticketing system. The first open consumes the URL token and stores a hardened server-side portal session in an HttpOnly cookie scoped to `/sqlos/admin/auth/sso-portal`.
+
+If the customer admin claims a domain in the delegated portal, SqlOS shows a TXT record such as:
+
+- Type: `TXT`
+- Name: `_sqlos-verify.customer.com`
+- Value: `sqlos-domain-verification=...`
+
+The connection cannot be activated for self-serve HRD until that TXT record is found, unless you disable `SsoPortal.RequireVerifiedDomainForActivation` because your host verifies ownership elsewhere.
 
 ## Step 2: What The Customer Entra Admin Configures
 
@@ -105,10 +114,12 @@ That is what SqlOS imports.
 In the delegated portal:
 
 1. Choose `Microsoft Entra`.
-2. Paste or upload the full federation metadata XML from Entra.
-3. Click `Validate metadata`.
-4. Click `Save metadata`, review the parsed IdP Entity ID and SSO URL, then click `Activate connection`.
-5. Optionally enter the test client id `example-web` and redirect URI `https://client.example.local/callback`, then run the test to generate a SAML redirect.
+2. Enter the customer email domain and publish the TXT ownership record.
+3. Confirm the TXT record after DNS has propagated.
+4. Paste or upload the full federation metadata XML from Entra.
+5. Click `Validate metadata`.
+6. Click `Save metadata`, review the parsed IdP Entity ID and SSO URL, then click `Activate connection`.
+7. Optionally enter the test client id `example-web` and redirect URI `https://client.example.local/callback`, then run the test to generate a SAML redirect.
 
 If the platform admin is doing the setup directly in the dashboard:
 
@@ -121,7 +132,7 @@ After import:
 
 - portal setup shows the connection as `ready_to_activate` until activation
 - dashboard direct import enables the connection immediately
-- the organization should still have the intended primary domain
+- home realm discovery will use the active verified domain first, and fall back to the intended primary domain for operator-managed setups
 
 At this point the org is ready for SSO testing.
 
@@ -175,7 +186,7 @@ In the dashboard:
 
 If the login does not redirect to Entra:
 
-- confirm the org `Primary domain` exactly matches the email domain
+- confirm the domain is active in delegated setup, or that the org `Primary domain` exactly matches the email domain for operator-managed setup
 - confirm the SSO connection is enabled
 
 If Entra redirects but the ACS step fails:

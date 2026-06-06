@@ -222,12 +222,31 @@ The setup URL opens `/sqlos/admin/auth/sso-portal/start?token=...`. The first op
 | --- | --- | --- |
 | GET | `/state` | Organization, provider guides, SP values, connection status |
 | PUT | `/provider` | Choose `microsoft-entra`, `okta`, `google-workspace`, or `generic-saml` |
+| POST | `/domain` | Create or reuse a pending domain-ownership TXT record |
+| POST | `/domains/{domainId}/confirm` | Verify DNS TXT ownership and activate the domain claim |
 | POST | `/metadata/validate` | Validate pasted or uploaded metadata XML |
 | POST | `/metadata` | Save metadata and hold the connection for activation |
 | POST | `/activate` | Enable the SAML connection after review |
 | POST | `/disable` | Disable the organization SAML connection |
 | POST | `/test` | Validate readiness or create a SAML redirect when `clientId` and `redirectUri` are supplied |
 | POST | `/signout` | Clear the portal session cookie |
+
+The headless setup API defaults to `/sqlos/admin/auth/sso-portal/api/setup`, can be moved with `SsoPortal.HeadlessApiBasePath`, and returns `SqlOSSsoSetupActionResult` records for custom admin UIs:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/` | Current setup view model |
+| PUT | `/provider` | Select provider and advance to the domain step |
+| POST | `/domain` | Start DNS TXT verification |
+| POST | `/domains/{domainId}/confirm` | Confirm ownership |
+| POST | `/metadata/validate` | Validate metadata XML |
+| POST | `/metadata` | Import metadata and advance to activation |
+| POST | `/activate` | Activate if allowed actions permit it |
+| POST | `/disable` | Disable the connection |
+| POST | `/test` | Run or record a readiness test |
+| POST | `/signout` | Close the portal session |
+
+The setup view model includes `domain`, `serviceProvider`, `providers`, `latestTest`, and `allowedActions`. Domain ownership uses a TXT record shaped like `_sqlos-verify.acme.com = sqlos-domain-verification=...`.
 
 ---
 

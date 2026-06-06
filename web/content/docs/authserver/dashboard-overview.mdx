@@ -46,9 +46,11 @@ For setup details, see [Email OTP](/docs/authserver/email-otp), [Email Invitatio
 
 Open an organization, choose the **SSO** tab, and create a setup link when a customer IT admin should configure SAML themselves. The link is scoped to one organization, can be revoked from the same tab, and opens `/sqlos/admin/auth/sso-portal` instead of the full dashboard.
 
-The portal shows Microsoft Entra, Okta, Google Workspace, and generic SAML setup paths. It displays copy-ready SP Entity ID and ACS URL values, accepts pasted or uploaded metadata XML, validates the IdP entity ID, SSO URL, and signing certificate, then lets the customer activate, disable, replace metadata, and run a SAML test redirect.
+The portal shows Microsoft Entra, Okta, Google Workspace, and generic SAML setup paths. It displays copy-ready SP Entity ID and ACS URL values, verifies the customer email domain through a DNS TXT record, accepts pasted or uploaded metadata XML, validates the IdP entity ID, SSO URL, and signing certificate, then lets the customer activate, disable, replace metadata, and run a SAML test redirect.
 
-Portal launch, open, revoke, provider selection, metadata import, activation, disable, and test actions are audit logged with the organization id.
+Portal launch, open, revoke, provider selection, domain verification, metadata import, activation, disable, and test actions are audit logged with the organization id.
+
+Hosts can disable the bundled portal and redirect opened sessions to their own admin UI with `SsoPortal.BuildUiUrl`. The same setup state machine is available at `/sqlos/admin/auth/sso-portal/api/setup` by default.
 
 ## FGA pages
 

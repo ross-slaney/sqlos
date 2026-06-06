@@ -67,18 +67,21 @@ public sealed class SqlOSSsoPortalService
     private readonly SqlOSSsoPortalOptions _portalOptions;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAdminService _adminService;
+    private readonly SqlOSOrganizationDomainService _domainService;
 
     public SqlOSSsoPortalService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSCryptoService cryptoService,
-        SqlOSAdminService adminService)
+        SqlOSAdminService adminService,
+        SqlOSOrganizationDomainService domainService)
     {
         _context = context;
         _options = options.Value;
         _portalOptions = _options.SsoPortal;
         _cryptoService = cryptoService;
         _adminService = adminService;
+        _domainService = domainService;
     }
 
     public async Task<SqlOSSsoPortalSessionResult> CreateSessionAsync(
@@ -289,6 +292,7 @@ public sealed class SqlOSSsoPortalService
             .AsNoTracking()
             .FirstAsync(x => x.Id == session.OrganizationId, cancellationToken);
         var connection = await EnsurePortalConnectionAsync(organization, cancellationToken, session);
+        var domain = await _domainService.GetPreferredDomainAsync(organization.Id, cancellationToken);
 
         return new SqlOSSsoPortalStateResult(
             new SqlOSSsoPortalOrganizationResult(
@@ -307,7 +311,9 @@ public sealed class SqlOSSsoPortalService
                     session.LastTestStatus ?? "unknown",
                     session.LastTestMessage ?? "No test details recorded.",
                     null,
-                    session.LastTestedAt.Value));
+                    session.LastTestedAt.Value),
+            domain,
+            BuildAllowedActions(organization, connection, domain));
     }
 
     public async Task<SqlOSSsoPortalStateResult> SetProviderAsync(
@@ -331,6 +337,31 @@ public sealed class SqlOSSsoPortalService
 
     public SqlOSSsoMetadataValidationResult ValidateMetadata(SqlOSSsoPortalMetadataRequest request)
         => _adminService.ValidateSsoMetadata(new SqlOSImportSsoMetadataRequest(request.MetadataXml));
+
+    public async Task<SqlOSSsoPortalStateResult> StartDomainVerificationAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalDomainRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _domainService.StartVerificationAsync(
+            session.OrganizationId,
+            request,
+            httpContext,
+            session.CreatedByUserId,
+            cancellationToken);
+        return await GetStateAsync(session, cancellationToken);
+    }
+
+    public async Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipAsync(
+        SqlOSSsoPortalSession session,
+        string domainId,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _domainService.ConfirmOwnershipAsync(session.OrganizationId, domainId, httpContext, cancellationToken);
+        return await GetStateAsync(session, cancellationToken);
+    }
 
     public async Task<SqlOSSsoPortalStateResult> ImportMetadataAsync(
         SqlOSSsoPortalSession session,
@@ -367,6 +398,7 @@ public sealed class SqlOSSsoPortalService
     {
         var connection = await RequirePortalConnectionAsync(session, cancellationToken);
         EnsureConnectionHasMetadata(connection);
+        await EnsureDomainCanActivateAsync(session, cancellationToken);
         connection.IsEnabled = true;
         connection.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
@@ -427,6 +459,244 @@ public sealed class SqlOSSsoPortalService
 
     public string BuildPortalUrl(HttpContext? httpContext = null)
         => $"{GetOrigin(httpContext)}{GetPortalPath()}";
+
+    public bool IsApiEnabled => _portalOptions.EnableApi;
+
+    public bool IsHostedPortalEnabled => _portalOptions.UseHostedPortal;
+
+    public string GetSetupApiBasePath()
+        => _portalOptions.ResolveHeadlessApiBasePath(GetAdminPrefix());
+
+    public string? TryBuildSetupUiUrl(
+        HttpContext httpContext,
+        string sessionId,
+        string organizationId,
+        string view)
+    {
+        if (_portalOptions.BuildUiUrl == null)
+        {
+            return null;
+        }
+
+        return _portalOptions.BuildUiUrl(
+            new SqlOSSsoSetupUiRouteContext(
+                httpContext,
+                sessionId,
+                organizationId,
+                NormalizeView(view)));
+    }
+
+    public async Task<SqlOSSsoSetupViewModel> GetSetupViewAsync(
+        SqlOSSsoPortalSession session,
+        string? view = null,
+        string? error = null,
+        IReadOnlyDictionary<string, string>? fieldErrors = null,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await GetStateAsync(session, cancellationToken);
+        return new SqlOSSsoSetupViewModel(
+            NormalizeView(view),
+            GetSetupApiBasePath(),
+            BuildPortalUrl(),
+            state.Organization,
+            state.Connection,
+            state.Domain,
+            state.Provider,
+            new SqlOSSsoSetupServiceProvider(
+                state.ServiceProviderEntityId,
+                state.AssertionConsumerServiceUrl),
+            state.Providers,
+            state.LatestTest,
+            state.AllowedActions ?? BuildAllowedActions(state.Organization, state.Connection, state.Domain),
+            error,
+            fieldErrors ?? new Dictionary<string, string>());
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> GetSetupActionAsync(
+        SqlOSSsoPortalSession session,
+        string? view = null,
+        CancellationToken cancellationToken = default)
+        => await ViewActionAsync(session, view, null, null, cancellationToken);
+
+    public async Task<SqlOSSsoSetupActionResult> SetProviderActionAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSUpdateSsoPortalProviderRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await SetProviderAsync(session, request, httpContext, cancellationToken);
+            return await ViewActionAsync(session, "domain", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(
+                session,
+                "provider",
+                ex.Message,
+                new Dictionary<string, string> { ["provider"] = ex.Message },
+                cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> StartDomainVerificationActionAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalDomainRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _domainService.StartVerificationAsync(
+                session.OrganizationId,
+                request,
+                httpContext,
+                session.CreatedByUserId,
+                cancellationToken);
+            return await ViewActionAsync(session, "domain", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(
+                session,
+                "domain",
+                ex.Message,
+                new Dictionary<string, string> { ["domain"] = ex.Message },
+                cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> ConfirmDomainOwnershipActionAsync(
+        SqlOSSsoPortalSession session,
+        string domainId,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var domain = await _domainService.ConfirmOwnershipAsync(session.OrganizationId, domainId, httpContext, cancellationToken);
+            return await ViewActionAsync(
+                session,
+                domain.Status == SqlOSOrganizationDomainStatuses.Active ? "metadata" : "domain",
+                domain.Status == SqlOSOrganizationDomainStatuses.Active ? null : domain.LastError,
+                null,
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(session, "domain", ex.Message, null, cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> ImportMetadataActionAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalMetadataRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await ImportMetadataAsync(session, request, httpContext, cancellationToken);
+            return await ViewActionAsync(session, "activate", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(
+                session,
+                "metadata",
+                ex.Message,
+                new Dictionary<string, string> { ["metadataXml"] = ex.Message },
+                cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> ActivateActionAsync(
+        SqlOSSsoPortalSession session,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await ActivateAsync(session, httpContext, cancellationToken);
+            return await ViewActionAsync(session, "test", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(session, "activate", ex.Message, null, cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> DisableActionAsync(
+        SqlOSSsoPortalSession session,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await DisableAsync(session, httpContext, cancellationToken);
+            return await ViewActionAsync(session, "activate", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(session, "activate", ex.Message, null, cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> RecordTestActionAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalTestRequest request,
+        SqlOSSamlService samlService,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var state = await GetStateAsync(session, cancellationToken);
+            if (!state.Connection.IsEnabled)
+            {
+                await RecordTestAsync(
+                    session,
+                    "blocked",
+                    "Activate the SSO connection before starting a test sign-in.",
+                    null,
+                    httpContext,
+                    cancellationToken);
+                return await ViewActionAsync(session, "test", null, null, cancellationToken);
+            }
+
+            string? authorizationUrl = null;
+            if (!string.IsNullOrWhiteSpace(request.ClientId) && !string.IsNullOrWhiteSpace(request.RedirectUri))
+            {
+                authorizationUrl = await samlService.CreateAuthorizationUrlAsync(
+                    new SqlOSAuthorizationUrlRequest(state.Connection.Id, request.ClientId, request.RedirectUri),
+                    cancellationToken);
+            }
+
+            await RecordTestAsync(
+                session,
+                authorizationUrl == null ? "ready" : "started",
+                authorizationUrl == null
+                    ? "Connection is active and ready for a SAML sign-in test."
+                    : "SAML sign-in test redirect created.",
+                authorizationUrl,
+                httpContext,
+                cancellationToken);
+            return await ViewActionAsync(session, "test", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(session, "test", ex.Message, null, cancellationToken);
+        }
+    }
+
+    private async Task<SqlOSSsoSetupActionResult> ViewActionAsync(
+        SqlOSSsoPortalSession session,
+        string? view,
+        string? error,
+        IReadOnlyDictionary<string, string>? fieldErrors,
+        CancellationToken cancellationToken)
+        => new("view", null, await GetSetupViewAsync(session, view, error, fieldErrors, cancellationToken));
 
     private async Task<SqlOSSsoConnection> EnsurePortalConnectionAsync(
         SqlOSOrganization organization,
@@ -534,6 +804,53 @@ public sealed class SqlOSSsoPortalService
             connection.CreatedAt,
             connection.UpdatedAt);
 
+    private SqlOSSsoSetupAllowedActions BuildAllowedActions(
+        SqlOSOrganization organization,
+        SqlOSSsoConnection connection,
+        SqlOSOrganizationDomainResult? domain)
+        => BuildAllowedActions(
+            new SqlOSSsoPortalOrganizationResult(
+                organization.Id,
+                organization.Name,
+                organization.Slug,
+                organization.PrimaryDomain),
+            ToConnectionResult(connection),
+            domain);
+
+    private SqlOSSsoSetupAllowedActions BuildAllowedActions(
+        SqlOSSsoPortalOrganizationResult organization,
+        SqlOSSsoPortalConnectionResult connection,
+        SqlOSOrganizationDomainResult? domain)
+    {
+        var hasMetadata = connection.SetupStatus is "ready_to_activate" or "active";
+        var domainReady = IsDomainReadyForActivation(organization.PrimaryDomain, domain);
+        return new SqlOSSsoSetupAllowedActions(
+            CanSelectProvider: true,
+            CanStartDomainVerification: true,
+            CanConfirmDomainVerification: domain?.Status == SqlOSOrganizationDomainStatuses.PendingOwnership,
+            CanValidateMetadata: true,
+            CanImportMetadata: true,
+            CanActivate: !connection.IsEnabled && hasMetadata && domainReady,
+            CanDisable: connection.IsEnabled,
+            CanTest: connection.IsEnabled,
+            CanSignOut: true);
+    }
+
+    private bool IsDomainReadyForActivation(string? primaryDomain, SqlOSOrganizationDomainResult? domain)
+    {
+        if (!_portalOptions.RequireVerifiedDomainForActivation)
+        {
+            return true;
+        }
+
+        if (domain?.Status == SqlOSOrganizationDomainStatuses.Active)
+        {
+            return true;
+        }
+
+        return domain == null && !string.IsNullOrWhiteSpace(primaryDomain);
+    }
+
     private async Task RecordPortalAuditAsync(
         string eventType,
         SqlOSSsoPortalSession session,
@@ -629,6 +946,26 @@ public sealed class SqlOSSsoPortalService
         }
     }
 
+    private async Task EnsureDomainCanActivateAsync(
+        SqlOSSsoPortalSession session,
+        CancellationToken cancellationToken)
+    {
+        if (!_portalOptions.RequireVerifiedDomainForActivation)
+        {
+            return;
+        }
+
+        var organization = session.Organization
+            ?? await _context.Set<SqlOSOrganization>().AsNoTracking().FirstAsync(x => x.Id == session.OrganizationId, cancellationToken);
+        var domain = await _domainService.GetPreferredDomainAsync(session.OrganizationId, cancellationToken);
+        if (IsDomainReadyForActivation(organization.PrimaryDomain, domain))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("Verify domain ownership before activating SSO for home realm discovery.");
+    }
+
     private static string GetSessionStatus(SqlOSSsoPortalSession session, DateTime now)
     {
         if (session.RevokedAt != null)
@@ -666,4 +1003,17 @@ public sealed class SqlOSSsoPortalService
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string NormalizeView(string? view)
+        => string.IsNullOrWhiteSpace(view)
+            ? "provider"
+            : view.Trim().ToLowerInvariant() switch
+            {
+                "provider" => "provider",
+                "domain" or "domains" => "domain",
+                "metadata" => "metadata",
+                "activate" or "activation" => "activate",
+                "test" => "test",
+                _ => "provider"
+            };
 }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.AuthServer.Models;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -21,7 +22,43 @@ public sealed class SqlOSHomeRealmDiscoveryService
             return new SqlOSHomeRealmDiscoveryResult("password", null, null, null, null);
         }
 
-        var match = await _context.Set<Models.SqlOSOrganization>()
+        var verifiedMatch = await _context.Set<SqlOSOrganizationDomain>()
+            .Where(domain => domain.Domain == normalizedDomain
+                && domain.Status == SqlOSOrganizationDomainStatuses.Active
+                && domain.RevokedAt == null)
+            .Join(
+                _context.Set<SqlOSOrganization>().Where(organization => organization.IsActive),
+                domain => domain.OrganizationId,
+                organization => organization.Id,
+                (domain, organization) => new { Domain = domain, Organization = organization })
+            .Join(
+                _context.Set<SqlOSSsoConnection>()
+                    .Where(connection => connection.IsEnabled
+                        && connection.IdentityProviderEntityId != ""
+                        && connection.SingleSignOnUrl != ""
+                        && connection.X509CertificatePem != ""),
+                match => match.Organization.Id,
+                connection => connection.OrganizationId,
+                (match, connection) => new
+                {
+                    OrganizationId = match.Organization.Id,
+                    OrganizationName = match.Organization.Name,
+                    PrimaryDomain = match.Domain.Domain,
+                    ConnectionId = connection.Id
+                })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (verifiedMatch != null)
+        {
+            return new SqlOSHomeRealmDiscoveryResult(
+                "sso",
+                verifiedMatch.OrganizationId,
+                verifiedMatch.OrganizationName,
+                verifiedMatch.PrimaryDomain,
+                verifiedMatch.ConnectionId);
+        }
+
+        var match = await _context.Set<SqlOSOrganization>()
             .Where(x => x.PrimaryDomain == normalizedDomain && x.IsActive)
             .Select(x => new
             {

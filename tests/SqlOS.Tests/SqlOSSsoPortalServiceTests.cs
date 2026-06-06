@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Tests.Infrastructure;
@@ -130,6 +131,104 @@ public sealed class SqlOSSsoPortalServiceTests
     }
 
     [TestMethod]
+    public async Task DomainVerificationAsync_CreatesTxtRecordAndEnablesVerifiedHomeRealmDiscovery()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Verified Org", null));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+
+        var state = await harness.Portal.StartDomainVerificationAsync(
+            session,
+            new SqlOSSsoPortalDomainRequest("admin@Verified.TEST"),
+            harness.Http);
+
+        state.Domain.Should().NotBeNull();
+        state.Domain!.Domain.Should().Be("verified.test");
+        state.Domain.Status.Should().Be(SqlOSOrganizationDomainStatuses.PendingOwnership);
+        state.Domain.OwnershipRecord.Should().NotBeNull();
+        state.Domain.OwnershipRecord!.Type.Should().Be("TXT");
+        state.Domain.OwnershipRecord.Name.Should().Be("_sqlos-verify.verified.test");
+        state.Domain.OwnershipRecord.Value.Should().StartWith("sqlos-domain-verification=");
+
+        state = await harness.Portal.ConfirmDomainOwnershipAsync(session, state.Domain.Id, harness.Http);
+        state.Domain!.Status.Should().Be(SqlOSOrganizationDomainStatuses.PendingOwnership);
+        state.Domain.LastError.Should().Contain("TXT record not found");
+
+        harness.Dns.AddTxt(state.Domain.OwnershipRecord!.Name, state.Domain.OwnershipRecord.Value);
+        state = await harness.Portal.ConfirmDomainOwnershipAsync(session, state.Domain.Id, harness.Http);
+        state.Domain!.Status.Should().Be(SqlOSOrganizationDomainStatuses.Active);
+
+        var metadataXml = BuildMetadata("urn:verified:idp", "https://idp.verified.test/sso");
+        await harness.Portal.ImportMetadataAsync(session, new SqlOSSsoPortalMetadataRequest(metadataXml), harness.Http);
+        state = await harness.Portal.ActivateAsync(session, harness.Http);
+        state.Connection.SetupStatus.Should().Be("active");
+
+        var hrd = await new SqlOSHomeRealmDiscoveryService(harness.Context)
+            .DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("user@verified.test"));
+        hrd.Mode.Should().Be("sso");
+        hrd.OrganizationId.Should().Be(org.Id);
+        hrd.PrimaryDomain.Should().Be("verified.test");
+    }
+
+    [TestMethod]
+    public async Task ActivateAsync_BlocksPendingSelfServeDomainUntilOwnershipIsVerified()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Pending Org", null));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+        var metadataXml = BuildMetadata("urn:pending:idp", "https://idp.pending.test/sso");
+
+        await harness.Portal.ImportMetadataAsync(session, new SqlOSSsoPortalMetadataRequest(metadataXml), harness.Http);
+        await harness.Portal.StartDomainVerificationAsync(
+            session,
+            new SqlOSSsoPortalDomainRequest("pending.test"),
+            harness.Http);
+
+        var action = async () => await harness.Portal.ActivateAsync(session, harness.Http);
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Verify domain ownership before activating SSO for home realm discovery.");
+    }
+
+    [TestMethod]
+    public async Task GetSetupActionAsync_ReturnsHeadlessSetupViewModel()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Headless Org", null, "headless.test"));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id, Provider: "okta"), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+
+        var result = await harness.Portal.GetSetupActionAsync(session, "domain");
+
+        result.Type.Should().Be("view");
+        result.RedirectUrl.Should().BeNull();
+        result.ViewModel.Should().NotBeNull();
+        result.ViewModel!.View.Should().Be("domain");
+        result.ViewModel.SetupApiBasePath.Should().Be("/sqlos/admin/auth/sso-portal/api/setup");
+        result.ViewModel.Provider.Should().Be("okta");
+        result.ViewModel.AllowedActions.CanStartDomainVerification.Should().BeTrue();
+        result.ViewModel.ServiceProvider.AssertionConsumerServiceUrl.Should().Contain("/saml/acs/");
+    }
+
+    [TestMethod]
+    public async Task TryBuildSetupUiUrl_UsesConfiguredBrowserHandoff()
+    {
+        using var harness = await PortalHarness.CreateAsync(options =>
+        {
+            options.SsoPortal.UseHostedPortal = false;
+            options.SsoPortal.BuildUiUrl = ctx =>
+                $"https://admin.example.test/sso/setup?session_id={ctx.SessionId}&org_id={ctx.OrganizationId}&view={ctx.View}";
+        });
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Route Org", null, "route.test"));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+
+        var url = harness.Portal.TryBuildSetupUiUrl(harness.Http, created.Id, org.Id, "metadata");
+
+        url.Should().Be($"https://admin.example.test/sso/setup?session_id={created.Id}&org_id={org.Id}&view=metadata");
+    }
+
+    [TestMethod]
     public async Task ValidateMetadata_ReturnsActionableErrors()
     {
         using var harness = await PortalHarness.CreateAsync();
@@ -149,6 +248,8 @@ public sealed class SqlOSSsoPortalServiceTests
         html.Should().Contain("<!doctype html>");
         html.Should().Contain("SqlOS SSO Portal");
         html.Should().Contain("./api");
+        html.Should().Contain("Domain Verification");
+        html.Should().Contain("Confirm TXT record");
         html.Should().Contain("Validate metadata");
         html.Should().Contain("Activate connection");
         html.Should().Contain("Run test");
@@ -174,11 +275,23 @@ public sealed class SqlOSSsoPortalServiceTests
                 portal.DefaultLinkLifetime = TimeSpan.FromHours(12);
                 portal.SessionIdleTimeout = TimeSpan.FromMinutes(45);
                 portal.CookieName = "custom_sso_portal";
+                portal.EnableApi = false;
+                portal.UseHostedPortal = false;
+                portal.RequireVerifiedDomainForActivation = false;
+                portal.AllowLocalhostDomainVerification = true;
+                portal.HeadlessApiBasePath = "/custom/sso/setup";
+                portal.DomainVerificationRecordPrefix = "_custom-verify";
             });
 
         options.SsoPortal.DefaultLinkLifetime.Should().Be(TimeSpan.FromHours(12));
         options.SsoPortal.SessionIdleTimeout.Should().Be(TimeSpan.FromMinutes(45));
         options.SsoPortal.CookieName.Should().Be("custom_sso_portal");
+        options.SsoPortal.EnableApi.Should().BeFalse();
+        options.SsoPortal.UseHostedPortal.Should().BeFalse();
+        options.SsoPortal.RequireVerifiedDomainForActivation.Should().BeFalse();
+        options.SsoPortal.AllowLocalhostDomainVerification.Should().BeTrue();
+        options.SsoPortal.ResolveHeadlessApiBasePath("/sqlos/admin/auth").Should().Be("/custom/sso/setup");
+        options.SsoPortal.DomainVerificationRecordPrefix.Should().Be("_custom-verify");
     }
 
     private static string ExtractToken(string setupUrl)
@@ -224,6 +337,8 @@ public sealed class SqlOSSsoPortalServiceTests
         public required TestSqlOSInMemoryDbContext Context { get; init; }
         public required SqlOSCryptoService Crypto { get; init; }
         public required SqlOSAdminService Admin { get; init; }
+        public required SqlOSOrganizationDomainService Domains { get; init; }
+        public required FakeDomainDnsVerifier Dns { get; init; }
         public required SqlOSSsoPortalService Portal { get; init; }
         public required DefaultHttpContext Http { get; init; }
 
@@ -242,7 +357,9 @@ public sealed class SqlOSSsoPortalServiceTests
             var options = Options.Create(authOptions);
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
-            var portal = new SqlOSSsoPortalService(context, options, crypto, admin);
+            var dns = new FakeDomainDnsVerifier();
+            var domains = new SqlOSOrganizationDomainService(context, options, crypto, admin, dns);
+            var portal = new SqlOSSsoPortalService(context, options, crypto, admin, domains);
 
             await crypto.EnsureActiveSigningKeyAsync();
 
@@ -251,6 +368,8 @@ public sealed class SqlOSSsoPortalServiceTests
                 Context = context,
                 Crypto = crypto,
                 Admin = admin,
+                Domains = domains,
+                Dns = dns,
                 Portal = portal,
                 Http = CreateHttpContext()
             };
@@ -267,5 +386,28 @@ public sealed class SqlOSSsoPortalServiceTests
 
         public void Dispose()
             => Context.Dispose();
+    }
+
+    private sealed class FakeDomainDnsVerifier : ISqlOSDomainDnsVerifier
+    {
+        private readonly Dictionary<string, HashSet<string>> _records = new(StringComparer.OrdinalIgnoreCase);
+
+        public void AddTxt(string recordName, string value)
+        {
+            if (!_records.TryGetValue(recordName, out var values))
+            {
+                values = new HashSet<string>(StringComparer.Ordinal);
+                _records[recordName] = values;
+            }
+
+            values.Add(SqlOSDomainOwnershipVerification.NormalizeTxtValue(value));
+        }
+
+        public Task<bool> HasTxtRecordValueAsync(
+            string recordName,
+            string expectedValue,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(_records.TryGetValue(recordName, out var values)
+                && values.Contains(SqlOSDomainOwnershipVerification.NormalizeTxtValue(expectedValue)));
     }
 }

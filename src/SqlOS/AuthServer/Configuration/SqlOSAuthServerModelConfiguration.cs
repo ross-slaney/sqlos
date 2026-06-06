@@ -189,6 +189,26 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSOrganizationDomain>(entity =>
+        {
+            entity.ToTable("SqlOSOrganizationDomains", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.OrganizationId, x.Domain })
+                .IsUnique()
+                .HasFilter("[RevokedAt] IS NULL");
+            entity.HasIndex(x => new { x.Domain, x.Status });
+            entity.HasIndex(x => new { x.OrganizationId, x.Status });
+            entity.Property(x => x.Domain).HasMaxLength(320);
+            entity.Property(x => x.Status).HasMaxLength(50);
+            entity.Property(x => x.VerificationToken).HasMaxLength(160);
+            entity.Property(x => x.CreatedByUserId).HasMaxLength(64);
+            entity.Property(x => x.LastError).HasMaxLength(1000);
+            entity.HasOne(x => x.Organization)
+                .WithMany(x => x.Domains)
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSOidcConnection>(entity =>
         {
             entity.ToTable("SqlOSAuthOidcConnections", schema, t => t.ExcludeFromMigrations());
