@@ -51,6 +51,12 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
     var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
         ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
 
+    // "Continue with Microsoft" social login. Secrets are never committed: the AppHost forwards
+    // them as environment variables (SqlOS__Oidc__Microsoft__*) when configured for the developer.
+    var microsoftOidcClientId = builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"];
+    var microsoftOidcClientSecret = builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"];
+    var microsoftOidcTenant = builder.Configuration["SqlOS:Oidc:Microsoft:Tenant"];
+
     if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
     {
         options.Dashboard.AuthMode = authMode;
@@ -141,6 +147,23 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
         "example-expo",
         "Example Expo Client",
         "sqlos-expo://auth-callback");
+
+    // Seed the Microsoft social connection only when credentials are supplied so a fresh checkout
+    // without Azure configured still boots cleanly (the button simply does not appear).
+    if (!string.IsNullOrWhiteSpace(microsoftOidcClientId) && !string.IsNullOrWhiteSpace(microsoftOidcClientSecret))
+    {
+        var oidcCallbackOrigin = builder.Configuration["SqlOS:Oidc:CallbackBaseUrl"]
+            ?? (Uri.TryCreate(auth.Issuer, UriKind.Absolute, out var issuerUri)
+                ? issuerUri.GetLeftPart(UriPartial.Authority)
+                : "http://localhost:5062");
+        var microsoftCallbackUri = $"{oidcCallbackOrigin.TrimEnd('/')}/api/v1/auth/oidc/callback/{{connectionId}}";
+
+        auth.SeedMicrosoftConnection(
+            microsoftOidcClientId,
+            microsoftOidcClientSecret,
+            microsoftOidcTenant,
+            microsoftCallbackUri);
+    }
 
     if (enableHeadlessAuthPage)
     {

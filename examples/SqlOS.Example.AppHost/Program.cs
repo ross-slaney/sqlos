@@ -22,6 +22,14 @@ var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyS
     ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
 var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
     ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
+// "Continue with Microsoft" social login secrets for the example app. Set these on the AppHost
+// (user-secrets or environment), never in source. They are forwarded to the API as env vars below.
+var microsoftOidcClientId = builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]
+    ?? builder.Configuration["AZURE_OIDC_MICROSOFT_CLIENT_ID"];
+var microsoftOidcClientSecret = builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"]
+    ?? builder.Configuration["AZURE_OIDC_MICROSOFT_CLIENT_SECRET"];
+var microsoftOidcTenant = builder.Configuration["SqlOS:Oidc:Microsoft:Tenant"]
+    ?? builder.Configuration["AZURE_OIDC_MICROSOFT_TENANT"];
 var sqlPassword = builder.AddParameter("sql-password", value: "LocalDevPassword123!");
 
 var sql = builder.AddSqlServer("sql", password: sqlPassword, port: 1434)
@@ -74,6 +82,18 @@ if (!string.IsNullOrWhiteSpace(twilioVerifyServiceSid))
 if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
 {
     api.WithEnvironment("SqlOS__PhoneOtp__DefaultRegion", phoneOtpDefaultRegion);
+}
+
+if (!string.IsNullOrWhiteSpace(microsoftOidcClientId) && !string.IsNullOrWhiteSpace(microsoftOidcClientSecret))
+{
+    api
+        .WithEnvironment("SqlOS__Oidc__Microsoft__ClientId", microsoftOidcClientId)
+        .WithEnvironment("SqlOS__Oidc__Microsoft__ClientSecret", microsoftOidcClientSecret);
+
+    if (!string.IsNullOrWhiteSpace(microsoftOidcTenant))
+    {
+        api.WithEnvironment("SqlOS__Oidc__Microsoft__Tenant", microsoftOidcTenant);
+    }
 }
 
 var todoApi = builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")

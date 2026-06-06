@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.Configuration;
 
 namespace SqlOS.AuthServer.Configuration;
@@ -51,6 +52,7 @@ public class SqlOSAuthServerOptions
     public SqlOSMfaSeedOptions? MfaSeed { get; private set; }
     public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
+    public List<SqlOSOidcConnectionSeedOptions> OidcConnectionSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
     {
@@ -89,6 +91,61 @@ public class SqlOSAuthServerOptions
         ClientSeeds.Add(seed);
         return this;
     }
+
+    /// <summary>
+    /// Seed a social/OIDC login connection (Google, Microsoft, Apple, or custom). The connection is
+    /// reconciled into the database on startup, matched by provider type (and display name for custom
+    /// providers). Callback URIs may include the <c>{connectionId}</c> placeholder.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedOidcConnection(Action<SqlOSOidcConnectionSeedOptions> configure)
+    {
+        var seed = new SqlOSOidcConnectionSeedOptions();
+        configure(seed);
+        OidcConnectionSeeds.Add(seed);
+        return this;
+    }
+
+    /// <summary>
+    /// Seed a "Continue with Microsoft" (Microsoft Entra) social login connection. When no callback URIs
+    /// are supplied, the SqlOS-owned callback URI (<c>{connectionId}</c> placeholder) is used so the
+    /// connection works against the host's own origin.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedMicrosoftConnection(
+        string clientId,
+        string clientSecret,
+        string? tenant = null,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
+            oidc.DisplayName = "Microsoft";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.MicrosoftTenant = tenant;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
+
+    /// <summary>
+    /// Seed a "Continue with Google" social login connection.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGoogleConnection(
+        string clientId,
+        string clientSecret,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.Google;
+            oidc.DisplayName = "Google";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
 
     public SqlOSAuthServerOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
     {
