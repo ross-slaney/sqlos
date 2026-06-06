@@ -88,6 +88,20 @@ auth.SeedOidcConnection(oidc =>
   - Add the same SqlOS-owned callback URI to the provider (Entra, Google, etc.). The connection id is shown in the dashboard after the first boot.
 </Callout>
 
+### Local example seed test
+
+The example AppHost forwards Microsoft OIDC environment variables into the API and seeds the connection when both client id and secret are present. To prove the row is coming from startup seeding, run the example against a new database name instead of reusing an existing persistent SQL Server database:
+
+```bash
+SQLOS_EXAMPLE_DATABASE_NAME=sqlos-example-oidc-seed \
+AZURE_OIDC_MICROSOFT_CLIENT_ID="<client-id>" \
+AZURE_OIDC_MICROSOFT_CLIENT_SECRET="<client-secret>" \
+AZURE_OIDC_MICROSOFT_TENANT=common \
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+After the first boot, open `/sqlos/admin/auth/oidc`, copy the generated Microsoft callback URI, and add that exact URI to the Entra app registration redirect URIs.
+
 ## Test
 
 1. Open your app’s login entry point (or `/sqlos/auth/login`).

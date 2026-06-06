@@ -22,6 +22,16 @@ var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyS
     ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
 var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
     ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
+var exampleDatabaseName = builder.Configuration["SqlOS:ExampleDatabaseName"]
+    ?? builder.Configuration["SQLOS_EXAMPLE_DATABASE_NAME"];
+exampleDatabaseName = string.IsNullOrWhiteSpace(exampleDatabaseName)
+    ? "sqlos-example"
+    : exampleDatabaseName.Trim();
+var todoDatabaseName = builder.Configuration["SqlOS:TodoDatabaseName"]
+    ?? builder.Configuration["SQLOS_TODO_DATABASE_NAME"];
+todoDatabaseName = string.IsNullOrWhiteSpace(todoDatabaseName)
+    ? "sqlos-todo"
+    : todoDatabaseName.Trim();
 // "Continue with Microsoft" social login secrets for the example app. Set these on the AppHost
 // (user-secrets or environment), never in source. They are forwarded to the API as env vars below.
 var microsoftOidcClientId = builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]
@@ -37,8 +47,8 @@ var sql = builder.AddSqlServer("sql", password: sqlPassword, port: 1434)
     .WithDataVolume()
     .WithContainerRuntimeArgs("--platform", "linux/amd64");
 
-var exampleDatabase = sql.AddDatabase("sqlos-example");
-var todoDatabase = sql.AddDatabase("sqlos-todo");
+var exampleDatabase = sql.AddDatabase("sqlos-example", exampleDatabaseName);
+var todoDatabase = sql.AddDatabase("sqlos-todo", todoDatabaseName);
 
 var api = builder.AddProject<Projects.SqlOS_Example_Api>("api")
     .WithReference(exampleDatabase)
