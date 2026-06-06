@@ -167,6 +167,40 @@ public sealed class SqlOSOidcConnectionSeedingTests
     }
 
     [TestMethod]
+    public async Task UpsertSeededOidcConnectionsAsync_SeedsGitHubConnection()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedGitHubConnection(
+            "github-client",
+            "github-secret",
+            "http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}");
+
+        var (admin, oidc) = CreateServices(context, optionsValue);
+
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        var connection = await context.Set<SqlOSOidcConnection>().SingleAsync();
+        connection.ProviderType.Should().Be(SqlOSOidcProviderType.GitHub);
+        connection.Protocol.Should().Be(SqlOSSocialProviderProtocol.OAuthProfile);
+        connection.DisplayName.Should().Be("GitHub");
+        connection.ClientId.Should().Be("github-client");
+        connection.UseDiscovery.Should().BeFalse();
+        connection.Issuer.Should().Be("https://github.com");
+        connection.AuthorizationEndpoint.Should().Be("https://github.com/login/oauth/authorize");
+        connection.TokenEndpoint.Should().Be("https://github.com/login/oauth/access_token");
+        connection.UserInfoEndpoint.Should().Be("https://api.github.com/user");
+        connection.JwksUri.Should().BeNull();
+        connection.ClientSecretEncrypted.Should().NotBeNullOrWhiteSpace();
+
+        var providers = await oidc.ListEnabledProvidersAsync();
+        providers.Should().ContainSingle(x =>
+            x.ProviderType == "GitHub" &&
+            x.Protocol == "OAuthProfile" &&
+            !string.IsNullOrWhiteSpace(x.LogoDataUrl));
+    }
+
+    [TestMethod]
     public async Task UpsertSeededOidcConnectionsAsync_MatchesCustomConnectionByDisplayName()
     {
         using var context = CreateContext();

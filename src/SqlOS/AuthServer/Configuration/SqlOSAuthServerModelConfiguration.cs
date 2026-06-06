@@ -168,6 +168,9 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.ProviderType)
                 .HasConversion<string>()
                 .HasMaxLength(40);
+            entity.Property(x => x.Protocol)
+                .HasConversion<string>()
+                .HasMaxLength(40);
             entity.Property(x => x.ClientAuthMethod)
                 .HasConversion<string>()
                 .HasMaxLength(40);

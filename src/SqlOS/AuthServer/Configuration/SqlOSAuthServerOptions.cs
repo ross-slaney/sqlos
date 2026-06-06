@@ -147,6 +147,27 @@ public class SqlOSAuthServerOptions
                 .ToList();
         });
 
+    /// <summary>
+    /// Seed a "Continue with GitHub" social login connection. GitHub user sign-in is OAuth 2.0
+    /// with provider profile/email lookups, not OIDC, but it uses the same persisted social
+    /// provider configuration and browser/headless login surface as OIDC providers.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGitHubConnection(
+        string clientId,
+        string clientSecret,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.GitHub;
+            oidc.DisplayName = "GitHub";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
+
     public SqlOSAuthServerOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
     {
         var application = new SqlOSSingleApplicationOptions { Name = name };
