@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -226,6 +227,111 @@ public sealed class SqlOSAuthServiceTests
         verifyResult.Type.Should().Be("redirect");
         verifyResult.RedirectUrl.Should().StartWith("https://client.example.test/callback");
         verifyResult.RedirectUrl.Should().Contain("code=");
+    }
+
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_WithInvitationAndRequiredOrgMfa_ForcesEnrollmentBeforeRedirect()
+    {
+        var harness = await TestHarness.CreateAsync(configure: ConfigureHeadlessMfa);
+        var organization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite MFA {Guid.NewGuid():N}", null));
+        await RequireMfaForAllUsersAsync(harness, organization.Id);
+        var invitedEmail = $"invite-mfa-{Guid.NewGuid():N}@example.com";
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Invite MFA User",
+            invitedEmail,
+            "P@ssword123!"));
+        var invitation = await harness.Invitation.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "member",
+                SendEmail: false),
+            CreateInvitationHttpContext());
+        var authorizationRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "state-invite-mfa",
+            invitedEmail);
+
+        var loginResult = await harness.Headless.PasswordLoginAsync(
+            CreatePasswordHttpContext("203.0.113.212"),
+            new SqlOSHeadlessPasswordLoginRequest(
+                authorizationRequest.Id,
+                invitedEmail,
+                "P@ssword123!",
+                ExtractInvitationToken(invitation.InviteUrl!)));
+
+        loginResult.Type.Should().Be("view");
+        loginResult.ViewModel.Should().NotBeNull();
+        loginResult.ViewModel!.View.Should().Be("mfa-enroll");
+        loginResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.ViewModel.RequiresMfaEnrollment.Should().BeTrue();
+        loginResult.ViewModel.TotpEnrollment.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
+            .Should().Be(0);
+
+        var storedInvitation = await harness.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().NotBeNull();
+        storedInvitation.AcceptedByUserId.Should().Be(user.Id);
+        var membership = await harness.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == user.Id && x.OrganizationId == organization.Id);
+        membership.Role.Should().Be("member");
+    }
+
+    [TestMethod]
+    public async Task HeadlessInvitationSignup_WithRequiredOrgMfa_ForcesEnrollmentBeforeRedirect()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureHeadlessMfa(options);
+            options.SeedAuthPage(page =>
+            {
+                page.EnabledCredentialTypes = ["password", "email_otp"];
+                page.EnablePasswordSignup = true;
+            });
+        });
+        var organization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite Signup MFA {Guid.NewGuid():N}", null));
+        await RequireMfaForAllUsersAsync(harness, organization.Id);
+        var invitedEmail = $"invite-signup-mfa-{Guid.NewGuid():N}@example.com";
+        var invitation = await harness.Invitation.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "admin",
+                SendEmail: false),
+            CreateInvitationHttpContext());
+        var authorizationRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "state-invite-signup-mfa",
+            invitedEmail);
+
+        var signupResult = await harness.Headless.SignUpWithInvitationAsync(
+            CreatePasswordHttpContext("203.0.113.213"),
+            new SqlOSHeadlessInvitationSignupRequest(
+                authorizationRequest.Id,
+                "Invite Signup MFA",
+                invitedEmail,
+                new JsonObject(),
+                ExtractInvitationToken(invitation.InviteUrl!)));
+
+        signupResult.Type.Should().Be("view");
+        signupResult.ViewModel.Should().NotBeNull();
+        signupResult.ViewModel!.View.Should().Be("mfa-enroll");
+        signupResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        signupResult.ViewModel.RequiresMfaEnrollment.Should().BeTrue();
+        signupResult.ViewModel.TotpEnrollment.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
+            .Should().Be(0);
+
+        var storedInvitation = await harness.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().NotBeNull();
+        var user = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.Email == invitedEmail);
+        var membership = await harness.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == user.UserId && x.OrganizationId == organization.Id);
+        membership.Role.Should().Be("admin");
     }
 
     [TestMethod]
@@ -1433,10 +1539,73 @@ public sealed class SqlOSAuthServiceTests
         return context;
     }
 
+    private static DefaultHttpContext CreateInvitationHttpContext()
+    {
+        var context = CreatePasswordHttpContext("203.0.113.214");
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("auth.example.test");
+        return context;
+    }
+
+    private static void ConfigureHeadlessMfa(SqlOSAuthServerOptions options)
+    {
+        options.Mfa.Enabled = true;
+        options.Mfa.AllowUserSelfEnrollmentByDefault = true;
+        options.Mfa.RecoveryCodesEnabledByDefault = true;
+        options.UseHeadlessAuthPage(headless =>
+        {
+            headless.BuildUiUrl = ctx =>
+                $"https://app.example.test/authorize?request={Uri.EscapeDataString(ctx.RequestId ?? string.Empty)}&view={Uri.EscapeDataString(ctx.View)}";
+        });
+    }
+
+    private static async Task RequireMfaForAllUsersAsync(TestHarness harness, string organizationId)
+    {
+        await harness.Settings.UpdateOrganizationMfaPolicyAsync(
+            organizationId,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: false,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]));
+    }
+
+    private static async Task<SqlOSAuthorizationRequest> CreateHeadlessAuthorizationRequestAsync(
+        TestHarness harness,
+        string state,
+        string? loginHint)
+        => await harness.Authorization.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                "test-client",
+                "https://client.example.test/callback",
+                state,
+                "openid profile email",
+                $"challenge-{state}",
+                "S256",
+                null,
+                loginHint,
+                null,
+                null,
+                "headless",
+                null));
+
     private static string GetLatestCode(TestAuthEmailSender sender, string email)
     {
         var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
         return Regex.Match(message.TextBody ?? string.Empty, @"\b\d{4,8}\b").Value;
+    }
+
+    private static string ExtractInvitationToken(string inviteUrl)
+    {
+        var query = new Uri(inviteUrl).Query.TrimStart('?');
+        var tokenPart = query
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .First(x => x.StartsWith("token=", StringComparison.Ordinal));
+        return Uri.UnescapeDataString(tokenPart["token=".Length..]);
     }
 
     private static string ExtractResetToken(string? textBody)
@@ -1588,6 +1757,7 @@ public sealed class SqlOSAuthServiceTests
         public required SqlOSAuthService Auth { get; init; }
         public required SqlOSAuthorizationServerService Authorization { get; init; }
         public required SqlOSHeadlessAuthService Headless { get; init; }
+        public required SqlOSInvitationService Invitation { get; init; }
         public required SqlOSAdminService Admin { get; init; }
         public required SqlOSCryptoService Crypto { get; init; }
         public required SqlOSSettingsService Settings { get; init; }
@@ -1616,9 +1786,11 @@ public sealed class SqlOSAuthServiceTests
             // ReplacementAccessToken cache is encrypted at rest as in production.
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
-            var emailSender = new TestAuthEmailSender();
+            var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);
-            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+            var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options, transactionalEmailService);
             var passwordAbuse = new SqlOSPasswordLoginAbuseService(context, admin, crypto, options);
             var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
             var totp = new SqlOSTotpMfaService(context, crypto, mfaPolicy, options);
@@ -1629,7 +1801,9 @@ public sealed class SqlOSAuthServiceTests
                 crypto,
                 settings,
                 emailOtp,
+                invitationService: invitation,
                 passwordLoginAbuseService: passwordAbuse,
+                transactionalEmailService: transactionalEmailService,
                 mfaPolicyService: mfaPolicy,
                 totpMfaService: totp);
             var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
@@ -1641,6 +1815,7 @@ public sealed class SqlOSAuthServiceTests
                 settings,
                 authPageSession,
                 options,
+                invitationService: invitation,
                 passwordLoginAbuseService: passwordAbuse,
                 mfaPolicyService: mfaPolicy,
                 totpMfaService: totp);
@@ -1670,10 +1845,13 @@ public sealed class SqlOSAuthServiceTests
                 settings,
                 emailOtp,
                 options,
+                invitationService: invitation,
                 authService: auth);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
+            await settings.UpsertSeededAuthPageSettingsAsync();
+            await settings.UpsertSeededAuthEmailSettingsAsync();
             await settings.UpsertSeededMfaSettingsAsync();
 
             return new TestHarness
@@ -1682,6 +1860,7 @@ public sealed class SqlOSAuthServiceTests
                 Auth = auth,
                 Authorization = authorization,
                 Headless = headless,
+                Invitation = invitation,
                 Admin = admin,
                 Crypto = crypto,
                 Settings = settings,

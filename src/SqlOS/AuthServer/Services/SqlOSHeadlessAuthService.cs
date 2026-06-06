@@ -699,10 +699,9 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 signup.User,
-                selectedOrganizationId,
                 signup.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
@@ -722,7 +721,11 @@ public sealed class SqlOSHeadlessAuthService
                 await transaction.CommitAsync(cancellationToken);
             }
 
-            return Redirect(redirectUrl);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                verification.Email,
+                cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
@@ -982,10 +985,9 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 signup.User,
-                selectedOrganizationId,
                 signup.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
@@ -1005,7 +1007,11 @@ public sealed class SqlOSHeadlessAuthService
                 await transaction.CommitAsync(cancellationToken);
             }
 
-            return Redirect(redirectUrl);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                email: null,
+                cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -1094,10 +1100,9 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 signup.User,
-                boundInvitation.OrganizationId,
                 signup.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
@@ -1116,7 +1121,11 @@ public sealed class SqlOSHeadlessAuthService
                 await transaction.CommitAsync(cancellationToken);
             }
 
-            return Redirect(redirectUrl);
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                email,
+                cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
@@ -1226,10 +1235,9 @@ public sealed class SqlOSHeadlessAuthService
                     cancellationToken);
             }
 
-            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 signup.User,
-                selectedOrganizationId,
                 signup.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
@@ -1238,7 +1246,12 @@ public sealed class SqlOSHeadlessAuthService
             {
                 await transaction.CommitAsync(cancellationToken);
             }
-            return Redirect(redirectUrl);
+
+            return await BuildCompletionActionResultAsync(
+                authorizationRequest,
+                completion,
+                email,
+                cancellationToken);
         }
         catch (SqlOSHeadlessValidationException ex)
         {
