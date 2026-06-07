@@ -71,9 +71,17 @@ public sealed class SqlOSSsoPortalServiceTests
         session.SessionTokenHash.Should().NotBeNullOrWhiteSpace();
         requestCookie.Should().NotContain(session.SessionTokenHash);
 
+        var repeatedOpenHttp = PortalHarness.CreateHttpContext();
+        repeatedOpenHttp.Request.Headers.Cookie = requestCookie;
+        var repeated = await harness.Portal.OpenSessionAsync(rawToken, repeatedOpenHttp);
+        repeated.Id.Should().Be(created.Id);
+
         var reuse = async () => await harness.Portal.OpenSessionAsync(rawToken, PortalHarness.CreateHttpContext());
         await reuse.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Portal setup token has already been used.");
+
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "sso.portal.session.opened"))
+            .Should().Be(1);
     }
 
     [TestMethod]
