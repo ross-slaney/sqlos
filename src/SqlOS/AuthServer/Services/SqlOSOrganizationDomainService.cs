@@ -90,7 +90,7 @@ public sealed class SqlOSOrganizationDomainService
                 OrganizationId = organization.Id,
                 Domain = domain,
                 Status = SqlOSOrganizationDomainStatuses.PendingOwnership,
-                VerificationToken = SqlOSDomainOwnershipVerification.CreateVerificationToken(_cryptoService),
+                VerificationToken = SqlOSDomainOwnershipVerification.CreateVerificationToken(_cryptoService, _options.SsoPortal),
                 CreatedByUserId = userId,
                 CreatedAt = now,
                 UpdatedAt = now
@@ -100,7 +100,7 @@ public sealed class SqlOSOrganizationDomainService
         else if (claim.Status != SqlOSOrganizationDomainStatuses.Active)
         {
             claim.Status = SqlOSOrganizationDomainStatuses.PendingOwnership;
-            claim.VerificationToken ??= SqlOSDomainOwnershipVerification.CreateVerificationToken(_cryptoService);
+            claim.VerificationToken ??= SqlOSDomainOwnershipVerification.CreateVerificationToken(_cryptoService, _options.SsoPortal);
             claim.LastError = null;
             claim.UpdatedAt = now;
         }

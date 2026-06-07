@@ -302,7 +302,7 @@ The headless setup API defaults to `/sqlos/admin/auth/sso-portal/api/setup`, can
 | POST | `/test` | Run or record a readiness test |
 | POST | `/signout` | Close the portal session |
 
-The setup view model includes `domain`, `serviceProvider`, `providers`, `latestTest`, and `allowedActions`. Domain ownership uses a TXT record shaped like `_sqlos-verify.acme.com = sqlos-domain-verification=...`.
+The setup view model includes `domain`, `serviceProvider`, `providers`, `latestTest`, and `allowedActions`. Domain ownership uses a TXT record shaped like `_sqlos-verify.acme.com = sqlos-domain-verification=...` by default. Hosts can customize both prefixes with `SsoPortal.DomainVerificationRecordPrefix` and `SsoPortal.DomainVerificationRecordValuePrefix`.
 
 ---
 

@@ -172,6 +172,31 @@ public sealed class SqlOSSsoPortalServiceTests
     }
 
     [TestMethod]
+    public async Task DomainVerificationAsync_UsesConfiguredOwnershipRecordBranding()
+    {
+        using var harness = await PortalHarness.CreateAsync(options =>
+            options.ConfigureSsoPortal(portal =>
+            {
+                portal.DomainVerificationRecordPrefix = "_mcpstack-verify";
+                portal.DomainVerificationRecordValuePrefix = "mcpstack-domain-verification";
+            }));
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Branded Org", null));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+
+        var state = await harness.Portal.StartDomainVerificationAsync(
+            session,
+            new SqlOSSsoPortalDomainRequest("branded.test"),
+            harness.Http);
+
+        state.Domain.Should().NotBeNull();
+        state.Domain!.OwnershipRecord.Should().NotBeNull();
+        state.Domain.OwnershipRecord!.Name.Should().Be("_mcpstack-verify.branded.test");
+        state.Domain.OwnershipRecord.Value.Should().StartWith("mcpstack-domain-verification=");
+        state.Domain.OwnershipRecord.Value.Should().NotContain("sqlos");
+    }
+
+    [TestMethod]
     public async Task ActivateAsync_BlocksPendingSelfServeDomainUntilOwnershipIsVerified()
     {
         using var harness = await PortalHarness.CreateAsync();
@@ -281,6 +306,7 @@ public sealed class SqlOSSsoPortalServiceTests
                 portal.AllowLocalhostDomainVerification = true;
                 portal.HeadlessApiBasePath = "/custom/sso/setup";
                 portal.DomainVerificationRecordPrefix = "_custom-verify";
+                portal.DomainVerificationRecordValuePrefix = "custom-domain-verification";
             });
 
         options.SsoPortal.DefaultLinkLifetime.Should().Be(TimeSpan.FromHours(12));
@@ -292,6 +318,7 @@ public sealed class SqlOSSsoPortalServiceTests
         options.SsoPortal.AllowLocalhostDomainVerification.Should().BeTrue();
         options.SsoPortal.ResolveHeadlessApiBasePath("/sqlos/admin/auth").Should().Be("/custom/sso/setup");
         options.SsoPortal.DomainVerificationRecordPrefix.Should().Be("_custom-verify");
+        options.SsoPortal.DomainVerificationRecordValuePrefix.Should().Be("custom-domain-verification");
     }
 
     private static string ExtractToken(string setupUrl)

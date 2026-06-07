@@ -162,6 +162,11 @@ internal static class SqlOSOptionsValidator
         {
             errors.Add("AuthServer.SsoPortal.DomainVerificationRecordPrefix is required.");
         }
+
+        if (string.IsNullOrWhiteSpace(options.DomainVerificationRecordValuePrefix))
+        {
+            errors.Add("AuthServer.SsoPortal.DomainVerificationRecordValuePrefix is required.");
+        }
     }
 
     private static void ValidatePasswordLoginAbuseOptions(SqlOSPasswordLoginAbuseOptions options, List<string> errors)
