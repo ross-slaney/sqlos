@@ -523,11 +523,18 @@ public sealed class SqlOSAuthorizationServerService
     {
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
+            var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
+                authorizationRequest.InvitationId,
+                user.Id,
+                saveChanges: true,
+                httpContext,
+                cancellationToken);
+            var invitationOrganizationId = invitationAcceptance?.OrganizationId;
             var invitationOrganizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
             var mfaResult = await TryCreateMfaAuthorizationResultAsync(
                 authorizationRequest,
                 user,
-                organizationId: null,
+                invitationOrganizationId,
                 authenticationMethod,
                 invitationOrganizations,
                 cancellationToken);
@@ -540,7 +547,7 @@ public sealed class SqlOSAuthorizationServerService
                 await IssueAuthorizationRedirectAsync(
                     authorizationRequest,
                     user,
-                    organizationId: null,
+                    invitationOrganizationId,
                     authenticationMethod,
                     httpContext,
                     cancellationToken),
