@@ -15,6 +15,9 @@ public static class SqlOSDomainOwnershipVerification
     public static string CreateVerificationToken(SqlOSCryptoService cryptoService)
         => $"{VerificationTokenPrefix}{cryptoService.GenerateOpaqueToken(24)}";
 
+    public static string CreateVerificationToken(SqlOSCryptoService cryptoService, SqlOSSsoPortalOptions options)
+        => $"{NormalizeValuePrefix(options.DomainVerificationRecordValuePrefix)}{cryptoService.GenerateOpaqueToken(24)}";
+
     public static SqlOSDomainOwnershipRecord BuildOwnershipRecord(
         string domain,
         string verificationToken,
@@ -22,7 +25,10 @@ public static class SqlOSDomainOwnershipVerification
         => new(
             "TXT",
             $"{NormalizeRecordPrefix(options.DomainVerificationRecordPrefix)}.{domain}",
-            verificationToken);
+            BuildVerificationValue(verificationToken, options));
+
+    public static string BuildVerificationValue(string verificationToken, SqlOSSsoPortalOptions options)
+        => $"{NormalizeValuePrefix(options.DomainVerificationRecordValuePrefix)}{ExtractVerificationTokenSuffix(verificationToken)}";
 
     public static string NormalizeDomain(string? value, SqlOSSsoPortalOptions options)
     {
@@ -183,6 +189,26 @@ public static class SqlOSDomainOwnershipVerification
         }
 
         return prefix.ToLowerInvariant();
+    }
+
+    private static string NormalizeValuePrefix(string? value)
+    {
+        var prefix = string.IsNullOrWhiteSpace(value) ? "sqlos-domain-verification" : value.Trim().TrimEnd('=');
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return VerificationTokenPrefix;
+        }
+
+        return $"{prefix}=";
+    }
+
+    private static string ExtractVerificationTokenSuffix(string value)
+    {
+        var token = value.Trim();
+        var separatorIndex = token.IndexOf('=');
+        return separatorIndex >= 0 && separatorIndex < token.Length - 1
+            ? token[(separatorIndex + 1)..]
+            : token;
     }
 
     private static string? NormalizeReservedRoot(string? value)

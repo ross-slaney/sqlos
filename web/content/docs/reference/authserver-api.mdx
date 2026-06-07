@@ -1083,6 +1083,8 @@ The ownership record is shaped as:
 | `Name` | `_sqlos-verify.acme.com` |
 | `Value` | `sqlos-domain-verification=...` |
 
+Hosts can customize the TXT record name and value prefixes with `SsoPortal.DomainVerificationRecordPrefix` and `SsoPortal.DomainVerificationRecordValuePrefix`.
+
 ### ConfirmOwnershipAsync
 
 Check the TXT record and mark the claim active when the expected value is present.
