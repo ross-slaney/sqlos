@@ -354,6 +354,16 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task DelegatedSsoPortal_TrailingSlash_ReturnsHostedShell()
+    {
+        var response = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/sso-portal/");
+
+        response.EnsureSuccessStatusCode();
+        var html = await response.Content.ReadAsStringAsync();
+        html.Should().Contain("SqlOS SSO Portal");
+    }
+
+    [TestMethod]
     public async Task DelegatedSsoPortal_HeadlessSetupApi_ReturnsViewModelAndDomainRecord()
     {
         var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
