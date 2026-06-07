@@ -108,6 +108,46 @@ public static class ExampleEndpoints
             }
         });
 
+        example.MapGet("/mfa/status", async (SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        {
+            var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await authService.GetMfaStatusAsync(
+                subjectId,
+                httpContext.User.FindFirst("org_id")?.Value,
+                cancellationToken));
+        });
+
+        example.MapPost("/mfa/totp/enroll/start", async (SqlOSTotpEnrollmentStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        {
+            var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await authService.StartTotpEnrollmentAsync(
+                subjectId,
+                request,
+                httpContext.User.FindFirst("org_id")?.Value,
+                cancellationToken));
+        });
+
+        example.MapPost("/mfa/totp/enroll/verify", async (SqlOSTotpEnrollmentVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        {
+            var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            if (string.IsNullOrWhiteSpace(subjectId))
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(await authService.VerifyTotpEnrollmentAsync(request, httpContext, cancellationToken));
+        });
+
         example.MapGet("/workspaces", async (ExampleAppDbContext context, ExampleFgaService fgaService, ISqlOSFgaAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
         {
             var organizationId = httpContext.User.FindFirst("org_id")?.Value;

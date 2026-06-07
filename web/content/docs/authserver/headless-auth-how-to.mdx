@@ -228,6 +228,42 @@ await postAction("/oauth/headless/password/login", {
 });
 ```
 
+If the user or selected organization requires MFA, this call can return `view: "mfa"` or `view: "mfa-enroll"` instead of a final redirect.
+
+### MFA challenge
+
+Render this state when `model.view === "mfa"`.
+
+```tsx
+await postAction("/oauth/headless/mfa/verify", {
+  requestId: model.requestId,
+  mfaToken: model.mfaToken,
+  code,
+});
+```
+
+Use one input for both authenticator codes and recovery codes. SqlOS validates the code against the user's available factors and returns the final redirect on success.
+
+### Forced MFA enrollment
+
+Render this state when `model.view === "mfa-enroll"`.
+
+```tsx
+const enrollment = model.totpEnrollment;
+
+// Show enrollment.qrCodeDataUrl as an image.
+// Show enrollment.secret as manual setup fallback.
+
+await postAction("/oauth/headless/mfa/totp/enroll/verify", {
+  requestId: model.requestId,
+  mfaToken: model.mfaToken,
+  enrollmentToken: enrollment.enrollmentToken,
+  code,
+});
+```
+
+SqlOS starts forced enrollment before issuing the authorization code. Your UI only renders the QR code, manual setup value, and verification input.
+
 ### Email OTP sign in
 
 Use Email OTP when `model.settings.enabledCredentialTypes` includes `email_otp`. Keep home realm discovery in the loop so SSO-required domains still redirect to SSO.

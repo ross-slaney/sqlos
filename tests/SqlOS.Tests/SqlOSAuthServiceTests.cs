@@ -2,9 +2,12 @@ using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -51,6 +54,378 @@ public sealed class SqlOSAuthServiceTests
         result.PendingAuthToken.Should().NotBeNullOrWhiteSpace();
         result.Tokens.Should().BeNull();
         result.Organizations.Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public async Task TotpEnrollment_WithDefaultOptionalPolicy_StoresProtectedSecretAndRecoveryCodes()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Mfa User",
+            $"mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Test Authenticator"));
+        var code = harness.Totp.GenerateCodeForTesting(enrollment.Secret);
+        var result = await harness.Auth.VerifyTotpEnrollmentAsync(
+            new SqlOSTotpEnrollmentVerifyRequest(enrollment.EnrollmentToken, code),
+            CreatePasswordHttpContext("203.0.113.200"));
+
+        result.AuthenticatorId.Should().Be(enrollment.AuthenticatorId);
+        result.RecoveryCodes.Should().HaveCount(harness.Options.Mfa.Totp.RecoveryCodeCount);
+        enrollment.ProvisioningUri.Should().StartWith("otpauth://totp/");
+        enrollment.QrCodeDataUrl.Should().StartWith("data:image/svg+xml;charset=utf-8,");
+        Uri.UnescapeDataString(enrollment.QrCodeDataUrl).Should().Contain("<svg");
+
+        var row = await harness.Context.Set<SqlOSUserAuthenticator>()
+            .SingleAsync(x => x.Id == enrollment.AuthenticatorId);
+        row.IsConfirmed.Should().BeTrue();
+        row.SecretProtected.Should().StartWith("dp:");
+        row.SecretProtected.Should().NotContain(enrollment.Secret);
+
+        var status = await harness.Auth.GetMfaStatusAsync(user.Id);
+        status.MfaEnabled.Should().BeTrue();
+        status.Required.Should().BeTrue();
+        status.EnrollmentRequired.Should().BeFalse();
+        status.HasTotp.Should().BeTrue();
+        status.RecoveryCodeCount.Should().Be(harness.Options.Mfa.Totp.RecoveryCodeCount);
+    }
+
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_WhenMfaEnrollmentRequired_ReturnsTotpEnrollmentQrCode()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.Mfa.Enabled = true;
+            options.Mfa.RequireForAllUsersByDefault = true;
+            options.Mfa.AllowUserSelfEnrollmentByDefault = true;
+            options.Mfa.RecoveryCodesEnabledByDefault = true;
+            options.UseHeadlessAuthPage(headless =>
+            {
+                headless.BuildUiUrl = ctx =>
+                    $"https://app.example.test/authorize?request={Uri.EscapeDataString(ctx.RequestId ?? string.Empty)}&view={Uri.EscapeDataString(ctx.View)}";
+            });
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Headless MFA",
+            $"headless-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var authorizationRequest = await harness.Authorization.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                "test-client",
+                "https://client.example.test/callback",
+                "headless-mfa",
+                "openid profile email",
+                "challenge-headless-mfa",
+                "S256",
+                null,
+                user.DefaultEmail,
+                null,
+                null,
+                "headless",
+                null));
+
+        var loginResult = await harness.Headless.PasswordLoginAsync(
+            CreatePasswordHttpContext("203.0.113.210"),
+            new SqlOSHeadlessPasswordLoginRequest(
+                authorizationRequest.Id,
+                user.DefaultEmail!,
+                "P@ssword123!"));
+
+        loginResult.Type.Should().Be("view");
+        loginResult.ViewModel.Should().NotBeNull();
+        loginResult.ViewModel!.View.Should().Be("mfa-enroll");
+        loginResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.ViewModel.RequiresMfaEnrollment.Should().BeTrue();
+        loginResult.ViewModel.TotpEnrollment.Should().NotBeNull();
+        loginResult.ViewModel.TotpEnrollment!.QrCodeDataUrl.Should().StartWith("data:image/svg+xml;charset=utf-8,");
+
+        var verificationCode = harness.Totp.GenerateCodeForTesting(loginResult.ViewModel.TotpEnrollment.Secret);
+        var verifyResult = await harness.Headless.VerifyMfaTotpEnrollmentAsync(
+            CreatePasswordHttpContext("203.0.113.210"),
+            new SqlOSHeadlessMfaTotpEnrollmentVerifyRequest(
+                authorizationRequest.Id,
+                loginResult.ViewModel.MfaToken!,
+                loginResult.ViewModel.TotpEnrollment.EnrollmentToken,
+                verificationCode));
+
+        verifyResult.Type.Should().Be("redirect");
+        verifyResult.RedirectUrl.Should().StartWith("https://client.example.test/callback");
+        verifyResult.RedirectUrl.Should().Contain("code=");
+    }
+
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_WhenUserHasTotp_ReturnsMfaChallengeAndCompletes()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.Mfa.Enabled = true;
+            options.Mfa.AllowUserSelfEnrollmentByDefault = true;
+            options.Mfa.RecoveryCodesEnabledByDefault = true;
+            options.UseHeadlessAuthPage(headless =>
+            {
+                headless.BuildUiUrl = ctx =>
+                    $"https://app.example.test/authorize?request={Uri.EscapeDataString(ctx.RequestId ?? string.Empty)}&view={Uri.EscapeDataString(ctx.View)}";
+            });
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Headless MFA Challenge",
+            $"headless-mfa-challenge-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Challenge Authenticator"));
+        var enrollmentCode = harness.Totp.GenerateCodeForTesting(enrollment.Secret);
+        await harness.Auth.VerifyTotpEnrollmentAsync(
+            new SqlOSTotpEnrollmentVerifyRequest(enrollment.EnrollmentToken, enrollmentCode),
+            CreatePasswordHttpContext("203.0.113.211"));
+        var authorizationRequest = await harness.Authorization.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                "test-client",
+                "https://client.example.test/callback",
+                "headless-mfa-challenge",
+                "openid profile email",
+                "challenge-headless-mfa-challenge",
+                "S256",
+                null,
+                user.DefaultEmail,
+                null,
+                null,
+                "headless",
+                null));
+
+        var loginResult = await harness.Headless.PasswordLoginAsync(
+            CreatePasswordHttpContext("203.0.113.211"),
+            new SqlOSHeadlessPasswordLoginRequest(
+                authorizationRequest.Id,
+                user.DefaultEmail!,
+                "P@ssword123!"));
+
+        loginResult.Type.Should().Be("view");
+        loginResult.ViewModel.Should().NotBeNull();
+        loginResult.ViewModel!.View.Should().Be("mfa");
+        loginResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.ViewModel.RequiresMfaEnrollment.Should().BeFalse();
+        loginResult.ViewModel.TotpEnrollment.Should().BeNull();
+        loginResult.ViewModel.MfaMethods.Should().NotBeNull();
+        loginResult.ViewModel.MfaMethods!.Should().Contain(SqlOSMfaFactorTypes.Totp);
+
+        var challengeCode = harness.Totp.GenerateCodeForTesting(
+            enrollment.Secret,
+            DateTimeOffset.UtcNow.AddSeconds(harness.Options.Mfa.Totp.PeriodSeconds));
+        var verifyResult = await harness.Headless.VerifyMfaAsync(
+            CreatePasswordHttpContext("203.0.113.211"),
+            new SqlOSHeadlessMfaVerifyRequest(
+                authorizationRequest.Id,
+                loginResult.ViewModel.MfaToken!,
+                challengeCode));
+
+        verifyResult.Type.Should().Be("redirect");
+        verifyResult.RedirectUrl.Should().StartWith("https://client.example.test/callback");
+        verifyResult.RedirectUrl.Should().Contain("code=");
+    }
+
+    [TestMethod]
+    public async Task HeadlessPasswordLogin_WithInvitationAndRequiredOrgMfa_ForcesEnrollmentBeforeRedirect()
+    {
+        var harness = await TestHarness.CreateAsync(configure: ConfigureHeadlessMfa);
+        var organization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite MFA {Guid.NewGuid():N}", null));
+        await RequireMfaForAllUsersAsync(harness, organization.Id);
+        var invitedEmail = $"invite-mfa-{Guid.NewGuid():N}@example.com";
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Invite MFA User",
+            invitedEmail,
+            "P@ssword123!"));
+        var invitation = await harness.Invitation.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "member",
+                SendEmail: false),
+            CreateInvitationHttpContext());
+        var authorizationRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "state-invite-mfa",
+            invitedEmail);
+
+        var loginResult = await harness.Headless.PasswordLoginAsync(
+            CreatePasswordHttpContext("203.0.113.212"),
+            new SqlOSHeadlessPasswordLoginRequest(
+                authorizationRequest.Id,
+                invitedEmail,
+                "P@ssword123!",
+                ExtractInvitationToken(invitation.InviteUrl!)));
+
+        loginResult.Type.Should().Be("view");
+        loginResult.ViewModel.Should().NotBeNull();
+        loginResult.ViewModel!.View.Should().Be("mfa-enroll");
+        loginResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.ViewModel.RequiresMfaEnrollment.Should().BeTrue();
+        loginResult.ViewModel.TotpEnrollment.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
+            .Should().Be(0);
+
+        var storedInvitation = await harness.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().NotBeNull();
+        storedInvitation.AcceptedByUserId.Should().Be(user.Id);
+        var membership = await harness.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == user.Id && x.OrganizationId == organization.Id);
+        membership.Role.Should().Be("member");
+    }
+
+    [TestMethod]
+    public async Task HeadlessInvitationSignup_WithRequiredOrgMfa_ForcesEnrollmentBeforeRedirect()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureHeadlessMfa(options);
+            options.SeedAuthPage(page =>
+            {
+                page.EnabledCredentialTypes = ["password", "email_otp"];
+                page.EnablePasswordSignup = true;
+            });
+        });
+        var organization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Invite Signup MFA {Guid.NewGuid():N}", null));
+        await RequireMfaForAllUsersAsync(harness, organization.Id);
+        var invitedEmail = $"invite-signup-mfa-{Guid.NewGuid():N}@example.com";
+        var invitation = await harness.Invitation.CreateEmailInvitationAsync(
+            new SqlOSCreateEmailInvitationRequest(
+                organization.Id,
+                invitedEmail,
+                "admin",
+                SendEmail: false),
+            CreateInvitationHttpContext());
+        var authorizationRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "state-invite-signup-mfa",
+            invitedEmail);
+
+        var signupResult = await harness.Headless.SignUpWithInvitationAsync(
+            CreatePasswordHttpContext("203.0.113.213"),
+            new SqlOSHeadlessInvitationSignupRequest(
+                authorizationRequest.Id,
+                "Invite Signup MFA",
+                invitedEmail,
+                new JsonObject(),
+                ExtractInvitationToken(invitation.InviteUrl!)));
+
+        signupResult.Type.Should().Be("view");
+        signupResult.ViewModel.Should().NotBeNull();
+        signupResult.ViewModel!.View.Should().Be("mfa-enroll");
+        signupResult.ViewModel.MfaToken.Should().NotBeNullOrWhiteSpace();
+        signupResult.ViewModel.RequiresMfaEnrollment.Should().BeTrue();
+        signupResult.ViewModel.TotpEnrollment.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
+            .Should().Be(0);
+
+        var storedInvitation = await harness.Context.Set<SqlOSInvitation>().SingleAsync(x => x.Id == invitation.Id);
+        storedInvitation.AcceptedAt.Should().NotBeNull();
+        var user = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.Email == invitedEmail);
+        var membership = await harness.Context.Set<SqlOSMembership>()
+            .SingleAsync(x => x.UserId == user.UserId && x.OrganizationId == organization.Id);
+        membership.Role.Should().Be("admin");
+    }
+
+    [TestMethod]
+    public async Task LoginWithPassword_WhenOrganizationRequiresMfa_ForcesEnrollmentBeforeTokens()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Required Mfa User",
+            $"required-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("MFA Required Org", null));
+        await harness.Admin.CreateMembershipAsync(org.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
+        await harness.Settings.UpdateOrganizationMfaPolicyAsync(
+            org.Id,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: false,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]));
+
+        var login = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", org.Id),
+            CreatePasswordHttpContext("203.0.113.201"));
+
+        login.RequiresMfa.Should().BeTrue();
+        login.RequiresMfaEnrollment.Should().BeTrue();
+        login.MfaToken.Should().NotBeNullOrWhiteSpace();
+        login.Tokens.Should().BeNull();
+
+        var enrollment = await harness.Auth.StartTotpEnrollmentForChallengeAsync(
+            login.MfaToken!,
+            new SqlOSTotpEnrollmentStartRequest("Required Authenticator"));
+        var code = harness.Totp.GenerateCodeForTesting(enrollment.Secret);
+        var verified = await harness.Auth.VerifyTotpEnrollmentAsync(
+            new SqlOSTotpEnrollmentVerifyRequest(enrollment.EnrollmentToken, code, login.MfaToken),
+            CreatePasswordHttpContext("203.0.113.201"));
+
+        verified.Tokens.Should().NotBeNull();
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(verified.Tokens!.AccessToken);
+        jwt.Claims.Where(x => x.Type == "amr").Select(x => x.Value)
+            .Should().BeEquivalentTo("password", "totp");
+    }
+
+    [TestMethod]
+    public async Task RecoveryCode_CanSatisfyMfaOnlyOnce()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Recovery User",
+            $"recovery-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Recovery MFA Org", null));
+        await harness.Admin.CreateMembershipAsync(org.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
+        await harness.Settings.UpdateOrganizationMfaPolicyAsync(
+            org.Id,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: false,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]));
+
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Recovery Authenticator"),
+            org.Id);
+        var enrollmentCode = harness.Totp.GenerateCodeForTesting(enrollment.Secret);
+        var enrollmentResult = await harness.Auth.VerifyTotpEnrollmentAsync(
+            new SqlOSTotpEnrollmentVerifyRequest(enrollment.EnrollmentToken, enrollmentCode),
+            CreatePasswordHttpContext("203.0.113.202"));
+        var recoveryCode = enrollmentResult.RecoveryCodes.First();
+
+        var firstLogin = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", org.Id),
+            CreatePasswordHttpContext("203.0.113.202"));
+        var firstVerify = await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(firstLogin.MfaToken!, recoveryCode),
+            CreatePasswordHttpContext("203.0.113.202"));
+        firstVerify.Tokens.Should().NotBeNull();
+
+        var secondLogin = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", org.Id),
+            CreatePasswordHttpContext("203.0.113.202"));
+        var act = async () => await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(secondLogin.MfaToken!, recoveryCode),
+            CreatePasswordHttpContext("203.0.113.202"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("MFA code is invalid.");
     }
 
     [TestMethod]
@@ -1164,10 +1539,73 @@ public sealed class SqlOSAuthServiceTests
         return context;
     }
 
+    private static DefaultHttpContext CreateInvitationHttpContext()
+    {
+        var context = CreatePasswordHttpContext("203.0.113.214");
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("auth.example.test");
+        return context;
+    }
+
+    private static void ConfigureHeadlessMfa(SqlOSAuthServerOptions options)
+    {
+        options.Mfa.Enabled = true;
+        options.Mfa.AllowUserSelfEnrollmentByDefault = true;
+        options.Mfa.RecoveryCodesEnabledByDefault = true;
+        options.UseHeadlessAuthPage(headless =>
+        {
+            headless.BuildUiUrl = ctx =>
+                $"https://app.example.test/authorize?request={Uri.EscapeDataString(ctx.RequestId ?? string.Empty)}&view={Uri.EscapeDataString(ctx.View)}";
+        });
+    }
+
+    private static async Task RequireMfaForAllUsersAsync(TestHarness harness, string organizationId)
+    {
+        await harness.Settings.UpdateOrganizationMfaPolicyAsync(
+            organizationId,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: false,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]));
+    }
+
+    private static async Task<SqlOSAuthorizationRequest> CreateHeadlessAuthorizationRequestAsync(
+        TestHarness harness,
+        string state,
+        string? loginHint)
+        => await harness.Authorization.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                "test-client",
+                "https://client.example.test/callback",
+                state,
+                "openid profile email",
+                $"challenge-{state}",
+                "S256",
+                null,
+                loginHint,
+                null,
+                null,
+                "headless",
+                null));
+
     private static string GetLatestCode(TestAuthEmailSender sender, string email)
     {
         var message = sender.Messages.Last(x => string.Equals(x.To, email, StringComparison.OrdinalIgnoreCase));
         return Regex.Match(message.TextBody ?? string.Empty, @"\b\d{4,8}\b").Value;
+    }
+
+    private static string ExtractInvitationToken(string inviteUrl)
+    {
+        var query = new Uri(inviteUrl).Query.TrimStart('?');
+        var tokenPart = query
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .First(x => x.StartsWith("token=", StringComparison.Ordinal));
+        return Uri.UnescapeDataString(tokenPart["token=".Length..]);
     }
 
     private static string ExtractResetToken(string? textBody)
@@ -1318,8 +1756,13 @@ public sealed class SqlOSAuthServiceTests
         public required TestSqlOSInMemoryDbContext Context { get; init; }
         public required SqlOSAuthService Auth { get; init; }
         public required SqlOSAuthorizationServerService Authorization { get; init; }
+        public required SqlOSHeadlessAuthService Headless { get; init; }
+        public required SqlOSInvitationService Invitation { get; init; }
         public required SqlOSAdminService Admin { get; init; }
         public required SqlOSCryptoService Crypto { get; init; }
+        public required SqlOSSettingsService Settings { get; init; }
+        public required SqlOSMfaPolicyService MfaPolicy { get; init; }
+        public required SqlOSTotpMfaService Totp { get; init; }
         public required SqlOSAuthServerOptions Options { get; init; }
 
         public static async Task<TestHarness> CreateAsync(
@@ -1343,10 +1786,14 @@ public sealed class SqlOSAuthServiceTests
             // ReplacementAccessToken cache is encrypted at rest as in production.
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
-            var emailSender = new TestAuthEmailSender();
+            var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);
-            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+            var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var invitation = new SqlOSInvitationService(context, admin, crypto, emailSender, settings, options, transactionalEmailService);
             var passwordAbuse = new SqlOSPasswordLoginAbuseService(context, admin, crypto, options);
+            var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
+            var totp = new SqlOSTotpMfaService(context, crypto, mfaPolicy, options);
             var auth = new SqlOSAuthService(
                 context,
                 options,
@@ -1354,7 +1801,11 @@ public sealed class SqlOSAuthServiceTests
                 crypto,
                 settings,
                 emailOtp,
-                passwordLoginAbuseService: passwordAbuse);
+                invitationService: invitation,
+                passwordLoginAbuseService: passwordAbuse,
+                transactionalEmailService: transactionalEmailService,
+                mfaPolicyService: mfaPolicy,
+                totpMfaService: totp);
             var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
             var authorization = new SqlOSAuthorizationServerService(
                 context,
@@ -1364,18 +1815,57 @@ public sealed class SqlOSAuthServiceTests
                 settings,
                 authPageSession,
                 options,
-                passwordLoginAbuseService: passwordAbuse);
+                invitationService: invitation,
+                passwordLoginAbuseService: passwordAbuse,
+                mfaPolicyService: mfaPolicy,
+                totpMfaService: totp);
+            var discovery = new SqlOSHomeRealmDiscoveryService(context);
+            var oidcAuth = new SqlOSOidcAuthService(
+                context,
+                admin,
+                crypto,
+                new FakeOidcProviderHttpClientFactory(),
+                NullLogger<SqlOSOidcAuthService>.Instance);
+            var saml = new SqlOSSamlService(context, options, admin, crypto);
+            var oidcBrowserAuth = new SqlOSOidcBrowserAuthService(
+                context,
+                admin,
+                auth,
+                authorization,
+                crypto,
+                oidcAuth,
+                options);
+            var headless = new SqlOSHeadlessAuthService(
+                context,
+                admin,
+                authorization,
+                discovery,
+                oidcBrowserAuth,
+                saml,
+                settings,
+                emailOtp,
+                options,
+                invitationService: invitation,
+                authService: auth);
 
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
+            await settings.UpsertSeededAuthPageSettingsAsync();
+            await settings.UpsertSeededAuthEmailSettingsAsync();
+            await settings.UpsertSeededMfaSettingsAsync();
 
             return new TestHarness
             {
                 Context = context,
                 Auth = auth,
                 Authorization = authorization,
+                Headless = headless,
+                Invitation = invitation,
                 Admin = admin,
                 Crypto = crypto,
+                Settings = settings,
+                MfaPolicy = mfaPolicy,
+                Totp = totp,
                 Options = authOptions
             };
         }

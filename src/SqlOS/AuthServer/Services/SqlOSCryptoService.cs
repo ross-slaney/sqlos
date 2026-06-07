@@ -267,9 +267,13 @@ public sealed class SqlOSCryptoService
         {
             new(JwtRegisteredClaimNames.Sub, user.Id),
             new("sid", session.Id),
-            new("client_id", client.ClientId),
-            new("amr", session.AuthenticationMethod ?? "password")
+            new("client_id", client.ClientId)
         };
+
+        foreach (var method in SqlOSMfaPolicyService.SplitAuthenticationMethods(session.AuthenticationMethod ?? "password"))
+        {
+            claims.Add(new Claim("amr", method));
+        }
 
         if (!string.IsNullOrWhiteSpace(user.DefaultEmail))
         {

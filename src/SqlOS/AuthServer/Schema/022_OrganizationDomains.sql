@@ -33,4 +33,4 @@ END
 GO
 
 DELETE FROM [{Schema}].[SqlOSSchema];
-INSERT INTO [{Schema}].[SqlOSSchema] ([Version]) VALUES (20);
+INSERT INTO [{Schema}].[SqlOSSchema] ([Version]) VALUES (22);

@@ -1,0 +1,185 @@
+---
+title: "Require Authenticator MFA"
+description: "Enable TOTP, let users self-enroll, and require MFA for a tenant."
+order: 4
+section: guides
+---
+
+This guide enables authenticator-app MFA and tests both voluntary enrollment and forced organization policy.
+
+## Goal
+
+You will configure SqlOS so:
+
+- users can add an authenticator app to their own account;
+- admins can require MFA globally or for one organization;
+- hosted and headless auth force enrollment before issuing tokens when policy requires MFA;
+- recovery codes are generated after TOTP enrollment.
+
+## Configure defaults
+
+Keep the first version optional unless your product needs an immediate tenant-wide requirement.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureMfa(mfa =>
+    {
+        mfa.Enabled = true;
+        mfa.AllowUserSelfEnrollmentByDefault = true;
+        mfa.RecoveryCodesEnabledByDefault = true;
+        mfa.RequireForAllUsersByDefault = false;
+        mfa.Totp.Issuer = "Acme";
+    });
+});
+```
+
+To let configuration own the value across restarts, seed the policy:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedMfaPolicy(mfa =>
+    {
+        mfa.Enabled = true;
+        mfa.TotpEnabled = true;
+        mfa.UserSelfEnrollmentEnabled = true;
+        mfa.RecoveryCodesEnabled = true;
+        mfa.RequireForAllUsers = false;
+    });
+});
+```
+
+## Verify dashboard settings
+
+Open `/sqlos/admin/auth/` and go to **MFA**.
+
+Confirm:
+
+- MFA is enabled.
+- Authenticator apps are enabled.
+- User self-enrollment is enabled.
+- Recovery codes are enabled.
+- Tenant-wide requirement is off unless you are intentionally testing forced MFA for everyone.
+
+If the screen says the values are startup managed, changes made in the dashboard are overwritten on restart.
+
+## Require MFA for one organization
+
+Use the organization policy API when one tenant requires MFA:
+
+```bash
+curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
+  -H "Content-Type: application/json" \
+  -d '{
+    "isEnabled": true,
+    "requireMfaForAllUsers": true,
+    "requireMfaForOwnersAndAdmins": false,
+    "userSelfEnrollmentEnabled": true,
+    "recoveryCodesEnabled": true,
+    "requiredRoles": ["owner", "admin"],
+    "availableFactors": ["totp", "recovery_code"]
+  }'
+```
+
+Use `requireMfaForOwnersAndAdmins` instead when only privileged tenant roles need MFA.
+
+## Add account self-enrollment
+
+Expose protected app endpoints that call `SqlOSAuthService`.
+
+```csharp
+app.MapGet("/api/mfa/status", async (
+    SqlOSAuthService authService,
+    ClaimsPrincipal user,
+    CancellationToken ct) =>
+{
+    var userId = user.FindFirstValue("sub")!;
+    var organizationId = user.FindFirstValue("org_id");
+    return await authService.GetMfaStatusAsync(userId, organizationId, ct);
+});
+
+app.MapPost("/api/mfa/totp/enroll/start", async (
+    SqlOSTotpEnrollmentStartRequest request,
+    SqlOSAuthService authService,
+    ClaimsPrincipal user,
+    CancellationToken ct) =>
+{
+    var userId = user.FindFirstValue("sub")!;
+    var organizationId = user.FindFirstValue("org_id");
+    return await authService.StartTotpEnrollmentAsync(userId, request, organizationId, ct);
+});
+
+app.MapPost("/api/mfa/totp/enroll/verify", async (
+    SqlOSTotpEnrollmentVerifyRequest request,
+    SqlOSAuthService authService,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+    await authService.VerifyTotpEnrollmentAsync(request, httpContext, ct));
+```
+
+Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, and verify the 6-digit TOTP code with the enrollment token. Show recovery codes once after verification.
+
+## Handle login-time MFA
+
+Hosted auth handles this automatically.
+
+For headless auth, render these view names:
+
+| View | UI |
+| --- | --- |
+| `mfa` | Code input for authenticator code or recovery code |
+| `mfa-enroll` | QR code, manual setup secret, and TOTP verification input |
+
+Post the challenge code:
+
+```http
+POST /sqlos/auth/headless/mfa/verify
+{
+  "requestId": "req_123",
+  "mfaToken": "tmp_...",
+  "code": "123456"
+}
+```
+
+Post forced enrollment verification:
+
+```http
+POST /sqlos/auth/headless/mfa/totp/enroll/verify
+{
+  "requestId": "req_123",
+  "mfaToken": "tmp_...",
+  "enrollmentToken": "tmp_...",
+  "code": "123456"
+}
+```
+
+## Test the Retail example
+
+The example stack includes both optional self-enrollment and a seeded Retail org that requires MFA.
+
+```bash
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Then:
+
+1. Open `http://localhost:3010`.
+2. Sign up for Retail.
+3. Go to `/retail/account`.
+4. Add an authenticator app, scan the QR code, verify the code, and save recovery codes.
+5. Sign out and sign back in. Expect `Two-step verification`.
+6. Sign in as `admin@retail.demo` with `RetailDemo1!`. Expect forced authenticator enrollment before entering the app.
+
+## Common mistakes
+
+- In headless/direct API flows, treat `requiresMfa` or `requiresMfaEnrollment` as the next auth state and post the MFA step back to SqlOS. Tokens are intentionally absent until SqlOS completes the second factor.
+- Do not re-display confirmed TOTP secrets to solve device changes.
+- Do not forget to render `mfa` and `mfa-enroll` in headless UIs.
+- Do not treat recovery codes as reusable backup passwords; each code is single-use.
+
+## Next reading
+
+- [MFA and TOTP](/docs/authserver/mfa-totp)
+- [Headless Auth How-To](/docs/authserver/headless-auth-how-to)
+- [Dashboard](/docs/authserver/dashboard-overview)

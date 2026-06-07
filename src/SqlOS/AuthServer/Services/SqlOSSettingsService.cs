@@ -127,6 +127,156 @@ public sealed class SqlOSSettingsService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task EnsureDefaultMfaSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await _context.Set<SqlOSMfaSettings>().FirstOrDefaultAsync(x => x.Id == "default", cancellationToken);
+        if (existing != null)
+        {
+            return;
+        }
+
+        _context.Set<SqlOSMfaSettings>().Add(new SqlOSMfaSettings
+        {
+            Id = "default",
+            Enabled = _options.Mfa.Enabled,
+            TotpEnabled = _options.Mfa.Totp.Enabled,
+            UserSelfEnrollmentEnabled = _options.Mfa.AllowUserSelfEnrollmentByDefault,
+            RecoveryCodesEnabled = _options.Mfa.RecoveryCodesEnabledByDefault,
+            RequireForAllUsers = _options.Mfa.RequireForAllUsersByDefault,
+            RequireForOwnersAndAdmins = _options.Mfa.RequireForOwnersAndAdminsByDefault,
+            RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(_options.Mfa.RequiredRolesByDefault, ["owner", "admin"])),
+            AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(_options.Mfa.AvailableFactorsByDefault)),
+            UpdatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpsertSeededMfaSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.MfaSeed == null)
+        {
+            return;
+        }
+
+        await EnsureDefaultMfaSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        settings.Enabled = _options.MfaSeed.Enabled;
+        settings.TotpEnabled = _options.MfaSeed.TotpEnabled;
+        settings.UserSelfEnrollmentEnabled = _options.MfaSeed.UserSelfEnrollmentEnabled;
+        settings.RecoveryCodesEnabled = _options.MfaSeed.RecoveryCodesEnabled;
+        settings.RequireForAllUsers = _options.MfaSeed.RequireForAllUsers;
+        settings.RequireForOwnersAndAdmins = _options.MfaSeed.RequireForOwnersAndAdmins;
+        settings.RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(_options.MfaSeed.RequiredRoles, ["owner", "admin"]));
+        settings.AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(_options.MfaSeed.AvailableFactors));
+        settings.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var organizationSeed in _options.MfaSeed.Organizations)
+        {
+            var organizationId = organizationSeed.OrganizationId;
+            if (string.IsNullOrWhiteSpace(organizationId) && !string.IsNullOrWhiteSpace(organizationSeed.OrganizationSlug))
+            {
+                organizationId = await _context.Set<SqlOSOrganization>()
+                    .Where(x => x.Slug == organizationSeed.OrganizationSlug.Trim())
+                    .Select(x => x.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            if (string.IsNullOrWhiteSpace(organizationId))
+            {
+                continue;
+            }
+
+            var policy = await _context.Set<SqlOSOrganizationMfaPolicy>()
+                .FirstOrDefaultAsync(x => x.OrganizationId == organizationId, cancellationToken);
+            if (policy == null)
+            {
+                policy = new SqlOSOrganizationMfaPolicy { OrganizationId = organizationId };
+                _context.Set<SqlOSOrganizationMfaPolicy>().Add(policy);
+            }
+
+            policy.IsEnabled = organizationSeed.IsEnabled;
+            policy.RequireMfaForAllUsers = organizationSeed.RequireMfaForAllUsers;
+            policy.RequireMfaForOwnersAndAdmins = organizationSeed.RequireMfaForOwnersAndAdmins;
+            policy.UserSelfEnrollmentEnabled = organizationSeed.UserSelfEnrollmentEnabled;
+            policy.RecoveryCodesEnabled = organizationSeed.RecoveryCodesEnabled;
+            policy.RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(organizationSeed.RequiredRoles, ["owner", "admin"]));
+            policy.AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(organizationSeed.AvailableFactors));
+            policy.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<SqlOSMfaSettingsDto> GetMfaSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultMfaSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        return ToMfaSettingsDto(settings, _options.MfaSeed != null);
+    }
+
+    public async Task<SqlOSMfaSettingsDto> UpdateMfaSettingsAsync(SqlOSUpdateMfaSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        await EnsureDefaultMfaSettingsAsync(cancellationToken);
+        var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        settings.Enabled = request.Enabled;
+        settings.TotpEnabled = request.TotpEnabled;
+        settings.UserSelfEnrollmentEnabled = request.UserSelfEnrollmentEnabled;
+        settings.RecoveryCodesEnabled = request.RecoveryCodesEnabled;
+        settings.RequireForAllUsers = request.RequireForAllUsers;
+        settings.RequireForOwnersAndAdmins = request.RequireForOwnersAndAdmins;
+        settings.RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(request.RequiredRoles, ["owner", "admin"]));
+        settings.AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(request.AvailableFactors));
+        settings.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        return ToMfaSettingsDto(settings, _options.MfaSeed != null);
+    }
+
+    public async Task<SqlOSOrganizationMfaPolicyDto> GetOrganizationMfaPolicyAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        var organization = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(x => x.Id == organizationId || x.Slug == organizationId, cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+
+        await EnsureDefaultMfaSettingsAsync(cancellationToken);
+        var global = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        var policy = await _context.Set<SqlOSOrganizationMfaPolicy>()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organization.Id, cancellationToken);
+
+        return ToOrganizationMfaPolicyDto(organization, policy, global);
+    }
+
+    public async Task<SqlOSOrganizationMfaPolicyDto> UpdateOrganizationMfaPolicyAsync(
+        string organizationId,
+        SqlOSUpdateOrganizationMfaPolicyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var organization = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(x => x.Id == organizationId || x.Slug == organizationId, cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+
+        var policy = await _context.Set<SqlOSOrganizationMfaPolicy>()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organization.Id, cancellationToken);
+        if (policy == null)
+        {
+            policy = new SqlOSOrganizationMfaPolicy { OrganizationId = organization.Id };
+            _context.Set<SqlOSOrganizationMfaPolicy>().Add(policy);
+        }
+
+        policy.IsEnabled = request.IsEnabled;
+        policy.RequireMfaForAllUsers = request.RequireMfaForAllUsers;
+        policy.RequireMfaForOwnersAndAdmins = request.RequireMfaForOwnersAndAdmins;
+        policy.UserSelfEnrollmentEnabled = request.UserSelfEnrollmentEnabled;
+        policy.RecoveryCodesEnabled = request.RecoveryCodesEnabled;
+        policy.RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(request.RequiredRoles, ["owner", "admin"]));
+        policy.AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(request.AvailableFactors));
+        policy.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return await GetOrganizationMfaPolicyAsync(organization.Id, cancellationToken);
+    }
+
     public async Task<SqlOSSecuritySettingsDto> GetSecuritySettingsAsync(CancellationToken cancellationToken = default)
     {
         await EnsureDefaultSettingsAsync(cancellationToken);
@@ -356,6 +506,71 @@ public sealed class SqlOSSettingsService
             return ["password"];
         }
     }
+
+    private static string[] DeserializeStringArray(string json, string[] fallback)
+    {
+        try
+        {
+            return NormalizeList(JsonSerializer.Deserialize<string[]>(json), fallback);
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    private static string[] NormalizeList(IEnumerable<string>? values, string[] fallback)
+    {
+        var normalized = (values ?? Array.Empty<string>())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length == 0 ? fallback : normalized;
+    }
+
+    private static string[] NormalizeAvailableFactors(IEnumerable<string>? values)
+    {
+        var normalized = NormalizeList(values, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode])
+            .Where(static value =>
+                string.Equals(value, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, SqlOSMfaFactorTypes.RecoveryCode, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized.Length == 0 ? [SqlOSMfaFactorTypes.Totp] : normalized;
+    }
+
+    private static SqlOSMfaSettingsDto ToMfaSettingsDto(SqlOSMfaSettings settings, bool managedByStartupSeed)
+        => new(
+            settings.Enabled,
+            settings.TotpEnabled,
+            settings.UserSelfEnrollmentEnabled,
+            settings.RecoveryCodesEnabled,
+            settings.RequireForAllUsers,
+            settings.RequireForOwnersAndAdmins,
+            DeserializeStringArray(settings.RequiredRolesJson, ["owner", "admin"]),
+            DeserializeStringArray(settings.AvailableFactorsJson, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]),
+            settings.UpdatedAt,
+            managedByStartupSeed);
+
+    private static SqlOSOrganizationMfaPolicyDto ToOrganizationMfaPolicyDto(
+        SqlOSOrganization organization,
+        SqlOSOrganizationMfaPolicy? policy,
+        SqlOSMfaSettings global)
+        => new(
+            organization.Id,
+            organization.Slug,
+            organization.Name,
+            policy?.IsEnabled ?? false,
+            policy?.RequireMfaForAllUsers ?? global.RequireForAllUsers,
+            policy?.RequireMfaForOwnersAndAdmins ?? global.RequireForOwnersAndAdmins,
+            policy?.UserSelfEnrollmentEnabled ?? global.UserSelfEnrollmentEnabled,
+            policy?.RecoveryCodesEnabled ?? global.RecoveryCodesEnabled,
+            DeserializeStringArray(policy?.RequiredRolesJson ?? global.RequiredRolesJson, ["owner", "admin"]),
+            DeserializeStringArray(policy?.AvailableFactorsJson ?? global.AvailableFactorsJson, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]),
+            policy?.UpdatedAt ?? global.UpdatedAt);
 
     private static string RequireColor(string value, string name)
     {

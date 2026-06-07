@@ -318,6 +318,33 @@ public sealed class SqlOSInvitationService
             .FirstOrDefaultAsync(x => x.Id == invitationId, cancellationToken)
             ?? throw new InvalidOperationException("Invitation is invalid or expired.");
 
+        if (invitation.AcceptedAt != null)
+        {
+            if (!string.Equals(invitation.AcceptedByUserId, userId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Invitation is invalid or expired.");
+            }
+
+            var membership = await _context.Set<SqlOSMembership>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x =>
+                    x.OrganizationId == invitation.OrganizationId
+                    && x.UserId == userId
+                    && x.IsActive,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("Invitation is invalid or expired.");
+
+            return new SqlOSInvitationAcceptanceResult(
+                invitation.Id,
+                invitation.OrganizationId,
+                userId,
+                membership.Role,
+                invitation.AcceptedAt.Value,
+                MembershipCreated: false,
+                MembershipReactivated: false,
+                EmailVerified: false);
+        }
+
         return await AcceptInvitationForUserAsync(invitation, userId, saveChanges, httpContext, cancellationToken);
     }
 

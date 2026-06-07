@@ -21,6 +21,7 @@ Complete reference for every public method in the AuthServer module.
 | Task | Start here |
 | --- | --- |
 | Login / signup | `SqlOSAuthService` — password and Email OTP sections below |
+| MFA / TOTP | `SqlOSAuthService` MFA methods and `SqlOSSettingsService` MFA policy methods |
 | Token validation | `ValidateAccessTokenAsync` |
 | Admin CRUD | `SqlOSAdminService` |
 | OIDC social | `SqlOSOidcAuthService` |
@@ -126,6 +127,88 @@ return Results.Ok(result.Tokens);
 | `PendingAuthToken` | `string?` | Temporary token for `SelectOrganizationAsync`. |
 | `Organizations` | `IReadOnlyList<SqlOSOrganizationOption>` | Available organizations. |
 | `Tokens` | `SqlOSTokenResponse?` | Issued tokens (null if org selection required). |
+| `RequiresMfa` | `bool` | `true` if a second-factor challenge is required before tokens can be issued. |
+| `MfaToken` | `string?` | Temporary token for the MFA challenge or forced enrollment flow. |
+| `RequiresMfaEnrollment` | `bool` | `true` if the user must enroll a TOTP authenticator before continuing. |
+| `MfaMethods` | `IReadOnlyList<string>?` | Available factors such as `totp` and `recovery_code`. |
+
+---
+
+### MFA / TOTP methods
+
+Inspect the user's MFA status:
+
+```csharp
+var status = await authService.GetMfaStatusAsync(userId, organizationId, ct);
+```
+
+List confirmed and pending authenticators:
+
+```csharp
+var authenticators = await authService.ListMfaAuthenticatorsAsync(userId, ct);
+```
+
+Start voluntary account enrollment:
+
+```csharp
+var enrollment = await authService.StartTotpEnrollmentAsync(
+    userId,
+    new SqlOSTotpEnrollmentStartRequest("Authenticator app"),
+    organizationId,
+    ct);
+```
+
+`SqlOSTotpEnrollmentStartResult` includes `Secret`, `ProvisioningUri`, `QrCodeDataUrl`, `EnrollmentToken`, and `ExpiresAt`.
+
+Verify enrollment:
+
+```csharp
+var result = await authService.VerifyTotpEnrollmentAsync(
+    new SqlOSTotpEnrollmentVerifyRequest(enrollment.EnrollmentToken, code),
+    httpContext,
+    ct);
+```
+
+`SqlOSTotpEnrollmentVerifyResult` includes the confirmed `AuthenticatorId` and one-time `RecoveryCodes`.
+
+When `LoginWithPasswordAsync`, `SignUpAsync`, Email OTP verification, hosted OAuth, or headless OAuth returns `RequiresMfa = true`, finish the challenge with:
+
+```csharp
+var result = await authService.VerifyMfaChallengeAsync(
+    new SqlOSMfaChallengeVerifyRequest(mfaToken, code),
+    httpContext,
+    ct);
+```
+
+For forced enrollment:
+
+```csharp
+var enrollment = await authService.StartTotpEnrollmentForChallengeAsync(
+    mfaToken,
+    new SqlOSTotpEnrollmentStartRequest("Authenticator app"),
+    ct);
+
+var result = await authService.VerifyTotpEnrollmentAsync(
+    new SqlOSTotpEnrollmentVerifyRequest(
+        enrollment.EnrollmentToken,
+        code,
+        mfaToken),
+    httpContext,
+    ct);
+```
+
+Direct HTTP endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sqlos/auth/mfa/challenge/verify` | Verify TOTP or recovery code for an MFA token |
+| `POST /sqlos/auth/mfa/challenge/totp/enroll/start` | Start forced TOTP enrollment for an MFA token |
+| `POST /sqlos/auth/mfa/challenge/totp/enroll/verify` | Verify forced TOTP enrollment and complete the MFA challenge |
+| `POST /sqlos/auth/headless/mfa/verify` | Headless MFA challenge verification |
+| `POST /sqlos/auth/headless/mfa/totp/enroll/start` | Headless forced TOTP enrollment start |
+| `POST /sqlos/auth/headless/mfa/totp/enroll/verify` | Headless forced TOTP enrollment verification |
+
+See [MFA and TOTP](/docs/authserver/mfa-totp).
 
 ---
 
@@ -1263,6 +1346,57 @@ await settingsService.UpdateSecuritySettingsAsync(
 
 ---
 
+### MFA policy settings
+
+Read and update global MFA settings:
+
+```csharp
+var settings = await settingsService.GetMfaSettingsAsync(ct);
+
+await settingsService.UpdateMfaSettingsAsync(
+    new SqlOSUpdateMfaSettingsRequest(
+        Enabled: true,
+        TotpEnabled: true,
+        UserSelfEnrollmentEnabled: true,
+        RecoveryCodesEnabled: true,
+        RequireForAllUsers: false,
+        RequireForOwnersAndAdmins: true,
+        RequiredRoles: ["owner", "admin"],
+        AvailableFactors: ["totp", "recovery_code"]),
+    ct);
+```
+
+Read and update organization MFA policy:
+
+```csharp
+var policy = await settingsService.GetOrganizationMfaPolicyAsync(
+    organizationId,
+    ct);
+
+await settingsService.UpdateOrganizationMfaPolicyAsync(
+    organizationId,
+    new SqlOSUpdateOrganizationMfaPolicyRequest(
+        IsEnabled: true,
+        RequireMfaForAllUsers: true,
+        RequireMfaForOwnersAndAdmins: false,
+        UserSelfEnrollmentEnabled: true,
+        RecoveryCodesEnabled: true,
+        RequiredRoles: ["owner", "admin"],
+        AvailableFactors: ["totp", "recovery_code"]),
+    ct);
+```
+
+Admin HTTP endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /sqlos/admin/auth/api/settings/mfa` | Read global MFA settings |
+| `PUT /sqlos/admin/auth/api/settings/mfa` | Update global MFA settings |
+| `GET /sqlos/admin/auth/api/organizations/{organizationId}/mfa-policy` | Read an organization's MFA policy |
+| `PUT /sqlos/admin/auth/api/organizations/{organizationId}/mfa-policy` | Update an organization's MFA policy |
+
+---
+
 ## Key Contracts
 
 ### SqlOSTokenResponse
@@ -1289,7 +1423,11 @@ public sealed record SqlOSLoginResult(
     bool RequiresOrganizationSelection,
     string? PendingAuthToken,
     IReadOnlyList<SqlOSOrganizationOption> Organizations,
-    SqlOSTokenResponse? Tokens);
+    SqlOSTokenResponse? Tokens,
+    bool RequiresMfa = false,
+    string? MfaToken = null,
+    bool RequiresMfaEnrollment = false,
+    IReadOnlyList<string>? MfaMethods = null);
 ```
 
 ### SqlOSValidatedToken

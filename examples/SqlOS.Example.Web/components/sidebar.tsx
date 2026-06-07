@@ -58,6 +58,7 @@ const links: ReadonlyArray<{
   { href: "/retail/chains", label: "Chains", icon: IconChain },
   { href: "/retail/stores", label: "Stores", icon: IconStore },
   { href: "/retail/sso", label: "SSO Portal", icon: IconShield },
+  { href: "/retail/account", label: "Account", icon: IconShield },
 ];
 
 export function Sidebar() {

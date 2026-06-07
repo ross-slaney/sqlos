@@ -9,13 +9,18 @@ import {
   getHeadlessRequest,
   headlessIdentify,
   headlessPasswordLogin,
+  headlessRequestPasswordResetEmail,
   headlessRequestEmailOtp,
   headlessRequestPhoneOtp,
   headlessRequestPhoneOtpSignup,
+  headlessResetPassword,
   headlessSelectOrganization,
   headlessSignup,
   headlessStartProvider,
+  headlessStartMfaTotpEnrollment,
   headlessVerifyEmailOtp,
+  headlessVerifyMfa,
+  headlessVerifyMfaTotpEnrollment,
   headlessVerifyPhoneOtp,
   headlessVerifyPhoneOtpSignup,
   type HeadlessViewModel,
@@ -84,11 +89,13 @@ export function SqlOSHeadlessAuthPanel() {
   const initialEmail = searchParams.get("email") || "";
   const pendingToken = searchParams.get("pendingToken");
   const initialDisplayName = searchParams.get("displayName") || "";
+  const initialResetToken = searchParams.get("token") || "";
   const nextPath = searchParams.get("next") || "/retail";
 
   const [view, setView] = useState(initialView);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
+  const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [viewModel, setViewModel] = useState<HeadlessViewModel | null>(null);
 
@@ -100,6 +107,13 @@ export function SqlOSHeadlessAuthPanel() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [referralSource, setReferralSource] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaEnrollmentCode, setMfaEnrollmentCode] = useState("");
+  const [startedMfaEnrollmentToken, setStartedMfaEnrollmentToken] = useState<string | null>(null);
+  const [resetEmail, setResetEmail] = useState(initialEmail);
+  const [resetToken, setResetToken] = useState(initialResetToken);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
   useEffect(() => {
     if (!requestId) return;
@@ -118,6 +132,7 @@ export function SqlOSHeadlessAuthPanel() {
         if (vm.view) setView(vm.view);
         if (vm.error) setError(vm.error);
         if (vm.email) setEmail(vm.email);
+        if (vm.email) setResetEmail(vm.email);
         if (vm.phoneNumber) setPhoneNumber(vm.phoneNumber);
         if (vm.displayName && !firstName && !lastName && initialDisplayName) {
           const [first = "", ...rest] = vm.displayName.split(" ");
@@ -133,7 +148,15 @@ export function SqlOSHeadlessAuthPanel() {
     void load();
   }, [requestId, initialView, initialError, pendingToken, initialEmail, initialDisplayName]);
 
+  useEffect(() => {
+    if (initialResetToken) {
+      setResetToken(initialResetToken);
+      setView("password-reset");
+    }
+  }, [initialResetToken]);
+
   const handleResult = useCallback(async (result: HeadlessActionResult) => {
+    setNotice(null);
     if (result.type === "redirect" && result.redirectUrl) {
       const url = new URL(result.redirectUrl);
       const code = url.searchParams.get("code");
@@ -192,15 +215,43 @@ export function SqlOSHeadlessAuthPanel() {
     }
 
     if (result.viewModel) {
-      setViewModel(result.viewModel);
-      if (result.viewModel.view) setView(result.viewModel.view);
-      if (result.viewModel.error) setError(result.viewModel.error);
-      if (result.viewModel.email) setEmail(result.viewModel.email);
-      if (result.viewModel.phoneNumber) setPhoneNumber(result.viewModel.phoneNumber);
-      if (result.viewModel.challengeToken) setOtpCode("");
-      setFieldErrors(result.viewModel.fieldErrors ?? {});
+      const nextViewModel =
+        result.viewModel.view === "mfa-enroll" && !result.viewModel.totpEnrollment && viewModel?.totpEnrollment
+          ? { ...result.viewModel, totpEnrollment: viewModel.totpEnrollment }
+          : result.viewModel;
+      setViewModel(nextViewModel);
+      if (nextViewModel.view) setView(nextViewModel.view);
+      if (nextViewModel.error) setError(nextViewModel.error);
+      if (nextViewModel.email) {
+        setEmail(nextViewModel.email);
+        setResetEmail(nextViewModel.email);
+      }
+      if (nextViewModel.phoneNumber) setPhoneNumber(nextViewModel.phoneNumber);
+      if (nextViewModel.challengeToken) setOtpCode("");
+      if (nextViewModel.mfaToken) setMfaCode("");
+      if (nextViewModel.totpEnrollment) setMfaEnrollmentCode("");
+      setFieldErrors(nextViewModel.fieldErrors ?? {});
     }
-  }, []);
+  }, [viewModel?.totpEnrollment]);
+
+  const onStartMfaEnrollment = useCallback(async () => {
+    if (!requestId || !viewModel?.mfaToken) return;
+    setLoading(true); setError(null); setFieldErrors({});
+    try {
+      await handleResult(await headlessStartMfaTotpEnrollment(requestId, viewModel.mfaToken, "Authenticator app"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "We could not start authenticator enrollment.");
+    } finally {
+      setLoading(false);
+    }
+  }, [handleResult, requestId, viewModel?.mfaToken]);
+
+  useEffect(() => {
+    if (view !== "mfa-enroll" || !requestId || !viewModel?.mfaToken || viewModel.totpEnrollment) return;
+    if (startedMfaEnrollmentToken === viewModel.mfaToken) return;
+    setStartedMfaEnrollmentToken(viewModel.mfaToken);
+    void onStartMfaEnrollment();
+  }, [onStartMfaEnrollment, requestId, startedMfaEnrollmentToken, view, viewModel?.mfaToken, viewModel?.totpEnrollment]);
 
   const onIdentify = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -218,6 +269,51 @@ export function SqlOSHeadlessAuthPanel() {
     try { await handleResult(await headlessPasswordLogin(requestId, email, password)); }
     catch (err) { setError(err instanceof Error ? err.message : "Login failed."); }
     finally { setLoading(false); }
+  };
+
+  const onRequestPasswordReset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true); setError(null); setNotice(null); setFieldErrors({});
+    try {
+      const targetEmail = (resetEmail || email).trim();
+      const resetUrl = new URL("/auth/authorize", window.location.origin);
+      resetUrl.searchParams.set("view", "password-reset");
+      if (requestId) resetUrl.searchParams.set("request", requestId);
+      if (targetEmail) resetUrl.searchParams.set("email", targetEmail);
+      const resetUrlBase = resetUrl.toString();
+      const resetUrlTemplate = `${resetUrlBase}${resetUrlBase.includes("?") ? "&" : "?"}token={token}`;
+      const result = await headlessRequestPasswordResetEmail(targetEmail, requestId, resetUrlTemplate);
+      setNotice(result.message || "If the account can be reset, a reset email is on the way.");
+      setView("forgot-password-sent");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "We could not request password recovery.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onResetPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true); setError(null); setNotice(null); setFieldErrors({});
+    try {
+      if (!resetToken.trim()) {
+        throw new Error("Password reset token is missing.");
+      }
+      if (newPassword !== confirmNewPassword) {
+        setFieldErrors({ confirmNewPassword: "Passwords do not match." });
+        return;
+      }
+      await headlessResetPassword(resetToken, newPassword);
+      setPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setNotice("Your password has been reset. Sign in with your new password.");
+      setView("login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "We could not reset your password.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRequestEmailOtp = async (event: React.FormEvent) => {
@@ -327,7 +423,40 @@ export function SqlOSHeadlessAuthPanel() {
     finally { setLoading(false); }
   };
 
+  const onVerifyMfa = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!requestId || !viewModel?.mfaToken) return;
+    setLoading(true); setError(null); setFieldErrors({});
+    try {
+      await handleResult(await headlessVerifyMfa(requestId, viewModel.mfaToken, mfaCode));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The second-factor code was rejected.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onVerifyMfaEnrollment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!requestId || !viewModel?.mfaToken || !viewModel.totpEnrollment) return;
+    setLoading(true); setError(null); setFieldErrors({});
+    try {
+      await handleResult(await headlessVerifyMfaTotpEnrollment(
+        requestId,
+        viewModel.mfaToken,
+        viewModel.totpEnrollment.enrollmentToken,
+        mfaEnrollmentCode,
+      ));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Authenticator enrollment failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const isSignup = view === "signup" || view === "phone-otp-signup" || view === "phone-otp-signup-verify";
+  const isMfa = view === "mfa" || view === "mfa-enroll";
+  const isRecovery = view === "forgot-password" || view === "forgot-password-sent" || view === "password-reset";
   const showProviderButtons = (view === "login" || view === "identify" || view === "signup") && (viewModel?.providers?.length ?? 0) > 0;
   const supportsPassword = !!viewModel?.settings?.localPasswordRuntimeEnabled
     && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("password");
@@ -336,17 +465,43 @@ export function SqlOSHeadlessAuthPanel() {
   const supportsPhoneOtp = !!viewModel?.settings?.phoneOtpRuntimeConfigured
     && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("phone_otp");
 
-  const headline = isSignup ? "Start your free trial" : view === "organization" ? "Choose workspace" : "Welcome back";
+  const headline = isSignup
+    ? "Start your free trial"
+    : view === "organization"
+      ? "Choose workspace"
+      : view === "mfa"
+        ? "Two-step verification"
+        : view === "mfa-enroll"
+          ? "Add authenticator app"
+          : view === "forgot-password"
+            ? "Recover account"
+            : view === "forgot-password-sent"
+              ? "Check your email"
+              : view === "password-reset"
+                ? "Reset password"
+                : "Welcome back";
   const subtitle = isSignup
     ? "Create your account and start managing retail operations in minutes."
     : view === "organization"
       ? "Select the organization you'd like to sign in to."
-      : "Sign in to your Northwind Retail account.";
+      : view === "mfa"
+        ? "Enter an authenticator code or one of your recovery codes."
+        : view === "mfa-enroll"
+          ? "Set up an authenticator app before continuing."
+          : view === "forgot-password"
+            ? "Enter your email and we'll send recovery instructions if the account can be reset."
+            : view === "forgot-password-sent"
+              ? "Use the link in your email to choose a new password."
+              : view === "password-reset"
+                ? "Choose a new password for your account."
+                : "Sign in to your Northwind Retail account.";
   const testimonialQuote = isSignup
     ? "Setting up took less than five minutes. We had our entire team onboarded before lunch."
+    : isMfa || isRecovery
+      ? "I can keep access secure without slowing down the team."
     : "I love that I can see exactly my stores. No noise, no clutter — just the data I need.";
-  const testimonialName = isSignup ? "Marcus Rivera" : "Priya Sharma";
-  const testimonialRole = isSignup ? "Head of Retail Ops, FreshMart" : "Store Manager, Target #100";
+  const testimonialName = isSignup ? "Marcus Rivera" : isMfa || isRecovery ? "Avery Chen" : "Priya Sharma";
+  const testimonialRole = isSignup ? "Head of Retail Ops, FreshMart" : isMfa || isRecovery ? "IT Manager, Northwind Retail" : "Store Manager, Target #100";
 
   return (
     <div className="ha">
@@ -386,9 +541,38 @@ export function SqlOSHeadlessAuthPanel() {
           </div>
 
           {error && <div className="ha-error">{error}</div>}
-          {viewModel?.info && <div className="ha-success">{viewModel.info}</div>}
+          {(notice || viewModel?.info) && <div className="ha-success">{notice || viewModel?.info}</div>}
 
-          {!requestId ? (
+          {!requestId && view === "password-reset" ? (
+            <form className="ha-form" onSubmit={onResetPassword}>
+              <div className="ha-field">
+                <label htmlFor="ha-reset-token">Reset token</label>
+                <input id="ha-reset-token" type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} required />
+              </div>
+              <div className="ha-field">
+                <label htmlFor="ha-new-password">New password</label>
+                <input id="ha-new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" required autoFocus />
+              </div>
+              <div className="ha-field">
+                <label htmlFor="ha-confirm-password">Confirm password</label>
+                <input id="ha-confirm-password" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
+                {fieldErrors.confirmNewPassword && <p className="ha-field-error">{fieldErrors.confirmNewPassword}</p>}
+              </div>
+              <button type="submit" className="ha-submit" disabled={loading}>
+                {loading ? "Resetting..." : "Reset password"}
+              </button>
+            </form>
+          ) : !requestId && view === "forgot-password" ? (
+            <form className="ha-form" onSubmit={onRequestPasswordReset}>
+              <div className="ha-field">
+                <label htmlFor="ha-forgot-email-standalone">Email address</label>
+                <input id="ha-forgot-email-standalone" type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@company.com" required autoFocus />
+              </div>
+              <button type="submit" className="ha-submit" disabled={loading}>
+                {loading ? "Sending..." : "Send recovery email"}
+              </button>
+            </form>
+          ) : !requestId ? (
             <HeadlessFlowStarter initialView={isSignup ? "signup" : "login"} nextPath={nextPath} />
           ) : (
             <>
@@ -426,9 +610,54 @@ export function SqlOSHeadlessAuthPanel() {
                   </button>
                   <div className="ha-alt">
                     <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                    <button type="button" className="ha-link-btn" onClick={() => { setResetEmail(email); setView("forgot-password"); }}>Forgot password?</button>
                     {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Email me a code instead</button>}
                     {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
                   </div>
+                </form>
+              )}
+
+              {view === "forgot-password" && (
+                <form className="ha-form" onSubmit={onRequestPasswordReset}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-forgot-email">Email address</label>
+                    <input id="ha-forgot-email" type="email" value={resetEmail || email} onChange={(e) => setResetEmail(e.target.value)} placeholder="you@company.com" required autoFocus />
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Sending..." : "Send recovery email"}
+                  </button>
+                  <div className="ha-alt">
+                    <button type="button" className="ha-link-btn" onClick={() => setView(email ? "password" : "login")}>Back to sign in</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "forgot-password-sent" && (
+                <div className="ha-form">
+                  <button type="button" className="ha-submit" onClick={() => setView("login")}>
+                    Back to sign in
+                  </button>
+                </div>
+              )}
+
+              {view === "password-reset" && (
+                <form className="ha-form" onSubmit={onResetPassword}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-reset-token-flow">Reset token</label>
+                    <input id="ha-reset-token-flow" type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} required />
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-new-password-flow">New password</label>
+                    <input id="ha-new-password-flow" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" required autoFocus />
+                  </div>
+                  <div className="ha-field">
+                    <label htmlFor="ha-confirm-password-flow">Confirm password</label>
+                    <input id="ha-confirm-password-flow" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
+                    {fieldErrors.confirmNewPassword && <p className="ha-field-error">{fieldErrors.confirmNewPassword}</p>}
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Resetting..." : "Reset password"}
+                  </button>
                 </form>
               )}
 
@@ -617,6 +846,78 @@ export function SqlOSHeadlessAuthPanel() {
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {view === "mfa" && (
+                <form className="ha-form" onSubmit={onVerifyMfa}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-mfa-code">Authenticator or recovery code</label>
+                    <input
+                      id="ha-mfa-code"
+                      type="text"
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value)}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="123456"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading || !viewModel?.mfaToken}>
+                    {loading ? "Verifying..." : "Verify and continue"}
+                  </button>
+                  <div className="ha-alt">
+                    Use a 6-digit authenticator code, or paste one of your saved recovery codes.
+                  </div>
+                </form>
+              )}
+
+              {view === "mfa-enroll" && (
+                <div className="ha-form">
+                  {viewModel?.totpEnrollment ? (
+                    <form className="ha-form" onSubmit={onVerifyMfaEnrollment}>
+                      <div className="ha-mfa-setup">
+                        <div className="ha-mfa-qr-frame">
+                          <img src={viewModel.totpEnrollment.qrCodeDataUrl} alt="Authenticator setup QR code" />
+                        </div>
+                        <div>
+                          <strong>Scan with an authenticator app</strong>
+                          <p>Use Google Authenticator, 1Password, Authy, or any TOTP-compatible app.</p>
+                        </div>
+                      </div>
+                      <details className="ha-manual-setup">
+                        <summary>Use manual setup</summary>
+                        <code>{viewModel.totpEnrollment.secret}</code>
+                        <code>{viewModel.totpEnrollment.provisioningUri}</code>
+                      </details>
+                      <div className="ha-field">
+                        <label htmlFor="ha-mfa-enroll-code">Verification code</label>
+                        <input
+                          id="ha-mfa-enroll-code"
+                          type="text"
+                          value={mfaEnrollmentCode}
+                          onChange={(e) => setMfaEnrollmentCode(e.target.value)}
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          placeholder="123456"
+                          required
+                          autoFocus
+                        />
+                      </div>
+                      <button type="submit" className="ha-submit" disabled={loading || mfaEnrollmentCode.trim().length < 6}>
+                        {loading ? "Verifying..." : "Verify and continue"}
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <p className="ha-helper-text">This organization requires an authenticator app before you can continue.</p>
+                      <button type="button" className="ha-submit" onClick={() => void onStartMfaEnrollment()} disabled={loading || !viewModel?.mfaToken}>
+                        {loading ? "Starting..." : "Add authenticator app"}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 

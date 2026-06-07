@@ -174,6 +174,134 @@ public sealed class SqlOSAdminService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task UpsertSeededOidcConnectionsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.OidcConnectionSeeds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var seed in _options.OidcConnectionSeeds)
+        {
+            var displayName = (seed.DisplayName ?? string.Empty).Trim();
+
+            SqlOSOidcConnection? existing;
+            if (seed.ProviderType == SqlOSOidcProviderType.Custom)
+            {
+                existing = await _context.Set<SqlOSOidcConnection>()
+                    .FirstOrDefaultAsync(
+                        x => x.ProviderType == SqlOSOidcProviderType.Custom && x.DisplayName == displayName,
+                        cancellationToken);
+            }
+            else
+            {
+                existing = await _context.Set<SqlOSOidcConnection>()
+                    .FirstOrDefaultAsync(x => x.ProviderType == seed.ProviderType, cancellationToken);
+            }
+
+            var connectionId = existing?.Id ?? _cryptoService.GenerateId("oidc");
+            var callbacks = NormalizeCallbackUris(seed.AllowedCallbackUris, connectionId);
+            if (callbacks.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Seeded OIDC connection '{(string.IsNullOrWhiteSpace(displayName) ? seed.ProviderType.ToString() : displayName)}' requires at least one callback URI.");
+            }
+
+            var normalized = NormalizeOidcConfiguration(
+                seed.ProviderType,
+                seed.UseDiscovery,
+                seed.DiscoveryUrl,
+                seed.Issuer,
+                seed.AuthorizationEndpoint,
+                seed.TokenEndpoint,
+                seed.UserInfoEndpoint,
+                seed.JwksUri,
+                seed.MicrosoftTenant,
+                seed.Scopes,
+                seed.ClaimMapping,
+                seed.ClientAuthMethod,
+                seed.UseUserInfo,
+                seed.AppleTeamId,
+                seed.AppleKeyId);
+
+            if (existing == null)
+            {
+                var connection = new SqlOSOidcConnection
+                {
+                    Id = connectionId,
+                    ProviderType = seed.ProviderType,
+                    Protocol = normalized.Protocol,
+                    DisplayName = displayName,
+                    LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(seed.LogoDataUrl),
+                    ClientId = seed.ClientId.Trim(),
+                    ClientSecretEncrypted = string.IsNullOrWhiteSpace(seed.ClientSecret) ? null : _cryptoService.ProtectSecret(seed.ClientSecret.Trim()),
+                    AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks),
+                    UseDiscovery = normalized.UseDiscovery,
+                    DiscoveryUrl = normalized.DiscoveryUrl,
+                    Issuer = normalized.Issuer,
+                    AuthorizationEndpoint = normalized.AuthorizationEndpoint,
+                    TokenEndpoint = normalized.TokenEndpoint,
+                    UserInfoEndpoint = normalized.UserInfoEndpoint,
+                    JwksUri = normalized.JwksUri,
+                    MicrosoftTenant = normalized.MicrosoftTenant,
+                    ScopesJson = JsonSerializer.Serialize(normalized.Scopes),
+                    ClaimMappingJson = JsonSerializer.Serialize(normalized.ClaimMapping),
+                    ClientAuthMethod = normalized.ClientAuthMethod,
+                    UseUserInfo = normalized.UseUserInfo,
+                    AppleTeamId = normalized.AppleTeamId,
+                    AppleKeyId = normalized.AppleKeyId,
+                    ApplePrivateKeyEncrypted = string.IsNullOrWhiteSpace(seed.ApplePrivateKeyPem) ? null : _cryptoService.ProtectSecret(NormalizePrivateKey(seed.ApplePrivateKeyPem)),
+                    IsEnabled = seed.IsEnabled,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                ValidateOidcSecretRequirements(connection);
+                _context.Set<SqlOSOidcConnection>().Add(connection);
+                continue;
+            }
+
+            existing.DisplayName = displayName;
+            existing.Protocol = normalized.Protocol;
+            existing.LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(seed.LogoDataUrl);
+            existing.ClientId = seed.ClientId.Trim();
+            existing.AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks);
+            existing.UseDiscovery = normalized.UseDiscovery;
+            existing.DiscoveryUrl = normalized.DiscoveryUrl;
+            existing.Issuer = normalized.Issuer;
+            existing.AuthorizationEndpoint = normalized.AuthorizationEndpoint;
+            existing.TokenEndpoint = normalized.TokenEndpoint;
+            existing.UserInfoEndpoint = normalized.UserInfoEndpoint;
+            existing.JwksUri = normalized.JwksUri;
+            existing.MicrosoftTenant = normalized.MicrosoftTenant;
+            existing.ScopesJson = JsonSerializer.Serialize(normalized.Scopes);
+            existing.ClaimMappingJson = JsonSerializer.Serialize(normalized.ClaimMapping);
+            existing.ClientAuthMethod = normalized.ClientAuthMethod;
+            existing.UseUserInfo = normalized.UseUserInfo;
+            existing.AppleTeamId = normalized.AppleTeamId;
+            existing.AppleKeyId = normalized.AppleKeyId;
+            existing.UpdatedAt = DateTime.UtcNow;
+
+            // Only overwrite secrets when the seed supplies them, so config without a secret
+            // (e.g. a rotated value kept out of source) never clears an existing credential.
+            if (!string.IsNullOrWhiteSpace(seed.ClientSecret))
+            {
+                existing.ClientSecretEncrypted = _cryptoService.ProtectSecret(seed.ClientSecret.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(seed.ApplePrivateKeyPem))
+            {
+                existing.ApplePrivateKeyEncrypted = _cryptoService.ProtectSecret(NormalizePrivateKey(seed.ApplePrivateKeyPem));
+            }
+
+            // Enable/disable is owner-managed once the connection exists: respect dashboard changes
+            // across restarts instead of forcing the seeded value on every boot.
+            ValidateOidcSecretRequirements(existing);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
     {
         var normalizedEmail = NormalizeEmail(request.Email);
@@ -365,6 +493,7 @@ public sealed class SqlOSAdminService
         {
             Id = connectionId,
             ProviderType = request.ProviderType,
+            Protocol = normalized.Protocol,
             DisplayName = request.DisplayName,
             LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(request.LogoDataUrl),
             ClientId = request.ClientId.Trim(),
@@ -427,6 +556,7 @@ public sealed class SqlOSAdminService
             request.AppleKeyId);
 
         connection.DisplayName = request.DisplayName;
+        connection.Protocol = normalized.Protocol;
         connection.LogoDataUrl = SqlOSOidcProviderLogoCatalog.NormalizeCustomLogoDataUrl(request.LogoDataUrl);
         connection.ClientId = request.ClientId.Trim();
         connection.AllowedCallbackUrisJson = JsonSerializer.Serialize(callbacks);
@@ -1395,6 +1525,7 @@ public sealed class SqlOSAdminService
             {
                 x.Id,
                 ProviderType = x.ProviderType.ToString(),
+                Protocol = x.Protocol.ToString(),
                 x.DisplayName,
                 x.LogoDataUrl,
                 EffectiveLogoDataUrl = SqlOSOidcProviderLogoCatalog.ResolveEffectiveLogoDataUrl(x.ProviderType, x.LogoDataUrl),
@@ -2089,7 +2220,7 @@ public sealed class SqlOSAdminService
 
         if (string.IsNullOrWhiteSpace(connection.ClientSecretEncrypted))
         {
-            throw new InvalidOperationException("This OIDC connection requires a client secret.");
+            throw new InvalidOperationException("This social login connection requires a client secret.");
         }
     }
 
@@ -2133,7 +2264,8 @@ public sealed class SqlOSAdminService
                 effectiveClientAuthMethod,
                 true,
                 null,
-                null);
+                null,
+                SqlOSSocialProviderProtocol.Oidc);
         }
 
         if (providerType == SqlOSOidcProviderType.Microsoft)
@@ -2153,7 +2285,8 @@ public sealed class SqlOSAdminService
                 effectiveClientAuthMethod,
                 true,
                 null,
-                null);
+                null,
+                SqlOSSocialProviderProtocol.Oidc);
         }
 
         if (providerType == SqlOSOidcProviderType.Apple)
@@ -2181,7 +2314,37 @@ public sealed class SqlOSAdminService
                 SqlOSOidcClientAuthMethod.ClientSecretPost,
                 false,
                 string.IsNullOrWhiteSpace(appleTeamId) ? null : appleTeamId.Trim(),
-                string.IsNullOrWhiteSpace(appleKeyId) ? null : appleKeyId.Trim());
+                string.IsNullOrWhiteSpace(appleKeyId) ? null : appleKeyId.Trim(),
+                SqlOSSocialProviderProtocol.Oidc);
+        }
+
+        if (providerType == SqlOSOidcProviderType.GitHub)
+        {
+            return new NormalizedOidcConfiguration(
+                false,
+                null,
+                "https://github.com",
+                "https://github.com/login/oauth/authorize",
+                "https://github.com/login/oauth/access_token",
+                "https://api.github.com/user",
+                null,
+                null,
+                normalizedScopes.Count > 0 ? normalizedScopes : ["read:user", "user:email"],
+                new SqlOSOidcClaimMapping
+                {
+                    SubjectClaim = "id",
+                    EmailClaim = "email",
+                    EmailVerifiedClaim = "email_verified",
+                    DisplayNameClaim = "name",
+                    FirstNameClaim = null,
+                    LastNameClaim = null,
+                    PreferredUsernameClaim = "login"
+                },
+                SqlOSOidcClientAuthMethod.ClientSecretPost,
+                true,
+                null,
+                null,
+                SqlOSSocialProviderProtocol.OAuthProfile);
         }
 
         if (effectiveUseDiscovery)
@@ -2200,7 +2363,8 @@ public sealed class SqlOSAdminService
                 effectiveClientAuthMethod,
                 effectiveUseUserInfo,
                 null,
-                null);
+                null,
+                SqlOSSocialProviderProtocol.Oidc);
         }
 
         return new NormalizedOidcConfiguration(
@@ -2217,7 +2381,8 @@ public sealed class SqlOSAdminService
             effectiveClientAuthMethod,
             effectiveUseUserInfo,
             null,
-            null);
+            null,
+            SqlOSSocialProviderProtocol.Oidc);
     }
 
     private List<SqlOSClientSeedOptions> BuildStartupClientSeeds()
@@ -2715,7 +2880,8 @@ public sealed class SqlOSAdminService
         SqlOSOidcClientAuthMethod ClientAuthMethod,
         bool UseUserInfo,
         string? AppleTeamId,
-        string? AppleKeyId);
+        string? AppleKeyId,
+        SqlOSSocialProviderProtocol Protocol);
 
     private sealed record NormalizedClientDefinition(
         string ClientId,

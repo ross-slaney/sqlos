@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.Configuration;
 
 namespace SqlOS.AuthServer.Configuration;
@@ -37,6 +38,7 @@ public class SqlOSAuthServerOptions
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
     public SqlOSEmailOtpOptions EmailOtp { get; } = new();
     public SqlOSPhoneOtpOptions PhoneOtp { get; } = new();
+    public SqlOSMfaOptions Mfa { get; } = new();
     public SqlOSPasswordResetOptions PasswordReset { get; } = new();
     public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
@@ -48,8 +50,10 @@ public class SqlOSAuthServerOptions
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
     public SqlOSAuthEmailSeedOptions? AuthEmailSeed { get; private set; }
+    public SqlOSMfaSeedOptions? MfaSeed { get; private set; }
     public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
+    public List<SqlOSOidcConnectionSeedOptions> OidcConnectionSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
     {
@@ -73,6 +77,14 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions SeedMfaPolicy(Action<SqlOSMfaSeedOptions> configure)
+    {
+        var seed = MfaSeed ?? new SqlOSMfaSeedOptions();
+        configure(seed);
+        MfaSeed = seed;
+        return this;
+    }
+
     public SqlOSAuthServerOptions SeedClient(Action<SqlOSClientSeedOptions> configure)
     {
         var seed = new SqlOSClientSeedOptions();
@@ -80,6 +92,82 @@ public class SqlOSAuthServerOptions
         ClientSeeds.Add(seed);
         return this;
     }
+
+    /// <summary>
+    /// Seed a social/OIDC login connection (Google, Microsoft, Apple, or custom). The connection is
+    /// reconciled into the database on startup, matched by provider type (and display name for custom
+    /// providers). Callback URIs may include the <c>{connectionId}</c> placeholder.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedOidcConnection(Action<SqlOSOidcConnectionSeedOptions> configure)
+    {
+        var seed = new SqlOSOidcConnectionSeedOptions();
+        configure(seed);
+        OidcConnectionSeeds.Add(seed);
+        return this;
+    }
+
+    /// <summary>
+    /// Seed a "Continue with Microsoft" (Microsoft Entra) social login connection. When no callback URIs
+    /// are supplied, the SqlOS-owned callback URI (<c>{connectionId}</c> placeholder) is used so the
+    /// connection works against the host's own origin.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedMicrosoftConnection(
+        string clientId,
+        string clientSecret,
+        string? tenant = null,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
+            oidc.DisplayName = "Microsoft";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.MicrosoftTenant = tenant;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
+
+    /// <summary>
+    /// Seed a "Continue with Google" social login connection.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGoogleConnection(
+        string clientId,
+        string clientSecret,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.Google;
+            oidc.DisplayName = "Google";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
+
+    /// <summary>
+    /// Seed a "Continue with GitHub" social login connection. GitHub user sign-in is OAuth 2.0
+    /// with provider profile/email lookups, not OIDC, but it uses the same persisted social
+    /// provider configuration and browser/headless login surface as OIDC providers.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGitHubConnection(
+        string clientId,
+        string clientSecret,
+        params string[] allowedCallbackUris)
+        => SeedOidcConnection(oidc =>
+        {
+            oidc.ProviderType = SqlOSOidcProviderType.GitHub;
+            oidc.DisplayName = "GitHub";
+            oidc.ClientId = clientId;
+            oidc.ClientSecret = clientSecret;
+            oidc.AllowedCallbackUris = allowedCallbackUris
+                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
+                .Select(static uri => uri.Trim())
+                .ToList();
+        });
 
     public SqlOSAuthServerOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
     {
@@ -173,6 +261,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigurePhoneOtp(Action<SqlOSPhoneOtpOptions> configure)
     {
         configure(PhoneOtp);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureMfa(Action<SqlOSMfaOptions> configure)
+    {
+        configure(Mfa);
         return this;
     }
 

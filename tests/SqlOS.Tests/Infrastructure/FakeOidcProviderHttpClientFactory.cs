@@ -35,6 +35,24 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                 return Json(HttpStatusCode.OK, new { keys = new[] { BuildJwk() } });
             }
 
+            if (request.Method == HttpMethod.Post && uri.Contains("github.com/login/oauth/access_token", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
+                var form = ParseForm(payload);
+                var code = form.GetValueOrDefault("code") ?? string.Empty;
+                if (code.StartsWith("bad", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Json(HttpStatusCode.BadRequest, new { error = "bad_verification_code", error_description = "The code passed is incorrect or expired." });
+                }
+
+                return Json(HttpStatusCode.OK, new
+                {
+                    access_token = $"github|{code}",
+                    token_type = "bearer",
+                    scope = "read:user,user:email"
+                });
+            }
+
             if (request.Method == HttpMethod.Post && uri.Contains("/token", StringComparison.OrdinalIgnoreCase))
             {
                 var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
@@ -93,6 +111,41 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     }),
                     _ => Json(HttpStatusCode.NotFound, new { error = "userinfo_not_supported" })
                 };
+            }
+
+            if (request.Method == HttpMethod.Get && string.Equals(uri, "https://api.github.com/user", StringComparison.OrdinalIgnoreCase))
+            {
+                var token = request.Headers.Authorization?.Parameter ?? string.Empty;
+                var parts = token.Split('|', 2, StringSplitOptions.None);
+                var parsed = ParseCode(parts.Length > 1 ? parts[1] : "success:octo@example.com:nonce");
+                var login = string.IsNullOrWhiteSpace(parsed.email)
+                    ? "octocat"
+                    : parsed.email.Split('@')[0].Replace(".", "-", StringComparison.OrdinalIgnoreCase);
+
+                return Json(HttpStatusCode.OK, new
+                {
+                    id = 123456789,
+                    login,
+                    name = $"GitHub {login}",
+                    email = (string?)null
+                });
+            }
+
+            if (request.Method == HttpMethod.Get && string.Equals(uri, "https://api.github.com/user/emails", StringComparison.OrdinalIgnoreCase))
+            {
+                var token = request.Headers.Authorization?.Parameter ?? string.Empty;
+                var parts = token.Split('|', 2, StringSplitOptions.None);
+                var parsed = ParseCode(parts.Length > 1 ? parts[1] : "success:octo@example.com:nonce");
+                return Json(HttpStatusCode.OK, new[]
+                {
+                    new
+                    {
+                        email = parsed.email,
+                        primary = true,
+                        verified = parsed.isVerified,
+                        visibility = "private"
+                    }
+                });
             }
 
             return Json(HttpStatusCode.NotFound, new { error = "not_found", url = uri });

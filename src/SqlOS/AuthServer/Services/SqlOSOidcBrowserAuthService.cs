@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
@@ -208,6 +209,7 @@ public sealed class SqlOSOidcBrowserAuthService
                     callbackInput.UserPayload),
                 httpContext.Connection.RemoteIpAddress?.ToString(),
                 cancellationToken);
+            await InvokeSocialSignupHookAsync(httpContext, authorizationRequest: null, result, cancellationToken);
 
             var code = await _cryptoService.CreateTemporaryTokenAsync(
                 "oidc_browser_code",
@@ -319,12 +321,13 @@ public sealed class SqlOSOidcBrowserAuthService
                     callbackInput.UserPayload),
                 httpContext.Connection.RemoteIpAddress?.ToString(),
                 cancellationToken);
+            var organizationId = await InvokeSocialSignupHookAsync(httpContext, authorizationRequest, result, cancellationToken);
 
             var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
             var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
                 authorizationRequest,
                 user,
-                result.OrganizationId ?? authorizationRequest.OrganizationId,
+                organizationId ?? authorizationRequest.OrganizationId,
                 result.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
@@ -399,6 +402,38 @@ public sealed class SqlOSOidcBrowserAuthService
             : _options.PublicOrigin!.TrimEnd('/');
 
         return $"{origin}{_options.BasePath.TrimEnd('/')}/oidc/callback";
+    }
+
+    private async Task<string?> InvokeSocialSignupHookAsync(
+        HttpContext httpContext,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        SqlOSCompleteOidcAuthorizationResult result,
+        CancellationToken cancellationToken)
+    {
+        if (!result.UserCreated || _options.Headless.OnHeadlessSignupAsync == null)
+        {
+            return result.OrganizationId;
+        }
+
+        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
+        SqlOSOrganization? organization = null;
+        if (!string.IsNullOrWhiteSpace(result.OrganizationId))
+        {
+            organization = await _context.Set<SqlOSOrganization>()
+                .FirstOrDefaultAsync(x => x.Id == result.OrganizationId, cancellationToken);
+        }
+
+        await _options.Headless.OnHeadlessSignupAsync(
+            new SqlOSHeadlessSignupHookContext(
+                httpContext,
+                authorizationRequest,
+                user,
+                organization,
+                new JsonObject()),
+            cancellationToken);
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        return organizations.Count == 1 ? organizations[0].Id : result.OrganizationId;
     }
 
     private static string BuildAppRedirectUri(string redirectUri, IDictionary<string, string?> parameters)

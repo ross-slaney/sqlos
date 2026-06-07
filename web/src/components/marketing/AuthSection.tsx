@@ -1,5 +1,4 @@
 import AuthPageViz from "@/components/AuthPageViz";
-import ProductScreenshot from "@/components/ProductScreenshot";
 import { authHighlights } from "@/components/marketing/constants";
 
 export default function AuthSection() {
@@ -25,10 +24,6 @@ export default function AuthSection() {
           </div>
 
           <div className="space-y-6 lg:mt-8">
-            <ProductScreenshot
-              src="/docs/auth-signin-page.png"
-              alt="SqlOS hosted sign-in page"
-            />
             <AuthPageViz />
           </div>
         </div>

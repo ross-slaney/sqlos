@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISqlOSOtpDeliveryChannel, SqlOSTwilioVerifyOtpChannel>();
         services.AddScoped<SqlOSPhoneOtpService>();
         services.AddScoped<SqlOSMfaPolicyService>();
+        services.AddScoped<SqlOSTotpMfaService>();
         services.AddScoped<SqlOSPasswordLoginAbuseService>();
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();

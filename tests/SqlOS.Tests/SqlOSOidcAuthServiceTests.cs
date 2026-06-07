@@ -144,6 +144,108 @@ public sealed class SqlOSOidcAuthServiceTests
     }
 
     [TestMethod]
+    public async Task CompleteAuthorization_GitHubOAuthProfile_ProvisionsUserWithVerifiedPrimaryEmail()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/github"]));
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.GitHub,
+            "GitHub",
+            "github-client",
+            "github-secret",
+            ["https://app.example.local/callback/github"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/github",
+            "success:github-user@example.com:nonce-github",
+            "verifier",
+            "nonce-github",
+            null));
+
+        result.Email.Should().Be("github-user@example.com");
+        result.AuthenticationMethod.Should().Be("github");
+        result.UserCreated.Should().BeTrue();
+        connection.Protocol.Should().Be(SqlOSSocialProviderProtocol.OAuthProfile);
+
+        var externalIdentity = await context.Set<SqlOSExternalIdentity>().SingleAsync();
+        externalIdentity.Issuer.Should().Be("https://github.com");
+        externalIdentity.Subject.Should().Be("123456789");
+        externalIdentity.OidcConnectionId.Should().Be(connection.Id);
+
+        var second = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/github",
+            "success:github-user@example.com:nonce-github",
+            "verifier",
+            "nonce-github",
+            null));
+
+        second.UserId.Should().Be(result.UserId);
+        second.UserCreated.Should().BeFalse();
+        context.Set<SqlOSExternalIdentity>().Count().Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_GitHubWithoutVerifiedPrimaryEmail_Fails()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/github"]));
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.GitHub,
+            "GitHub",
+            "github-client",
+            "github-secret",
+            ["https://app.example.local/callback/github"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/github",
+            "unverified:github-user@example.com:nonce-github",
+            "verifier",
+            "nonce-github",
+            null));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*verified primary email*");
+    }
+
+    [TestMethod]
     public async Task CompleteAuthorization_CustomManualConfig_UsesClaimMapping()
     {
         using var context = CreateContext();

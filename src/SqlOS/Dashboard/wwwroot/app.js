@@ -45,8 +45,9 @@
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
-        oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, and custom OIDC providers for authserver-owned social login." },
+        oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, GitHub, and custom providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
+        mfa: { title: "MFA", description: "Configure authenticator app enrollment and second-factor requirements." },
         authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
         sessions: { title: "Sessions", description: "Inspect active sessions and authentication methods." },
         audit: { title: "Audit Events", description: "Review recent auth and admin activity." }
@@ -189,6 +190,28 @@
                 { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" }
             ],
             integration: "Apple redirects back to SqlOS, then SqlOS redirects back to your app callback with the final code."
+        },
+        GitHub: {
+            heading: "GitHub Setup",
+            description: "Create a GitHub OAuth app and let SqlOS fetch the verified primary email through GitHub's user APIs.",
+            docsLabel: "GitHub OAuth app",
+            docsUrl: "https://github.com/settings/developers",
+            steps: [
+                "Create or open a GitHub OAuth App.",
+                "Set Authorization callback URL to: {callback}.",
+                "Copy Client ID + Client Secret from GitHub into SqlOS, then save the connection.",
+                "Use the default scopes so SqlOS can read the profile and verified primary email."
+            ],
+            rows: [
+                { label: "Provider type", value: "GitHub" },
+                { label: "Protocol", value: "OAuth profile" },
+                { label: "Authorization endpoint", value: "https://github.com/login/oauth/authorize" },
+                { label: "Token endpoint", value: "https://github.com/login/oauth/access_token" },
+                { label: "Profile endpoints", value: "/user and /user/emails" },
+                { label: "Provider callback URI", html: "<div class=\"inline-code\">{callback}</div>" },
+                { label: "Suggested scopes", value: "read:user, user:email" }
+            ],
+            integration: "GitHub returns an OAuth access token. SqlOS uses it to load GitHub profile/email data, links by numeric GitHub user id, and then completes the normal social login redirect."
         },
         Custom: {
             heading: "Custom OIDC Setup",
@@ -743,6 +766,10 @@
             return "Apple";
         }
 
+        if (raw === "github") {
+            return "GitHub";
+        }
+
         return "Custom";
     }
 
@@ -1113,6 +1140,7 @@
                         ${quickLink("auth-users", "Users")}
                         ${quickLink("auth-oidc", "OIDC")}
                         ${quickLink("auth-security", "Security")}
+                        ${quickLink("auth-mfa", "MFA")}
                         ${quickLink("auth-authpage", "Auth Page")}
                     </div>
                 </section>
@@ -1180,6 +1208,11 @@
 
         if (view === "security") {
             await renderAuthSecurity();
+            return;
+        }
+
+        if (view === "mfa") {
+            await renderAuthMfa();
             return;
         }
 
@@ -2681,12 +2714,13 @@
                 <div class="panel-grid">
                     <section class="panel">
                         <h2>Configure Social Provider</h2>
-                        <p>SqlOS owns the provider callback for social login. Register this exact callback URI with Google, Microsoft, Apple, or your custom OIDC provider, then save the provider configuration here.</p>
+                        <p>SqlOS owns the provider callback for social login. Register this exact callback URI with Google, Microsoft, Apple, GitHub, or your custom provider, then save the provider configuration here.</p>
                         <form id="create-oidc-connection-form">
                             <select id="oidc-provider-type" name="providerType" required>
                                 <option value="Google">Google</option>
                                 <option value="Microsoft">Microsoft</option>
                                 <option value="Apple">Apple</option>
+                                <option value="GitHub">GitHub</option>
                                 <option value="Custom">Custom</option>
                             </select>
                             <input name="displayName" placeholder="Display name" required>
@@ -2714,7 +2748,7 @@
                             <textarea name="allowedCallbackUris" required readonly>${esc(callbackTemplate)}</textarea>
                             <textarea name="scopes" placeholder="Optional scopes, one per line"></textarea>
                             <textarea name="claimMapping" placeholder='Claim mapping JSON, for example {\"SubjectClaim\":\"sub\",\"EmailClaim\":\"email\"}'></textarea>
-                            <button type="submit">Create OIDC connection</button>
+                            <button type="submit">Create social connection</button>
                         </form>
                     </section>
                     <section class="panel">
@@ -2733,12 +2767,13 @@
                                     ${renderOidcProviderLogo(item.effectiveLogoDataUrl || item.logoDataUrl, item.displayName)}
                                     <div>
                                         <strong>${esc(item.displayName)}</strong>
-                                        <div class="oidc-provider-subtitle">${esc(item.providerType)} social login</div>
+                                        <div class="oidc-provider-subtitle">${esc(item.providerType)} social login${item.protocol ? ` · ${esc(item.protocol)}` : ""}</div>
                                     </div>
                                 </div>
                             </div>
                             ${renderMetadataRows([
                                 { label: "Provider", value: item.providerType },
+                                { label: "Protocol", value: item.protocol || "Oidc" },
                                 { label: "Connection ID", value: item.id },
                                 {
                                     label: "Effective logo",
@@ -3017,6 +3052,71 @@
                 })
             });
             setFlash("success", "Security settings saved.");
+        });
+    }
+
+    async function renderAuthMfa() {
+        const config = authViews.mfa;
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading MFA settings...");
+
+        const settings = await fetchJson(`${authApiBasePath}/settings/mfa`);
+        const factors = Array.isArray(settings.availableFactors) ? settings.availableFactors.join(", ") : "totp, recovery_code";
+        const roles = Array.isArray(settings.requiredRoles) ? settings.requiredRoles.join(", ") : "owner, admin";
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <div class="panel-grid">
+                <section class="panel">
+                    <h2>MFA Settings</h2>
+                    ${settings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                    <form id="mfa-settings-form">
+                        <label><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> Enable MFA</label>
+                        <label><input type="checkbox" name="totpEnabled" ${settings.totpEnabled ? "checked" : ""}> Enable authenticator apps</label>
+                        <label><input type="checkbox" name="userSelfEnrollmentEnabled" ${settings.userSelfEnrollmentEnabled ? "checked" : ""}> Allow users to add MFA voluntarily</label>
+                        <label><input type="checkbox" name="recoveryCodesEnabled" ${settings.recoveryCodesEnabled ? "checked" : ""}> Issue recovery codes</label>
+                        <label><input type="checkbox" name="requireForAllUsers" ${settings.requireForAllUsers ? "checked" : ""}> Require MFA for all users</label>
+                        <label><input type="checkbox" name="requireForOwnersAndAdmins" ${settings.requireForOwnersAndAdmins ? "checked" : ""}> Require MFA for owners and admins</label>
+                        <input name="requiredRoles" placeholder="Required roles, comma separated" value="${esc(roles)}">
+                        <input name="availableFactors" placeholder="Available factors, comma separated" value="${esc(factors)}">
+                        <button type="submit">Save MFA settings</button>
+                    </form>
+                </section>
+                <section class="panel">
+                    <h2>Current Policy</h2>
+                    ${renderMetadataRows([
+                        { label: "MFA", value: settings.enabled ? "Enabled" : "Disabled" },
+                        { label: "Authenticator apps", value: settings.totpEnabled ? "Enabled" : "Disabled" },
+                        { label: "User self-enrollment", value: settings.userSelfEnrollmentEnabled ? "Enabled" : "Disabled" },
+                        { label: "Recovery codes", value: settings.recoveryCodesEnabled ? "Enabled" : "Disabled" },
+                        { label: "All users required", value: settings.requireForAllUsers ? "Yes" : "No" },
+                        { label: "Privileged roles required", value: settings.requireForOwnersAndAdmins ? "Yes" : "No" },
+                        { label: "Updated", value: formatDate(settings.updatedAt) }
+                    ])}
+                </section>
+            </div>
+        `;
+
+        bindForm("mfa-settings-form", async form => {
+            const splitList = value => String(value || "")
+                .split(",")
+                .map(item => item.trim())
+                .filter(Boolean);
+
+            await fetchJson(`${authApiBasePath}/settings/mfa`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    enabled: form.get("enabled") === "on",
+                    totpEnabled: form.get("totpEnabled") === "on",
+                    userSelfEnrollmentEnabled: form.get("userSelfEnrollmentEnabled") === "on",
+                    recoveryCodesEnabled: form.get("recoveryCodesEnabled") === "on",
+                    requireForAllUsers: form.get("requireForAllUsers") === "on",
+                    requireForOwnersAndAdmins: form.get("requireForOwnersAndAdmins") === "on",
+                    requiredRoles: splitList(form.get("requiredRoles")),
+                    availableFactors: splitList(form.get("availableFactors"))
+                })
+            });
+            setFlash("success", "MFA settings saved.");
         });
     }
 
