@@ -1,0 +1,175 @@
+---
+title: "Auth0 FGA vs SqlOS SHRBAC"
+description: "A focused comparison for one .NET app: Auth0 FGA as an external relationship store and SqlOS SHRBAC as SQL Server-native authorization for EF list queries."
+date: "2026-06-05"
+author: "Ross Slaney"
+tags: ["Auth0 FGA", "OpenFGA", "SHRBAC", "FGA", "SqlOS"]
+---
+
+Auth0 FGA and SqlOS SHRBAC (scoped hierarchical RBAC) both answer authorization questions. They do not put the authorization data in the same place.
+
+That is the comparison that matters for a single .NET SaaS app on SQL Server.
+
+Auth0 FGA is a managed fine-grained authorization service based on OpenFGA. You define an authorization model, write relationship tuples, and call APIs like Check and ListObjects. Auth0 describes FGA as a fast, scalable authorization service inspired by Zanzibar and based on relationship-based access control. The official docs are here: [Auth0 FGA introduction](https://docs.fga.dev/fga), [FGA concepts](https://docs.fga.dev/fga-concepts), and [relationship queries](https://docs.fga.dev/writing-data/advanced/check-read-expand).
+
+SqlOS SHRBAC keeps a hierarchical resource tree, roles, permissions, and grants in SQL Server. EF Core list endpoints compose an authorization predicate into the same query that loads app rows.
+
+<BlogVisual kind="auth0-vs-sqlos" />
+
+## The short version
+
+| Question | Auth0 FGA | SqlOS SHRBAC |
+| --- | --- | --- |
+| Where do resources live? | Relationship tuples in an FGA store | Resource rows in your SQL Server database |
+| Model style | ReBAC relations in an authorization model DSL | Tree + flat roles + scoped grants |
+| Point check | Check API | DB-backed FGA service |
+| List page of authorized rows | ListObjects or Batch Check plus app query logic | LINQ filter with `GetAuthorizationFilterAsync` |
+| App data writes | App DB write plus FGA tuple write | App row plus resource/grant rows in the same DB |
+| Operations | Managed service, credentials, stores, billing | SQL Server you already run |
+| Pairs with | Auth0 login or another identity system | SqlOS AuthServer in the same package |
+
+Neither architecture is universally better. They optimize for different boundaries.
+
+## What Auth0 FGA is good at
+
+Auth0 FGA shines when authorization is a graph you want outside application code and outside one database. The model can express relationships like owners, writers, viewers, parent folders, inherited access, groups, and contextual tuples.
+
+A tiny model looks like this:
+
+```text
+model
+  schema 1.1
+
+type user
+
+type document
+  relations
+    define writer: [user]
+    define reader: [user] or writer
+```
+
+Then a service can ask the FGA API whether a relationship exists:
+
+```bash
+curl --request POST \
+  --url "$FGA_API_URL/stores/$FGA_STORE_ID/check" \
+  --header "authorization: Bearer $FGA_API_TOKEN" \
+  --header "content-type: application/json" \
+  --data '{
+    "tuple_key": {
+      "user": "user:bob",
+      "relation": "reader",
+      "object": "document:planning"
+    }
+  }'
+```
+
+That is a clean boundary if many services need the same centralized authorization model, if the object graph is not naturally stored in one relational database, or if you already use Auth0 and want a managed FGA product.
+
+## Where the single-app question changes
+
+The single-app .NET question is narrower:
+
+> I have EF Core list endpoints over SQL Server tables. How do I make those endpoints return only authorized rows?
+
+Auth0 FGA has ListObjects for "which objects can this user access?" and Batch Check for batches of candidate objects. In both cases, the app still has to connect the authorization answer back to its data tables. In practice, a list page may need:
+
+1. decide whether SQL Server or Auth0 FGA supplies the candidate object IDs first
+2. query or check the matching object IDs
+3. apply product filters, sort, and pagination without dropping or duplicating rows
+4. handle cases where the product query and FGA object list do not line up cleanly
+
+That can be correct, but it is an application orchestration problem. It is not the same shape as a LINQ query that composes one authorization predicate with the rest of the SQL.
+
+SqlOS optimizes for that EF query:
+
+```csharp
+var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+    subjectId,
+    "TODO_READ");
+
+var todos = await dbContext.TodoItems
+    .Where(filter)
+    .OrderBy(x => x.CreatedAt)
+    .Take(20)
+    .ToListAsync(cancellationToken);
+```
+
+The filter calls the SQL Server function that walks resource ancestors and matches grants. The database handles authorization and pagination together.
+
+## Resource writes and consistency
+
+With Auth0 FGA, app data and authorization data are deliberately separate. When a document is created, the app writes its row to SQL Server and writes a tuple or relationship to FGA. For many systems, that decoupling is the point.
+
+With SqlOS, the resource can be created beside the row:
+
+```csharp
+var document = new Document
+{
+    Id = Guid.NewGuid(),
+    ProjectId = project.Id,
+    Title = request.Title
+};
+
+document.ResourceId = dbContext.CreateResource(
+    parentId: project.ResourceId,
+    name: document.Title,
+    resourceTypeId: "document",
+    id: $"document::{document.Id:D}");
+
+dbContext.Documents.Add(document);
+await dbContext.SaveChangesAsync(cancellationToken);
+```
+
+That is less flexible than a global relationship service, but it is very strong for one app: the business row and authorization resource commit together.
+
+## Expressiveness
+
+Do not claim SHRBAC replaces every ReBAC model. It does not.
+
+Auth0 FGA is a relationship system. It can model parent-child inheritance, usersets, group membership, contextual tuples, conditions, and more graph-shaped access patterns. If your product authorization naturally reads like "viewer from parent folder or member of group or relation through another object," Auth0 FGA is closer to that mental model.
+
+SqlOS SHRBAC is intentionally narrower:
+
+- resources form a hierarchy
+- roles are reusable permission bundles
+- grants attach a subject and role to one resource
+- access inherits down descendants
+- list filtering composes with SQL Server queries
+
+That narrower shape is a feature when the app data already has a hierarchy: organization, workspace, project, item.
+
+## Decision scenarios
+
+Choose Auth0 FGA when:
+
+- you already use Auth0 login and want an Auth0-hosted authorization service
+- authorization is shared across multiple services or databases
+- you need graph-native ReBAC expressiveness
+- you want managed authorization operations and can pay per the service model
+- ListObjects or Batch Check orchestration fits your list pages
+
+Choose SqlOS when:
+
+- you are building a greenfield .NET app on SQL Server
+- your resource hierarchy matches your domain
+- EF Core list endpoints are the hard part
+- you want app rows and authorization rows in the same transaction
+- you want auth, orgs, sessions, and FGA in one package
+
+<BlogCallout title="A practical rule">
+  If your hardest question is "can this user perform this action on this object across many systems," Auth0 FGA is a strong fit. If your hardest question is "which rows should this EF query return," SqlOS is shaped for that path.
+</BlogCallout>
+
+## The honest single-app answer
+
+For one B2B app, Auth0 FGA is not "wrong." It may be the right decision if you already chose Auth0 for login, expect multiple services quickly, or need graph expressiveness that SHRBAC does not attempt.
+
+SqlOS is the tighter fit when you want one ASP.NET host, one SQL Server database, OAuth login, organizations, sessions, and row-level authorization for EF queries without a second authorization service.
+
+Next reading:
+
+- [List endpoints that only return authorized rows](/blog/authorized-list-queries-ef-core-sqlos)
+- [FGA Overview](/docs/fga/overview)
+- [Auth0 FGA docs](https://docs.fga.dev/fga)
+- [Auth0 FGA relationship queries](https://docs.fga.dev/writing-data/advanced/check-read-expand)
