@@ -9,6 +9,11 @@ SqlOS supports SAML 2.0 enterprise SSO. Each organization can have its own SSO c
 
 ## Setup
 
+You can configure SAML in two ways:
+
+- **Platform-admin setup**: your operator creates the draft and imports metadata from the dashboard or admin API.
+- **Delegated org-admin setup**: your operator or host app creates a one-organization portal session, sends the setup link to the customer IT admin, and lets that admin complete the same SAML setup without access to the global dashboard.
+
 ### 1. Create an SSO draft
 
 **SDK**:
@@ -64,12 +69,134 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-connections/{connect
 
 The connection is now active. Users with `@acme.com` emails will be routed to Entra for authentication.
 
+## Delegated org-admin portal
+
+Create a portal session from the dashboard organization SSO tab or through the admin API:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_...",
+    "provider": "microsoft-entra"
+  }'
+```
+
+The response includes a `setupUrl`. Send that URL with your own mailer or admin workflow. The first browser open consumes the URL token and stores an HttpOnly server-side portal session cookie. Reuse requires a new setup link.
+
+The portal is scoped to one organization and supports:
+
+- provider guides for Microsoft Entra, Okta, Google Workspace, and generic SAML
+- copy-ready SP Entity ID and ACS URL values
+- DNS TXT verification for self-serve organization email domains
+- metadata XML paste or file upload
+- validation before activation
+- activation, disable, metadata replacement, and retest
+
+Hosts can expose the same launch behavior from their own admin surfaces by wrapping `SqlOSSsoPortalService.CreateSessionAsync`, as the example app does with `POST /api/sso-portal-links`.
+
+Revoke a setup link or portal session:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions/{sessionId}/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "customer_cancelled"}'
+```
+
+Portal-scoped APIs live under `/sqlos/admin/auth/sso-portal/api` and require the portal session cookie. They cannot list users, clients, other organizations, or global dashboard pages.
+
+## Verified organization domains
+
+Self-serve SSO setup can claim an organization's email domain before home realm discovery trusts it. The portal asks the org admin for a domain such as `acme.com`, creates a pending claim, and returns a DNS TXT record:
+
+| Field | Value |
+| --- | --- |
+| Type | `TXT` |
+| Name | `_sqlos-verify.acme.com` |
+| Value | `sqlos-domain-verification=...` |
+
+When the TXT record is visible, the portal marks the domain `active`. Home realm discovery checks active verified domains first, then falls back to the legacy operator-managed `PrimaryDomain` field. This keeps existing platform-admin setups working while making self-serve domain claims authoritative.
+
+SqlOS has no Azure dependency for this. The default verifier uses public DNS-over-HTTPS and is registered behind `ISqlOSDomainDnsVerifier`, so hosts can replace it with internal DNS, provider-specific DNS APIs, or a test fake.
+
+Activation requires a verified self-serve domain by default when the organization does not already have an operator-managed primary domain. Disable that gate only when your own host app enforces equivalent ownership outside SqlOS.
+
+```csharp
+options.AuthServer.ConfigureSsoPortal(portal =>
+{
+    portal.ReservedDomainRoots.Add("yourapp.com");
+    portal.RequireVerifiedDomainForActivation = true;
+});
+```
+
+## Headless setup state machine
+
+The hosted portal is optional. Configure `BuildUiUrl` to hand the opened portal session to your own admin UI, and call the setup API for state transitions.
+
+```csharp
+options.AuthServer.ConfigureSsoPortal(portal =>
+{
+    portal.UseHostedPortal = false;
+    portal.BuildUiUrl = ctx =>
+        $"https://admin.example.com/sso/setup?session_id={ctx.SessionId}&view={ctx.View}";
+});
+```
+
+Default setup API base path:
+
+```text
+/sqlos/admin/auth/sso-portal/api/setup
+```
+
+Override it with `SsoPortal.HeadlessApiBasePath`. Keep it on the SqlOS origin or configure your host for credentialed browser requests, because the portal session is stored in an HttpOnly cookie.
+
+The setup API returns `SqlOSSsoSetupActionResult`:
+
+| Field | Description |
+| --- | --- |
+| `type` | `view` or `redirect` |
+| `redirectUrl` | Optional browser redirect |
+| `viewModel` | Current setup state, service-provider values, provider guides, domain claim, latest test, and allowed actions |
+
+State-machine endpoints:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/` | Current setup view |
+| PUT | `/provider` | Select SAML provider |
+| POST | `/domain` | Start DNS TXT domain verification |
+| POST | `/domains/{domainId}/confirm` | Check the TXT record and activate the claim |
+| POST | `/metadata/validate` | Validate SAML metadata XML |
+| POST | `/metadata` | Import metadata without activating |
+| POST | `/activate` | Activate when metadata and domain state allow it |
+| POST | `/disable` | Disable the connection |
+| POST | `/test` | Record readiness or generate a test redirect |
+| POST | `/signout` | Clear the portal session |
+
 ## Options
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `autoProvisionUsers` | `false` | Create SqlOS users from SAML assertions on first login |
 | `autoLinkByEmail` | `false` | Link SAML logins to existing users by email match |
+| `SsoPortal.EnableApi` | `true` | Expose portal and headless setup APIs |
+| `SsoPortal.UseHostedPortal` | `true` | Serve the bundled setup portal |
+| `SsoPortal.BuildUiUrl` | `null` | Redirect opened setup sessions to a host-owned UI |
+| `SsoPortal.HeadlessApiBasePath` | `/sqlos/admin/auth/sso-portal/api/setup` | Base path for the headless setup API |
+| `SsoPortal.RequireVerifiedDomainForActivation` | `true` | Require a verified domain before activating self-serve SSO |
+| `SsoPortal.DomainVerificationRecordPrefix` | `_sqlos-verify` | TXT record name prefix |
+| `SsoPortal.ReservedDomainRoots` | empty | Domain roots customers cannot claim |
+
+## Provider notes
+
+| Provider | SP Entity ID field | ACS field | Metadata source |
+| --- | --- | --- | --- |
+| Microsoft Entra | Identifier (Entity ID) | Reply URL | Federation Metadata XML |
+| Okta | Audience URI (SP Entity ID) | Single sign-on URL | IdP metadata |
+| Google Workspace | Entity ID | ACS URL | IdP metadata |
+| Generic SAML | SP Entity ID | ACS URL | SAML metadata XML |
+
+For metadata rotation, open the delegated portal again or use the dashboard, paste or upload the new XML, review the parsed IdP values, and activate. New metadata is validated before it replaces the active configuration.
 
 ## SSO login flow
 

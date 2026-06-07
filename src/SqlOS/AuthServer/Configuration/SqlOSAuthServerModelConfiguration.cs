@@ -161,6 +161,54 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSSsoPortalSession>(entity =>
+        {
+            entity.ToTable("SqlOSSsoPortalSessions", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.LinkTokenHash).IsUnique();
+            entity.HasIndex(x => x.SessionTokenHash)
+                .IsUnique()
+                .HasFilter("[SessionTokenHash] IS NOT NULL");
+            entity.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
+            entity.HasIndex(x => new { x.OrganizationId, x.RevokedAt, x.ExpiresAt });
+            entity.Property(x => x.Provider).HasMaxLength(40);
+            entity.Property(x => x.ReturnUrl).HasMaxLength(1000);
+            entity.Property(x => x.ActorType).HasMaxLength(80);
+            entity.Property(x => x.RevokedReason).HasMaxLength(160);
+            entity.Property(x => x.IpAddress).HasMaxLength(128);
+            entity.Property(x => x.UserAgent).HasMaxLength(512);
+            entity.Property(x => x.LastTestStatus).HasMaxLength(40);
+            entity.Property(x => x.LastTestMessage).HasMaxLength(500);
+            entity.HasOne(x => x.Organization)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Connection)
+                .WithMany(x => x.PortalSessions)
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSOrganizationDomain>(entity =>
+        {
+            entity.ToTable("SqlOSOrganizationDomains", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.OrganizationId, x.Domain })
+                .IsUnique()
+                .HasFilter("[RevokedAt] IS NULL");
+            entity.HasIndex(x => new { x.Domain, x.Status });
+            entity.HasIndex(x => new { x.OrganizationId, x.Status });
+            entity.Property(x => x.Domain).HasMaxLength(320);
+            entity.Property(x => x.Status).HasMaxLength(50);
+            entity.Property(x => x.VerificationToken).HasMaxLength(160);
+            entity.Property(x => x.CreatedByUserId).HasMaxLength(64);
+            entity.Property(x => x.LastError).HasMaxLength(1000);
+            entity.HasOne(x => x.Organization)
+                .WithMany(x => x.Domains)
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSOidcConnection>(entity =>
         {
             entity.ToTable("SqlOSAuthOidcConnections", schema, t => t.ExcludeFromMigrations());

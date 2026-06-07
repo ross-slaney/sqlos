@@ -39,6 +39,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Email));
         services.AddDataProtection();
         services.AddHttpClient();
+        services.AddHttpClient<ISqlOSDomainDnsVerifier, SqlOSDnsOverHttpsDomainVerifier>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
         services.AddSingleton<SqlOSDashboardSessionService>();
         services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
         services.AddSingleton<SqlOSDynamicClientRegistrationRateLimiter>();
@@ -77,6 +81,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSOidcBrowserAuthService>();
         services.AddScoped<SqlOSSamlService>();
         services.AddScoped<SqlOSSsoAuthorizationService>();
+        services.AddScoped<SqlOSOrganizationDomainService>();
+        services.AddScoped<SqlOSSsoPortalService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();

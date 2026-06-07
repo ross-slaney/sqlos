@@ -42,6 +42,7 @@ public class SqlOSAuthServerOptions
     public SqlOSPasswordResetOptions PasswordReset { get; } = new();
     public SqlOSPasswordLoginAbuseOptions PasswordLogin { get; } = new();
     public SqlOSInvitationOptions Invitations { get; } = new();
+    public SqlOSSsoPortalOptions SsoPortal { get; } = new();
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
@@ -287,6 +288,12 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions ConfigureSsoPortal(Action<SqlOSSsoPortalOptions> configure)
+    {
+        configure(SsoPortal);
+        return this;
+    }
+
     public SqlOSAuthServerOptions ConfigureDeviceAuthorization(Action<SqlOSDeviceAuthorizationOptions> configure)
     {
         configure(DeviceAuthorization);
@@ -414,3 +421,35 @@ public sealed class SqlOSPasswordLoginAbuseOptions
     public TimeSpan FailureWindow { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
 }
+
+public sealed class SqlOSSsoPortalOptions
+{
+    public TimeSpan DefaultLinkLifetime { get; set; } = TimeSpan.FromDays(7);
+    public TimeSpan SessionIdleTimeout { get; set; } = TimeSpan.FromHours(2);
+    public string CookieName { get; set; } = "sqlos_sso_portal";
+    public bool EnableApi { get; set; } = true;
+    public bool UseHostedPortal { get; set; } = true;
+    public bool RequireVerifiedDomainForActivation { get; set; } = true;
+    public bool AllowLocalhostDomainVerification { get; set; }
+    public string? HeadlessApiBasePath { get; set; }
+    public Func<SqlOSSsoSetupUiRouteContext, string>? BuildUiUrl { get; set; }
+    public string DomainVerificationRecordPrefix { get; set; } = "_sqlos-verify";
+    public List<string> ReservedDomainRoots { get; } = [];
+
+    public string ResolveHeadlessApiBasePath(string adminBasePath)
+    {
+        if (string.IsNullOrWhiteSpace(HeadlessApiBasePath))
+        {
+            return $"{adminBasePath.TrimEnd('/')}/sso-portal/api/setup";
+        }
+
+        var normalized = HeadlessApiBasePath.Trim();
+        return normalized.StartsWith("/", StringComparison.Ordinal) ? normalized.TrimEnd('/') : $"/{normalized.TrimEnd('/')}";
+    }
+}
+
+public sealed record SqlOSSsoSetupUiRouteContext(
+    HttpContext HttpContext,
+    string SessionId,
+    string OrganizationId,
+    string View);

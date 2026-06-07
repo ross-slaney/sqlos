@@ -10,9 +10,12 @@ Home realm discovery inspects an email address and returns the appropriate login
 ## How it works
 
 1. Extract the email domain
-2. Check if any organization has a matching primary domain with an active SSO connection
-3. If yes, return `sso` with the organization and connection details
-4. If no, return `password`, meaning local credentials are allowed
+2. Check active verified organization-domain claims with active SSO connections
+3. If no verified claim matches, check the legacy operator-managed organization `PrimaryDomain`
+4. If a match has enabled SSO metadata, return `sso` with the organization and connection details
+5. If no match is found, return `password`, meaning local credentials are allowed
+
+Verified domains are created by delegated SSO setup. The customer admin publishes a TXT record such as `_sqlos-verify.acme.com` with a `sqlos-domain-verification=...` value. SqlOS verifies that record before the domain participates in home realm discovery. Existing dashboard-managed `PrimaryDomain` values continue to work as a fallback.
 
 ## SDK
 

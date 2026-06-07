@@ -364,6 +364,7 @@ public sealed class SqlOSDashboardMiddleware
 
         if (relativePath.StartsWith("auth/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/api/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith("admin/auth/sso-portal", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/.well-known/", StringComparison.OrdinalIgnoreCase)
             || relativePath.StartsWith("admin/auth/saml/", StringComparison.OrdinalIgnoreCase))
         {

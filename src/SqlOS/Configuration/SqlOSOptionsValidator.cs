@@ -72,6 +72,7 @@ internal static class SqlOSOptionsValidator
         }
 
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
+        ValidateSsoPortalOptions(options.AuthServer.SsoPortal, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
         ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
         ValidatePasswordResetOptions(options.AuthServer.PasswordReset, errors);
@@ -128,6 +129,38 @@ internal static class SqlOSOptionsValidator
         if (options.OnHeadlessSignupAsync != null && !options.EnableApi)
         {
             errors.Add("AuthServer.Headless.OnHeadlessSignupAsync requires AuthServer.Headless.EnableApi.");
+        }
+    }
+
+    private static void ValidateSsoPortalOptions(SqlOSSsoPortalOptions options, List<string> errors)
+    {
+        if (options.DefaultLinkLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.SsoPortal.DefaultLinkLifetime must be greater than zero.");
+        }
+
+        if (options.SessionIdleTimeout <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.SsoPortal.SessionIdleTimeout must be greater than zero.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.HeadlessApiBasePath))
+        {
+            ValidateRootPath(options.HeadlessApiBasePath, "AuthServer.SsoPortal.HeadlessApiBasePath", errors);
+            if (!options.EnableApi)
+            {
+                errors.Add("AuthServer.SsoPortal.HeadlessApiBasePath requires AuthServer.SsoPortal.EnableApi.");
+            }
+        }
+
+        if (options.BuildUiUrl != null && !options.EnableApi)
+        {
+            errors.Add("AuthServer.SsoPortal.BuildUiUrl requires AuthServer.SsoPortal.EnableApi.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.DomainVerificationRecordPrefix))
+        {
+            errors.Add("AuthServer.SsoPortal.DomainVerificationRecordPrefix is required.");
         }
     }
 

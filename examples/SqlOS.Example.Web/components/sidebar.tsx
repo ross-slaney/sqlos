@@ -57,6 +57,7 @@ const links: ReadonlyArray<{
   { href: "/retail", label: "Dashboard", icon: IconDashboard, exact: true },
   { href: "/retail/chains", label: "Chains", icon: IconChain },
   { href: "/retail/stores", label: "Stores", icon: IconStore },
+  { href: "/retail/sso", label: "SSO Portal", icon: IconShield },
   { href: "/retail/account", label: "Account", icon: IconShield },
 ];
 
