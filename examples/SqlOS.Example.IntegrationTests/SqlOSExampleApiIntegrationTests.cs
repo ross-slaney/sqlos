@@ -304,6 +304,14 @@ public sealed class SqlOSExampleApiIntegrationTests
         var portalCookie = startResponse.Headers.GetValues("Set-Cookie").Single().Split(';', 2)[0];
         portalCookie.Should().StartWith("sqlos_sso_portal=");
 
+        foreach (var path in new[] { "/sqlos/admin/auth/sso-portal", "/sqlos/admin/auth/sso-portal/" })
+        {
+            var shellResponse = await PortalGetAsync(path, portalCookie);
+            shellResponse.EnsureSuccessStatusCode();
+            var shellHtml = await shellResponse.Content.ReadAsStringAsync();
+            shellHtml.Should().Contain("Organization SSO setup");
+        }
+
         var stateResponse = await PortalGetAsync("/sqlos/admin/auth/sso-portal/api/state", portalCookie);
         stateResponse.EnsureSuccessStatusCode();
         var stateJson = JsonDocument.Parse(await stateResponse.Content.ReadAsStringAsync());
