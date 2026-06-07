@@ -414,8 +414,31 @@ public static class SqlOSAuthServerModelConfiguration
         {
             entity.ToTable("SqlOSAuditEvents", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.EventType).HasMaxLength(120);
+            entity.HasIndex(x => x.OccurredAt);
+            entity.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
+            entity.HasIndex(x => new { x.ApplicationId, x.OccurredAt });
+            entity.HasIndex(x => new { x.ApplicationKey, x.OccurredAt });
+            entity.HasIndex(x => new { x.Source, x.OccurredAt });
+            entity.HasIndex(x => new { x.Action, x.OccurredAt });
+            entity.HasIndex(x => new { x.ActorType, x.ActorId, x.OccurredAt });
+            entity.HasIndex(x => x.IdempotencyKeyHash)
+                .IsUnique()
+                .HasFilter("[IdempotencyKeyHash] IS NOT NULL");
+            entity.Property(x => x.EventType).HasMaxLength(160);
+            entity.Property(x => x.ApplicationId).HasMaxLength(64);
+            entity.Property(x => x.ApplicationKey).HasMaxLength(200);
+            entity.Property(x => x.Source).HasMaxLength(80);
+            entity.Property(x => x.Action).HasMaxLength(160);
             entity.Property(x => x.ActorType).HasMaxLength(80);
+            entity.Property(x => x.ActorId).HasMaxLength(128);
+            entity.Property(x => x.ActorDisplayName).HasMaxLength(320);
+            entity.Property(x => x.TargetsJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.ContextJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.MetadataJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.UserAgent).HasMaxLength(512);
+            entity.Property(x => x.RequestId).HasMaxLength(128);
+            entity.Property(x => x.CorrelationId).HasMaxLength(128);
+            entity.Property(x => x.IdempotencyKeyHash).HasMaxLength(128);
         });
 
         modelBuilder.Entity<SqlOSSettings>(entity =>

@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
+using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
@@ -80,6 +82,7 @@ public static class InventoryEndpoints
             CreateInventoryItemRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -105,6 +108,25 @@ public static class InventoryEndpoints
             context.InventoryItems.Add(item);
 
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.inventory_item.created",
+                [
+                    new SqlOSAuditTarget("location", location.Id, location.Name),
+                    new SqlOSAuditTarget("inventory_item", item.Id, item.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["sku"] = item.Sku,
+                    ["quantityOnHand"] = item.QuantityOnHand,
+                    ["price"] = item.Price,
+                    ["locationId"] = location.Id,
+                    ["locationResourceId"] = location.ResourceId,
+                    ["inventoryResourceId"] = item.ResourceId
+                },
+                http.RequestAborted);
 
             return Results.Created($"/api/inventory/{item.Id}", new InventoryItemDetailDto
             {
@@ -127,6 +149,7 @@ public static class InventoryEndpoints
             UpdateInventoryItemRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -137,12 +160,35 @@ public static class InventoryEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, item.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            var previousQuantity = item.QuantityOnHand;
+            var previousPrice = item.Price;
             item.Name = request.Name;
             item.Description = request.Description;
             item.Price = request.Price;
             item.QuantityOnHand = request.QuantityOnHand;
             item.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.inventory_item.updated",
+                [
+                    new SqlOSAuditTarget("location", item.LocationId, item.Location?.Name),
+                    new SqlOSAuditTarget("inventory_item", item.Id, item.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["sku"] = item.Sku,
+                    ["previousQuantityOnHand"] = previousQuantity,
+                    ["quantityOnHand"] = item.QuantityOnHand,
+                    ["quantityDelta"] = item.QuantityOnHand - previousQuantity,
+                    ["previousPrice"] = previousPrice,
+                    ["price"] = item.Price,
+                    ["locationId"] = item.LocationId,
+                    ["inventoryResourceId"] = item.ResourceId
+                },
+                http.RequestAborted);
 
             return Results.Ok(new InventoryItemDetailDto
             {
@@ -164,11 +210,12 @@ public static class InventoryEndpoints
             string id,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
 
-            var item = await context.InventoryItems.FirstOrDefaultAsync(i => i.Id == id);
+            var item = await context.InventoryItems.Include(i => i.Location).FirstOrDefaultAsync(i => i.Id == id);
             if (item is null) return Results.NotFound();
 
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, item.ResourceId);
@@ -176,6 +223,24 @@ public static class InventoryEndpoints
 
             context.InventoryItems.Remove(item);
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.inventory_item.deleted",
+                [
+                    new SqlOSAuditTarget("location", item.LocationId, item.Location?.Name),
+                    new SqlOSAuditTarget("inventory_item", item.Id, item.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["sku"] = item.Sku,
+                    ["quantityOnHand"] = item.QuantityOnHand,
+                    ["price"] = item.Price,
+                    ["locationId"] = item.LocationId,
+                    ["inventoryResourceId"] = item.ResourceId
+                },
+                http.RequestAborted);
 
             return Results.NoContent();
         }).WithName("DeleteInventoryItem");

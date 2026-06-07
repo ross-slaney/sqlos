@@ -701,6 +701,70 @@ nav a.active {
     max-height: 220px;
 }
 
+.audit-grid {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+}
+
+.audit-filter-form {
+    grid-template-columns: 1fr;
+}
+
+.audit-filter-actions {
+    margin-top: 0;
+}
+
+.audit-filter-actions button {
+    width: auto;
+}
+
+.audit-event-row {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+}
+
+.audit-event-row--selected {
+    border-color: var(--amber-400);
+    background: var(--amber-50);
+}
+
+.audit-event-row button {
+    width: auto;
+    padding: 6px 10px;
+    border: 1px solid var(--zinc-200);
+    background: var(--zinc-100);
+    color: var(--zinc-800);
+    font-size: 12px;
+}
+
+.audit-event-row button:hover {
+    background: var(--zinc-200);
+}
+
+.audit-detail-panel {
+    grid-column: 2;
+    display: grid;
+    gap: 12px;
+}
+
+.audit-detail-panel h3 {
+    margin: 0;
+    color: var(--zinc-900);
+}
+
+.audit-detail-panel details {
+    display: grid;
+    gap: 8px;
+}
+
+.audit-detail-panel summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--zinc-800);
+}
+
 .provider-guide {
     display: grid;
     gap: 12px;
@@ -995,6 +1059,7 @@ body.login-mode .content-area {
     .topbar { display: flex; }
     main { padding: 16px; }
     .panel-grid { grid-template-columns: 1fr; }
+    .audit-detail-panel { grid-column: auto; }
     .panel-actions,
     .list-item-header,
     .client-list-header,

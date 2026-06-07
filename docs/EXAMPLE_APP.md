@@ -66,7 +66,8 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 9. Open `/retail/sso`, create a delegated SSO setup link for the signed-in organization, and open the portal.
 10. In the portal, choose Entra, Okta, Google Workspace, or Generic SAML, verify the organization's email domain through the TXT record shown by the portal, paste/upload metadata XML, activate, and run a test redirect.
 11. Create and list workspaces through the protected app flow.
-12. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
+12. Open the Retail app, create/edit/restock/delete inventory, then open **Governance > Audit Logs** in the SqlOS dashboard and filter by application key `northwind-retail`.
+13. Return to the dashboard and validate auth sessions plus FGA resource/grant data.
 
 The host-launched path calls the sample API endpoint `POST /api/sso-portal-links`, which wraps the SqlOS portal-session service for the current `org_id`. Platform admins can create and revoke the same delegated links from the dashboard organization SSO tab.
 
@@ -83,3 +84,7 @@ For OIDC setup, use:
 - [Microsoft OIDC](MICROSOFT_OIDC.md)
 - [Apple OIDC](APPLE_OIDC.md)
 - [Custom OIDC](CUSTOM_OIDC.md)
+
+For audit-log validation, use:
+
+- [Audit Logs](AUDIT_LOGS.md)

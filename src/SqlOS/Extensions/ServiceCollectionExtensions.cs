@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using SqlOS.AuditLogs;
 using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
@@ -53,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSSchemaInitializer>();
         services.AddScoped<SqlOSBootstrapper>();
         services.AddScoped<SqlOSCryptoService>();
+        services.AddScoped<ISqlOSAuditLogService, SqlOSAuditLogService>();
         services.AddScoped<SqlOSSettingsService>();
         services.AddSingleton<ISqlOSAuthEmailSender, SqlOSAcsAuthEmailSender>();
         services.AddSingleton<SqlOSAcsEmailSender>();

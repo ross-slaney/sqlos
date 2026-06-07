@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
+using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
@@ -106,6 +108,7 @@ public static class LocationEndpoints
             CreateLocationRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -132,6 +135,25 @@ public static class LocationEndpoints
             context.Locations.Add(location);
 
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.location.created",
+                [
+                    new SqlOSAuditTarget("chain", chain.Id, chain.Name),
+                    new SqlOSAuditTarget("location", location.Id, location.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["chainId"] = chain.Id,
+                    ["chainResourceId"] = chain.ResourceId,
+                    ["locationResourceId"] = location.ResourceId,
+                    ["storeNumber"] = location.StoreNumber,
+                    ["city"] = location.City,
+                    ["state"] = location.State
+                },
+                http.RequestAborted);
 
             return Results.Created($"/api/locations/{location.Id}", new LocationDetailDto
             {
@@ -156,6 +178,7 @@ public static class LocationEndpoints
             UpdateLocationRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -166,6 +189,7 @@ public static class LocationEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.LocationEdit, location.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            var previousName = location.Name;
             location.Name = request.Name;
             location.StoreNumber = request.StoreNumber;
             location.Address = request.Address;
@@ -174,6 +198,24 @@ public static class LocationEndpoints
             location.ZipCode = request.ZipCode;
             location.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.location.updated",
+                [
+                    new SqlOSAuditTarget("chain", location.ChainId, location.Chain?.Name),
+                    new SqlOSAuditTarget("location", location.Id, location.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["previousName"] = previousName,
+                    ["storeNumber"] = location.StoreNumber,
+                    ["city"] = location.City,
+                    ["state"] = location.State,
+                    ["locationResourceId"] = location.ResourceId
+                },
+                http.RequestAborted);
 
             return Results.Ok(new LocationDetailDto
             {
@@ -197,11 +239,12 @@ public static class LocationEndpoints
             string id,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
 
-            var location = await context.Locations.FirstOrDefaultAsync(l => l.Id == id);
+            var location = await context.Locations.Include(l => l.Chain).FirstOrDefaultAsync(l => l.Id == id);
             if (location is null) return Results.NotFound();
 
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.LocationEdit, location.ResourceId);
@@ -209,6 +252,23 @@ public static class LocationEndpoints
 
             context.Locations.Remove(location);
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.location.deleted",
+                [
+                    new SqlOSAuditTarget("chain", location.ChainId, location.Chain?.Name),
+                    new SqlOSAuditTarget("location", location.Id, location.Name)
+                ],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["storeNumber"] = location.StoreNumber,
+                    ["city"] = location.City,
+                    ["state"] = location.State,
+                    ["locationResourceId"] = location.ResourceId
+                },
+                http.RequestAborted);
 
             return Results.NoContent();
         }).WithName("DeleteLocation");
