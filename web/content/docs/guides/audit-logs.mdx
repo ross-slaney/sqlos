@@ -1,0 +1,200 @@
+---
+title: "Add Audit Logs"
+description: "Record application audit events and review them in the SqlOS dashboard."
+order: 9
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Add application audit logs to a SqlOS app"
+  href="/docs/reference/audit-logs"
+  actionLabel="Audit Logs reference"
+>
+  This guide shows how to record server-side audit events for product actions, then inspect and export them from the embedded dashboard.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - SqlOS is registered with `AddSqlOS<TContext>()`
+  - Your app calls `app.MapSqlOS()`
+  - You have a mutation or security-sensitive action that should produce an audit event
+</Callout>
+
+## Goal
+
+When a user changes an important business resource, SqlOS should store a structured event that an operator can later answer:
+
+- who acted
+- what changed
+- which organization and application were involved
+- which resources were affected
+- when it happened
+- what safe metadata explains the outcome
+
+## 1. Pick event names
+
+Use stable dot-delimited action names. Prefer past-tense or outcome-specific names:
+
+| Good | Avoid |
+| --- | --- |
+| `retail.chain.created` | `create` |
+| `retail.inventory_item.updated` | `item changed` |
+| `document.shared` | `share document button clicked` |
+| `application.access.denied` | `error` |
+
+Keep action names stable because operators filter and export by action.
+
+## 2. Identify actor and targets
+
+The actor is the principal that performed the action.
+
+Common actor types:
+
+- `user`
+- `client`
+- `service_account`
+- `agent`
+- `dashboard`
+- `system`
+
+Targets are the affected resources. A single operation can have multiple targets:
+
+```csharp
+Targets:
+[
+    new SqlOSAuditTarget("location", location.Id, location.Name),
+    new SqlOSAuditTarget("inventory_item", item.Id, item.Name)
+]
+```
+
+## 3. Record the event from server-side code
+
+Inject `ISqlOSAuditLogService` into the endpoint, controller, or domain service that performs the mutation.
+
+```csharp
+app.MapPut("/api/locations/{locationId}/inventory/{itemId}", async (
+    string locationId,
+    string itemId,
+    UpdateInventoryRequest request,
+    ExampleAppDbContext db,
+    ISqlOSAuditLogService auditLogs,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var item = await db.InventoryItems.FindAsync([itemId], ct);
+    if (item is null)
+    {
+        return Results.NotFound();
+    }
+
+    var previousQuantity = item.QuantityOnHand;
+    item.QuantityOnHand = request.QuantityOnHand;
+    await db.SaveChangesAsync(ct);
+
+    await auditLogs.RecordAsync(new SqlOSAuditLogRecordRequest(
+        Action: "retail.inventory_item.updated",
+        OrganizationId: request.OrganizationId,
+        ApplicationKey: "northwind-retail",
+        Source: "application",
+        Actor: new SqlOSAuditActor("user", request.UserId, request.UserDisplayName),
+        Targets:
+        [
+            new SqlOSAuditTarget("location", locationId),
+            new SqlOSAuditTarget("inventory_item", item.Id, item.Name)
+        ],
+        Context: SqlOSAuditContext.FromHttpContext(httpContext),
+        Metadata: new Dictionary<string, object?>
+        {
+            ["result"] = "success",
+            ["sku"] = item.Sku,
+            ["previousQuantity"] = previousQuantity,
+            ["newQuantity"] = item.QuantityOnHand,
+            ["delta"] = item.QuantityOnHand - previousQuantity
+        },
+        IdempotencyKey: $"retail:inventory:{item.Id}:updated:{httpContext.TraceIdentifier}"),
+        ct);
+
+    return Results.Ok(item);
+});
+```
+
+Use `ApplicationKey` for the product surface that produced the event. If the key matches a registered SqlOS client id, SqlOS also links the event to that client row.
+
+## 4. Make retries safe
+
+Set `IdempotencyKey` when a request may be retried. SqlOS hashes the key before storage. A duplicate key returns the original event instead of inserting another row.
+
+Good idempotency keys usually include:
+
+- application key
+- action
+- target resource id
+- actor id
+- request id or domain operation id
+
+## 5. Keep metadata safe
+
+<Callout type="warning" title="Do not put secrets in audit metadata">
+  Never include passwords, access tokens, refresh tokens, API keys, client secrets, raw authorization headers, cookies, private keys, raw stack traces, request bodies, or response bodies.
+</Callout>
+
+Metadata should explain the decision or outcome without exposing sensitive data:
+
+```csharp
+Metadata: new Dictionary<string, object?>
+{
+    ["result"] = "denied",
+    ["reason"] = "missing_permission",
+    ["permission"] = "inventory.edit"
+}
+```
+
+## 6. Review events in the dashboard
+
+Open:
+
+```text
+/sqlos/admin/audit/logs
+```
+
+Useful filters:
+
+| Filter | Example |
+| --- | --- |
+| Application | `northwind-retail` |
+| Source | `application` |
+| Action | `retail.inventory_item.updated` |
+| Actor type | `user` |
+| Target type | `inventory_item` |
+| Result | `success` or `denied` |
+
+Select a row to inspect actor, targets, context, and metadata.
+
+## 7. Export a bounded CSV
+
+Use the dashboard export button or call:
+
+```bash
+curl -OJ "/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z"
+```
+
+Exports use the same filters as the dashboard list. SqlOS caps dashboard exports at 5,000 rows and a 366-day date range. If no dates are supplied, export defaults to the last 30 days.
+
+## Expected outcome
+
+After a mutation, the Audit Logs dashboard shows:
+
+- `Source = application`
+- the application key you supplied
+- the stable action name
+- the actor and targets
+- request context
+- safe metadata
+
+In the Retail example, create or edit a chain, store, or inventory item and filter Audit Logs by `northwind-retail`.
+
+## Next steps
+
+- [Audit Logs Reference](/docs/reference/audit-logs)
+- [Dashboard](/docs/authserver/dashboard-overview)
+- [Testing](/docs/guides/testing)
