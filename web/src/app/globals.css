@@ -237,3 +237,9 @@ pre code {
 .sqlos-docs-shell .emcydocs-prose pre [data-line] {
   min-height: 1.72em;
 }
+
+.sqlos-docs-shell .emcydocs-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}

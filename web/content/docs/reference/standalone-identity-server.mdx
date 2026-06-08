@@ -1,0 +1,171 @@
+---
+title: "Standalone Identity Server Reference"
+description: "Reference tables for using SqlOS as a dedicated identity host for multiple applications."
+order: 13
+section: reference
+---
+
+This reference covers the advanced multi-application topology. Use [Single-Application Setup](/docs/authserver/single-application) if your product has one app.
+
+## Concept map
+
+| Concept | Meaning | Primary docs |
+| --- | --- | --- |
+| Auth host | ASP.NET app that runs `AddSqlOS` and `MapSqlOS` | [Getting Started](/docs/getting-started) |
+| Client application | OAuth client representing one app surface | [Clients](/docs/authserver/clients) |
+| Audience | Resource/API identifier placed in access tokens | [Token Validation](/docs/authserver/token-validation) |
+| Application access | Policy for who may use a client application | [Application Access](/docs/authserver/application-access) |
+| Headless auth | App-owned UI with SqlOS-owned protocol state | [Headless Auth](/docs/authserver/headless-auth) |
+| Device flow | CLI/native flow without a redirect listener | [CLI OAuth](/docs/authserver/cli-oauth) |
+
+## Required host settings
+
+| Setting | Purpose | Example |
+| --- | --- | --- |
+| `DashboardBasePath` | Mounts dashboard and auth routes | `/sqlos` |
+| `AuthServer.Issuer` | Public issuer used in tokens and discovery | `https://auth.example.com/sqlos/auth` |
+| `AuthServer.PublicOrigin` | Public origin for generated links | `https://auth.example.com` |
+| `AuthServer.DefaultAudience` | Fallback API/resource audience | `https://api.example.com` |
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.DashboardBasePath = "/sqlos";
+    options.AuthServer.Issuer = "https://auth.example.com/sqlos/auth";
+    options.AuthServer.PublicOrigin = "https://auth.example.com";
+    options.AuthServer.DefaultAudience = "https://api.example.com";
+});
+```
+
+## Client seed methods
+
+| Method | Use for | Notes |
+| --- | --- | --- |
+| `SeedBrowserClient` | Browser SPA/web apps and custom-scheme callbacks | Public PKCE client |
+| `SeedOwnedWebApp` | First-party hosted web apps | Convenience wrapper for owned web clients |
+| `SeedCliClient` | Terminal apps | Enables device flow and refresh token |
+| Dashboard-created client | Operators create or adjust clients after deploy | Not startup managed |
+| CIMD | Portable public clients with HTTPS metadata `client_id` | See [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents) |
+| DCR | Compatibility public clients that expect runtime registration | See [Dynamic Client Registration](/docs/authserver/dynamic-client-registration) |
+
+## Example client set
+
+```csharp
+auth.SeedBrowserClient(
+    "customer-portal",
+    "Customer Portal",
+    "https://app.example.com/auth/callback");
+
+auth.SeedBrowserClient(
+    "admin-console",
+    "Admin Console",
+    "https://admin.example.com/auth/callback");
+
+auth.SeedBrowserClient(
+    "mobile-app",
+    "Mobile App",
+    "sqlos-mobile://auth-callback");
+
+auth.SeedCliClient(
+    "support-cli",
+    "Support CLI",
+    "https://api.example.com",
+    "openid",
+    "profile",
+    "email",
+    "offline_access");
+```
+
+## Application access modes
+
+| Mode | Behavior |
+| --- | --- |
+| `all_organizations` | Any authenticated user with active organization context can use the app. |
+| `selected_organizations` | Only directly assigned organizations can use the app. |
+| `selected_users_groups_roles` | User, FGA user group, organization role, service account, or agent assignment required. |
+| `internal_only` | Explicit trusted assignment required. |
+| `disabled` | App cannot be used. Existing sessions fail refresh. |
+
+Explicit `denied` assignments take precedence over allowed assignments.
+
+## Assignment principal types
+
+| `principalType` | Required fields | Typical use |
+| --- | --- | --- |
+| `organization` | `organizationId` or `principalId` | Enable one customer tenant for an app |
+| `user` | `principalId` | Allow or deny a named user |
+| `group` | `principalId` | Allow an FGA user group |
+| `role` | `organizationId`, `roleKey` | Allow tenant admins or members |
+| `service_account` | `principalId` | Allow a machine principal |
+| `agent` | `principalId` | Allow an agent principal |
+
+## Admin endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /sqlos/admin/auth/api/applications/{applicationId}/assignments` | List assignments |
+| `POST /sqlos/admin/auth/api/applications/{applicationId}/access-mode` | Set access mode |
+| `POST /sqlos/admin/auth/api/applications/{applicationId}/assignments` | Create allow or deny assignment |
+| `DELETE /sqlos/admin/auth/api/applications/{applicationId}/assignments/{assignmentId}` | Revoke assignment |
+| `GET /sqlos/admin/auth/api/applications/{applicationId}/access/check` | Explain access decision |
+| `GET /sqlos/admin/auth/api/organizations/{organizationId}/applications` | Apps available to an organization |
+| `GET /sqlos/admin/auth/api/users/{userId}/applications` | Apps available to a user |
+
+## Enforcement points
+
+SqlOS checks application access when a concrete application and subject context are known:
+
+- hosted authorization before issuing an auth code
+- headless authorization before issuing an auth code
+- Email OTP and signup completion through the shared session path
+- SAML and OIDC callbacks before issuing an auth code
+- device authorization approval before releasing CLI tokens
+- refresh token rotation before minting a new access token
+
+Public errors use generic denial text. Audit events and the access-check endpoint carry the operator detail.
+
+## Resource API validation
+
+Resource APIs should validate the token independently:
+
+```csharp
+app.UseSqlOSAccessTokenValidation(options =>
+{
+    options.ExpectedAudience = "https://api.example.com";
+});
+```
+
+Application access decides whether a user may use an app. Audience validation decides whether an API should accept a token.
+
+## Headless request parameters
+
+When `UseHeadlessAuthPage` is configured, SqlOS redirects to the app-owned UI with request state:
+
+| Parameter | Meaning |
+| --- | --- |
+| `request` | SqlOS authorization request ID |
+| `view` | Current view (`login`, `signup`, `organization`, `mfa`, `device`, etc.) |
+| `email` | Known email when already identified |
+| `pendingToken` | Token for intermediate auth state |
+| `ui_context` | Context for invitations, CLI, or specialized flows |
+
+The app should call [headless endpoints](/docs/authserver/headless-auth) with the request ID instead of inventing separate login state.
+
+## Decision checklist
+
+Use standalone SqlOS when all of these are true:
+
+- you can name multiple app surfaces
+- each app needs distinct client IDs, redirect URIs, or access policy
+- users and organizations should be shared
+- SSO and invitations should work across apps
+- resource APIs can validate SqlOS tokens
+
+Stay on single-application mode when those statements are not true.
+
+Related:
+
+- [Run a standalone identity server](/docs/guides/standalone-identity-server)
+- [Standalone SqlOS identity server for multiple apps](/blog/standalone-sqlos-identity-server-multi-app)
+- [Application Access](/docs/authserver/application-access)
+- [Clients](/docs/authserver/clients)
