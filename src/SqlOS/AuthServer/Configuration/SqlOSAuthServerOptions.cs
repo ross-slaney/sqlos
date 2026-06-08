@@ -434,6 +434,7 @@ public sealed class SqlOSSsoPortalOptions
     public string? HeadlessApiBasePath { get; set; }
     public Func<SqlOSSsoSetupUiRouteContext, string>? BuildUiUrl { get; set; }
     public string DomainVerificationRecordPrefix { get; set; } = "_sqlos-verify";
+    public string DomainVerificationRecordValuePrefix { get; set; } = "sqlos-domain-verification";
     public List<string> ReservedDomainRoots { get; } = [];
 
     public string ResolveHeadlessApiBasePath(string adminBasePath)

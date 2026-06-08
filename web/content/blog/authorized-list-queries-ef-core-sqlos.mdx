@@ -1,0 +1,264 @@
+---
+title: "List Endpoints That Only Return Authorized Rows"
+description: "How SqlOS FGA turns EF Core list queries into authorized SQL Server queries, using the Todo sample resource tree and GetAuthorizationFilterAsync."
+date: "2026-06-04"
+author: "Ross Slaney"
+tags: ["FGA", "EF Core", "Authorization", "SQL Server", "SqlOS"]
+---
+
+Most authorization bugs do not start with a dramatic exploit. They start with a list endpoint.
+
+The detail endpoint has a check:
+
+```csharp
+if (!await CanEdit(userId, documentId))
+    return Results.Forbid();
+```
+
+But the list endpoint quietly returns too much:
+
+```csharp
+var todos = await db.TodoItems
+    .Where(x => x.SqlOSUserId == userId)
+    .OrderBy(x => x.CreatedAt)
+    .ToListAsync();
+```
+
+That works until the product adds teams, shared workspaces, organization admins, contractors, or nested resources. Then `owner_id = @uid` turns into copied filters, special cases, and post-query trimming. The user should only see rows they can access, and pagination should still be done by the database.
+
+SqlOS FGA is built for that exact list endpoint.
+
+<BlogVisual kind="fga-list-query" />
+
+## Point checks are not enough
+
+A point check answers one question:
+
+> Can this user edit this one todo?
+
+A list filter answers a different question:
+
+> Which todos can this user read, sorted and paged like any other query?
+
+Those are not interchangeable. If you load 500 rows and then call a permission service 500 times, you have already over-fetched data and broken pagination. Page 1 might shrink to three visible rows. Page 2 might include records that should have been on page 1. Search counts become misleading.
+
+The authorization predicate has to be inside the query.
+
+## Why owner_id breaks
+
+The Todo sample starts intentionally small, but even it models the problem better than `owner_id`.
+
+The resource hierarchy is:
+
+```text
+root
+  tenant::{userId}
+    todo::{todoId}
+```
+
+The grant is on the tenant root:
+
+```text
+subject user_123
+  has role tenant_owner
+  on resource tenant::user_123
+```
+
+The role includes:
+
+```text
+TENANT_CREATE_TODO
+TODO_READ
+TODO_WRITE
+```
+
+Every child todo inherits access from the tenant resource. The sample could add shared projects or organization workspaces later without changing the list endpoint shape. The row points to a resource, and the resource tree explains who can see it.
+
+## The Todo item carries a ResourceId
+
+Every protected entity implements `IHasResourceId`:
+
+```csharp
+using SqlOS.Fga.Interfaces;
+
+public sealed class TodoItem : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string SqlOSUserId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public bool IsCompleted { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}
+```
+
+The `ResourceId` is the bridge between business data and authorization data. The todo row can still have app-specific columns, indexes, and constraints. SqlOS only needs the resource ID to compose the authorization predicate.
+
+## The DbContext maps the SQL function
+
+The Todo sample context implements both SqlOS interfaces and exposes `IsResourceAccessible`:
+
+```csharp
+public sealed class TodoSampleDbContext(
+    DbContextOptions<TodoSampleDbContext> options)
+    : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+{
+    public DbSet<TodoItem> TodoItems => Set<TodoItem>();
+
+    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+        string resourceId,
+        string subjectIds,
+        string permissionId)
+        => FromExpression(() =>
+            IsResourceAccessible(resourceId, subjectIds, permissionId));
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.UseSqlOS(Database.IsRelational() ? GetType() : null);
+    }
+}
+```
+
+SqlOS creates the backing SQL Server function during host startup. EF Core can then translate a normal LINQ expression into SQL that calls the inline table-valued function.
+
+## Before and after
+
+The fragile version asks the app table to carry all authorization meaning:
+
+```csharp
+var items = await dbContext.TodoItems
+    .AsNoTracking()
+    .Where(x => x.SqlOSUserId == currentUserId)
+    .OrderBy(x => x.IsCompleted)
+    .ThenBy(x => x.CreatedAt)
+    .ToListAsync();
+```
+
+That is okay only while each todo has one owner and no sharing. The SqlOS version asks FGA for a query predicate:
+
+```csharp
+var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+    subjectId,
+    TodoFgaService.TodoReadPermission);
+
+var items = await dbContext.TodoItems
+    .AsNoTracking()
+    .Where(filter)
+    .OrderBy(x => x.IsCompleted)
+    .ThenBy(x => x.CreatedAt)
+    .Select(x => new
+    {
+        x.Id,
+        x.ResourceId,
+        x.Title,
+        x.IsCompleted,
+        x.CreatedAt,
+        x.CompletedAt
+    })
+    .ToListAsync(cancellationToken);
+```
+
+That filter composes with search, sort, projection, and pagination. It does not load unauthorized rows into memory first.
+
+## Creating rows and resources together
+
+When a todo is created, the app creates a domain row and an FGA resource in the same `DbContext` unit of work:
+
+```csharp
+var item = new TodoItem
+{
+    Id = Guid.NewGuid(),
+    SqlOSUserId = todoContext.SubjectId,
+    Title = request.Title.Trim(),
+    CreatedAt = DateTime.UtcNow
+};
+
+item.ResourceId = todoFgaService.CreateTodoResource(
+    item,
+    todoContext.TenantResourceId);
+
+dbContext.TodoItems.Add(item);
+await dbContext.SaveChangesAsync(cancellationToken);
+```
+
+The helper creates `todo::{todoId}` under the tenant resource:
+
+```csharp
+public string CreateTodoResource(TodoItem item, string tenantResourceId)
+{
+    var resourceId = GetTodoResourceId(item.Id);
+
+    _context.CreateResource(
+        tenantResourceId,
+        item.Title,
+        TodoResourceTypeId,
+        resourceId);
+
+    return resourceId;
+}
+```
+
+That is the practical advantage of keeping app data and authorization data in the same database. If the business write fails, the resource write fails with it. If the resource cannot be created, the todo is not silently created with no authorization node.
+
+## Mutations use point checks
+
+List endpoints use filters. Mutations still use explicit checks against one resource:
+
+```csharp
+var access = await fgaAuthService.CheckAccessAsync(
+    todoContext.SubjectId,
+    TodoFgaService.TodoWritePermission,
+    item.ResourceId);
+
+if (!access.Allowed)
+{
+    return Results.Json(
+        new { error = "Permission denied" },
+        statusCode: 403);
+}
+
+item.IsCompleted = !item.IsCompleted;
+await dbContext.SaveChangesAsync(cancellationToken);
+```
+
+The model is the same either way: subjects, resources, roles, permissions, grants. The list endpoint and the mutation endpoint do not invent separate authorization systems.
+
+## The dashboard makes it inspectable
+
+Because the resources and grants are real rows, the dashboard can show the tree, the grants, and a traceable access decision.
+
+<BlogScreenshot
+  src="/docs/dashboard-grants.png"
+  alt="SqlOS grants dashboard"
+  caption="Grants are scoped to resources. A role granted on a parent resource applies to descendants without copying grants to every row."
+/>
+
+<BlogScreenshot
+  src="/docs/dashboard-access-tester.png"
+  alt="SqlOS access tester dashboard"
+  caption="The access tester is the 30-second sanity check: subject, resource, permission, and the decision path."
+/>
+
+This is useful during development and support. If a customer says, "I should see that project," you do not have to reverse engineer a pile of `WHERE` clauses. You can inspect the resource path and the grants that do or do not match.
+
+## What this solves
+
+SqlOS FGA is not just a more expressive `CanEdit` helper. It solves the list problem:
+
+- list only authorized rows
+- keep authorization inside the SQL query
+- combine auth with search, sorting, and pagination
+- support inherited access through a resource tree
+- avoid per-row HTTP checks
+- keep resource writes in the same transaction as business writes
+
+If you are evaluating Auth0 FGA or WorkOS FGA, the next posts compare the architecture tradeoffs. This post is the SqlOS problem statement: your .NET app needs authorized list queries, and those list queries already live in EF Core.
+
+Next reading:
+
+- [Todo Sample](/docs/authserver/todo-sample)
+- [List Filtering](/docs/fga/list-filter)
+- [FGA Overview](/docs/fga/overview)
+- [Row-Level Security with EF Core, SQL Server, and TVFs](/blog/row-level-security-ef-core-sql-server-tvfs)

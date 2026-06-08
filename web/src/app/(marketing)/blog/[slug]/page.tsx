@@ -3,6 +3,7 @@ import { getAllPosts, getPostBySlug } from "@/lib/blog";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
+import { blogMdxComponents } from "@/components/blog/BlogMdxComponents";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -79,6 +80,7 @@ export default async function BlogPostPage({ params }: PageProps) {
         <div className="prose prose-zinc dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-pre:bg-zinc-900 prose-pre:text-zinc-300 prose-code:text-indigo-600 dark:prose-code:text-indigo-400 prose-code:before:content-none prose-code:after:content-none">
           <MDXRemote
             source={post.content}
+            components={blogMdxComponents}
             options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
           />
         </div>
