@@ -216,20 +216,6 @@ Default base path:
 | `GET` | `/events/{id}` | Fetch one event by id. |
 | `GET` | `/events/export.csv` | Export filtered events to CSV. |
 
-Example list request:
-
-```bash
-curl "http://localhost:5062/sqlos/admin/audit/api/events?applicationKey=northwind-retail&source=application&pageSize=25" \
-  -H "Cookie: SqlOS.Dashboard.Session=<dashboard-session-cookie>"
-```
-
-Example export request:
-
-```bash
-curl -OJ "http://localhost:5062/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z" \
-  -H "Cookie: SqlOS.Dashboard.Session=<dashboard-session-cookie>"
-```
-
 CSV export uses the same filters as listing. It is bounded to 5,000 rows and a maximum 366-day date range. If no dates are supplied, export defaults to the last 30 days.
 
 ## Retail example
