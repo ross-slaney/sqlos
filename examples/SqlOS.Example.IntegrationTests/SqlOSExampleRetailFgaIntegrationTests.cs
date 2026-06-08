@@ -194,22 +194,6 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [TestMethod]
-    public async Task DemoSwitch_ReturnsTokensWithoutMfaChallenge()
-    {
-        var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");
-
-        var response = await ExampleApiFixture.Client.PostAsJsonAsync(
-            "/api/v1/auth/demo/switch",
-            new { email = companyAdminEmail });
-
-        response.EnsureSuccessStatusCode();
-        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        json.RootElement.GetProperty("accessToken").GetString().Should().NotBeNullOrWhiteSpace();
-        json.RootElement.GetProperty("refreshToken").GetString().Should().NotBeNullOrWhiteSpace();
-        json.RootElement.TryGetProperty("requiresMfa", out _).Should().BeFalse();
-    }
-
     private static async Task<IReadOnlyList<DemoSubject>> GetDemoSubjectsAsync()
     {
         var response = await ExampleApiFixture.Client.GetAsync("/api/demo/users");

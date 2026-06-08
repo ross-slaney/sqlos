@@ -214,13 +214,6 @@ public sealed class SqlOSSsoPortalService
             .FirstOrDefaultAsync(x => x.LinkTokenHash == tokenHash, cancellationToken)
             ?? throw new InvalidOperationException("Portal setup token is invalid or expired.");
 
-        if (SessionHasBeenOpened(session)
-            && await TryGetSessionAsync(httpContext, cancellationToken) is { } existingSession
-            && string.Equals(existingSession.Id, session.Id, StringComparison.Ordinal))
-        {
-            return ToSessionResult(existingSession, setupUrl: null);
-        }
-
         EnsureSessionCanOpen(session, now);
 
         var rawSessionToken = _cryptoService.GenerateOpaqueToken();
@@ -936,9 +929,6 @@ public sealed class SqlOSSsoPortalService
             throw new InvalidOperationException("Portal setup token has already been used.");
         }
     }
-
-    private static bool SessionHasBeenOpened(SqlOSSsoPortalSession session)
-        => session.OpenedAt != null || !string.IsNullOrWhiteSpace(session.SessionTokenHash);
 
     private bool IsSessionUsable(SqlOSSsoPortalSession session, DateTime now)
         => session.RevokedAt == null

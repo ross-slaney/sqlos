@@ -164,6 +164,7 @@ public static class ExampleDemoEndpoints
             ExampleFgaService fgaService,
             ExampleAppDbContext db,
             IOptions<ExampleWebOptions> webOptions,
+            IOptions<SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions> authOptions,
             HttpContext httpContext,
             CancellationToken cancellationToken) =>
         {
@@ -191,29 +192,41 @@ public static class ExampleDemoEndpoints
 
             try
             {
-                var user = await db.Set<SqlOSUser>()
-                    .FirstAsync(x => x.Id == userId, cancellationToken);
-                var client = await db.Set<SqlOSClientApplication>()
-                    .FirstOrDefaultAsync(x => x.ClientId == webOptions.Value.ClientId && x.IsActive, cancellationToken)
-                    ?? throw new InvalidOperationException("Example web client is not configured.");
-
-                await fgaService.EnsureUserAccessAsync(user.Id, org.Id, cancellationToken);
-                var tokens = await authService.CreateSessionTokensForUserAsync(
-                    user,
-                    client,
-                    org.Id,
-                    "demo_switch",
-                    httpContext.Request.Headers.UserAgent.ToString(),
-                    httpContext.Connection.RemoteIpAddress?.ToString(),
+                var result = await authService.LoginWithPasswordAsync(
+                    new SqlOSPasswordLoginRequest(requestedEmail, RetailSeedService.DemoPassword, webOptions.Value.ClientId, org.Id),
+                    httpContext,
                     cancellationToken);
+
+                if (result.RequiresMfa && !string.IsNullOrWhiteSpace(result.MfaToken))
+                {
+                    return Results.Ok(new
+                    {
+                        requiresMfa = true,
+                        mfaToken = result.MfaToken,
+                        requiresMfaEnrollment = result.RequiresMfaEnrollment,
+                        mfaMethods = result.MfaMethods ?? Array.Empty<string>()
+                    });
+                }
+
+                if (result.Tokens == null)
+                    return Results.BadRequest(new { error = "Login did not produce tokens." });
+
+                var validated = await authService.ValidateAccessTokenAsync(
+                        result.Tokens.AccessToken,
+                        authOptions.Value.DefaultAudience,
+                        cancellationToken)
+                    ?? throw new InvalidOperationException("Token validation failed after login.");
+
+                await fgaService.EnsureUserAccessAsync(validated.UserId!, org.Id, cancellationToken);
+
                 return Results.Ok(new
                 {
-                    accessToken = tokens.AccessToken,
-                    refreshToken = tokens.RefreshToken,
-                    sessionId = tokens.SessionId,
-                    organizationId = tokens.OrganizationId,
-                    accessTokenExpiresAt = tokens.AccessTokenExpiresAt,
-                    refreshTokenExpiresAt = tokens.RefreshTokenExpiresAt,
+                    accessToken = result.Tokens.AccessToken,
+                    refreshToken = result.Tokens.RefreshToken,
+                    sessionId = result.Tokens.SessionId,
+                    organizationId = result.Tokens.OrganizationId,
+                    accessTokenExpiresAt = result.Tokens.AccessTokenExpiresAt,
+                    refreshTokenExpiresAt = result.Tokens.RefreshTokenExpiresAt,
                 });
             }
             catch (InvalidOperationException ex)
