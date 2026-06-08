@@ -3204,6 +3204,9 @@ public static class EndpointRouteBuilderExtensions
         portal.MapGet("", (SqlOSSsoPortalService portalService) => portalService.IsHostedPortalEnabled
             ? Results.Content(SqlOSSsoPortalPageRenderer.RenderShell(), "text/html; charset=utf-8")
             : Results.NotFound());
+        portal.MapGet("/", (SqlOSSsoPortalService portalService) => portalService.IsHostedPortalEnabled
+            ? Results.Content(SqlOSSsoPortalPageRenderer.RenderShell(), "text/html; charset=utf-8")
+            : Results.NotFound());
 
         var api = portal.MapGroup("/api");
 
