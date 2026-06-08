@@ -5,9 +5,11 @@
     const authDashboardPath = `${dashboardBasePath}/admin/auth`;
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const emailDashboardPath = `${dashboardBasePath}/admin/email`;
+    const auditDashboardPath = `${dashboardBasePath}/admin/audit`;
     const authApiBasePath = `${authDashboardPath}/api`;
     const fgaApiBasePath = `${fgaDashboardPath}/api`;
     const emailApiBasePath = `${emailDashboardPath}/api`;
+    const auditApiBasePath = `${auditDashboardPath}/api`;
     const clientOnboardingDocsUrl = "https://sqlos.dev/docs/authserver/preregistration-vs-cimd-vs-dcr";
 
     const content = document.getElementById("content");
@@ -38,6 +40,21 @@
         from: "",
         to: ""
     };
+    const auditFilters = {
+        organizationId: "",
+        application: "",
+        source: "",
+        action: "",
+        actorType: "",
+        actorId: "",
+        targetType: "",
+        targetId: "",
+        result: "",
+        from: "",
+        to: "",
+        search: ""
+    };
+    let selectedAuditEventId = null;
 
     const authViews = {
         overview: { title: "Auth Server", description: "Organizations, users, sessions, applications, and security settings." },
@@ -435,6 +452,10 @@
             return `${emailDashboardPath}/${route.slice(6)}`;
         }
 
+        if (route.startsWith("audit-")) {
+            return `${auditDashboardPath}/${route.slice(6)}`;
+        }
+
         return `${dashboardBasePath}/`;
     }
 
@@ -551,6 +572,16 @@
             };
         }
 
+        if (segments[1] === "audit") {
+            const view = segments[2] === "logs" ? "logs" : "logs";
+            return {
+                kind: "audit",
+                view,
+                key: "audit-logs",
+                canonicalPath: `${auditDashboardPath}/${view}`
+            };
+        }
+
         return { kind: "home", key: "home", canonicalPath: `${dashboardBasePath}/` };
     }
 
@@ -628,8 +659,15 @@
             return "n/a";
         }
 
-        const parsed = parseJsonObject(value, null);
-        return parsed ? JSON.stringify(parsed, null, 2) : String(value);
+        if (typeof value === "object") {
+            return JSON.stringify(value, null, 2);
+        }
+
+        try {
+            return JSON.stringify(JSON.parse(value), null, 2);
+        } catch {
+            return String(value);
+        }
     }
 
     function renderClientBadge(label, tone = "neutral") {
@@ -1029,6 +1067,11 @@
 
             if (route.kind === "email") {
                 await renderEmailRoute(route.view);
+                return;
+            }
+
+            if (route.kind === "audit") {
+                await renderAuditLogs();
                 return;
             }
 
@@ -3319,30 +3362,257 @@
     }
 
     async function renderAuthAudit() {
-        const config = authViews.audit;
-        setHeader("Auth Server", config.title, config.description);
-        renderLoading("Loading audit events...");
+        await renderAuditLogs({
+            fixedSource: "authserver",
+            eyebrow: "Audit Logs",
+            title: "Auth Server Audit",
+            description: "Review auth-server events through the central audit log product."
+        });
+    }
 
-        const auditEvents = await fetchJson(`${authApiBasePath}/audit-events`);
+    function auditDateParam(value, endOfRange = false) {
+        if (!value) {
+            return "";
+        }
+
+        const normalized = value.length === 10
+            ? `${value}T${endOfRange ? "23:59:59" : "00:00:00"}`
+            : value;
+        const parsed = new Date(normalized);
+        return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+    }
+
+    function buildAuditQueryParams({ includePage = true, fixedSource = null } = {}) {
+        const params = new URLSearchParams();
+        if (includePage) {
+            const pager = getPagerState("audit-logs", 25);
+            params.set("page", String(pager.page));
+            params.set("pageSize", String(pager.pageSize));
+        }
+
+        const values = {
+            organizationId: auditFilters.organizationId,
+            application: auditFilters.application,
+            source: fixedSource || auditFilters.source,
+            action: auditFilters.action,
+            actorType: auditFilters.actorType,
+            actorId: auditFilters.actorId,
+            targetType: auditFilters.targetType,
+            targetId: auditFilters.targetId,
+            result: auditFilters.result,
+            search: auditFilters.search,
+            occurredAtFrom: auditDateParam(auditFilters.from),
+            occurredAtTo: auditDateParam(auditFilters.to, true)
+        };
+
+        Object.entries(values).forEach(([key, value]) => {
+            if (value) {
+                params.set(key, value);
+            }
+        });
+
+        return params;
+    }
+
+    function auditActorLabel(event) {
+        const actor = event.actor || {};
+        const identity = actor.displayName || actor.id || "n/a";
+        return `${actor.type || "system"}: ${identity}`;
+    }
+
+    function auditTargetSummary(targets) {
+        if (!targets || targets.length === 0) {
+            return "n/a";
+        }
+
+        return targets
+            .map(target => `${target.type}:${target.displayName || target.id}`)
+            .join(", ");
+    }
+
+    function auditApplicationLabel(event) {
+        return event.applicationKey || event.applicationId || "n/a";
+    }
+
+    function renderAuditFilterForm(fixedSource) {
+        return `
+            <form id="audit-filter-form" class="audit-filter-form">
+                <input name="search" placeholder="Search action, actor, target, metadata" value="${esc(auditFilters.search)}">
+                <input name="organizationId" placeholder="Organization ID" value="${esc(auditFilters.organizationId)}">
+                <input name="application" placeholder="Application key or client ID" value="${esc(auditFilters.application)}">
+                ${fixedSource ? `
+                    <input name="source" value="${esc(fixedSource)}" disabled>
+                ` : `
+                    <input name="source" placeholder="Source" value="${esc(auditFilters.source)}">
+                `}
+                <input name="action" placeholder="Action" value="${esc(auditFilters.action)}">
+                <input name="actorType" placeholder="Actor type" value="${esc(auditFilters.actorType)}">
+                <input name="actorId" placeholder="Actor ID" value="${esc(auditFilters.actorId)}">
+                <input name="targetType" placeholder="Target type" value="${esc(auditFilters.targetType)}">
+                <input name="targetId" placeholder="Target ID" value="${esc(auditFilters.targetId)}">
+                <input name="result" placeholder="Metadata result/status" value="${esc(auditFilters.result)}">
+                <input name="from" type="datetime-local" value="${esc(auditFilters.from)}">
+                <input name="to" type="datetime-local" value="${esc(auditFilters.to)}">
+                <div class="form-actions audit-filter-actions">
+                    <button type="submit">Apply filters</button>
+                    <button id="audit-clear-filters" type="button">Clear</button>
+                </div>
+            </form>
+        `;
+    }
+
+    function renderAuditDetail(event) {
+        if (!event) {
+            return `
+                <section class="panel">
+                    <h2>Event Detail</h2>
+                    <div class="empty-state-block">Select an audit event to inspect its actor, targets, context, and metadata.</div>
+                </section>
+            `;
+        }
+
+        return `
+            <section class="panel audit-detail-panel">
+                <div class="panel-actions">
+                    <h2>Event Detail</h2>
+                    <span class="client-badge client-badge--source">${esc(event.source)}</span>
+                </div>
+                <h3>${esc(event.action)}</h3>
+                ${renderMetadataRows([
+                    { label: "Event ID", value: event.id },
+                    { label: "Occurred", value: formatDate(event.occurredAt) },
+                    { label: "Ingested", value: formatDate(event.ingestedAt) },
+                    { label: "Organization", value: event.organizationId || "n/a" },
+                    { label: "Application", value: auditApplicationLabel(event) },
+                    { label: "Actor", value: auditActorLabel(event) },
+                    { label: "Targets", value: auditTargetSummary(event.targets) },
+                    { label: "IP", value: event.ipAddress || event.context?.ipAddress || "n/a" },
+                    { label: "Request", value: event.requestId || event.context?.requestId || "n/a" },
+                    { label: "Correlation", value: event.correlationId || event.context?.correlationId || "n/a" }
+                ])}
+                <details open>
+                    <summary>Actor</summary>
+                    <pre class="json-preview">${esc(formatJson(event.actor))}</pre>
+                </details>
+                <details open>
+                    <summary>Targets</summary>
+                    <pre class="json-preview">${esc(formatJson(event.targets || []))}</pre>
+                </details>
+                <details open>
+                    <summary>Context</summary>
+                    <pre class="json-preview">${esc(formatJson(event.context || {}))}</pre>
+                </details>
+                <details open>
+                    <summary>Metadata</summary>
+                    <pre class="json-preview">${esc(formatJson(event.metadata || {}))}</pre>
+                </details>
+            </section>
+        `;
+    }
+
+    async function renderAuditLogs(options = {}) {
+        const fixedSource = options.fixedSource || null;
+        setHeader(
+            options.eyebrow || "Governance",
+            options.title || "Audit Logs",
+            options.description || "Search, filter, inspect, and export structured SqlOS and application audit events.");
+        renderLoading("Loading audit logs...");
+
+        const pager = getPagerState("audit-logs", 25);
+        const params = buildAuditQueryParams({ fixedSource });
+        const auditResult = await fetchJson(`${auditApiBasePath}/events?${params.toString()}`);
+        let selectedEvent = null;
+        if (selectedAuditEventId) {
+            try {
+                selectedEvent = await fetchJson(`${auditApiBasePath}/events/${encodeURIComponent(selectedAuditEventId)}`);
+            } catch {
+                selectedAuditEventId = null;
+            }
+        }
+
+        const exportParams = buildAuditQueryParams({ includePage: false, fixedSource });
+        const exportHref = `${auditApiBasePath}/events/export.csv?${exportParams.toString()}`;
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <section class="panel">
-                <h2>Audit Events</h2>
-                ${renderList(
-                    auditEvents,
-                    item => `
-                        <strong>${esc(item.eventType)}</strong>
-                        ${renderMetadataRows([
-                            { label: "Occurred", value: formatDate(item.occurredAt) },
-                            { label: "Actor", value: `${item.actorType}: ${item.actorId || "n/a"}` },
-                            { label: "Entity", value: item.entityId ? `${item.entityType}: ${item.entityId}` : "n/a" }
-                        ])}
-                    `,
-                    "No audit events yet."
-                )}
-            </section>
+            <div class="panel-grid audit-grid">
+                <section class="panel">
+                    <div class="panel-actions">
+                        <h2>Filters</h2>
+                        <a class="button-link" href="${esc(exportHref)}">Export CSV</a>
+                    </div>
+                    ${renderAuditFilterForm(fixedSource)}
+                </section>
+                <section class="panel">
+                    <div class="panel-actions">
+                        <h2>Events</h2>
+                        <div id="audit-pagination-top">${renderPagination(auditResult.page, auditResult.totalPages, auditResult.totalCount)}</div>
+                    </div>
+                    ${renderList(
+                        auditResult.data,
+                        item => `
+                            <div class="audit-event-row ${item.id === selectedAuditEventId ? "audit-event-row--selected" : ""}">
+                                <div class="list-item-header">
+                                    <strong>${esc(item.action)}</strong>
+                                    <button type="button" data-audit-event-id="${esc(item.id)}">Inspect</button>
+                                </div>
+                                <div class="client-badge-row">
+                                    <span class="client-badge client-badge--source">${esc(item.source)}</span>
+                                    ${item.applicationKey || item.applicationId ? `<span class="client-badge client-badge--info">${esc(auditApplicationLabel(item))}</span>` : ""}
+                                    ${item.metadata?.result ? `<span class="client-badge client-badge--success">${esc(item.metadata.result)}</span>` : ""}
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "Occurred", value: formatDate(item.occurredAt) },
+                                    { label: "Actor", value: auditActorLabel(item) },
+                                    { label: "Organization", value: item.organizationId || "n/a" },
+                                    { label: "Targets", value: auditTargetSummary(item.targets) },
+                                    { label: "IP", value: item.ipAddress || item.context?.ipAddress || "n/a" }
+                                ])}
+                            </div>
+                        `,
+                        "No audit events matched the current filters."
+                    )}
+                </section>
+                ${renderAuditDetail(selectedEvent)}
+            </div>
         `;
+
+        bindForm("audit-filter-form", async form => {
+            auditFilters.search = String(form.get("search") || "").trim();
+            auditFilters.organizationId = String(form.get("organizationId") || "").trim();
+            auditFilters.application = String(form.get("application") || "").trim();
+            auditFilters.source = fixedSource ? "" : String(form.get("source") || "").trim();
+            auditFilters.action = String(form.get("action") || "").trim();
+            auditFilters.actorType = String(form.get("actorType") || "").trim();
+            auditFilters.actorId = String(form.get("actorId") || "").trim();
+            auditFilters.targetType = String(form.get("targetType") || "").trim();
+            auditFilters.targetId = String(form.get("targetId") || "").trim();
+            auditFilters.result = String(form.get("result") || "").trim();
+            auditFilters.from = String(form.get("from") || "").trim();
+            auditFilters.to = String(form.get("to") || "").trim();
+            selectedAuditEventId = null;
+            setPagerPage("audit-logs", 1);
+        });
+
+        document.getElementById("audit-clear-filters")?.addEventListener("click", async () => {
+            Object.keys(auditFilters).forEach(key => auditFilters[key] = "");
+            selectedAuditEventId = null;
+            setPagerPage("audit-logs", 1);
+            await render();
+        });
+
+        document.querySelectorAll("[data-audit-event-id]").forEach(button => {
+            button.addEventListener("click", async () => {
+                selectedAuditEventId = button.dataset.auditEventId || null;
+                await render();
+            });
+        });
+
+        bindPagination("#audit-pagination-top", async page => {
+            pager.page = Math.max(1, page);
+            selectedAuditEventId = null;
+            await render();
+        });
     }
 
     async function renderEmailRoute(view) {

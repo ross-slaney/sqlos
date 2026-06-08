@@ -1,0 +1,236 @@
+---
+title: "Audit Logs Reference"
+description: "Record, query, inspect, and export SqlOS and application audit events."
+order: 12
+section: reference
+---
+
+<Banner
+  eyebrow="Reference"
+  title="Audit events for AuthServer and host applications"
+  href="/docs/guides/audit-logs"
+  actionLabel="Implementation guide"
+>
+  Audit Logs are append-only governance records. Use them for security review, support investigations, customer-visible activity history, and compliance exports.
+</Banner>
+
+## What Audit Logs capture
+
+Audit Logs answer:
+
+| Question | Field |
+| --- | --- |
+| What happened? | `Action` / `EventType` |
+| Who or what did it? | `Actor` |
+| Which tenant was affected? | `OrganizationId` |
+| Which app produced it? | `ApplicationId` / `ApplicationKey` |
+| Which system emitted it? | `Source` |
+| Which resources changed? | `Targets` |
+| Where did it come from? | `Context`, `IpAddress`, `UserAgent`, `RequestId`, `CorrelationId` |
+| What safe details explain the outcome? | `Metadata` |
+
+Audit events are not debug logs, traces, metrics, or product analytics. Keep them structured, bounded, durable, and safe for an operator to inspect.
+
+## Service registration
+
+`AddSqlOS<TContext>()` registers `ISqlOSAuditLogService`.
+
+```csharp
+builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
+{
+    options.UseSqlServer(connectionString);
+});
+```
+
+Inject the service into server-side application code. Frontends should not write audit rows directly.
+
+```csharp
+app.MapPost("/api/documents/{id}/share", async (
+    string id,
+    ShareDocumentRequest request,
+    ISqlOSAuditLogService auditLogs,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    await auditLogs.RecordAsync(new SqlOSAuditLogRecordRequest(
+        Action: "document.shared",
+        OrganizationId: request.OrganizationId,
+        ApplicationKey: "workspace-web",
+        Source: "application",
+        Actor: new SqlOSAuditActor("user", request.UserId, request.UserDisplayName),
+        Targets:
+        [
+            new SqlOSAuditTarget("document", id, request.DocumentName)
+        ],
+        Context: SqlOSAuditContext.FromHttpContext(httpContext),
+        Metadata: new Dictionary<string, object?>
+        {
+            ["result"] = "success",
+            ["role"] = request.Role
+        },
+        IdempotencyKey: $"document:{id}:shared:{request.UserId}:{httpContext.TraceIdentifier}"),
+        ct);
+
+    return Results.NoContent();
+});
+```
+
+## Record request
+
+`SqlOSAuditLogRecordRequest`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `Action` | `string` | Required stable action name. Prefer dot-delimited names such as `retail.inventory_item.updated`. |
+| `OrganizationId` | `string?` | Tenant or customer organization affected by the action. |
+| `UserId` | `string?` | Compatibility user id. Usually inferred from `Actor` when `Actor.Type == "user"`. |
+| `ApplicationId` | `string?` | SqlOS client row id when known. |
+| `ApplicationKey` | `string?` | Host application key such as `northwind-retail`. If it matches a registered client id, SqlOS resolves `ApplicationId`. |
+| `Source` | `string` | Event source. Defaults to `application`. AuthServer events use `authserver`. |
+| `Actor` | `SqlOSAuditActor?` | Principal that performed the action. |
+| `Targets` | `IReadOnlyList<SqlOSAuditTarget>?` | Resources affected by the action. |
+| `Context` | `SqlOSAuditContext?` | IP, user agent, session, request, and correlation identifiers. |
+| `Metadata` | `IReadOnlyDictionary<string, object?>?` | Non-sensitive structured details. |
+| `IdempotencyKey` | `string?` | Retry-safe key, hashed before storage. Duplicate keys return the original event. |
+| `OccurredAt` | `DateTime?` | Event time. Defaults to current UTC time. |
+
+## Actor
+
+`SqlOSAuditActor`
+
+| Field | Description |
+| --- | --- |
+| `Type` | Principal type such as `user`, `client`, `service_account`, `agent`, `dashboard`, or `system`. |
+| `Id` | Stable id for the actor when available. |
+| `DisplayName` | Human-readable name shown in dashboard details. |
+
+## Targets
+
+`SqlOSAuditTarget`
+
+| Field | Description |
+| --- | --- |
+| `Type` | Resource type such as `organization`, `client`, `chain`, `location`, or `inventory_item`. |
+| `Id` | Stable resource id. |
+| `DisplayName` | Human-readable name shown in dashboard details. |
+
+Use multiple targets when one operation affects a hierarchy. For example, an inventory update can target both the `location` and the `inventory_item`.
+
+## Context
+
+`SqlOSAuditContext.FromHttpContext(httpContext)` captures:
+
+- remote IP address
+- user agent
+- `sid` claim as session id
+- `X-Request-ID` / `X-Request-Id`, falling back to `HttpContext.TraceIdentifier`
+- `X-Correlation-ID` / `X-Correlation-Id`
+
+Create `SqlOSAuditContext` manually for background jobs, service accounts, queues, and scheduled maintenance.
+
+## Metadata safety
+
+Metadata must be non-secret. Do not include:
+
+- passwords
+- access or refresh tokens
+- API keys
+- client secrets
+- raw authorization headers
+- cookies
+- private keys
+- raw exceptions or stack traces
+- full request or response bodies
+
+SqlOS redacts common secret-like metadata keys, but callers are still responsible for sending safe data. Prefer stable fields such as `result`, `reason`, counts, role names, and non-sensitive before/after values.
+
+## Query request
+
+`SqlOSAuditLogListRequest`
+
+| Filter | Description |
+| --- | --- |
+| `Page`, `PageSize` | Pagination. `PageSize` is capped at 100. |
+| `OrganizationId` | Filter to one tenant. |
+| `ApplicationId`, `ApplicationKey`, `Application` | Filter by registered app/client id or host application key. |
+| `Source` | Filter by `application`, `authserver`, or another stable source. |
+| `Action` | Exact action filter. |
+| `ActorType`, `ActorId` | Principal filters. |
+| `TargetType`, `TargetId` | Affected resource filters. |
+| `Result` | Shortcut for result/status metadata values such as `success`, `failed`, or `denied`. |
+| `Search` | Free text search over common event fields. |
+| `OccurredAtFrom`, `OccurredAtTo` | UTC date range. |
+
+Results sort by `OccurredAt` descending, then `IngestedAt` descending.
+
+## Service methods
+
+```csharp
+public interface ISqlOSAuditLogService
+{
+    Task<SqlOSAuditLogRecordResult> RecordAsync(
+        SqlOSAuditLogRecordRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqlOSAuditLogListResult> ListAsync(
+        SqlOSAuditLogListRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqlOSAuditLogEvent?> GetAsync(
+        string id,
+        CancellationToken cancellationToken = default);
+
+    Task<SqlOSAuditLogCsvExportResult> ExportCsvAsync(
+        SqlOSAuditLogListRequest request,
+        CancellationToken cancellationToken = default);
+}
+```
+
+`RecordAsync` returns `Created = false` when the idempotency key already exists and the original event is returned.
+
+## Dashboard
+
+The embedded dashboard exposes Audit Logs as a top-level governance page:
+
+```text
+/sqlos/admin/audit/logs
+```
+
+Operators can filter by organization, application, source, action, actor, target, result/status metadata, text search, and date range. Selecting a row opens structured details for actor, targets, context, and metadata.
+
+The older AuthServer audit route links into the same central view filtered to `source=authserver`.
+
+## Admin API
+
+Admin APIs are mounted when you call `app.MapSqlOS()`. They are protected by the same dashboard authorization as `/sqlos/admin`: password-mode dashboard sessions, your configured `Dashboard.AuthorizationCallback`, or your deployment's dashboard-facing proxy/SSO controls. Unauthorized requests return `404`.
+
+Default base path:
+
+```text
+/sqlos/admin/audit/api
+```
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/events` | List audit events with filters. |
+| `GET` | `/events/{id}` | Fetch one event by id. |
+| `GET` | `/events/export.csv` | Export filtered events to CSV. |
+
+CSV export uses the same filters as listing. It is bounded to 5,000 rows and a maximum 366-day date range. If no dates are supplied, export defaults to the last 30 days.
+
+## Retail example
+
+The Retail example records host-application events with:
+
+```csharp
+ApplicationKey = "northwind-retail"
+Source = "application"
+```
+
+Successful chain, location, and inventory mutations appear in `/sqlos/admin/audit/logs`. Filter by `northwind-retail` to inspect only Retail events.
+
+## See also
+
+- [Add audit logs to your app](/docs/guides/audit-logs)
+- [Dashboard](/docs/authserver/dashboard-overview)
+- [API Reference](/docs/reference/api-reference)

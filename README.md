@@ -304,6 +304,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
 - [SMS OTP](docs/SMS_OTP.md) — passwordless phone-code login/signup through Twilio Verify
 - [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
+- [Audit Logs](docs/AUDIT_LOGS.md) — central event model, application scoping, dashboard filters, export, and host-app ingestion
 - [Todo Sample](examples/SqlOS.Todo.Api/README.md) — hosted auth, simple FGA, and MCP-oriented protected-resource flows
 - [Client Registration DevEx](docs/CLIENT_REGISTRATION_DEVEX_2026.md) — product vocabulary and onboarding model
 - [Preregistration vs CIMD vs DCR](web/content/docs/authserver/preregistration-vs-cimd-vs-dcr.mdx) — choose the right client onboarding path

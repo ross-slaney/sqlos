@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
+using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Specifications;
@@ -79,6 +81,7 @@ public static class ChainEndpoints
             CreateChainRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -98,6 +101,18 @@ public static class ChainEndpoints
             context.Chains.Add(chain);
 
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.chain.created",
+                [new SqlOSAuditTarget("chain", chain.Id, chain.Name)],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["chainResourceId"] = chain.ResourceId,
+                    ["headquartersAddress"] = chain.HeadquartersAddress
+                },
+                http.RequestAborted);
 
             return Results.Created($"/api/chains/{chain.Id}", new ChainDetailDto
             {
@@ -117,6 +132,7 @@ public static class ChainEndpoints
             UpdateChainRequest request,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -127,11 +143,25 @@ public static class ChainEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.ChainEdit, chain.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            var previousName = chain.Name;
             chain.Name = request.Name;
             chain.Description = request.Description;
             chain.HeadquartersAddress = request.HeadquartersAddress;
             chain.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.chain.updated",
+                [new SqlOSAuditTarget("chain", chain.Id, chain.Name)],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["previousName"] = previousName,
+                    ["chainResourceId"] = chain.ResourceId,
+                    ["headquartersAddress"] = chain.HeadquartersAddress
+                },
+                http.RequestAborted);
 
             return Results.Ok(new ChainDetailDto
             {
@@ -150,6 +180,7 @@ public static class ChainEndpoints
             string id,
             ExampleAppDbContext context,
             ISqlOSFgaAuthService authService,
+            RetailAuditService audit,
             HttpContext http) =>
         {
             var subjectId = http.GetSubjectId();
@@ -162,6 +193,18 @@ public static class ChainEndpoints
 
             context.Chains.Remove(chain);
             await context.SaveChangesAsync();
+            await audit.RecordAsync(
+                http,
+                context,
+                "retail.chain.deleted",
+                [new SqlOSAuditTarget("chain", chain.Id, chain.Name)],
+                new Dictionary<string, object?>
+                {
+                    ["result"] = "success",
+                    ["chainResourceId"] = chain.ResourceId,
+                    ["headquartersAddress"] = chain.HeadquartersAddress
+                },
+                http.RequestAborted);
 
             return Results.NoContent();
         }).WithName("DeleteChain");

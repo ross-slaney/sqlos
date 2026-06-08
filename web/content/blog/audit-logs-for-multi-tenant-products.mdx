@@ -1,0 +1,193 @@
+---
+title: "Audit Logs for Multi-Tenant Products"
+description: "SqlOS now gives AuthServer and host applications one structured audit trail for governance, support, and customer review."
+date: "2026-06-08"
+author: "Ross Slaney"
+tags: ["Audit Logs", "Governance", "AuthServer", "SqlOS"]
+---
+
+Most applications eventually grow a second kind of log.
+
+The first log is for engineers. It says a request timed out, a SQL query was slow, or a handler threw.
+
+The second log is for operators, security teams, support, and customers. It answers:
+
+> Who did what, to which resource, in which tenant, from which application, and when?
+
+That second log is an audit log. SqlOS now has it as a first-class product surface.
+
+## Audit logs are not debug logs
+
+Debug logs are intentionally noisy. They carry stack traces, timings, low-level request details, and implementation context. They are useful when an engineer is fixing a bug.
+
+Audit logs need different properties:
+
+| Property | Why it matters |
+| --- | --- |
+| Structured | Operators need to filter by organization, actor, action, and resource. |
+| Durable | Events may be needed for support, security review, or customer reporting. |
+| Bounded | Rows should carry enough context, not full request dumps. |
+| Safe | Operators should not see secrets, tokens, cookies, or raw bodies. |
+| Product-aware | The log should understand organizations, apps, users, agents, and resources. |
+
+If you mix these concerns into application logs, the result is usually either too noisy for operators or too sparse for investigations.
+
+SqlOS Audit Logs are designed for the second job.
+
+## One trail for AuthServer and the host app
+
+Before this release, AuthServer events were audit-like, but host applications still had to invent their own activity trail.
+
+Now both paths use the same central event model.
+
+AuthServer compatibility events flow into the central audit log with:
+
+```text
+Source = authserver
+```
+
+Host applications can record product events with:
+
+```text
+Source = application
+ApplicationKey = northwind-retail
+```
+
+That matters because real investigations rarely stop at the auth boundary.
+
+For example:
+
+1. A dashboard admin disables a client.
+2. A user signs in through SSO.
+3. A service account updates inventory.
+4. A support operator exports matching events for one customer.
+
+Those should be queryable from the same governance surface, with enough structure to separate AuthServer events from application events.
+
+## The event shape
+
+Every audit event starts with a stable action:
+
+```text
+retail.inventory_item.updated
+```
+
+Then it describes the actor:
+
+```csharp
+new SqlOSAuditActor("user", userId, "Company Admin")
+```
+
+And the affected targets:
+
+```csharp
+[
+    new SqlOSAuditTarget("location", locationId, "Walmart Supercenter #001"),
+    new SqlOSAuditTarget("inventory_item", itemId, "ProBook Laptop")
+]
+```
+
+The event can also include request context:
+
+```csharp
+SqlOSAuditContext.FromHttpContext(httpContext)
+```
+
+And safe metadata:
+
+```csharp
+new Dictionary<string, object?>
+{
+    ["result"] = "success",
+    ["sku"] = "LAPTOP-001",
+    ["previousQuantity"] = 12,
+    ["newQuantity"] = 18
+}
+```
+
+That is enough for an operator to answer what happened without exposing access tokens, cookies, passwords, raw exceptions, or request bodies.
+
+## Idempotency belongs in the audit layer
+
+Audit writes often happen near mutations. Mutations are retried. Workers can restart. Clients can resubmit.
+
+Duplicate audit events make investigations worse because operators have to decide whether two rows represent two actions or one retried write.
+
+SqlOS accepts an `IdempotencyKey` on audit writes. The key is hashed before storage. If the same key appears again, `RecordAsync` returns the original event instead of inserting a duplicate.
+
+That lets application code build retry-safe audit writes from domain facts:
+
+```text
+retail:inventory:{itemId}:updated:{operationId}
+```
+
+## Dashboard-first, API-backed
+
+The embedded dashboard now has a top-level Governance section for Audit Logs:
+
+```text
+/sqlos/admin/audit/logs
+```
+
+Operators can filter by:
+
+- organization
+- application/client
+- source
+- action
+- actor type and id
+- target type and id
+- result/status metadata
+- free text
+- date range
+
+Selecting a row opens structured details for actor, targets, context, and metadata.
+
+The same filters back CSV export. Exports are intentionally bounded for dashboard use: 5,000 rows and a maximum 366-day range. If no dates are supplied, the export defaults to the last 30 days.
+
+## Retail example
+
+The Northwind Retail example now records application audit events for successful chain, location, and inventory mutations.
+
+That makes the local demo concrete:
+
+1. Open the Retail app.
+2. Switch to `Company Admin`.
+3. Create or update a chain, store, or inventory item.
+4. Open `/sqlos/admin/audit/logs`.
+5. Filter by application key `northwind-retail`.
+
+You will see host-application events next to AuthServer governance events, without the frontend calling audit APIs directly.
+
+## Why this belongs in SqlOS
+
+SqlOS already understands organizations, AuthServer users, client applications, FGA subjects, sessions, and the embedded admin dashboard.
+
+Audit logs sit naturally on top of that foundation.
+
+Instead of every host app building a one-off activity table, CSV exporter, dashboard page, metadata redaction rules, and auth-event bridge, SqlOS gives you a shared event model and admin surface.
+
+You still decide which product actions matter. SqlOS handles the storage, dashboard filtering, export path, AuthServer compatibility, and common safety rules.
+
+## Start with product-critical actions
+
+Do not audit everything.
+
+Start with actions that matter to a customer or operator:
+
+- sign-ins, logouts, and session changes
+- client and application access changes
+- organization and membership changes
+- SSO and MFA configuration changes
+- permission and grant changes
+- business-resource mutations such as inventory, documents, invoices, or exports
+
+Then keep the event names stable.
+
+That is the practical difference between "we have logs somewhere" and "we can answer what happened."
+
+Next reading:
+
+- [Add Audit Logs](/docs/guides/audit-logs)
+- [Audit Logs Reference](/docs/reference/audit-logs)
+- [Dashboard](/docs/authserver/dashboard-overview)

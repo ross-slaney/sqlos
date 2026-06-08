@@ -7,6 +7,7 @@ using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Endpoints;
 using SqlOS.Example.Api.FgaRetail.Endpoints;
 using SqlOS.Example.Api.FgaRetail.Seeding;
+using SqlOS.Example.Api.FgaRetail.Services;
 using SqlOS.Example.Api.Middleware;
 using SqlOS.Example.Api.Services;
 using Microsoft.AspNetCore.WebUtilities;
@@ -276,6 +277,7 @@ builder.AddSqlOS<ExampleAppDbContext>(options =>
 
 builder.Services.AddScoped<ExampleFgaService>();
 builder.Services.AddScoped<RetailSeedService>();
+builder.Services.AddScoped<RetailAuditService>();
 builder.Services.AddHostedService<ExampleRetailSeedHostedService>();
 builder.Services.AddCors(options =>
 {

@@ -456,15 +456,41 @@ public sealed class SqlOSTemporaryToken
 
 public sealed class SqlOSAuditEvent
 {
+    private string _eventType = string.Empty;
+
     public string Id { get; set; } = string.Empty;
     public string? OrganizationId { get; set; }
+    public string? ApplicationId { get; set; }
+    public string? ApplicationKey { get; set; }
     public string? UserId { get; set; }
     public string? SessionId { get; set; }
-    public string EventType { get; set; } = string.Empty;
-    public string ActorType { get; set; } = string.Empty;
+    public string EventType
+    {
+        get => _eventType;
+        set
+        {
+            _eventType = value ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(Action))
+            {
+                Action = _eventType;
+            }
+        }
+    }
+    public string Source { get; set; } = "authserver";
+    public string Action { get; set; } = string.Empty;
+    public string ActorType { get; set; } = "system";
     public string? ActorId { get; set; }
+    public string? ActorDisplayName { get; set; }
+    public string TargetsJson { get; set; } = "[]";
+    public string? ContextJson { get; set; }
+    public string? MetadataJson { get; set; }
     public DateTime OccurredAt { get; set; }
+    public DateTime IngestedAt { get; set; } = DateTime.UtcNow;
     public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+    public string? RequestId { get; set; }
+    public string? CorrelationId { get; set; }
+    public string? IdempotencyKeyHash { get; set; }
     public string? DataJson { get; set; }
 }
 

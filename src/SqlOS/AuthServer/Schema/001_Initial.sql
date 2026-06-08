@@ -192,16 +192,46 @@ BEGIN
     CREATE TABLE [{Schema}].[SqlOSAuditEvents] (
         [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
         [OrganizationId] NVARCHAR(64) NULL,
+        [ApplicationId] NVARCHAR(64) NULL,
+        [ApplicationKey] NVARCHAR(200) NULL,
         [UserId] NVARCHAR(64) NULL,
         [SessionId] NVARCHAR(64) NULL,
-        [EventType] NVARCHAR(120) NOT NULL,
+        [EventType] NVARCHAR(160) NOT NULL,
+        [Source] NVARCHAR(80) NOT NULL CONSTRAINT [DF_SqlOSAuditEvents_Source] DEFAULT ('authserver'),
+        [Action] NVARCHAR(160) NOT NULL CONSTRAINT [DF_SqlOSAuditEvents_Action] DEFAULT (''),
         [ActorType] NVARCHAR(80) NOT NULL,
-        [ActorId] NVARCHAR(64) NULL,
+        [ActorId] NVARCHAR(128) NULL,
+        [ActorDisplayName] NVARCHAR(320) NULL,
+        [TargetsJson] NVARCHAR(MAX) NOT NULL CONSTRAINT [DF_SqlOSAuditEvents_TargetsJson] DEFAULT ('[]'),
+        [ContextJson] NVARCHAR(MAX) NULL,
+        [MetadataJson] NVARCHAR(MAX) NULL,
         [OccurredAt] DATETIME2 NOT NULL,
+        [IngestedAt] DATETIME2 NOT NULL CONSTRAINT [DF_SqlOSAuditEvents_IngestedAt] DEFAULT (SYSUTCDATETIME()),
         [IpAddress] NVARCHAR(128) NULL,
+        [UserAgent] NVARCHAR(512) NULL,
+        [RequestId] NVARCHAR(128) NULL,
+        [CorrelationId] NVARCHAR(128) NULL,
+        [IdempotencyKeyHash] NVARCHAR(128) NULL,
         [DataJson] NVARCHAR(MAX) NULL
     );
 END
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_OrganizationId_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_OrganizationId_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([OrganizationId], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_ApplicationId_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_ApplicationId_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([ApplicationId], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_ApplicationKey_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_ApplicationKey_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([ApplicationKey], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_Source_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_Source_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([Source], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_Action_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_Action_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([Action], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_SqlOSAuditEvents_Actor_OccurredAt' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE INDEX [IX_SqlOSAuditEvents_Actor_OccurredAt] ON [{Schema}].[SqlOSAuditEvents] ([ActorType], [ActorId], [OccurredAt] DESC);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'UX_SqlOSAuditEvents_IdempotencyKeyHash' AND object_id = OBJECT_ID('[{Schema}].[SqlOSAuditEvents]'))
+    CREATE UNIQUE INDEX [UX_SqlOSAuditEvents_IdempotencyKeyHash] ON [{Schema}].[SqlOSAuditEvents] ([IdempotencyKeyHash]) WHERE [IdempotencyKeyHash] IS NOT NULL;
 
 DELETE FROM [{Schema}].[SqlOSSchema];
 INSERT INTO [{Schema}].[SqlOSSchema] ([Version]) VALUES (1);

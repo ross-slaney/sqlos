@@ -5,6 +5,7 @@ using System.Xml;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
@@ -1700,13 +1701,25 @@ public sealed class SqlOSAdminService
             {
                 x.Id,
                 x.EventType,
+                x.Action,
+                x.Source,
+                x.ApplicationId,
+                x.ApplicationKey,
                 x.ActorType,
                 x.ActorId,
+                x.ActorDisplayName,
                 x.UserId,
                 x.OrganizationId,
                 x.SessionId,
                 x.OccurredAt,
+                x.IngestedAt,
                 x.IpAddress,
+                x.UserAgent,
+                x.RequestId,
+                x.CorrelationId,
+                x.TargetsJson,
+                x.ContextJson,
+                x.MetadataJson,
                 x.DataJson
             })
             .Cast<object>()
@@ -1751,20 +1764,25 @@ public sealed class SqlOSAdminService
         object? data = null,
         CancellationToken cancellationToken = default)
     {
-        _context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
-        {
-            Id = _cryptoService.GenerateId("evt"),
-            EventType = eventType,
-            ActorType = actorType,
-            ActorId = actorId,
-            UserId = userId,
-            OrganizationId = organizationId,
-            SessionId = sessionId,
-            IpAddress = ipAddress,
-            DataJson = data != null ? JsonSerializer.Serialize(data) : null,
-            OccurredAt = DateTime.UtcNow
-        });
-        await _context.SaveChangesAsync(cancellationToken);
+        IReadOnlyDictionary<string, object?>? metadata = data == null
+            ? null
+            : JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                JsonSerializer.Serialize(data),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var auditLogs = new SqlOSAuditLogService(_context, _cryptoService);
+        await auditLogs.RecordAsync(
+            new SqlOSAuditLogRecordRequest(
+                Action: eventType,
+                OrganizationId: organizationId,
+                UserId: userId,
+                Source: "authserver",
+                Actor: new SqlOSAuditActor(actorType, actorId),
+                Context: new SqlOSAuditContext(
+                    IpAddress: ipAddress,
+                    SessionId: sessionId),
+                Metadata: metadata),
+            cancellationToken);
     }
 
     private async Task<SqlOSApplicationAccessCheckResult> EvaluateApplicationAccessAsync(
