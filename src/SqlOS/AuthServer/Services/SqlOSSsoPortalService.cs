@@ -736,7 +736,7 @@ public sealed class SqlOSSsoPortalService
             SingleSignOnUrl = string.Empty,
             X509CertificatePem = string.Empty,
             AutoProvisionUsers = true,
-            AutoLinkByEmail = false,
+            AutoLinkByEmail = true,
             EmailAttributeName = "email",
             FirstNameAttributeName = "first_name",
             LastNameAttributeName = "last_name",

@@ -42,6 +42,8 @@ public sealed class SqlOSSsoPortalServiceTests
         var connection = await harness.Context.Set<SqlOSSsoConnection>().SingleAsync();
         connection.OrganizationId.Should().Be(org.Id);
         connection.IsEnabled.Should().BeFalse();
+        connection.AutoProvisionUsers.Should().BeTrue();
+        connection.AutoLinkByEmail.Should().BeTrue();
         SqlOSAdminService.GetSsoSetupStatus(connection).Should().Be("draft");
 
         (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.session.created"))

@@ -7,9 +7,11 @@ using System.Xml;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
 
@@ -133,6 +135,58 @@ public sealed class SamlServiceIntegrationTests
 
         tokens.OrganizationId.Should().Be(org.Id);
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithExistingEmail_ReusesUserWhenAutoProvisioning()
+    {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+
+        var email = $"existing-saml-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing SAML User", email, "P@ssword123!"));
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Existing SAML {Guid.NewGuid():N}", null));
+        var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            $"existing-saml-{Guid.NewGuid():N}"[..20],
+            "Existing SAML Client",
+            "sqlos-tests",
+            new List<string> { "https://client.example.local/callback" }));
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSExistingSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Existing User SSO",
+            "urn:existing:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(connection.Id, client.ClientId, "https://client.example.local/callback"));
+        var requestToken = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
+        requestToken.Should().NotBeNull();
+
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing:idp", email, "Existing", "User");
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken!, default);
+        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
+
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+        var matchingEmails = await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
+            .Where(x => x.NormalizedEmail == normalizedEmail)
+            .ToListAsync();
+        matchingEmails.Should().ContainSingle();
+        matchingEmails.Single().UserId.Should().Be(existingUser.Id);
+
+        var externalIdentity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .SingleAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email);
+        externalIdentity.UserId.Should().Be(existingUser.Id);
     }
 
     [TestMethod]

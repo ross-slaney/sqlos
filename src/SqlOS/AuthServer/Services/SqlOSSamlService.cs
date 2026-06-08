@@ -321,12 +321,18 @@ public sealed class SqlOSSamlService
         }
 
         SqlOSUser? user = null;
-        if (connection.AutoLinkByEmail && !string.IsNullOrWhiteSpace(email))
+        string? normalizedEmail = null;
+        if (!string.IsNullOrWhiteSpace(email))
         {
-            var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
+            normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
             var existingEmail = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
             if (existingEmail != null)
             {
+                if (!connection.AutoLinkByEmail && !connection.AutoProvisionUsers)
+                {
+                    return null;
+                }
+
                 user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
             }
         }
@@ -353,7 +359,7 @@ public sealed class SqlOSSamlService
                 Id = _cryptoService.GenerateId("eml"),
                 UserId = user.Id,
                 Email = email,
-                NormalizedEmail = SqlOSAdminService.NormalizeEmail(email),
+                NormalizedEmail = normalizedEmail ?? SqlOSAdminService.NormalizeEmail(email),
                 IsPrimary = true,
                 IsVerified = true,
                 VerifiedAt = DateTime.UtcNow,
