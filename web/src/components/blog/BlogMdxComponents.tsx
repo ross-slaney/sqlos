@@ -6,7 +6,8 @@ type VisualKind =
   | "fga-list-query"
   | "auth0-vs-sqlos"
   | "workos-vs-sqlos"
-  | "managed-vs-sqlos";
+  | "managed-vs-sqlos"
+  | "standalone-multi-app";
 
 const visualCopy: Record<
   VisualKind,
@@ -127,6 +128,28 @@ const visualCopy: Record<
         label: "SqlOS",
         tone: "primary",
         nodes: ["Hosted AuthPage", "Orgs + invites in SQL Server", "FGA in EF queries"],
+      },
+    ],
+  },
+  "standalone-multi-app": {
+    title: "One SqlOS host, many application surfaces",
+    caption:
+      "The advanced topology moves SqlOS into a dedicated auth host. Multiple clients share users, organizations, sessions, SSO, and application access policy while resource APIs validate the tokens they receive.",
+    lanes: [
+      {
+        label: "Client apps",
+        tone: "accent",
+        nodes: ["Customer portal", "Admin console", "Mobile app / CLI"],
+      },
+      {
+        label: "SqlOS auth host",
+        tone: "primary",
+        nodes: ["/sqlos/auth/*", "Users + orgs + SSO", "Application assignments"],
+      },
+      {
+        label: "Resource APIs",
+        tone: "neutral",
+        nodes: ["Validate issuer + audience", "Call FGA / app policy", "Return protected data"],
       },
     ],
   },
