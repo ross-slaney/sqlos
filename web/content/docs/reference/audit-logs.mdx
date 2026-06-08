@@ -202,7 +202,9 @@ The older AuthServer audit route links into the same central view filtered to `s
 
 ## Admin API
 
-Admin APIs are mounted when you call `app.MapSqlOS()`. Default base path:
+Admin APIs are mounted when you call `app.MapSqlOS()`. They are protected by the same dashboard authorization as `/sqlos/admin`: password-mode dashboard sessions, your configured `Dashboard.AuthorizationCallback`, or your deployment's dashboard-facing proxy/SSO controls. Unauthorized requests return `404`.
+
+Default base path:
 
 ```text
 /sqlos/admin/audit/api
@@ -217,13 +219,15 @@ Admin APIs are mounted when you call `app.MapSqlOS()`. Default base path:
 Example list request:
 
 ```bash
-curl "/sqlos/admin/audit/api/events?applicationKey=northwind-retail&source=application&pageSize=25"
+curl "http://localhost:5062/sqlos/admin/audit/api/events?applicationKey=northwind-retail&source=application&pageSize=25" \
+  -H "Cookie: SqlOS.Dashboard.Session=<dashboard-session-cookie>"
 ```
 
 Example export request:
 
 ```bash
-curl -OJ "/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z"
+curl -OJ "http://localhost:5062/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z" \
+  -H "Cookie: SqlOS.Dashboard.Session=<dashboard-session-cookie>"
 ```
 
 CSV export uses the same filters as listing. It is bounded to 5,000 rows and a maximum 366-day date range. If no dates are supplied, export defaults to the last 30 days.

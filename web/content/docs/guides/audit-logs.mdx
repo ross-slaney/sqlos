@@ -172,10 +172,11 @@ Select a row to inspect actor, targets, context, and metadata.
 
 ## 7. Export a bounded CSV
 
-Use the dashboard export button or call:
+Use the dashboard export button. The CSV endpoint is also available for admin automation, but it is not public: it uses the same dashboard authorization as `/sqlos/admin`. In password mode, a curl request must include a valid `SqlOS.Dashboard.Session` cookie. If you configure a dashboard `AuthorizationCallback` or protect the dashboard behind SSO/proxy auth, that same authorization path must allow the request.
 
 ```bash
-curl -OJ "/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z"
+curl -OJ "http://localhost:5062/sqlos/admin/audit/api/events/export.csv?applicationKey=northwind-retail&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z" \
+  -H "Cookie: SqlOS.Dashboard.Session=<dashboard-session-cookie>"
 ```
 
 Exports use the same filters as the dashboard list. SqlOS caps dashboard exports at 5,000 rows and a 366-day date range. If no dates are supplied, export defaults to the last 30 days.
