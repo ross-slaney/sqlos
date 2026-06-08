@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Tests.Infrastructure;
 
@@ -43,6 +44,110 @@ public sealed class SqlOSDiscoveryAndSettingsTests
     }
 
     [TestMethod]
+    public async Task DiscoverAsync_ReturnsSso_ForExistingVerifiedMemberWhenRequireSsoIsEnabled()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var discovery = new SqlOSHomeRealmDiscoveryService(context);
+
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Member Org", null, "member.test"));
+        var user = await CreateVerifiedUserAsync(context, admin, "Member User", "user@member.test");
+        context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = organization.Id,
+            UserId = user.Id,
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "Member SSO",
+            "urn:member:idp",
+            "https://idp.member.test/sso",
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            false,
+            true,
+            "email",
+            "first_name",
+            "last_name"));
+        await context.SaveChangesAsync();
+
+        var result = await discovery.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("user@member.test"));
+
+        result.Mode.Should().Be("sso");
+        result.OrganizationId.Should().Be(organization.Id);
+    }
+
+    [TestMethod]
+    public async Task DiscoverAsync_ReturnsPassword_ForMissingMemberWhenJitIsDisabled()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var discovery = new SqlOSHomeRealmDiscoveryService(context);
+
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("No JIT Org", null, "nojit.test"));
+        await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "No JIT SSO",
+            "urn:nojit:idp",
+            "https://idp.nojit.test/sso",
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            false,
+            true,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var result = await discovery.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("new@nojit.test"));
+
+        result.Mode.Should().Be("password");
+        result.OrganizationId.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task DiscoverAsync_ReturnsPassword_ForExistingMemberWhenRequireSsoIsDisabledAndJitIsDisabled()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var discovery = new SqlOSHomeRealmDiscoveryService(context);
+
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Password Org", null, "password.test"));
+        var user = await CreateVerifiedUserAsync(context, admin, "Password User", "user@password.test");
+        context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = organization.Id,
+            UserId = user.Id,
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "Password SSO",
+            "urn:password:idp",
+            "https://idp.password.test/sso",
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            false,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+        await context.SaveChangesAsync();
+
+        var result = await discovery.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("user@password.test"));
+
+        result.Mode.Should().Be("password");
+        result.OrganizationId.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task SettingsService_SeedsDefaults_AndCanBeUpdated()
     {
         await using var context = CreateContext();
@@ -74,5 +179,19 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
+    }
+
+    private static async Task<SqlOSUser> CreateVerifiedUserAsync(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSAdminService admin,
+        string displayName,
+        string email)
+    {
+        var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"));
+        var userEmail = await context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id);
+        userEmail.IsVerified = true;
+        userEmail.VerifiedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+        return user;
     }
 }

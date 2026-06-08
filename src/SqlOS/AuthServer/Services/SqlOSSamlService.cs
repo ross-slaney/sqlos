@@ -124,14 +124,9 @@ public sealed class SqlOSSamlService
         }
 
         var email = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue) ? emailValue : authorizationRequest.LoginHintEmail;
-        var user = await ResolveUserAsync(connection, principal, email, cancellationToken)
-            ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
-
         var organizationId = authorizationRequest.OrganizationId ?? connection.OrganizationId;
-        if (!await _adminService.UserHasMembershipAsync(user.Id, organizationId, cancellationToken))
-        {
-            await _adminService.CreateMembershipAsync(organizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
-        }
+        var user = await ResolveUserAsync(connection, principal, email, organizationId, cancellationToken)
+            ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
 
         if (_authorizationServerService != null)
         {
@@ -194,13 +189,8 @@ public sealed class SqlOSSamlService
         CancellationToken cancellationToken)
     {
         var email = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue) ? emailValue : null;
-        var user = await ResolveUserAsync(connection, principal, email, cancellationToken)
+        var user = await ResolveUserAsync(connection, principal, email, connection.OrganizationId, cancellationToken)
             ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
-
-        if (!await _adminService.UserHasMembershipAsync(user.Id, connection.OrganizationId, cancellationToken))
-        {
-            await _adminService.CreateMembershipAsync(connection.OrganizationId, new SqlOSCreateMembershipRequest(user.Id, "member"), cancellationToken);
-        }
 
         var code = await _cryptoService.CreateTemporaryTokenAsync(
             "auth_code",
@@ -311,61 +301,90 @@ public sealed class SqlOSSamlService
         SqlOSSsoConnection connection,
         SqlOSSamlPrincipal principal,
         string? email,
+        string organizationId,
         CancellationToken cancellationToken)
     {
         var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
             .FirstOrDefaultAsync(x => x.SsoConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
-        if (externalIdentity != null)
-        {
-            return await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
-        }
-
-        SqlOSUser? user = null;
+        SqlOSUser? user = externalIdentity == null
+            ? null
+            : await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
         string? normalizedEmail = null;
-        if (!string.IsNullOrWhiteSpace(email))
+
+        if (user != null)
+        {
+            var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
+            if (!hasMembership)
+            {
+                if (!connection.AutoProvisionUsers)
+                {
+                    return null;
+                }
+
+                await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(email))
         {
             normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
             var existingEmail = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
             if (existingEmail != null)
             {
-                if (!connection.AutoLinkByEmail && !connection.AutoProvisionUsers)
+                user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+                var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
+                if (hasMembership)
                 {
-                    return null;
+                    if (!connection.AutoLinkByEmail || !existingEmail.IsVerified)
+                    {
+                        return null;
+                    }
+                }
+                else
+                {
+                    if (!connection.AutoProvisionUsers)
+                    {
+                        return null;
+                    }
+
+                    if (!existingEmail.IsVerified)
+                    {
+                        existingEmail.IsVerified = true;
+                        existingEmail.VerifiedAt = DateTime.UtcNow;
+                    }
+
+                    await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
+                }
+            }
+            else if (connection.AutoProvisionUsers)
+            {
+                var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
+                if (string.IsNullOrWhiteSpace(displayName))
+                {
+                    displayName = email;
                 }
 
-                user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+                user = new SqlOSUser
+                {
+                    Id = _cryptoService.GenerateId("usr"),
+                    DisplayName = displayName,
+                    DefaultEmail = email,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Set<SqlOSUser>().Add(user);
+                _context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
+                {
+                    Id = _cryptoService.GenerateId("eml"),
+                    UserId = user.Id,
+                    Email = email,
+                    NormalizedEmail = normalizedEmail ?? SqlOSAdminService.NormalizeEmail(email),
+                    IsPrimary = true,
+                    IsVerified = true,
+                    VerifiedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                });
+                await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
             }
-        }
-
-        if (user == null && connection.AutoProvisionUsers && !string.IsNullOrWhiteSpace(email))
-        {
-            var displayName = $"{principal.Attributes.GetValueOrDefault(connection.FirstNameAttributeName, string.Empty)} {principal.Attributes.GetValueOrDefault(connection.LastNameAttributeName, string.Empty)}".Trim();
-            if (string.IsNullOrWhiteSpace(displayName))
-            {
-                displayName = email;
-            }
-
-            user = new SqlOSUser
-            {
-                Id = _cryptoService.GenerateId("usr"),
-                DisplayName = displayName,
-                DefaultEmail = email,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _context.Set<SqlOSUser>().Add(user);
-            _context.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
-            {
-                Id = _cryptoService.GenerateId("eml"),
-                UserId = user.Id,
-                Email = email,
-                NormalizedEmail = normalizedEmail ?? SqlOSAdminService.NormalizeEmail(email),
-                IsPrimary = true,
-                IsVerified = true,
-                VerifiedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            });
-            await _context.SaveChangesAsync(cancellationToken);
         }
 
         if (user == null)
@@ -373,18 +392,53 @@ public sealed class SqlOSSamlService
             return null;
         }
 
-        _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+        if (externalIdentity == null)
         {
-            Id = _cryptoService.GenerateId("ext"),
-            UserId = user.Id,
-            SsoConnectionId = connection.Id,
-            Issuer = principal.Issuer,
-            Subject = principal.Subject,
-            Email = email,
-            CreatedAt = DateTime.UtcNow
-        });
+            _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+            {
+                Id = _cryptoService.GenerateId("ext"),
+                UserId = user.Id,
+                SsoConnectionId = connection.Id,
+                Issuer = principal.Issuer,
+                Subject = principal.Subject,
+                Email = email,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         return user;
+    }
+
+    private async Task<bool> UserHasActiveMembershipAsync(
+        string userId,
+        string organizationId,
+        CancellationToken cancellationToken)
+        => await _context.Set<SqlOSMembership>()
+            .AnyAsync(x => x.UserId == userId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
+
+    private async Task EnsureMembershipAsync(
+        string organizationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var existing = await _context.Set<SqlOSMembership>()
+            .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
+        if (existing != null)
+        {
+            existing.IsActive = true;
+            existing.Role = "member";
+            return;
+        }
+
+        _context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = organizationId,
+            UserId = userId,
+            Role = "member",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        });
     }
 
     private sealed record SsoRequestPayload(string ClientId, string RedirectUri, string ConnectionId);

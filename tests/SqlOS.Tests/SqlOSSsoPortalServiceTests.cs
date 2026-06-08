@@ -42,11 +42,42 @@ public sealed class SqlOSSsoPortalServiceTests
         var connection = await harness.Context.Set<SqlOSSsoConnection>().SingleAsync();
         connection.OrganizationId.Should().Be(org.Id);
         connection.IsEnabled.Should().BeFalse();
-        connection.AutoProvisionUsers.Should().BeTrue();
+        connection.AutoProvisionUsers.Should().BeFalse();
         connection.AutoLinkByEmail.Should().BeTrue();
         SqlOSAdminService.GetSsoSetupStatus(connection).Should().Be("draft");
 
+        var state = await harness.Portal.GetStateAsync(session: stored);
+        state.Connection.EnrollmentPolicy.Should().NotBeNull();
+        state.Connection.EnrollmentPolicy!.RequireSsoForExistingMembers.Should().BeTrue();
+        state.Connection.EnrollmentPolicy.AllowJitProvisioning.Should().BeFalse();
+
         (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.session.created"))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UpdateEnrollmentPolicyAsync_PersistsConnectionFlagsAndReturnsState()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Policy Org", null, "policy.test"));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+
+        var state = await harness.Portal.UpdateEnrollmentPolicyAsync(
+            session,
+            new SqlOSSsoPortalEnrollmentPolicyRequest(false, true),
+            harness.Http);
+
+        state.Connection.AutoLinkByEmail.Should().BeFalse();
+        state.Connection.AutoProvisionUsers.Should().BeTrue();
+        state.Connection.EnrollmentPolicy.Should().NotBeNull();
+        state.Connection.EnrollmentPolicy!.RequireSsoForExistingMembers.Should().BeFalse();
+        state.Connection.EnrollmentPolicy.AllowJitProvisioning.Should().BeTrue();
+
+        var stored = await harness.Context.Set<SqlOSSsoConnection>().SingleAsync(x => x.Id == state.Connection.Id);
+        stored.AutoLinkByEmail.Should().BeFalse();
+        stored.AutoProvisionUsers.Should().BeTrue();
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.enrollment_policy.updated"))
             .Should().BeTrue();
     }
 
@@ -122,6 +153,17 @@ public sealed class SqlOSSsoPortalServiceTests
         state = await harness.Portal.ActivateAsync(session, harness.Http);
         state.Connection.SetupStatus.Should().Be("active");
 
+        var user = await CreateVerifiedUserAsync(harness, "Portal User", "user@portal.test");
+        harness.Context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = org.Id,
+            UserId = user.Id,
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await harness.Context.SaveChangesAsync();
+
         var hrd = await new SqlOSHomeRealmDiscoveryService(harness.Context)
             .DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("user@portal.test"));
         hrd.Mode.Should().Be("sso");
@@ -165,6 +207,17 @@ public sealed class SqlOSSsoPortalServiceTests
         await harness.Portal.ImportMetadataAsync(session, new SqlOSSsoPortalMetadataRequest(metadataXml), harness.Http);
         state = await harness.Portal.ActivateAsync(session, harness.Http);
         state.Connection.SetupStatus.Should().Be("active");
+
+        var user = await CreateVerifiedUserAsync(harness, "Verified User", "user@verified.test");
+        harness.Context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = org.Id,
+            UserId = user.Id,
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await harness.Context.SaveChangesAsync();
 
         var hrd = await new SqlOSHomeRealmDiscoveryService(harness.Context)
             .DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest("user@verified.test"));
@@ -216,6 +269,73 @@ public sealed class SqlOSSsoPortalServiceTests
         var action = async () => await harness.Portal.ActivateAsync(session, harness.Http);
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Verify domain ownership before activating SSO for home realm discovery.");
+    }
+
+    [TestMethod]
+    public async Task RevokeOrganizationSessionsAsync_RevokesOnlyActiveSessionsForOrgAndDomain()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Revoke Sessions Org", null));
+        var otherOrg = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Other Sessions Org", null));
+        var created = await harness.Portal.CreateSessionAsync(new SqlOSCreateSsoPortalSessionRequest(org.Id), harness.Http);
+        var session = await harness.Context.Set<SqlOSSsoPortalSession>().SingleAsync(x => x.Id == created.Id);
+        var connection = await harness.Context.Set<SqlOSSsoConnection>().SingleAsync(x => x.OrganizationId == org.Id);
+        connection.IsEnabled = true;
+        connection.IdentityProviderEntityId = "urn:revoke:idp";
+        connection.SingleSignOnUrl = "https://idp.revoke.test/sso";
+        connection.X509CertificatePem = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
+        harness.Context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+        {
+            Id = "dom_revoke",
+            OrganizationId = org.Id,
+            Domain = "revoke.test",
+            Status = SqlOSOrganizationDomainStatuses.Active,
+            VerificationToken = "verified",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            VerifiedAt = DateTime.UtcNow
+        });
+
+        var matching = await CreateVerifiedUserAsync(harness, "Matching User", "member@revoke.test");
+        var unrelatedDomain = await CreateVerifiedUserAsync(harness, "Other Domain User", "member@else.test");
+        var otherOrganizationUser = await CreateVerifiedUserAsync(harness, "Other Org User", "other@revoke.test");
+        AddSession(harness, "sess_revoke_match", matching.Id, org.Id);
+        AddSession(harness, "sess_revoke_domain_miss", unrelatedDomain.Id, org.Id);
+        AddSession(harness, "sess_revoke_other_org", otherOrganizationUser.Id, otherOrg.Id);
+        await harness.Context.SaveChangesAsync();
+
+        var blocked = async () => await harness.Portal.RevokeOrganizationSessionsAsync(
+            session,
+            new SqlOSSsoPortalRevokeOrganizationSessionsRequest(false),
+            harness.Http);
+        await blocked.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Confirm session revocation before signing out existing sessions.");
+
+        var result = await harness.Portal.RevokeOrganizationSessionsAsync(
+            session,
+            new SqlOSSsoPortalRevokeOrganizationSessionsRequest(true),
+            harness.Http);
+
+        result.OrganizationId.Should().Be(org.Id);
+        result.ConnectionId.Should().Be(connection.Id);
+        result.Domain.Should().Be("revoke.test");
+        result.RevokedSessions.Should().Be(1);
+
+        var matchingSession = await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_match");
+        matchingSession.RevokedAt.Should().NotBeNull();
+        matchingSession.RevocationReason.Should().Be("sso_required");
+        (await harness.Context.Set<SqlOSRefreshToken>().SingleAsync(x => x.SessionId == matchingSession.Id)).RevokedAt
+            .Should().NotBeNull();
+
+        (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_domain_miss")).RevokedAt
+            .Should().BeNull();
+        (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_other_org")).RevokedAt
+            .Should().BeNull();
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.organization_sessions.revoked"
+            && x.OrganizationId == org.Id
+            && x.MetadataJson != null
+            && x.MetadataJson.Contains("\"revokedSessions\":1", StringComparison.Ordinal)))
+            .Should().BeTrue();
     }
 
     [TestMethod]
@@ -277,6 +397,8 @@ public sealed class SqlOSSsoPortalServiceTests
         html.Should().Contain("./api");
         html.Should().Contain("Domain Verification");
         html.Should().Contain("Confirm TXT record");
+        html.Should().Contain("Access Policy");
+        html.Should().Contain("Sign out existing sessions");
         html.Should().Contain("Validate metadata");
         html.Should().Contain("Activate connection");
         html.Should().Contain("Run test");
@@ -336,6 +458,40 @@ public sealed class SqlOSSsoPortalServiceTests
         }
 
         return Uri.UnescapeDataString(token);
+    }
+
+    private static async Task<SqlOSUser> CreateVerifiedUserAsync(PortalHarness harness, string displayName, string email)
+    {
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(displayName, email, "P@ssword123!"));
+        var userEmail = await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id);
+        userEmail.IsVerified = true;
+        userEmail.VerifiedAt = DateTime.UtcNow;
+        await harness.Context.SaveChangesAsync();
+        return user;
+    }
+
+    private static void AddSession(PortalHarness harness, string sessionId, string userId, string organizationId)
+    {
+        harness.Context.Set<SqlOSSession>().Add(new SqlOSSession
+        {
+            Id = sessionId,
+            UserId = userId,
+            OrganizationId = organizationId,
+            AuthenticationMethod = "password",
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+            IdleExpiresAt = DateTime.UtcNow.AddHours(1),
+            AbsoluteExpiresAt = DateTime.UtcNow.AddHours(8)
+        });
+        harness.Context.Set<SqlOSRefreshToken>().Add(new SqlOSRefreshToken
+        {
+            Id = $"rt_{sessionId}",
+            SessionId = sessionId,
+            TokenHash = $"hash_{sessionId}",
+            FamilyId = $"family_{sessionId}",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
     }
 
     private static string BuildMetadata(string entityId, string singleSignOnUrl)

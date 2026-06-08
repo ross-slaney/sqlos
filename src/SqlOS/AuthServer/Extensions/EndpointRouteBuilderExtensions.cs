@@ -3243,6 +3243,29 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapPut("/enrollment-policy", async (HttpContext context, SqlOSSsoPortalEnrollmentPolicyRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
+        {
+            if (!portalService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            var session = await portalService.TryGetSessionAsync(context, cancellationToken);
+            if (session == null)
+            {
+                return Results.Json(new { message = "Portal session is invalid or expired." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(await portalService.UpdateEnrollmentPolicyAsync(session, request, context, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapPost("/domain", async (HttpContext context, SqlOSSsoPortalDomainRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
         {
             if (!portalService.IsApiEnabled)
@@ -3374,6 +3397,29 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapPost("/organization-sessions/revoke", async (HttpContext context, SqlOSSsoPortalRevokeOrganizationSessionsRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
+        {
+            if (!portalService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            var session = await portalService.TryGetSessionAsync(context, cancellationToken);
+            if (session == null)
+            {
+                return Results.Json(new { message = "Portal session is invalid or expired." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(await portalService.RevokeOrganizationSessionsAsync(session, request, context, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapPost("/test", async (HttpContext context, SqlOSSsoPortalTestRequest request, SqlOSSsoPortalService portalService, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
         {
             if (!portalService.IsApiEnabled)
@@ -3462,6 +3508,19 @@ public static class EndpointRouteBuilderExtensions
                 : Results.Ok(await portalService.SetProviderActionAsync(session, request, context, cancellationToken));
         });
 
+        setupApi.MapPut("/enrollment-policy", async (HttpContext context, SqlOSSsoPortalEnrollmentPolicyRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
+        {
+            if (!portalService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            var session = await portalService.TryGetSessionAsync(context, cancellationToken);
+            return session == null
+                ? Results.Json(new { message = "Portal session is invalid or expired." }, statusCode: StatusCodes.Status401Unauthorized)
+                : Results.Ok(await portalService.UpdateEnrollmentPolicyActionAsync(session, request, context, cancellationToken));
+        });
+
         setupApi.MapPost("/domain", async (HttpContext context, SqlOSSsoPortalDomainRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
         {
             if (!portalService.IsApiEnabled)
@@ -3538,6 +3597,29 @@ public static class EndpointRouteBuilderExtensions
             return session == null
                 ? Results.Json(new { message = "Portal session is invalid or expired." }, statusCode: StatusCodes.Status401Unauthorized)
                 : Results.Ok(await portalService.DisableActionAsync(session, context, cancellationToken));
+        });
+
+        setupApi.MapPost("/organization-sessions/revoke", async (HttpContext context, SqlOSSsoPortalRevokeOrganizationSessionsRequest request, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
+        {
+            if (!portalService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            var session = await portalService.TryGetSessionAsync(context, cancellationToken);
+            if (session == null)
+            {
+                return Results.Json(new { message = "Portal session is invalid or expired." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(await portalService.RevokeOrganizationSessionsAsync(session, request, context, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         setupApi.MapPost("/test", async (HttpContext context, SqlOSSsoPortalTestRequest request, SqlOSSsoPortalService portalService, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
