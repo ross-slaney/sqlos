@@ -11,6 +11,12 @@ public sealed record SqlOSRevokeSsoPortalSessionRequest(string? Reason = null);
 
 public sealed record SqlOSUpdateSsoPortalProviderRequest(string Provider);
 
+public sealed record SqlOSSsoPortalEnrollmentPolicyRequest(
+    bool RequireSsoForExistingMembers,
+    bool AllowJitProvisioning);
+
+public sealed record SqlOSSsoPortalRevokeOrganizationSessionsRequest(bool Confirm);
+
 public sealed record SqlOSSsoPortalDomainRequest(string Domain);
 
 public sealed record SqlOSSsoPortalMetadataRequest(string MetadataXml);
@@ -61,7 +67,19 @@ public sealed record SqlOSSsoPortalConnectionResult(
     bool AutoProvisionUsers,
     bool AutoLinkByEmail,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    SqlOSSsoPortalEnrollmentPolicyResult? EnrollmentPolicy = null);
+
+public sealed record SqlOSSsoPortalEnrollmentPolicyResult(
+    bool RequireSsoForExistingMembers,
+    bool AllowJitProvisioning);
+
+public sealed record SqlOSSsoPortalRevokeOrganizationSessionsResult(
+    string OrganizationId,
+    string ConnectionId,
+    string Domain,
+    int RevokedSessions,
+    DateTime RevokedAt);
 
 public sealed record SqlOSSsoProviderGuide(
     string Key,
@@ -108,7 +126,9 @@ public sealed record SqlOSSsoSetupAllowedActions(
     bool CanActivate,
     bool CanDisable,
     bool CanTest,
-    bool CanSignOut);
+    bool CanSignOut,
+    bool CanUpdateEnrollmentPolicy = true,
+    bool CanRevokeOrganizationSessions = false);
 
 public sealed record SqlOSSsoSetupViewModel(
     string View,

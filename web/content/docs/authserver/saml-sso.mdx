@@ -67,7 +67,7 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-connections/{connect
   -d '{"metadataXml": "<?xml version=\"1.0\" ...>"}'
 ```
 
-The connection is now active. Users with `@acme.com` emails will be routed to Entra for authentication.
+The connection is now active. By default, existing organization members with verified `@acme.com` email addresses will be routed to Entra on their next sign-in. New users are not JIT-provisioned unless you explicitly enable that policy.
 
 ## Delegated org-admin portal
 
@@ -89,9 +89,11 @@ The portal is scoped to one organization and supports:
 - provider guides for Microsoft Entra, Okta, Google Workspace, and generic SAML
 - copy-ready SP Entity ID and ACS URL values
 - DNS TXT verification for self-serve organization email domains
+- access-policy controls for existing-member SSO enrollment and optional JIT provisioning
 - metadata XML paste or file upload
 - validation before activation
 - activation, disable, metadata replacement, and retest
+- an explicit, confirm-gated action to sign out existing sessions after activation
 
 Hosts can expose the same launch behavior from their own admin surfaces by wrapping `SqlOSSsoPortalService.CreateSessionAsync`, as the example app does with `POST /api/sso-portal-links`.
 
@@ -129,6 +131,24 @@ options.AuthServer.ConfigureSsoPortal(portal =>
 });
 ```
 
+## Enrollment policy
+
+Portal-created connections default to:
+
+- `RequireSsoForExistingMembers = true`
+- `AllowJitProvisioning = false`
+
+Internally these map to the existing connection flags:
+
+- `RequireSsoForExistingMembers` maps to `AutoLinkByEmail`
+- `AllowJitProvisioning` maps to `AutoProvisionUsers`
+
+When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in links the IdP subject to that existing user. SqlOS does not create a user or membership on this path.
+
+When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create the missing user or organization membership when no existing organization member matches the SAML email. Keep this disabled when access should be invitation- or admin-managed.
+
+Activation only enables the SSO connection and HRD behavior. It does not revoke active sessions. Use the separate session revocation action when an admin intentionally wants existing matching-domain sessions to sign in again through SSO.
+
 ## Headless setup state machine
 
 The hosted portal is optional. Configure `BuildUiUrl` to hand the opened portal session to your own admin UI, and call the setup API for state transitions.
@@ -164,12 +184,14 @@ State-machine endpoints:
 | --- | --- | --- |
 | GET | `/` | Current setup view |
 | PUT | `/provider` | Select SAML provider |
+| PUT | `/enrollment-policy` | Update existing-member SSO and JIT provisioning policy |
 | POST | `/domain` | Start DNS TXT domain verification |
 | POST | `/domains/{domainId}/confirm` | Check the TXT record and activate the claim |
 | POST | `/metadata/validate` | Validate SAML metadata XML |
 | POST | `/metadata` | Import metadata without activating |
 | POST | `/activate` | Activate when metadata and domain state allow it |
 | POST | `/disable` | Disable the connection |
+| POST | `/organization-sessions/revoke` | Confirm-gated revocation for active org sessions on the verified SSO domain |
 | POST | `/test` | Record readiness or generate a test redirect |
 | POST | `/signout` | Clear the portal session |
 
@@ -177,8 +199,8 @@ State-machine endpoints:
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `autoProvisionUsers` | `false` | Create SqlOS users from SAML assertions on first login |
-| `autoLinkByEmail` | `false` | Link SAML logins to existing users by email match |
+| `autoProvisionUsers` | `false` for portal-created connections | Create SqlOS users or memberships from SAML assertions on first login |
+| `autoLinkByEmail` | `true` for portal-created connections | Require existing verified org members to enroll and sign in through SSO |
 | `SsoPortal.EnableApi` | `true` | Expose portal and headless setup APIs |
 | `SsoPortal.UseHostedPortal` | `true` | Serve the bundled setup portal |
 | `SsoPortal.BuildUiUrl` | `null` | Redirect opened setup sessions to a host-owned UI |
@@ -202,8 +224,8 @@ For metadata rotation, open the delegated portal again or use the dashboard, pas
 ## SSO login flow
 
 1. User enters email on the login page
-2. [Home realm discovery](/docs/authserver/home-realm-discovery) detects the `@acme.com` domain matches an SSO connection
+2. [Home realm discovery](/docs/authserver/home-realm-discovery) detects the `@acme.com` domain and checks the connection enrollment policy
 3. AuthServer generates a SAML AuthnRequest and redirects to the IdP
 4. User authenticates at the IdP
 5. IdP POSTs a SAML Response to the ACS URL
-6. AuthServer validates the assertion, provisions/links the user, and creates a session
+6. AuthServer validates the assertion, links the existing user or provisions access only when policy allows it, and creates a session

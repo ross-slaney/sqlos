@@ -335,6 +335,33 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
+    public async Task<SqlOSSsoPortalStateResult> UpdateEnrollmentPolicyAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalEnrollmentPolicyRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await RequirePortalConnectionAsync(session, cancellationToken);
+        connection.AutoLinkByEmail = request.RequireSsoForExistingMembers;
+        connection.AutoProvisionUsers = request.AllowJitProvisioning;
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordPortalAuditAsync(
+            "sso.portal.enrollment_policy.updated",
+            session,
+            httpContext,
+            new
+            {
+                connectionId = connection.Id,
+                request.RequireSsoForExistingMembers,
+                request.AllowJitProvisioning
+            },
+            cancellationToken);
+
+        return await GetStateAsync(session, cancellationToken);
+    }
+
     public SqlOSSsoMetadataValidationResult ValidateMetadata(SqlOSSsoPortalMetadataRequest request)
         => _adminService.ValidateSsoMetadata(new SqlOSImportSsoMetadataRequest(request.MetadataXml));
 
@@ -431,6 +458,85 @@ public sealed class SqlOSSsoPortalService
             cancellationToken);
 
         return await GetStateAsync(session, cancellationToken);
+    }
+
+    public async Task<SqlOSSsoPortalRevokeOrganizationSessionsResult> RevokeOrganizationSessionsAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalRevokeOrganizationSessionsRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!request.Confirm)
+        {
+            throw new InvalidOperationException("Confirm session revocation before signing out existing sessions.");
+        }
+
+        var connection = await RequirePortalConnectionAsync(session, cancellationToken);
+        if (!connection.IsEnabled)
+        {
+            throw new InvalidOperationException("Activate the SSO connection before signing out existing sessions.");
+        }
+
+        var domain = await _domainService.GetPreferredDomainAsync(session.OrganizationId, cancellationToken);
+        if (domain == null || domain.Status != SqlOSOrganizationDomainStatuses.Active)
+        {
+            throw new InvalidOperationException("Verify an SSO domain before signing out existing sessions.");
+        }
+
+        var now = DateTime.UtcNow;
+        var normalizedDomainSuffix = "@" + domain.Domain.ToUpperInvariant();
+        var eligibleUserIds = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .Where(x => x.IsVerified && x.NormalizedEmail.EndsWith(normalizedDomainSuffix))
+            .Select(x => x.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var sessions = eligibleUserIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSSession>()
+                .Where(x => x.OrganizationId == session.OrganizationId
+                    && x.RevokedAt == null
+                    && eligibleUserIds.Contains(x.UserId))
+                .ToListAsync(cancellationToken);
+
+        var sessionIds = sessions.Select(x => x.Id).ToList();
+        var refreshTokens = sessionIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSRefreshToken>()
+                .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+
+        foreach (var activeSession in sessions)
+        {
+            activeSession.RevokedAt = now;
+            activeSession.RevocationReason = "sso_required";
+        }
+
+        foreach (var refreshToken in refreshTokens)
+        {
+            refreshToken.RevokedAt = now;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordPortalAuditAsync(
+            "sso.portal.organization_sessions.revoked",
+            session,
+            httpContext,
+            new
+            {
+                connectionId = connection.Id,
+                domain = domain.Domain,
+                revokedSessions = sessions.Count
+            },
+            cancellationToken);
+
+        return new SqlOSSsoPortalRevokeOrganizationSessionsResult(
+            session.OrganizationId,
+            connection.Id,
+            domain.Domain,
+            sessions.Count,
+            now);
     }
 
     public async Task<SqlOSSsoPortalTestResult> RecordTestAsync(
@@ -537,6 +643,23 @@ public sealed class SqlOSSsoPortalService
                 ex.Message,
                 new Dictionary<string, string> { ["provider"] = ex.Message },
                 cancellationToken);
+        }
+    }
+
+    public async Task<SqlOSSsoSetupActionResult> UpdateEnrollmentPolicyActionAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalEnrollmentPolicyRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await UpdateEnrollmentPolicyAsync(session, request, httpContext, cancellationToken);
+            return await ViewActionAsync(session, "policy", null, null, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await ViewActionAsync(session, "policy", ex.Message, null, cancellationToken);
         }
     }
 
@@ -735,8 +858,8 @@ public sealed class SqlOSSsoPortalService
             IdentityProviderEntityId = string.Empty,
             SingleSignOnUrl = string.Empty,
             X509CertificatePem = string.Empty,
-            AutoProvisionUsers = true,
-            AutoLinkByEmail = false,
+            AutoProvisionUsers = false,
+            AutoLinkByEmail = true,
             EmailAttributeName = "email",
             FirstNameAttributeName = "first_name",
             LastNameAttributeName = "last_name",
@@ -802,7 +925,10 @@ public sealed class SqlOSSsoPortalService
             connection.AutoProvisionUsers,
             connection.AutoLinkByEmail,
             connection.CreatedAt,
-            connection.UpdatedAt);
+            connection.UpdatedAt,
+            new SqlOSSsoPortalEnrollmentPolicyResult(
+                connection.AutoLinkByEmail,
+                connection.AutoProvisionUsers));
 
     private SqlOSSsoSetupAllowedActions BuildAllowedActions(
         SqlOSOrganization organization,
@@ -833,7 +959,9 @@ public sealed class SqlOSSsoPortalService
             CanActivate: !connection.IsEnabled && hasMetadata && domainReady,
             CanDisable: connection.IsEnabled,
             CanTest: connection.IsEnabled,
-            CanSignOut: true);
+            CanSignOut: true,
+            CanUpdateEnrollmentPolicy: true,
+            CanRevokeOrganizationSessions: connection.IsEnabled && domain?.Status == SqlOSOrganizationDomainStatuses.Active);
     }
 
     private bool IsDomainReadyForActivation(string? primaryDomain, SqlOSOrganizationDomainResult? domain)

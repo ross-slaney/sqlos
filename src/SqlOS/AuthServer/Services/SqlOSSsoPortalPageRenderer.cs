@@ -54,6 +54,8 @@ public static class SqlOSSsoPortalPageRenderer
                 button.danger { background: #991b1b; }
                 button:disabled { opacity: .45; cursor: not-allowed; }
                 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+                .check-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
+                .check-row input { width: auto; margin-top: 2px; }
                 .field-grid { display: grid; gap: 10px; }
                 label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 700; }
                 input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fff; color: var(--ink); }
@@ -125,6 +127,29 @@ public static class SqlOSSsoPortalPageRenderer
                         <section class="panel">
                             <h2 id="guide-title">Setup Steps</h2>
                             <ol id="guide-steps"></ol>
+                        </section>
+                        <section class="panel">
+                            <h2>Access Policy</h2>
+                            <div class="field-grid">
+                                <label class="check-row">
+                                    <input id="require-sso" type="checkbox">
+                                    <span>
+                                        <strong>Require SSO for existing members</strong><br>
+                                        Existing organization members with verified email on this domain must use SSO on their next sign-in.
+                                    </span>
+                                </label>
+                                <label class="check-row">
+                                    <input id="allow-jit" type="checkbox">
+                                    <span>
+                                        <strong>Allow JIT provisioning from SSO</strong><br>
+                                        Successful SSO sign-ins can create missing user access for this organization.
+                                    </span>
+                                </label>
+                                <div class="row">
+                                    <button id="save-policy" type="button" class="secondary">Save policy</button>
+                                    <button id="revoke-sessions" type="button" class="danger">Sign out existing sessions</button>
+                                </div>
+                            </div>
                         </section>
                         <section class="panel">
                             <h2>Domain Verification</h2>
@@ -212,6 +237,13 @@ public static class SqlOSSsoPortalPageRenderer
                     return state.providers.find((item) => item.key === state.provider) || state.providers[0];
                 }
 
+                function enrollmentPolicy() {
+                    return state.connection.enrollmentPolicy || {
+                        requireSsoForExistingMembers: state.connection.autoLinkByEmail,
+                        allowJitProvisioning: state.connection.autoProvisionUsers
+                    };
+                }
+
                 function render() {
                     $("expired").classList.add("hidden");
                     $("app").classList.remove("hidden");
@@ -253,6 +285,11 @@ public static class SqlOSSsoPortalPageRenderer
 
                     $("guide-title").textContent = `${selected.label} setup`;
                     $("guide-steps").innerHTML = selected.steps.map((step) => `<li>${esc(step)}</li>`).join("");
+                    const policy = enrollmentPolicy();
+                    $("require-sso").checked = !!policy.requireSsoForExistingMembers;
+                    $("allow-jit").checked = !!policy.allowJitProvisioning;
+                    $("save-policy").disabled = !(state.allowedActions?.canUpdateEnrollmentPolicy ?? true);
+                    $("revoke-sessions").disabled = !(state.allowedActions?.canRevokeOrganizationSessions ?? false);
                     renderDomain();
                     $("activate").disabled = !(state.allowedActions?.canActivate ?? true);
                     $("disable").disabled = !(state.allowedActions?.canDisable ?? false);
@@ -337,6 +374,17 @@ public static class SqlOSSsoPortalPageRenderer
                     else showBanner(state.domain?.lastError || "Domain record was not found yet.", "bad");
                     render();
                 });
+                $("save-policy").addEventListener("click", async () => {
+                    state = await request("/enrollment-policy", {
+                        method: "PUT",
+                        body: JSON.stringify({
+                            requireSsoForExistingMembers: $("require-sso").checked,
+                            allowJitProvisioning: $("allow-jit").checked
+                        })
+                    });
+                    showBanner("Access policy saved.");
+                    render();
+                });
                 $("activate").addEventListener("click", async () => {
                     state = await request("/activate", { method: "POST", body: "{}" });
                     showBanner("Connection activated.");
@@ -353,6 +401,11 @@ public static class SqlOSSsoPortalPageRenderer
                         body: JSON.stringify({ clientId: $("client-id").value || null, redirectUri: $("redirect-uri").value || null })
                     });
                     showTest(result);
+                });
+                $("revoke-sessions").addEventListener("click", async () => {
+                    if (!confirm("Sign out active sessions for this organization and SSO domain?")) return;
+                    const result = await request("/organization-sessions/revoke", { method: "POST", body: JSON.stringify({ confirm: true }) });
+                    showBanner(`${result.revokedSessions} active session${result.revokedSessions === 1 ? "" : "s"} signed out.`);
                 });
                 $("signout").addEventListener("click", async () => {
                     await request("/signout", { method: "POST", body: "{}" });

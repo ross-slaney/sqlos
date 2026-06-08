@@ -22,7 +22,11 @@ public sealed class SqlOSHomeRealmDiscoveryService
             return new SqlOSHomeRealmDiscoveryResult("password", null, null, null, null);
         }
 
-        var verifiedMatch = await _context.Set<SqlOSOrganizationDomain>()
+        var normalizedEmail = string.IsNullOrWhiteSpace(request.Email)
+            ? null
+            : SqlOSAdminService.NormalizeEmail(request.Email);
+
+        var verifiedMatches = await _context.Set<SqlOSOrganizationDomain>()
             .Where(domain => domain.Domain == normalizedDomain
                 && domain.Status == SqlOSOrganizationDomainStatuses.Active
                 && domain.RevokedAt == null)
@@ -44,18 +48,28 @@ public sealed class SqlOSHomeRealmDiscoveryService
                     OrganizationId = match.Organization.Id,
                     OrganizationName = match.Organization.Name,
                     PrimaryDomain = match.Domain.Domain,
-                    ConnectionId = connection.Id
+                    ConnectionId = connection.Id,
+                    connection.AutoLinkByEmail,
+                    connection.AutoProvisionUsers
                 })
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
 
-        if (verifiedMatch != null)
+        foreach (var verifiedMatch in verifiedMatches)
         {
-            return new SqlOSHomeRealmDiscoveryResult(
-                "sso",
+            if (await ShouldRouteToSsoAsync(
                 verifiedMatch.OrganizationId,
-                verifiedMatch.OrganizationName,
-                verifiedMatch.PrimaryDomain,
-                verifiedMatch.ConnectionId);
+                normalizedEmail,
+                verifiedMatch.AutoLinkByEmail,
+                verifiedMatch.AutoProvisionUsers,
+                cancellationToken))
+            {
+                return new SqlOSHomeRealmDiscoveryResult(
+                    "sso",
+                    verifiedMatch.OrganizationId,
+                    verifiedMatch.OrganizationName,
+                    verifiedMatch.PrimaryDomain,
+                    verifiedMatch.ConnectionId);
+            }
         }
 
         var match = await _context.Set<SqlOSOrganization>()
@@ -65,18 +79,51 @@ public sealed class SqlOSHomeRealmDiscoveryService
                 x.Id,
                 x.Name,
                 x.PrimaryDomain,
-                ConnectionId = x.SsoConnections
+                Connection = x.SsoConnections
                     .Where(c => c.IsEnabled && c.IdentityProviderEntityId != "" && c.SingleSignOnUrl != "" && c.X509CertificatePem != "")
-                    .Select(c => c.Id)
+                    .Select(c => new
+                    {
+                        c.Id,
+                        c.AutoLinkByEmail,
+                        c.AutoProvisionUsers
+                    })
                     .FirstOrDefault()
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (match?.ConnectionId == null)
+        if (match?.Connection == null
+            || !await ShouldRouteToSsoAsync(
+                match.Id,
+                normalizedEmail,
+                match.Connection.AutoLinkByEmail,
+                match.Connection.AutoProvisionUsers,
+                cancellationToken))
         {
             return new SqlOSHomeRealmDiscoveryResult("password", null, null, null, null);
         }
 
-        return new SqlOSHomeRealmDiscoveryResult("sso", match.Id, match.Name, match.PrimaryDomain, match.ConnectionId);
+        return new SqlOSHomeRealmDiscoveryResult("sso", match.Id, match.Name, match.PrimaryDomain, match.Connection.Id);
+    }
+
+    private async Task<bool> ShouldRouteToSsoAsync(
+        string organizationId,
+        string? normalizedEmail,
+        bool requireSsoForExistingMembers,
+        bool allowJitProvisioning,
+        CancellationToken cancellationToken)
+    {
+        var hasExistingMember = !string.IsNullOrWhiteSpace(normalizedEmail)
+            && await _context.Set<SqlOSUserEmail>()
+                .Where(email => email.NormalizedEmail == normalizedEmail && email.IsVerified)
+                .Join(
+                    _context.Set<SqlOSMembership>().Where(membership => membership.OrganizationId == organizationId && membership.IsActive),
+                    email => email.UserId,
+                    membership => membership.UserId,
+                    (_, _) => true)
+                .AnyAsync(cancellationToken);
+
+        return hasExistingMember
+            ? requireSsoForExistingMembers
+            : allowJitProvisioning;
     }
 }

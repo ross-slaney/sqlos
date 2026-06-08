@@ -21,7 +21,7 @@ You'll learn how to create a SAML connection, share metadata with your customer�
 
 ## Goal
 
-Users with `@acme.com` email automatically use Acme’s SAML IdP instead of password login.
+Existing organization members with verified `@acme.com` email automatically use Acme’s SAML IdP instead of password login. New users are only created from SSO if you enable JIT provisioning.
 
 ## Steps
 
@@ -29,12 +29,13 @@ Users with `@acme.com` email automatically use Acme’s SAML IdP instead of pass
 2. Create a **draft** SAML connection. Note the **Entity ID** and **ACS URL** SqlOS generates.
 3. Send those values to the customer’s IT admin (or use the [Admin Portal pattern](/docs/authserver/saml-sso) from your product).
 4. Import the IdP **metadata XML** (or paste certificate and endpoints manually).
-5. Enable the connection and set the org **primary domain** to match user emails (e.g. `acme.com`).
-6. Test with [home realm discovery](/docs/authserver/home-realm-discovery): sign in with `user@acme.com` and confirm redirect to the IdP.
+5. Review the **Access policy**. The portal default requires SSO for existing members and leaves JIT provisioning off.
+6. Enable the connection and set or verify the org email domain (e.g. `acme.com`).
+7. Test with [home realm discovery](/docs/authserver/home-realm-discovery): sign in as an existing member with `user@acme.com` and confirm redirect to the IdP.
 
 ## Expected outcome
 
-- SAML assertion maps to a SqlOS user and org membership
+- SAML assertion links to an existing SqlOS user, or provisions access only when JIT is enabled
 - Audit log shows SSO sign-in events
 - Non-matching domains still use password, OTP, or social login
 
