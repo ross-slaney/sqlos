@@ -1,0 +1,263 @@
+---
+title: "Run a standalone identity server"
+description: "Configure SqlOS as a dedicated auth host for several web, mobile, CLI, and API surfaces."
+order: 10
+section: guides
+---
+
+<Banner
+  eyebrow="Advanced setup"
+  title="Use one SqlOS auth host for several applications"
+  href="/blog/standalone-sqlos-identity-server-multi-app"
+  actionLabel="Read the architecture post"
+>
+  Use this guide when SqlOS is a dedicated identity host for multiple app surfaces. If you have one app, use single-application mode instead.
+</Banner>
+
+<Callout type="warning" title="Not the default path">
+  Standalone SqlOS adds a control plane: multiple clients, assignments, headless UI routing, and resource API validation. Start with [single-application setup](/docs/authserver/single-application) unless you already have more than one app surface.
+</Callout>
+
+## Goal
+
+By the end of this guide you will have:
+
+- one ASP.NET host running SqlOS AuthServer
+- multiple preregistered clients
+- optional headless UI routing
+- application assignments for app availability
+- resource APIs validating SqlOS tokens
+- links to SDK flows for invitations, OTP, and CLI device flow
+
+## Topology
+
+<Files title="Standalone SqlOS topology">
+  <Folder name="SqlOS.Example.Api (auth host)">
+    <File name="/sqlos/auth/*" meta="OAuth, AuthPage, token, device flow" />
+    <File name="/sqlos/admin/auth" meta="users, orgs, clients, assignments" />
+    <File name="SQL Server" meta="identity, sessions, SSO, FGA" />
+  </Folder>
+  <Folder name="Application clients">
+    <File name="Example.Web" meta="Next.js customer portal" />
+    <File name="Example.AngularWeb" meta="Angular app" />
+    <File name="Example.ExpoApp" meta="mobile/native callback" />
+    <File name="CLI / MCP client" meta="device flow or CIMD" />
+  </Folder>
+  <Folder name="Resource APIs">
+    <File name="api.example.com" meta="validates issuer and audience" />
+  </Folder>
+</Files>
+
+## 1. Configure the auth host
+
+Register SqlOS in the ASP.NET host that will act as the identity server.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<ExampleAppDbContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.AddSqlOS<ExampleAppDbContext>(options =>
+{
+    options.DashboardBasePath = "/sqlos";
+
+    var auth = options.AuthServer;
+    auth.Issuer = "https://auth.example.com/sqlos/auth";
+    auth.PublicOrigin = "https://auth.example.com";
+    auth.DefaultAudience = "https://api.example.com";
+});
+
+var app = builder.Build();
+app.MapSqlOS();
+app.Run();
+```
+
+The public issuer must be stable. Resource APIs validate tokens against this issuer.
+
+## 2. Register each client
+
+Give every app surface its own client ID and redirect URI.
+
+```csharp
+builder.AddSqlOS<ExampleAppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+
+    auth.SeedBrowserClient(
+        "customer-portal",
+        "Customer Portal",
+        "https://app.example.com/auth/callback");
+
+    auth.SeedBrowserClient(
+        "admin-console",
+        "Admin Console",
+        "https://admin.example.com/auth/callback");
+
+    auth.SeedBrowserClient(
+        "mobile-app",
+        "Mobile App",
+        "sqlos-mobile://auth-callback");
+
+    auth.SeedCliClient(
+        "support-cli",
+        "Support CLI",
+        "https://api.example.com",
+        "openid",
+        "profile",
+        "email",
+        "offline_access");
+});
+```
+
+<Callout type="info" title="Client and audience are different">
+  Client IDs identify the app asking for login. Audience identifies the resource API that should accept the access token. Two clients can use the same audience and still have different application access policy.
+</Callout>
+
+## 3. Choose hosted or headless login
+
+Use hosted AuthPage when a shared login page is acceptable.
+
+Use headless when each frontend should own the login UI while SqlOS owns OAuth state.
+
+```csharp
+auth.UseHeadlessAuthPage(headless =>
+{
+    headless.BuildUiUrl = ctx =>
+        QueryHelpers.AddQueryString(
+            "https://app.example.com/auth/authorize",
+            new Dictionary<string, string?>
+            {
+                ["request"] = ctx.RequestId,
+                ["view"] = ctx.View,
+                ["email"] = ctx.Email,
+                ["pendingToken"] = ctx.PendingToken,
+                ["ui_context"] = ctx.UiContext?.ToJsonString()
+            });
+});
+```
+
+See [Headless Auth](/docs/authserver/headless-auth) and [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
+
+## 4. Configure application access
+
+Start with open access for the customer-facing app. Restrict sensitive surfaces.
+
+```bash
+curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access-mode \
+  -H "Content-Type: application/json" \
+  -d '{ "accessMode": "selected_users_groups_roles" }'
+```
+
+Allow tenant admins for one organization:
+
+```bash
+curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/assignments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principalType": "role",
+    "organizationId": "org_123",
+    "roleKey": "admin",
+    "access": "allowed",
+    "reason": "Tenant admins may use Admin Console"
+  }'
+```
+
+Explain a decision:
+
+```bash
+curl "https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access/check?organizationId=org_123&userId=usr_123"
+```
+
+## 5. Validate tokens in resource APIs
+
+Resource APIs should validate issuer, signature, expiry, and audience. They should not rely on application access checks alone.
+
+```csharp
+app.UseSqlOSAccessTokenValidation(options =>
+{
+    options.ExpectedAudience = "https://api.example.com";
+});
+```
+
+Use FGA or app policy after token validation when the API needs row-level or resource-level authorization.
+
+## 6. Add server-side flows
+
+Use the SDK services for flows that are not just browser redirect login.
+
+<Tabs defaultValue="invite">
+  <TabsList>
+    <TabsTrigger value="invite">Invitations</TabsTrigger>
+    <TabsTrigger value="device">Device flow</TabsTrigger>
+    <TabsTrigger value="otp">Email OTP</TabsTrigger>
+  </TabsList>
+
+  <TabsContent value="invite">
+    ```csharp
+    var invite = await authService.CreateEmailInvitationAsync(
+        new SqlOSCreateEmailInvitationRequest(
+            organizationId,
+            email: "alex@example.com",
+            role: "admin",
+            clientId: "admin-console",
+            redirectUri: "https://admin.example.com/auth/callback"),
+        httpContext,
+        ct);
+    ```
+  </TabsContent>
+
+  <TabsContent value="device">
+    ```csharp
+    var deviceStart = await authService.StartDeviceAuthorizationAsync(
+        new SqlOSDeviceAuthorizationStartRequest(
+            clientId: "support-cli",
+            scope: "openid profile email offline_access",
+            resource: "https://api.example.com"),
+        httpContext,
+        ct);
+    ```
+  </TabsContent>
+
+  <TabsContent value="otp">
+    ```csharp
+    var otpStart = await authService.RequestEmailOtpAsync(
+        new SqlOSEmailOtpStartRequest(
+            email: "alex@example.com",
+            clientId: "customer-portal",
+            organizationId: "org_123"),
+        httpContext,
+        ct);
+    ```
+  </TabsContent>
+</Tabs>
+
+## 7. Verify the setup
+
+<Steps>
+  <Step title="Open the dashboard">
+    Open `/sqlos/admin/auth`, confirm all expected clients exist, and check their access modes.
+  </Step>
+  <Step title="Sign in through each app">
+    Use Customer Portal, Admin Console, mobile callback, and CLI/device flow separately.
+  </Step>
+  <Step title="Test assignment decisions">
+    Use the access check endpoint before and after revoking an assignment.
+  </Step>
+  <Step title="Validate API audience">
+    Call the resource API with a token minted for the correct audience and with one minted for the wrong audience.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGrid cols={2}>
+  <Card title="Standalone reference" description="Tables for clients, access modes, assignment targets, endpoints, and enforcement points." href="/docs/reference/standalone-identity-server" />
+  <Card title="Application access" description="Assign applications to organizations, users, groups, and roles." href="/docs/authserver/application-access" />
+  <Card title="Clients" description="Owned apps, CLI clients, CIMD, and DCR paths." href="/docs/authserver/clients" />
+  <Card title="SDK reference" description="AuthService, admin service, OTP, invitations, device flow, and token validation." href="/docs/reference/sdk-reference" />
+</CardGrid>
