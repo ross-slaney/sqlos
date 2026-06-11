@@ -35,11 +35,10 @@ public static class SqlOSFgaConvenienceExtensions
         string parentId,
         string name,
         string resourceTypeId,
-        string? id = null,
-        int maxHierarchyDepth = DefaultMaxResourceHierarchyDepth)
+        string? id = null)
     {
         var resourceId = id ?? Guid.NewGuid().ToString();
-        EnsureParentChainDoesNotCreateCycle(context, resourceId, parentId, maxHierarchyDepth);
+        EnsureParentChainDoesNotCreateCycle(context, resourceId, parentId);
         var resource = new SqlOSFgaResource
         {
             Id = resourceId,
@@ -54,15 +53,13 @@ public static class SqlOSFgaConvenienceExtensions
     private static void EnsureParentChainDoesNotCreateCycle(
         ISqlOSFgaDbContext context,
         string resourceId,
-        string parentId,
-        int maxHierarchyDepth)
+        string parentId)
     {
         if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
         }
 
-        var maxDepth = Math.Max(1, maxHierarchyDepth);
         var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
         string? currentId = parentId;
         var depth = 0;
@@ -74,9 +71,9 @@ public static class SqlOSFgaConvenienceExtensions
                 throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
             }
 
-            if (depth > maxDepth)
+            if (depth > DefaultMaxResourceHierarchyDepth)
             {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {maxDepth}.");
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
             }
 
             var parent = context.Set<SqlOSFgaResource>()
