@@ -11,6 +11,8 @@ namespace SqlOS.Fga.Extensions;
 /// </summary>
 public static class SqlOSFgaConvenienceExtensions
 {
+    private const int DefaultMaxResourceHierarchyDepth = 10;
+
     /// <summary>
     /// Creates a <see cref="SqlOSFgaResource"/> and adds it to the context (not yet saved).
     /// Returns the generated resource ID so you can assign it to your domain entity.
@@ -33,9 +35,11 @@ public static class SqlOSFgaConvenienceExtensions
         string parentId,
         string name,
         string resourceTypeId,
-        string? id = null)
+        string? id = null,
+        int maxHierarchyDepth = DefaultMaxResourceHierarchyDepth)
     {
         var resourceId = id ?? Guid.NewGuid().ToString();
+        EnsureParentChainDoesNotCreateCycle(context, resourceId, parentId, maxHierarchyDepth);
         var resource = new SqlOSFgaResource
         {
             Id = resourceId,
@@ -45,6 +49,44 @@ public static class SqlOSFgaConvenienceExtensions
         };
         context.Set<SqlOSFgaResource>().Add(resource);
         return resourceId;
+    }
+
+    private static void EnsureParentChainDoesNotCreateCycle(
+        ISqlOSFgaDbContext context,
+        string resourceId,
+        string parentId,
+        int maxHierarchyDepth)
+    {
+        if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
+        }
+
+        var maxDepth = Math.Max(1, maxHierarchyDepth);
+        var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
+        string? currentId = parentId;
+        var depth = 0;
+
+        while (!string.IsNullOrWhiteSpace(currentId))
+        {
+            if (!visited.Add(currentId))
+            {
+                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
+            }
+
+            if (depth > maxDepth)
+            {
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {maxDepth}.");
+            }
+
+            var parent = context.Set<SqlOSFgaResource>()
+                .AsNoTracking()
+                .Where(r => r.Id == currentId)
+                .Select(r => new { r.ParentId })
+                .FirstOrDefault();
+            currentId = parent?.ParentId;
+            depth++;
+        }
     }
 
     /// <summary>

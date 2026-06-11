@@ -83,6 +83,12 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 | `SqlOSOidcAuthService` | Google, Microsoft, Apple, and custom OIDC |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
 
+## Signing keys and protected secrets
+
+SqlOS stores JWT signing keys in your application database. Private signing key PEMs are protected with `SqlOSCryptoService.ProtectSecret` when ASP.NET Data Protection is available, and legacy plaintext rows are upgraded the next time the active key is loaded.
+
+Production deployments should configure a durable Data Protection key ring outside the application database. If Data Protection keys are lost, existing protected signing keys and other protected secrets cannot be unprotected.
+
 ## Hosted and headless
 
 <Accordion>

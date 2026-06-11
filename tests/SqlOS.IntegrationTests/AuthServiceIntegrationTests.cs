@@ -114,7 +114,7 @@ public sealed class AuthServiceIntegrationTests
         try
         {
             // Find the family ID from the original token.
-            var crypto = new SqlOSCryptoService(verifyCtx, Microsoft.Extensions.Options.Options.Create(AspireFixture.Options));
+            var crypto = new SqlOSCryptoService(verifyCtx, Microsoft.Extensions.Options.Options.Create(AspireFixture.Options), AspireFixture.DataProtectionProvider);
             var originalHash = crypto.HashToken(refreshToken);
             var original = await verifyCtx.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
                 .FirstAsync(x => x.TokenHash == originalHash);
@@ -152,7 +152,7 @@ public sealed class AuthServiceIntegrationTests
     {
         var ctx = BuildIsolatedContext();
         var options = Microsoft.Extensions.Options.Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(ctx, options);
+        var crypto = new SqlOSCryptoService(ctx, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(ctx, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(ctx, options, emailSender);
@@ -248,7 +248,7 @@ public sealed class AuthServiceIntegrationTests
     private static SqlOSAuthService BuildAuthService()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
@@ -259,7 +259,7 @@ public sealed class AuthServiceIntegrationTests
     private static SqlOSAdminService BuildAdminService()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         return new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
     }
 }

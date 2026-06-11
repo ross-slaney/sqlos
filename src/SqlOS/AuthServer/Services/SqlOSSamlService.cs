@@ -2,6 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Security;
 using System.IO.Compression;
 using System.Xml;
@@ -19,6 +20,31 @@ public sealed class SqlOSSamlService
 {
     private const string SamlProtocolNs = "urn:oasis:names:tc:SAML:2.0:protocol";
     private const string SamlAssertionNs = "urn:oasis:names:tc:SAML:2.0:assertion";
+    private const string SamlBearerConfirmationMethod = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
+    private const string SamlStatePropertyName = "__sqlosSaml";
+    private static readonly TimeSpan SamlClockSkew = TimeSpan.FromMinutes(5);
+    private static readonly HashSet<string> AllowedSignatureMethods = new(StringComparer.Ordinal)
+    {
+        SignedXml.XmlDsigRSASHA256Url,
+        SignedXml.XmlDsigRSASHA384Url,
+        SignedXml.XmlDsigRSASHA512Url,
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+        "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512"
+    };
+    private static readonly HashSet<string> AllowedDigestMethods = new(StringComparer.Ordinal)
+    {
+        SignedXml.XmlDsigSHA256Url,
+        SignedXml.XmlDsigSHA384Url,
+        SignedXml.XmlDsigSHA512Url
+    };
+    private static readonly HashSet<string> AllowedReferenceTransforms = new(StringComparer.Ordinal)
+    {
+        SignedXml.XmlDsigEnvelopedSignatureTransformUrl,
+        SignedXml.XmlDsigC14NTransformUrl,
+        SignedXml.XmlDsigExcC14NTransformUrl
+    };
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSAdminService _adminService;
@@ -51,7 +77,7 @@ public sealed class SqlOSSamlService
             null,
             client.Id,
             connection.OrganizationId,
-            new SsoRequestPayload(client.ClientId, request.RedirectUri, connection.Id),
+            new SsoRequestPayload(client.ClientId, request.RedirectUri, connection.Id, null, null),
             TimeSpan.FromMinutes(10),
             cancellationToken);
 
@@ -64,9 +90,18 @@ public sealed class SqlOSSamlService
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");
         var requestState = await _cryptoService.FindTemporaryTokenAsync("sso_request", requestToken, cancellationToken)
             ?? throw new InvalidOperationException("SSO request token is invalid or expired.");
+        var requestPayload = _cryptoService.DeserializePayload<SsoRequestPayload>(requestState)
+            ?? throw new InvalidOperationException("SSO request payload is invalid.");
+        var samlRequest = BuildAuthnRequest(connection);
 
-        _ = requestState;
-        return BuildIdentityProviderRedirectUrl(connection, requestToken);
+        requestState.PayloadJson = JsonSerializer.Serialize(requestPayload with
+        {
+            SamlRequestId = samlRequest.Id,
+            AssertionConsumerServiceUrl = samlRequest.AssertionConsumerServiceUrl
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return BuildIdentityProviderRedirectUrl(connection, requestToken, samlRequest.EncodedRequest);
     }
 
     public async Task<string> BuildIdentityProviderRedirectForAuthorizationRequestAsync(string authorizationRequestId, CancellationToken cancellationToken = default)
@@ -87,19 +122,35 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("SAML connection not found or disabled.");
         }
 
-        return BuildIdentityProviderRedirectUrl(connection, authorizationRequest.Id);
+        var samlRequest = BuildAuthnRequest(connection);
+        authorizationRequest.UiContextJson = StoreSamlRequestState(
+            authorizationRequest.UiContextJson,
+            new SamlRequestState(samlRequest.Id, samlRequest.AssertionConsumerServiceUrl));
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return BuildIdentityProviderRedirectUrl(connection, authorizationRequest.Id, samlRequest.EncodedRequest);
     }
 
     public async Task<string> HandleAcsAsync(string connectionId, string samlResponse, string relayState, HttpContext? httpContext = null, CancellationToken cancellationToken = default)
     {
         var connection = await _context.Set<SqlOSSsoConnection>().FirstOrDefaultAsync(x => x.Id == connectionId && x.IsEnabled, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");
-        var principal = ParseAndValidateAssertion(samlResponse, connection);
         var authorizationRequest = await _context.Set<SqlOSAuthorizationRequest>()
             .FirstOrDefaultAsync(x => x.Id == relayState && x.ConnectionId == connectionId, cancellationToken);
 
         if (authorizationRequest != null)
         {
+            if (authorizationRequest.CancelledAt != null || authorizationRequest.CompletedAt != null || authorizationRequest.ExpiresAt <= DateTime.UtcNow)
+            {
+                throw new InvalidOperationException("Authorization request is no longer active.");
+            }
+
+            var samlState = ReadSamlRequestState(authorizationRequest.UiContextJson)
+                ?? throw new InvalidOperationException("SAML request state is missing.");
+            var principal = ParseAndValidateAssertion(
+                samlResponse,
+                connection,
+                new SamlValidationContext(samlState.RequestId, samlState.AssertionConsumerServiceUrl, _adminService.GetServiceProviderEntityId()));
             return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, principal, httpContext, cancellationToken);
         }
 
@@ -107,8 +158,17 @@ public sealed class SqlOSSamlService
             ?? throw new InvalidOperationException("SSO request token is invalid or expired.");
         var requestPayload = _cryptoService.DeserializePayload<SsoRequestPayload>(requestToken)
             ?? throw new InvalidOperationException("SSO request payload is invalid.");
+        if (string.IsNullOrWhiteSpace(requestPayload.SamlRequestId) || string.IsNullOrWhiteSpace(requestPayload.AssertionConsumerServiceUrl))
+        {
+            throw new InvalidOperationException("SAML request state is missing.");
+        }
 
-        return await HandleRequestTokenAcsAsync(connection, requestToken, requestPayload, principal, cancellationToken);
+        var requestPrincipal = ParseAndValidateAssertion(
+            samlResponse,
+            connection,
+            new SamlValidationContext(requestPayload.SamlRequestId, requestPayload.AssertionConsumerServiceUrl, _adminService.GetServiceProviderEntityId()));
+
+        return await HandleRequestTokenAcsAsync(connection, requestToken, requestPayload, requestPrincipal, cancellationToken);
     }
 
     private async Task<string> HandleAuthorizationRequestAcsAsync(
@@ -206,8 +266,9 @@ public sealed class SqlOSSamlService
         return $"{requestPayload.RedirectUri}{separator}code={Uri.EscapeDataString(code)}";
     }
 
-    private string BuildAuthnRequest(SqlOSSsoConnection connection, string acsUrl)
+    private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection)
     {
+        var acsUrl = _adminService.GetAssertionConsumerServiceUrl(connection.Id);
         var requestId = $"_{Guid.NewGuid():N}";
         var issueInstant = DateTime.UtcNow.ToString("o");
 
@@ -224,43 +285,76 @@ public sealed class SqlOSSamlService
             deflater.Write(bytes, 0, bytes.Length);
         }
 
-        return Convert.ToBase64String(output.ToArray());
+        return new SamlAuthnRequest(requestId, acsUrl, Convert.ToBase64String(output.ToArray()));
     }
 
-    private string BuildIdentityProviderRedirectUrl(SqlOSSsoConnection connection, string relayState)
+    private static string BuildIdentityProviderRedirectUrl(SqlOSSsoConnection connection, string relayState, string encodedAuthnRequest)
     {
-        var authnRequest = BuildAuthnRequest(connection, _adminService.GetAssertionConsumerServiceUrl(connection.Id));
-        var query = $"SAMLRequest={Uri.EscapeDataString(authnRequest)}&RelayState={Uri.EscapeDataString(relayState)}";
+        var query = $"SAMLRequest={Uri.EscapeDataString(encodedAuthnRequest)}&RelayState={Uri.EscapeDataString(relayState)}";
         var separator = connection.SingleSignOnUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{connection.SingleSignOnUrl}{separator}{query}";
     }
 
-    private SqlOSSamlPrincipal ParseAndValidateAssertion(string base64Response, SqlOSSsoConnection connection)
+    private SqlOSSamlPrincipal ParseAndValidateAssertion(
+        string base64Response,
+        SqlOSSsoConnection connection,
+        SamlValidationContext validationContext)
     {
         var xml = Encoding.UTF8.GetString(Convert.FromBase64String(base64Response));
-        var xmlDoc = new XmlDocument { PreserveWhitespace = true };
-        xmlDoc.LoadXml(xml);
+        var xmlDoc = LoadSamlDocument(xml);
 
         var ns = new XmlNamespaceManager(xmlDoc.NameTable);
         ns.AddNamespace("samlp", SamlProtocolNs);
         ns.AddNamespace("saml", SamlAssertionNs);
         ns.AddNamespace("ds", SignedXml.XmlDsigNamespaceUrl);
 
-        ValidateSignature(xmlDoc, connection.X509CertificatePem, ns);
+        var responseElement = xmlDoc.DocumentElement;
+        if (responseElement == null
+            || responseElement.LocalName != "Response"
+            || responseElement.NamespaceURI != SamlProtocolNs)
+        {
+            throw new InvalidOperationException("SAML response is invalid.");
+        }
 
-        var issuer = xmlDoc.SelectSingleNode("/samlp:Response/saml:Issuer", ns)?.InnerText
-            ?? xmlDoc.SelectSingleNode("/samlp:Response/saml:Assertion/saml:Issuer", ns)?.InnerText
-            ?? throw new InvalidOperationException("SAML response issuer missing.");
+        var assertionNodes = responseElement.SelectNodes("saml:Assertion", ns);
+        if (assertionNodes == null || assertionNodes.Count != 1 || assertionNodes[0] is not XmlElement assertionElement)
+        {
+            throw new InvalidOperationException("SAML response must contain exactly one assertion.");
+        }
+
+        var signedElement = ValidateSignature(xmlDoc, connection.X509CertificatePem, ns);
+        if (!ReferenceEquals(signedElement, responseElement) && !ReferenceEquals(signedElement, assertionElement))
+        {
+            throw new InvalidOperationException("SAML signature does not cover the consumed assertion.");
+        }
+
+        if (ReferenceEquals(signedElement, responseElement) && !ReferenceEquals(assertionElement.ParentNode, responseElement))
+        {
+            throw new InvalidOperationException("SAML signature does not cover the consumed assertion.");
+        }
+
+        var responseIssuer = responseElement.SelectSingleNode("saml:Issuer", ns)?.InnerText;
+        if (!string.IsNullOrWhiteSpace(responseIssuer)
+            && !string.Equals(responseIssuer, connection.IdentityProviderEntityId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML response issuer mismatch.");
+        }
+
+        var issuer = assertionElement.SelectSingleNode("saml:Issuer", ns)?.InnerText
+            ?? throw new InvalidOperationException("SAML assertion issuer missing.");
         if (!string.Equals(issuer, connection.IdentityProviderEntityId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("SAML response issuer mismatch.");
         }
 
-        var nameId = xmlDoc.SelectSingleNode("//saml:Assertion/saml:Subject/saml:NameID", ns)?.InnerText
+        ValidateResponseCorrelation(responseElement, validationContext);
+        ValidateAssertionConditions(assertionElement, validationContext, ns);
+
+        var nameId = assertionElement.SelectSingleNode("saml:Subject/saml:NameID", ns)?.InnerText
             ?? throw new InvalidOperationException("SAML assertion NameID missing.");
 
         var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var attributeNodes = xmlDoc.SelectNodes("//saml:AttributeStatement/saml:Attribute", ns);
+        var attributeNodes = assertionElement.SelectNodes("saml:AttributeStatement/saml:Attribute", ns);
         if (attributeNodes != null)
         {
             foreach (XmlNode attribute in attributeNodes)
@@ -277,23 +371,268 @@ public sealed class SqlOSSamlService
         return new SqlOSSamlPrincipal(issuer, nameId, attributes);
     }
 
-    private static void ValidateSignature(XmlDocument xmlDocument, string certificatePem, XmlNamespaceManager ns)
+    private static XmlDocument LoadSamlDocument(string xml)
     {
-        var signatureNode = xmlDocument.SelectSingleNode("/samlp:Response/ds:Signature", ns)
-            ?? xmlDocument.SelectSingleNode("//saml:Assertion/ds:Signature", ns);
-        if (signatureNode is not XmlElement signatureElement)
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null
+        };
+        var xmlDocument = new XmlDocument
+        {
+            PreserveWhitespace = true,
+            XmlResolver = null
+        };
+
+        using var stringReader = new StringReader(xml);
+        using var reader = XmlReader.Create(stringReader, settings);
+        xmlDocument.Load(reader);
+        return xmlDocument;
+    }
+
+    private static XmlElement ValidateSignature(XmlDocument xmlDocument, string certificatePem, XmlNamespaceManager ns)
+    {
+        var signatureNodes = xmlDocument.SelectNodes("/samlp:Response/ds:Signature | /samlp:Response/saml:Assertion/ds:Signature", ns);
+        if (signatureNodes == null || signatureNodes.Count != 1 || signatureNodes[0] is not XmlElement signatureElement)
         {
             throw new InvalidOperationException("SAML response signature missing.");
         }
 
         var signedElement = signatureElement.ParentNode as XmlElement
             ?? throw new InvalidOperationException("Signed SAML element missing.");
-        var signedXml = new SignedXml(signedElement);
+        var signedXml = new SignedXmlWithIdResolution(signedElement);
         signedXml.LoadXml(signatureElement);
+        ValidateSignedInfo(signedXml);
+
         var certificate = X509Certificate2.CreateFromPem(certificatePem);
         if (!signedXml.CheckSignature(certificate, true))
         {
             throw new InvalidOperationException("SAML response signature is invalid.");
+        }
+
+        var reference = (Reference)signedXml.SignedInfo!.References[0]!;
+        var referenceUri = reference.Uri
+            ?? throw new InvalidOperationException("SAML signature reference must identify a signed element.");
+        var referencedElement = ResolveSignedReference(xmlDocument, referenceUri);
+        if (!ReferenceEquals(referencedElement, signedElement))
+        {
+            throw new InvalidOperationException("SAML signature reference does not match the signed element.");
+        }
+
+        return referencedElement;
+    }
+
+    private static void ValidateSignedInfo(SignedXml signedXml)
+    {
+        if (signedXml.SignedInfo == null
+            || string.IsNullOrWhiteSpace(signedXml.SignedInfo.SignatureMethod)
+            || !AllowedSignatureMethods.Contains(signedXml.SignedInfo.SignatureMethod))
+        {
+            throw new InvalidOperationException("SAML signature algorithm is not allowed.");
+        }
+
+        if (signedXml.SignedInfo.References.Count != 1 || signedXml.SignedInfo.References[0] is not Reference reference)
+        {
+            throw new InvalidOperationException("SAML signature must contain exactly one reference.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reference.Uri) || !reference.Uri.StartsWith("#", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML signature reference must identify a signed element.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reference.DigestMethod) || !AllowedDigestMethods.Contains(reference.DigestMethod))
+        {
+            throw new InvalidOperationException("SAML signature digest algorithm is not allowed.");
+        }
+
+        var transforms = new List<Transform>();
+        for (var i = 0; i < reference.TransformChain.Count; i++)
+        {
+            transforms.Add((Transform)reference.TransformChain[i]);
+        }
+        if (transforms.Count != 2
+            || !transforms.Any(t => string.Equals(t.Algorithm, SignedXml.XmlDsigEnvelopedSignatureTransformUrl, StringComparison.Ordinal))
+            || !transforms.Any(t => string.Equals(t.Algorithm, SignedXml.XmlDsigC14NTransformUrl, StringComparison.Ordinal)
+                || string.Equals(t.Algorithm, SignedXml.XmlDsigExcC14NTransformUrl, StringComparison.Ordinal))
+            || transforms.Any(t => string.IsNullOrWhiteSpace(t.Algorithm) || !AllowedReferenceTransforms.Contains(t.Algorithm)))
+        {
+            throw new InvalidOperationException("SAML signature transform is not allowed.");
+        }
+    }
+
+    private static XmlElement ResolveSignedReference(XmlDocument document, string uri)
+    {
+        var id = Uri.UnescapeDataString(uri[1..]);
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new InvalidOperationException("SAML signature reference is invalid.");
+        }
+
+        XmlElement? match = null;
+        foreach (var element in EnumerateElements(document.DocumentElement))
+        {
+            if (ElementHasId(element, id))
+            {
+                if (match != null)
+                {
+                    throw new InvalidOperationException("SAML signature reference ID is ambiguous.");
+                }
+
+                match = element;
+            }
+        }
+
+        return match ?? throw new InvalidOperationException("SAML signature reference target is missing.");
+    }
+
+    private static IEnumerable<XmlElement> EnumerateElements(XmlElement? root)
+    {
+        if (root == null)
+        {
+            yield break;
+        }
+
+        yield return root;
+        foreach (XmlNode child in root.ChildNodes)
+        {
+            if (child is XmlElement childElement)
+            {
+                foreach (var descendant in EnumerateElements(childElement))
+                {
+                    yield return descendant;
+                }
+            }
+        }
+    }
+
+    private static bool ElementHasId(XmlElement element, string id)
+        => string.Equals(element.GetAttribute("ID"), id, StringComparison.Ordinal)
+           || string.Equals(element.GetAttribute("Id"), id, StringComparison.Ordinal)
+           || string.Equals(element.GetAttribute("id"), id, StringComparison.Ordinal)
+           || string.Equals(element.GetAttribute("xml:id"), id, StringComparison.Ordinal);
+
+    private static void ValidateResponseCorrelation(XmlElement responseElement, SamlValidationContext validationContext)
+    {
+        var responseInResponseTo = responseElement.GetAttribute("InResponseTo");
+        if (!string.IsNullOrWhiteSpace(responseInResponseTo)
+            && !string.Equals(responseInResponseTo, validationContext.RequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML response InResponseTo mismatch.");
+        }
+
+        var destination = responseElement.GetAttribute("Destination");
+        if (!string.IsNullOrWhiteSpace(destination)
+            && !string.Equals(destination, validationContext.AssertionConsumerServiceUrl, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML response destination mismatch.");
+        }
+    }
+
+    private static void ValidateAssertionConditions(XmlElement assertionElement, SamlValidationContext validationContext, XmlNamespaceManager ns)
+    {
+        var now = DateTime.UtcNow;
+        var conditions = assertionElement.SelectSingleNode("saml:Conditions", ns) as XmlElement
+            ?? throw new InvalidOperationException("SAML assertion conditions missing.");
+
+        var notBefore = ParseSamlDateTimeOrNull(conditions.GetAttribute("NotBefore"));
+        if (notBefore.HasValue && now + SamlClockSkew < notBefore.Value)
+        {
+            throw new InvalidOperationException("SAML assertion is not yet valid.");
+        }
+
+        var notOnOrAfter = ParseSamlDateTimeOrNull(conditions.GetAttribute("NotOnOrAfter"))
+            ?? throw new InvalidOperationException("SAML assertion expiration missing.");
+        if (now - SamlClockSkew >= notOnOrAfter)
+        {
+            throw new InvalidOperationException("SAML assertion has expired.");
+        }
+
+        var audiences = conditions.SelectNodes("saml:AudienceRestriction/saml:Audience", ns);
+        if (audiences == null
+            || audiences.Count == 0
+            || !audiences.Cast<XmlNode>().Any(a => string.Equals(a.InnerText, validationContext.Audience, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("SAML assertion audience mismatch.");
+        }
+
+        var subjectConfirmationData = assertionElement.SelectNodes(
+            "saml:Subject/saml:SubjectConfirmation/saml:SubjectConfirmationData",
+            ns);
+        if (subjectConfirmationData == null
+            || !subjectConfirmationData.Cast<XmlNode>().OfType<XmlElement>().Any(data => IsValidSubjectConfirmation(data, validationContext, now)))
+        {
+            throw new InvalidOperationException("SAML subject confirmation mismatch.");
+        }
+    }
+
+    private static bool IsValidSubjectConfirmation(XmlElement subjectConfirmationData, SamlValidationContext validationContext, DateTime now)
+    {
+        if (subjectConfirmationData.ParentNode is XmlElement confirmation)
+        {
+            var method = confirmation.GetAttribute("Method");
+            if (!string.Equals(method, SamlBearerConfirmationMethod, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        if (!string.Equals(subjectConfirmationData.GetAttribute("Recipient"), validationContext.AssertionConsumerServiceUrl, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.Equals(subjectConfirmationData.GetAttribute("InResponseTo"), validationContext.RequestId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var notOnOrAfter = ParseSamlDateTimeOrNull(subjectConfirmationData.GetAttribute("NotOnOrAfter"));
+        return !notOnOrAfter.HasValue || now - SamlClockSkew < notOnOrAfter.Value;
+    }
+
+    private static DateTime? ParseSamlDateTimeOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return XmlConvert.ToDateTime(value, XmlDateTimeSerializationMode.Utc);
+    }
+
+    private static string StoreSamlRequestState(string? uiContextJson, SamlRequestState state)
+    {
+        var uiContext = SqlOSHeadlessAuthService.ParseUiContext(uiContextJson) ?? new JsonObject();
+        uiContext[SamlStatePropertyName] = JsonSerializer.SerializeToNode(state);
+        return uiContext.ToJsonString();
+    }
+
+    private static SamlRequestState? ReadSamlRequestState(string? uiContextJson)
+    {
+        var uiContext = SqlOSHeadlessAuthService.ParseUiContext(uiContextJson);
+        if (uiContext == null || !uiContext.TryGetPropertyValue(SamlStatePropertyName, out var value) || value == null)
+        {
+            return null;
+        }
+
+        return value.Deserialize<SamlRequestState>();
+    }
+
+    private sealed class SignedXmlWithIdResolution : SignedXml
+    {
+        public SignedXmlWithIdResolution(XmlElement element) : base(element)
+        {
+        }
+
+        public override XmlElement? GetIdElement(XmlDocument? document, string idValue)
+        {
+            if (document?.DocumentElement == null)
+            {
+                return null;
+            }
+
+            return EnumerateElements(document.DocumentElement).FirstOrDefault(element => ElementHasId(element, idValue));
         }
     }
 
@@ -441,7 +780,16 @@ public sealed class SqlOSSamlService
         });
     }
 
-    private sealed record SsoRequestPayload(string ClientId, string RedirectUri, string ConnectionId);
+    private sealed record SsoRequestPayload(
+        string ClientId,
+        string RedirectUri,
+        string ConnectionId,
+        string? SamlRequestId,
+        string? AssertionConsumerServiceUrl);
+
+    private sealed record SamlAuthnRequest(string Id, string AssertionConsumerServiceUrl, string EncodedRequest);
+    private sealed record SamlRequestState(string RequestId, string AssertionConsumerServiceUrl);
+    private sealed record SamlValidationContext(string RequestId, string AssertionConsumerServiceUrl, string Audience);
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record SqlOSSamlPrincipal(string Issuer, string Subject, Dictionary<string, string> Attributes);
 }

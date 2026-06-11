@@ -1,6 +1,9 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -56,6 +59,47 @@ public class SqlOSFgaSubjectServiceTests
     public void Cleanup()
     {
         _context.Dispose();
+    }
+
+    [TestMethod]
+    public void CreateResource_WhenParentIsSelf_Throws()
+    {
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            _context.CreateResource("res_self", "Self", "root", id: "res_self"));
+    }
+
+    [TestMethod]
+    public void CreateResource_WhenExistingParentChainHasCycle_Throws()
+    {
+        _context.Set<SqlOSFgaResource>().AddRange(
+            new SqlOSFgaResource { Id = "res_a", ParentId = "res_b", Name = "A", ResourceTypeId = "root" },
+            new SqlOSFgaResource { Id = "res_b", ParentId = "res_a", Name = "B", ResourceTypeId = "root" });
+        _context.SaveChanges();
+
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            _context.CreateResource("res_a", "Child", "root", id: "res_child"));
+    }
+
+    [TestMethod]
+    public async Task GetAuthorizationFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
+    {
+        _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
+        {
+            Id = "perm_read",
+            Key = "READ",
+            Name = "Read"
+        });
+        _context.SaveChanges();
+        var authService = new SqlOSFgaAuthService(
+            _context,
+            Options.Create(new SqlOSFgaOptions()),
+            NullLogger<SqlOSFgaAuthService>.Instance);
+
+        var filter = await authService.GetAuthorizationFilterAsync<TestProtectedEntity>("subj_user", "READ");
+        var constants = ConstantCollector.Collect(filter);
+
+        Assert.IsFalse(constants.Contains("subj_user"));
+        Assert.IsFalse(constants.Contains("perm_read"));
     }
 
     [TestMethod]
@@ -208,5 +252,28 @@ public class SqlOSFgaSubjectServiceTests
         var groups = await _service.GetGroupsForSubjectAsync(agent.SubjectId);
         Assert.AreEqual(1, groups.Count);
         Assert.AreEqual(group.Id, groups[0].Id);
+    }
+
+    private sealed class TestProtectedEntity : IHasResourceId
+    {
+        public string ResourceId { get; set; } = string.Empty;
+    }
+
+    private sealed class ConstantCollector : ExpressionVisitor
+    {
+        private readonly List<object?> _values = new();
+
+        public static List<object?> Collect(Expression expression)
+        {
+            var collector = new ConstantCollector();
+            collector.Visit(expression);
+            return collector._values;
+        }
+
+        protected override Expression VisitConstant(ConstantExpression node)
+        {
+            _values.Add(node.Value);
+            return base.VisitConstant(node);
+        }
     }
 }

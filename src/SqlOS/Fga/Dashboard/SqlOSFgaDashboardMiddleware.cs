@@ -23,6 +23,7 @@ public class SqlOSFgaDashboardMiddleware
     private readonly IFileProvider _fileProvider;
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
+    private const int MaxAncestorTraversalDepth = 50;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -462,16 +463,21 @@ public class SqlOSFgaDashboardMiddleware
         // Build breadcrumb path from root to this resource
         var breadcrumbs = new List<object>();
         var currentId = resource.ParentId;
-        while (!string.IsNullOrEmpty(currentId))
+        var visited = new HashSet<string>(StringComparer.Ordinal) { resource.Id };
+        for (var depth = 0; !string.IsNullOrEmpty(currentId) && depth <= MaxAncestorTraversalDepth; depth++)
         {
+            if (!visited.Add(currentId))
+            {
+                break;
+            }
+
             var parent = await dbContext.Set<SqlOSFgaResource>()
                 .Where(r => r.Id == currentId)
-                .Select(r => new { r.Id, r.Name })
+                .Select(r => new { r.Id, r.Name, r.ParentId })
                 .FirstOrDefaultAsync();
             if (parent == null) break;
-            breadcrumbs.Insert(0, parent);
-            var res = await dbContext.Set<SqlOSFgaResource>().Where(r => r.Id == currentId).Select(r => r.ParentId).FirstOrDefaultAsync();
-            currentId = res;
+            breadcrumbs.Insert(0, new { parent.Id, parent.Name });
+            currentId = parent.ParentId;
         }
 
         var result = new { Resource = resource, Breadcrumbs = breadcrumbs };
@@ -490,8 +496,14 @@ public class SqlOSFgaDashboardMiddleware
 
         var ancestorIds = new List<string> { resourceId };
         var currentId = resource.ParentId;
-        while (!string.IsNullOrEmpty(currentId))
+        var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
+        for (var depth = 0; !string.IsNullOrEmpty(currentId) && depth <= MaxAncestorTraversalDepth; depth++)
         {
+            if (!visited.Add(currentId))
+            {
+                break;
+            }
+
             ancestorIds.Add(currentId);
             var parentId = await dbContext.Set<SqlOSFgaResource>().Where(r => r.Id == currentId).Select(r => r.ParentId).FirstOrDefaultAsync();
             currentId = parentId;
