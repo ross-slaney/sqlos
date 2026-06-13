@@ -148,7 +148,46 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(23, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(24, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_RepairsVersion23MissingApplicationAssignmentsSchema()
+    {
+        var databaseName = $"SqlOSRepair_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion23WithoutApplicationAssignmentsSchemaAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSClientApplications", "AccessMode"));
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSSessions", "OrganizationId"));
+            Assert.IsTrue(await TableExistsAsync(context, "SqlOSApplicationAssignments"));
+            Assert.IsTrue(await ForeignKeyExistsAsync(context, "SqlOSSessions", "FK_SqlOSSessions_Organizations"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSClientApplications", "IX_SqlOSClientApplications_AccessMode"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
+            Assert.AreEqual(24, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -157,14 +196,43 @@ public sealed class SchemaInitializerIntegrationTests
     }
 
     private static async Task<bool> TableExistsAsync(string tableName)
+        => await TableExistsAsync(AspireFixture.SharedContext, tableName);
+
+    private static async Task<bool> TableExistsAsync(DbContext context, string tableName)
     {
-        var connection = AspireFixture.SharedContext.Database.GetDbConnection();
+        var connection = context.Database.GetDbConnection();
         await connection.OpenAsync();
         try
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE name = @name AND schema_id = SCHEMA_ID('dbo')";
             cmd.Parameters.Add(new SqlParameter("@name", tableName));
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result) > 0;
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private static async Task<bool> ForeignKeyExistsAsync(DbContext context, string tableName, string foreignKeyName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT COUNT(*)
+                FROM sys.foreign_keys fk
+                INNER JOIN sys.tables t ON fk.parent_object_id = t.object_id
+                WHERE t.name = @tableName
+                  AND fk.name = @foreignKeyName
+                  AND t.schema_id = SCHEMA_ID('dbo')
+                """;
+            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
+            cmd.Parameters.Add(new SqlParameter("@foreignKeyName", foreignKeyName));
             var result = await cmd.ExecuteScalarAsync();
             return Convert.ToInt32(result) > 0;
         }
@@ -259,6 +327,26 @@ public sealed class SchemaInitializerIntegrationTests
                 'user.login',
                 'user',
                 SYSUTCDATETIME()
+            );
+            """);
+    }
+
+    private static async Task SeedVersion23WithoutApplicationAssignmentsSchemaAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (23);
+
+            CREATE TABLE [dbo].[SqlOSOrganizations] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
+            );
+
+            CREATE TABLE [dbo].[SqlOSClientApplications] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
+            );
+
+            CREATE TABLE [dbo].[SqlOSSessions] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
             );
             """);
     }
