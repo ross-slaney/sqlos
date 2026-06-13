@@ -120,6 +120,42 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync("SqlOSEmailDeliveries", "IdempotencyKey"));
     }
 
+    [TestMethod]
+    public async Task EnsureSchema_UpgradesVersion22AuditEventsSchema()
+    {
+        var databaseName = $"SqlOSUpgrade_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion22AuditEventsSchemaAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSAuditEvents", "Action"));
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSAuditEvents", "IdempotencyKeyHash"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
+            Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
+            Assert.AreEqual(23, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
     private static async Task<bool> TableExistsAsync(string tableName)
     {
         var connection = AspireFixture.SharedContext.Database.GetDbConnection();
@@ -139,8 +175,11 @@ public sealed class SchemaInitializerIntegrationTests
     }
 
     private static async Task<bool> ColumnExistsAsync(string tableName, string columnName)
+        => await ColumnExistsAsync(AspireFixture.SharedContext, tableName, columnName);
+
+    private static async Task<bool> ColumnExistsAsync(DbContext context, string tableName, string columnName)
     {
-        var connection = AspireFixture.SharedContext.Database.GetDbConnection();
+        var connection = context.Database.GetDbConnection();
         await connection.OpenAsync();
         try
         {
@@ -162,5 +201,141 @@ public sealed class SchemaInitializerIntegrationTests
         {
             await connection.CloseAsync();
         }
+    }
+
+    private static async Task<bool> IndexExistsAsync(DbContext context, string tableName, string indexName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT COUNT(*)
+                FROM sys.indexes i
+                INNER JOIN sys.tables t ON i.object_id = t.object_id
+                WHERE t.name = @tableName
+                  AND i.name = @indexName
+                  AND t.schema_id = SCHEMA_ID('dbo')
+                """;
+            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
+            cmd.Parameters.Add(new SqlParameter("@indexName", indexName));
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result) > 0;
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private static async Task SeedVersion22AuditEventsSchemaAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (22);
+
+            CREATE TABLE [dbo].[SqlOSAuditEvents] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [OrganizationId] NVARCHAR(64) NULL,
+                [UserId] NVARCHAR(64) NULL,
+                [SessionId] NVARCHAR(64) NULL,
+                [EventType] NVARCHAR(120) NOT NULL,
+                [ActorType] NVARCHAR(80) NOT NULL,
+                [ActorId] NVARCHAR(64) NULL,
+                [OccurredAt] DATETIME2 NOT NULL,
+                [IpAddress] NVARCHAR(128) NULL,
+                [DataJson] NVARCHAR(MAX) NULL
+            );
+
+            INSERT INTO [dbo].[SqlOSAuditEvents] (
+                [Id],
+                [EventType],
+                [ActorType],
+                [OccurredAt]
+            )
+            VALUES (
+                'evt_upgrade_audit',
+                'user.login',
+                'user',
+                SYSUTCDATETIME()
+            );
+            """);
+    }
+
+    private static async Task<string?> ScalarStringAsync(DbContext context, string sql)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            var result = await cmd.ExecuteScalarAsync();
+            return result == DBNull.Value ? null : Convert.ToString(result);
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private static async Task<int> ScalarIntAsync(DbContext context, string sql)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result);
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private static string BuildDatabaseConnectionString(string databaseName)
+    {
+        var builder = new SqlConnectionStringBuilder(AspireFixture.SqlConnectionString)
+        {
+            InitialCatalog = databaseName
+        };
+        return builder.ConnectionString;
+    }
+
+    private static string BuildMasterConnectionString()
+    {
+        var builder = new SqlConnectionStringBuilder(AspireFixture.SqlConnectionString)
+        {
+            InitialCatalog = "master"
+        };
+        return builder.ConnectionString;
+    }
+
+    private static async Task CreateDatabaseAsync(string databaseName)
+    {
+        await using var connection = new SqlConnection(BuildMasterConnectionString());
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"CREATE DATABASE [{databaseName}]";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task DropDatabaseAsync(string databaseName)
+    {
+        await using var connection = new SqlConnection(BuildMasterConnectionString());
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"""
+            IF DB_ID(N'{databaseName}') IS NOT NULL
+            BEGIN
+                ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                DROP DATABASE [{databaseName}];
+            END
+            """;
+        await cmd.ExecuteNonQueryAsync();
     }
 }

@@ -37,6 +37,8 @@ IF COL_LENGTH('[{Schema}].[SqlOSAuditEvents]', 'CorrelationId') IS NULL
 IF COL_LENGTH('[{Schema}].[SqlOSAuditEvents]', 'IdempotencyKeyHash') IS NULL
     ALTER TABLE [{Schema}].[SqlOSAuditEvents] ADD [IdempotencyKeyHash] NVARCHAR(128) NULL;
 
+GO
+
 IF COL_LENGTH('[{Schema}].[SqlOSAuditEvents]', 'Action') IS NOT NULL
     UPDATE [{Schema}].[SqlOSAuditEvents]
     SET [Action] = [EventType]
