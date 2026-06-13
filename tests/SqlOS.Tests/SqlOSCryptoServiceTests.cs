@@ -38,12 +38,27 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
-    public async Task EnsureActiveSigningKey_WithDataProtection_StoresProtectedPrivateKey()
+    public async Task EnsureActiveSigningKey_WithDefaultOptions_DoesNotProtectSigningKeyEvenWhenDataProtectionExists()
     {
         using var context = CreateContext();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
+            new EphemeralDataProtectionProvider());
+
+        var key = await service.EnsureActiveSigningKeyAsync();
+
+        key.PrivateKeyPem.Should().Contain("BEGIN PRIVATE KEY");
+        key.PrivateKeyPem.Should().NotStartWith("dp:");
+    }
+
+    [TestMethod]
+    public async Task EnsureActiveSigningKey_WithSigningKeyDataProtection_StoresProtectedPrivateKey()
+    {
+        using var context = CreateContext();
+        var service = new SqlOSCryptoService(
+            context,
+            SigningKeyProtectedOptions(),
             new EphemeralDataProtectionProvider());
 
         var key = await service.EnsureActiveSigningKeyAsync();
@@ -54,7 +69,7 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
-    public async Task EnsureActiveSigningKey_WithDataProtection_ProtectsLegacyPlaintextPrivateKey()
+    public async Task EnsureActiveSigningKey_WithSigningKeyDataProtection_ProtectsLegacyPlaintextPrivateKey()
     {
         using var context = CreateContext();
         var plaintextService = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
@@ -63,7 +78,7 @@ public sealed class SqlOSCryptoServiceTests
 
         var protectedService = new SqlOSCryptoService(
             context,
-            Options.Create(new SqlOSAuthServerOptions()),
+            SigningKeyProtectedOptions(),
             new EphemeralDataProtectionProvider());
 
         var upgradedKey = await protectedService.EnsureActiveSigningKeyAsync();
@@ -79,7 +94,7 @@ public sealed class SqlOSCryptoServiceTests
         using var context = CreateContext();
         var service = new SqlOSCryptoService(
             context,
-            Options.Create(new SqlOSAuthServerOptions()),
+            SigningKeyProtectedOptions(),
             new EphemeralDataProtectionProvider());
         await service.EnsureActiveSigningKeyAsync();
 
@@ -117,6 +132,35 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
+    public async Task CreateAccessToken_WithUnreadableProtectedSigningKey_RotatesAndSucceeds()
+    {
+        using var context = CreateContext();
+        var originalProvider = new EphemeralDataProtectionProvider();
+        var originalService = new SqlOSCryptoService(context, SigningKeyProtectedOptions(), originalProvider);
+        var originalKey = await originalService.EnsureActiveSigningKeyAsync();
+        originalKey.PrivateKeyPem.Should().StartWith("dp:");
+
+        var replacementProvider = new EphemeralDataProtectionProvider();
+        var recoveryService = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            replacementProvider);
+
+        var token = await recoveryService.CreateAccessTokenAsync(
+            CreateUser(),
+            CreateSession(),
+            CreateClient(),
+            "org_test");
+
+        token.Should().NotBeNullOrWhiteSpace();
+        originalKey.IsActive.Should().BeFalse();
+        originalKey.RetiredAt.Should().NotBeNull();
+        var activeKey = context.Set<SqlOSSigningKey>().Single(x => x.IsActive);
+        activeKey.Id.Should().NotBe(originalKey.Id);
+        activeKey.PrivateKeyPem.Should().Contain("BEGIN PRIVATE KEY");
+    }
+
+    [TestMethod]
     public void ProtectSecret_UnprotectSecret_RoundTrips()
     {
         using var context = CreateContext();
@@ -136,4 +180,39 @@ public sealed class SqlOSCryptoServiceTests
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
     }
+
+    private static IOptions<SqlOSAuthServerOptions> SigningKeyProtectedOptions()
+        => Options.Create(new SqlOSAuthServerOptions { ProtectSigningKeysWithDataProtection = true });
+
+    private static SqlOSUser CreateUser()
+        => new()
+        {
+            Id = "usr_test",
+            DisplayName = "Test User",
+            DefaultEmail = "test@example.com",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+    private static SqlOSSession CreateSession()
+        => new()
+        {
+            Id = "ses_test",
+            UserId = "usr_test",
+            AuthenticationMethod = "password",
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+            IdleExpiresAt = DateTime.UtcNow.AddHours(1),
+            AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+
+    private static SqlOSClientApplication CreateClient()
+        => new()
+        {
+            Id = "cli_test",
+            ClientId = "test-client",
+            Name = "Test Client",
+            Audience = "test-api",
+            CreatedAt = DateTime.UtcNow
+        };
 }
