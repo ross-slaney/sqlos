@@ -7,7 +7,7 @@ echo "=== PR Coverage Check ==="
 if [ -n "$GITHUB_BASE_REF" ]; then
     BASE_BRANCH="origin/$GITHUB_BASE_REF"
     echo "GitHub Actions detected. Base branch: $BASE_BRANCH"
-    git fetch origin "$GITHUB_BASE_REF" --depth=1 2>/dev/null || true
+    git fetch origin "$GITHUB_BASE_REF" 2>/dev/null || true
 else
     BASE_BRANCH="origin/main"
     echo "Local run. Using base branch: $BASE_BRANCH"
@@ -29,6 +29,11 @@ fi
 
 echo "Coverage file: $COVERAGE_FILE"
 echo "Is main PR: $IS_MAIN_PR"
+
+if ! git merge-base "$BASE_BRANCH" HEAD >/dev/null 2>&1; then
+    echo "No merge base found for $BASE_BRANCH...HEAD. Skipping diff coverage check."
+    exit 0
+fi
 
 # Run diff-cover
 mkdir -p TestResults/Coverage
