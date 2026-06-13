@@ -14,6 +14,7 @@ public class SqlOSFgaOptions
     public string RootResourceName { get; set; } = "Root";
     public bool InitializeFunctions { get; set; } = true;
     public bool SeedCoreData { get; set; } = true;
+    public int MaxResourceHierarchyDepth { get; set; } = 10;
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSFgaTableNames TableNames { get; set; } = new();
     public SqlOSFgaSeedData? StartupSeedData { get; private set; }

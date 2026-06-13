@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using FluentAssertions;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -21,7 +20,7 @@ public sealed class OidcAuthIntegrationTests
         await ResetOidcStateAsync();
 
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         const string customLogo = "data:image/svg+xml;charset=utf-8,%3Csvg%20viewBox%3D%220%200%2024%2024%22%3E%3C%2Fsvg%3E";
 
@@ -84,7 +83,7 @@ public sealed class OidcAuthIntegrationTests
         await ResetOidcStateAsync();
 
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
@@ -156,7 +155,7 @@ public sealed class OidcAuthIntegrationTests
         await ResetOidcStateAsync();
 
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
@@ -217,7 +216,7 @@ public sealed class OidcAuthIntegrationTests
         await ResetOidcStateAsync();
 
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, new EphemeralDataProtectionProvider());
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
         await EnsureClientAsync(admin, "example-web-apple");

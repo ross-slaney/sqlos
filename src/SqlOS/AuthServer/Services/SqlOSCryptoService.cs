@@ -56,12 +56,24 @@ public sealed class SqlOSCryptoService
             return string.Empty;
         }
 
-        if (_secretProtector == null || !protectedSecret.StartsWith("dp:", StringComparison.Ordinal))
+        if (!protectedSecret.StartsWith("dp:", StringComparison.Ordinal))
         {
             return protectedSecret;
         }
 
-        return _secretProtector.Unprotect(protectedSecret[3..]);
+        if (_secretProtector == null)
+        {
+            throw new InvalidOperationException("This secret is protected with ASP.NET Core Data Protection, but no Data Protection provider is available.");
+        }
+
+        try
+        {
+            return _secretProtector.Unprotect(protectedSecret[3..]);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException("This secret could not be unprotected. Ensure the ASP.NET Core Data Protection key ring is persisted and available to this application instance.", ex);
+        }
     }
 
     public bool VerifyPassword(string hashedPassword, string password)
@@ -170,6 +182,7 @@ public sealed class SqlOSCryptoService
             .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
         if (activeKey != null)
         {
+            await ProtectSigningKeyAtRestIfNeededAsync(activeKey, cancellationToken);
             return activeKey;
         }
 
@@ -179,7 +192,7 @@ public sealed class SqlOSCryptoService
             Id = GenerateId("key"),
             Kid = GenerateOpaqueToken(16),
             PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = rsa.ExportPkcs8PrivateKeyPem(),
+            PrivateKeyPem = ProtectSecret(rsa.ExportPkcs8PrivateKeyPem()),
             ActivatedAt = DateTime.UtcNow,
             IsActive = true
         };
@@ -214,7 +227,7 @@ public sealed class SqlOSCryptoService
             Id = GenerateId("key"),
             Kid = GenerateOpaqueToken(16),
             PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = rsa.ExportPkcs8PrivateKeyPem(),
+            PrivateKeyPem = ProtectSecret(rsa.ExportPkcs8PrivateKeyPem()),
             ActivatedAt = now,
             IsActive = true
         };
@@ -259,7 +272,7 @@ public sealed class SqlOSCryptoService
     {
         var key = await EnsureActiveSigningKeyAsync(cancellationToken);
         using var rsa = RSA.Create();
-        rsa.ImportFromPem(key.PrivateKeyPem);
+        rsa.ImportFromPem(UnprotectSecret(key.PrivateKeyPem));
         var signingKey = new RsaSecurityKey(rsa.ExportParameters(true)) { KeyId = key.Kid };
 
         var now = DateTime.UtcNow;
@@ -414,5 +427,22 @@ public sealed class SqlOSCryptoService
         rsa.ImportFromPem(key.PublicKeyPem);
         var parameters = rsa.ExportParameters(false);
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
+    }
+
+    private async Task ProtectSigningKeyAtRestIfNeededAsync(SqlOSSigningKey key, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(key.PrivateKeyPem) || key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var protectedPrivateKey = ProtectSecret(key.PrivateKeyPem);
+        if (string.Equals(protectedPrivateKey, key.PrivateKeyPem, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        key.PrivateKeyPem = protectedPrivateKey;
+        await _context.SaveChangesAsync(cancellationToken);
     }
 }

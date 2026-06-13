@@ -408,10 +408,12 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var entityParam = Expression.Parameter(typeof(T), "entity");
         var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
         var contextExpr = Expression.Constant(_context, contextType);
+        var filterParameters = new AuthorizationFilterParameters(subjectIdsStr, permissionId);
+        var filterParametersExpr = Expression.Constant(filterParameters);
         var tvfCall = Expression.Call(contextExpr, tvfMethod,
             resourceIdProp,
-            Expression.Constant(subjectIdsStr),
-            Expression.Constant(permissionId));
+            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.SubjectIds)),
+            Expression.Field(filterParametersExpr, nameof(AuthorizationFilterParameters.PermissionId)));
 
         var anyMethod = typeof(Queryable).GetMethods()
             .First(m => m.Name == "Any" && m.GetParameters().Length == 1)
@@ -492,13 +494,27 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     {
         var ancestors = new List<SqlOSFgaResource>();
         string? currentId = resourceId;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var depth = 0;
+        var maxDepth = Math.Max(1, _options.MaxResourceHierarchyDepth);
 
         while (currentId != null)
         {
+            if (!visited.Add(currentId))
+            {
+                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
+            }
+
+            if (depth > maxDepth)
+            {
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
+            }
+
             var resource = await _context.Set<SqlOSFgaResource>().FirstOrDefaultAsync(r => r.Id == currentId);
             if (resource == null) break;
             ancestors.Add(resource);
             currentId = resource.ParentId;
+            depth++;
         }
 
         return ancestors;
@@ -514,5 +530,17 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                        (g.EffectiveFrom == null || g.EffectiveFrom <= now) &&
                        (g.EffectiveTo == null || g.EffectiveTo >= now))
             .ToListAsync();
+    }
+
+    private sealed class AuthorizationFilterParameters
+    {
+        public AuthorizationFilterParameters(string subjectIds, string permissionId)
+        {
+            SubjectIds = subjectIds;
+            PermissionId = permissionId;
+        }
+
+        public readonly string SubjectIds;
+        public readonly string PermissionId;
     }
 }

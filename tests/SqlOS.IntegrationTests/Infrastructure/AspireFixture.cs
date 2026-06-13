@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using Aspire.Hosting.Testing;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,6 +22,7 @@ public static class AspireFixture
     public static TestSqlOSDbContext SharedContext { get; private set; } = null!;
     public static SqlOSAuthServerOptions Options { get; private set; } = new();
     public static SqlOSFgaOptions FgaOptions { get; private set; } = new();
+    public static IDataProtectionProvider DataProtectionProvider { get; } = new EphemeralDataProtectionProvider();
 
     [AssemblyInitialize]
     public static async Task InitializeAsync(TestContext context)
@@ -73,7 +75,7 @@ public static class AspireFixture
         await fgaSeedService.SeedCoreAsync();
         await FgaTestDataSeeder.SeedAsync(SharedContext);
 
-        var crypto = new SqlOSCryptoService(SharedContext, Microsoft.Extensions.Options.Options.Create(Options));
+        var crypto = new SqlOSCryptoService(SharedContext, Microsoft.Extensions.Options.Options.Create(Options), DataProtectionProvider);
         var admin = new SqlOSAdminService(SharedContext, Microsoft.Extensions.Options.Options.Create(Options), crypto);
         await crypto.EnsureActiveSigningKeyAsync();
         await admin.UpsertSeededClientsAsync();

@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.IO.Compression;
+using System.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
@@ -220,15 +222,17 @@ public sealed class SqlOSExampleApiIntegrationTests
         authUrlResponse.EnsureSuccessStatusCode();
         var authUrlJson = JsonDocument.Parse(await authUrlResponse.Content.ReadAsStringAsync());
         var authUrl = authUrlJson.RootElement.GetProperty("authorizationUrl").GetString()!;
-        var relayState = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
+        var loginResponse = await ExampleApiFixture.Client.GetAsync(authUrl);
+        loginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        var flow = ParseSamlFlow(loginResponse.Headers.Location!.ToString());
 
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:example:idp", "saml-user@example.com", "Saml", "User");
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:example:idp", "saml-user@example.com", "Saml", "User", flow);
         var acsResponse = await ExampleApiFixture.Client.PostAsync(
             $"/sqlos/auth/saml/acs/{connectionId}",
             new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["SAMLResponse"] = samlResponse,
-                ["RelayState"] = relayState
+                ["RelayState"] = flow.RelayState
             }));
 
         acsResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
@@ -832,23 +836,33 @@ public sealed class SqlOSExampleApiIntegrationTests
         string issuer,
         string email,
         string firstName,
-        string lastName)
+        string lastName,
+        SamlFlow flow)
     {
         var responseId = $"_{Guid.NewGuid():N}";
+        var assertionId = $"_{Guid.NewGuid():N}";
         var issueInstant = DateTime.UtcNow.ToString("o");
+        var notBefore = DateTime.UtcNow.AddMinutes(-1).ToString("o");
+        var notOnOrAfter = DateTime.UtcNow.AddMinutes(5).ToString("o");
         var xml = $"""
-        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{responseId}" Version="2.0" IssueInstant="{issueInstant}">
-          <saml:Issuer>{issuer}</saml:Issuer>
+        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{responseId}" Version="2.0" IssueInstant="{issueInstant}" Destination="{SecurityElement.Escape(flow.AssertionConsumerServiceUrl)}" InResponseTo="{SecurityElement.Escape(flow.RequestId)}">
+          <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
           <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success" /></samlp:Status>
-          <saml:Assertion ID="_{Guid.NewGuid():N}" Version="2.0" IssueInstant="{issueInstant}">
-            <saml:Issuer>{issuer}</saml:Issuer>
+          <saml:Assertion ID="{assertionId}" Version="2.0" IssueInstant="{issueInstant}">
+            <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
             <saml:Subject>
-              <saml:NameID>{email}</saml:NameID>
+              <saml:NameID>{SecurityElement.Escape(email)}</saml:NameID>
+              <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+                <saml:SubjectConfirmationData InResponseTo="{SecurityElement.Escape(flow.RequestId)}" Recipient="{SecurityElement.Escape(flow.AssertionConsumerServiceUrl)}" NotOnOrAfter="{notOnOrAfter}" />
+              </saml:SubjectConfirmation>
             </saml:Subject>
+            <saml:Conditions NotBefore="{notBefore}" NotOnOrAfter="{notOnOrAfter}">
+              <saml:AudienceRestriction><saml:Audience>https://localhost/sqlos/auth</saml:Audience></saml:AudienceRestriction>
+            </saml:Conditions>
             <saml:AttributeStatement>
-              <saml:Attribute Name="email"><saml:AttributeValue>{email}</saml:AttributeValue></saml:Attribute>
-              <saml:Attribute Name="first_name"><saml:AttributeValue>{firstName}</saml:AttributeValue></saml:Attribute>
-              <saml:Attribute Name="last_name"><saml:AttributeValue>{lastName}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="email"><saml:AttributeValue>{SecurityElement.Escape(email)}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="first_name"><saml:AttributeValue>{SecurityElement.Escape(firstName)}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="last_name"><saml:AttributeValue>{SecurityElement.Escape(lastName)}</saml:AttributeValue></saml:Attribute>
             </saml:AttributeStatement>
           </saml:Assertion>
         </samlp:Response>
@@ -865,7 +879,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         };
         signedXml.SignedInfo!.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
         signedXml.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA256Url;
-        var reference = new Reference { Uri = $"#{responseId}" };
+        var reference = new Reference { Uri = $"#{responseId}", DigestMethod = SignedXml.XmlDsigSHA256Url };
         reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
         reference.AddTransform(new XmlDsigExcC14NTransform());
         signedXml.AddReference(reference);
@@ -875,6 +889,35 @@ public sealed class SqlOSExampleApiIntegrationTests
         responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
     }
+
+    private static SamlFlow ParseSamlFlow(string loginUrl)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(loginUrl).Query);
+        var relayState = query["RelayState"].ToString();
+        var samlRequest = query["SAMLRequest"].ToString();
+        relayState.Should().NotBeNullOrWhiteSpace();
+        samlRequest.Should().NotBeNullOrWhiteSpace();
+
+        var xml = InflateSamlRequest(samlRequest!);
+        var xmlDoc = new XmlDocument { XmlResolver = null };
+        xmlDoc.LoadXml(xml);
+        var root = xmlDoc.DocumentElement!;
+        return new SamlFlow(
+            relayState!,
+            root.GetAttribute("ID"),
+            root.GetAttribute("AssertionConsumerServiceURL"));
+    }
+
+    private static string InflateSamlRequest(string samlRequest)
+    {
+        var bytes = Convert.FromBase64String(samlRequest);
+        using var compressed = new MemoryStream(bytes);
+        using var inflater = new DeflateStream(compressed, CompressionMode.Decompress);
+        using var reader = new StreamReader(inflater, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    private sealed record SamlFlow(string RelayState, string RequestId, string AssertionConsumerServiceUrl);
 
     private static string BuildFederationMetadata(string entityId, string singleSignOnUrl, X509Certificate2 certificate)
     {

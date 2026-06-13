@@ -77,6 +77,23 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task EnsureSchema_V4Migration_AddsAuthorizationIndexes()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var initializer = new SqlOSFgaSchemaInitializer(
+            Context,
+            Options.Create(new SqlOSFgaOptions()),
+            loggerFactory.CreateLogger<SqlOSFgaSchemaInitializer>());
+
+        await initializer.EnsureSchemaAsync();
+
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaRolePermissions", "IX_SqlOSFgaRolePermissions_PermissionId_RoleId"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_SubjectId"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId"));
+    }
+
+    [TestMethod]
     public async Task EnsureSchema_SetsCorrectVersion()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
@@ -88,7 +105,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         var version = await GetSchemaVersionAsync();
-        Assert.IsTrue(version >= 3, $"Schema version should be at least 3, was {version}");
+        Assert.IsTrue(version >= 4, $"Schema version should be at least 4, was {version}");
     }
 
     private async Task<bool> TableExistsAsync(string tableName)
@@ -122,6 +139,31 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
                 WHERE t.name = @tableName AND c.name = @columnName AND t.schema_id = SCHEMA_ID('dbo')";
             cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
             cmd.Parameters.Add(new SqlParameter("@columnName", columnName));
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result) > 0;
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private async Task<bool> IndexExistsAsync(string tableName, string indexName)
+    {
+        var connection = Context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT COUNT(*)
+                FROM sys.indexes i
+                INNER JOIN sys.tables t ON i.object_id = t.object_id
+                WHERE t.name = @tableName
+                  AND i.name = @indexName
+                  AND t.schema_id = SCHEMA_ID('dbo')";
+            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
+            cmd.Parameters.Add(new SqlParameter("@indexName", indexName));
             var result = await cmd.ExecuteScalarAsync();
             return Convert.ToInt32(result) > 0;
         }

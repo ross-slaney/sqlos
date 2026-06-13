@@ -11,6 +11,8 @@ namespace SqlOS.Fga.Extensions;
 /// </summary>
 public static class SqlOSFgaConvenienceExtensions
 {
+    private const int DefaultMaxResourceHierarchyDepth = 10;
+
     /// <summary>
     /// Creates a <see cref="SqlOSFgaResource"/> and adds it to the context (not yet saved).
     /// Returns the generated resource ID so you can assign it to your domain entity.
@@ -36,6 +38,7 @@ public static class SqlOSFgaConvenienceExtensions
         string? id = null)
     {
         var resourceId = id ?? Guid.NewGuid().ToString();
+        EnsureParentChainDoesNotCreateCycle(context, resourceId, parentId);
         var resource = new SqlOSFgaResource
         {
             Id = resourceId,
@@ -45,6 +48,42 @@ public static class SqlOSFgaConvenienceExtensions
         };
         context.Set<SqlOSFgaResource>().Add(resource);
         return resourceId;
+    }
+
+    private static void EnsureParentChainDoesNotCreateCycle(
+        ISqlOSFgaDbContext context,
+        string resourceId,
+        string parentId)
+    {
+        if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("FGA resource parent cannot be the resource itself.");
+        }
+
+        var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
+        string? currentId = parentId;
+        var depth = 0;
+
+        while (!string.IsNullOrWhiteSpace(currentId))
+        {
+            if (!visited.Add(currentId))
+            {
+                throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
+            }
+
+            if (depth > DefaultMaxResourceHierarchyDepth)
+            {
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
+            }
+
+            var parent = context.Set<SqlOSFgaResource>()
+                .AsNoTracking()
+                .Where(r => r.Id == currentId)
+                .Select(r => new { r.ParentId })
+                .FirstOrDefault();
+            currentId = parent?.ParentId;
+            depth++;
+        }
     }
 
     /// <summary>

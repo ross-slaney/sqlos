@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
+using System.Security;
 using System.Text;
 using System.IO.Compression;
 using System.Xml;
@@ -24,7 +25,7 @@ public sealed class SamlServiceIntegrationTests
     public async Task SignedSamlResponse_ProducesExchangeableAuthCode()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
         var emailSender = new TestAuthEmailSender();
@@ -54,12 +55,9 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(connection.Id, client.ClientId, "https://client.example.local/callback"));
-        var requestToken = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
-        requestToken.Should().NotBeNull();
-
-        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", "user@example.com", "Saml", "User");
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken!, default);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(cert, "urn:test:idp", "user@example.com", "Saml", "User", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
         redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
 
         var code = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query)["code"].ToString();
@@ -74,7 +72,7 @@ public sealed class SamlServiceIntegrationTests
     public async Task PkceSamlAuthorizationFlow_CanExchangeCode()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
@@ -118,11 +116,11 @@ public sealed class SamlServiceIntegrationTests
             "S256"));
 
         start.AuthorizationUrl.Should().Contain("SAMLRequest=");
-        var relayState = QueryHelpers.ParseQuery(new Uri(start.AuthorizationUrl).Query)["RelayState"].ToString();
-        relayState.Should().NotBeNullOrWhiteSpace();
+        var flow = ParseSamlFlow(start.AuthorizationUrl);
+        flow.RelayState.Should().NotBeNullOrWhiteSpace();
 
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:pkce:idp", $"user@{domain}", "Pkce", "User");
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, relayState!, default);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:pkce:idp", $"user@{domain}", "Pkce", "User", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
         redirectUrl.Should().Contain("state=");
 
         var query = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query);
@@ -141,7 +139,7 @@ public sealed class SamlServiceIntegrationTests
     public async Task SignedSamlResponse_WithExistingEmail_ReusesUserWhenAutoProvisioning()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
 
@@ -169,12 +167,9 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(connection.Id, client.ClientId, "https://client.example.local/callback"));
-        var requestToken = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
-        requestToken.Should().NotBeNull();
-
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing:idp", email, "Existing", "User");
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken!, default);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing:idp", email, "Existing", "User", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
         redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
 
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
@@ -227,9 +222,9 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var requestToken = await CreateRequestTokenAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing-member:idp", email, "Existing", "Member");
-        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken, default);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing-member:idp", email, "Existing", "Member", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
         redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
@@ -267,9 +262,9 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var requestToken = await CreateRequestTokenAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing-nonmember:idp", email, "Existing", "Nonmember");
-        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken, default);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:existing-nonmember:idp", email, "Existing", "Nonmember", flow);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("No user could be resolved from the SAML assertion.");
@@ -302,9 +297,9 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var requestToken = await CreateRequestTokenAsync(saml, connection.Id, client.ClientId);
-        var samlResponse = BuildSignedSamlResponse(certificate, "urn:missing-jit-off:idp", email, "Missing", "User");
-        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, requestToken, default);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:missing-jit-off:idp", email, "Missing", "User", flow);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("No user could be resolved from the SAML assertion.");
@@ -317,7 +312,7 @@ public sealed class SamlServiceIntegrationTests
     public async Task AuthorizationUrl_UsesRedirectBindingDeflateEncoding()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
 
@@ -361,10 +356,218 @@ public sealed class SamlServiceIntegrationTests
         xml.Should().Contain(connection.SingleSignOnUrl);
     }
 
+    [TestMethod]
+    public async Task SignedSamlResponse_WithExtraUnsignedAssertion_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Wrapping {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "wrapping");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSWrappingSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Wrapping SSO",
+            "urn:wrapping:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            "urn:wrapping:idp",
+            "legitimate@example.com",
+            "Legitimate",
+            "User",
+            flow,
+            signAssertion: true,
+            addExtraUnsignedAssertion: true);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML response must contain exactly one assertion.");
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithWrongAudience_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Audience {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "audience");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSAudienceSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Audience SSO",
+            "urn:audience:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:audience:idp", "user@example.com", "Audience", "User", flow, audience: "urn:wrong:audience");
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML assertion audience mismatch.");
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithWrongInResponseTo_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"InResponseTo {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "inresponse");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSInResponseSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "InResponseTo SSO",
+            "urn:inresponse:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, "urn:inresponse:idp", "user@example.com", "Response", "User", flow, inResponseTo: "_wrong");
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML response InResponseTo mismatch.");
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithExpiredAssertion_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Expired {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "expired");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSExpiredSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Expired SSO",
+            "urn:expired:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            "urn:expired:idp",
+            "user@example.com",
+            "Expired",
+            "User",
+            flow,
+            notBefore: DateTime.UtcNow.AddMinutes(-20),
+            notOnOrAfter: DateTime.UtcNow.AddMinutes(-10));
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML assertion has expired.");
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithSha1Signature_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Sha1 {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "sha1");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSSha1SamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Sha1 SSO",
+            "urn:sha1:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            "urn:sha1:idp",
+            "user@example.com",
+            "Sha",
+            "One",
+            flow,
+            mutateAfterSigning: (document, _) =>
+            {
+                var signatureMethod = document.GetElementsByTagName("SignatureMethod", SignedXml.XmlDsigNamespaceUrl).OfType<XmlElement>().Single();
+                signatureMethod.SetAttribute("Algorithm", SignedXml.XmlDsigRSASHA1Url);
+            });
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML signature algorithm is not allowed.");
+    }
+
+    [TestMethod]
+    public async Task SamlResponse_WithDtd_IsRejectedBeforeXmlEntityResolution()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Dtd {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "dtd");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSDtdSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Dtd SSO",
+            "urn:dtd:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var xml = """
+        <!DOCTYPE samlp:Response [
+          <!ENTITY xxe SYSTEM "file:///etc/passwd">
+        ]>
+        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_dtd" Version="2.0">
+          <saml:Issuer>&xxe;</saml:Issuer>
+        </samlp:Response>
+        """;
+        var samlResponse = Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<XmlException>();
+    }
+
     private static (SqlOSCryptoService Crypto, SqlOSAdminService Admin, SqlOSSamlService Saml) CreateSamlServices()
     {
         var options = Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
         return (crypto, admin, saml);
@@ -377,13 +580,19 @@ public sealed class SamlServiceIntegrationTests
             "sqlos-tests",
             new List<string> { "https://client.example.local/callback" }));
 
-    private static async Task<string> CreateRequestTokenAsync(SqlOSSamlService saml, string connectionId, string clientId)
+    private static async Task<SamlFlow> StartSamlRequestAsync(SqlOSSamlService saml, string connectionId, string clientId)
     {
         var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
             connectionId,
             clientId,
             "https://client.example.local/callback"));
-        return QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
+        var requestToken = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
+        requestToken.Should().NotBeNullOrWhiteSpace();
+
+        var loginUrl = await saml.BuildIdentityProviderRedirectAsync(connectionId, requestToken!);
+        var flow = ParseSamlFlow(loginUrl);
+        flow.RelayState.Should().Be(requestToken);
+        return flow;
     }
 
     private static async Task MarkEmailVerifiedAsync(string userId)
@@ -399,24 +608,51 @@ public sealed class SamlServiceIntegrationTests
         string issuer,
         string email,
         string firstName,
-        string lastName)
+        string lastName,
+        SamlFlow flow,
+        bool signAssertion = false,
+        bool includeConditions = true,
+        bool addExtraUnsignedAssertion = false,
+        string? audience = null,
+        string? recipient = null,
+        string? inResponseTo = null,
+        DateTime? notBefore = null,
+        DateTime? notOnOrAfter = null,
+        Action<XmlDocument, XmlElement, XmlElement>? mutateBeforeSigning = null,
+        Action<XmlDocument, XmlElement>? mutateAfterSigning = null)
     {
         var responseId = $"_{Guid.NewGuid():N}";
         var assertionId = $"_{Guid.NewGuid():N}";
         var issueInstant = DateTime.UtcNow.ToString("o");
+        var effectiveAudience = audience ?? AspireFixture.Options.Issuer;
+        var effectiveRecipient = recipient ?? flow.AssertionConsumerServiceUrl;
+        var effectiveInResponseTo = inResponseTo ?? flow.RequestId;
+        var effectiveNotBefore = (notBefore ?? DateTime.UtcNow.AddMinutes(-1)).ToString("o");
+        var effectiveNotOnOrAfter = (notOnOrAfter ?? DateTime.UtcNow.AddMinutes(5)).ToString("o");
+        var conditionsXml = includeConditions
+            ? $"""
+                <saml:Conditions NotBefore="{effectiveNotBefore}" NotOnOrAfter="{effectiveNotOnOrAfter}">
+                  <saml:AudienceRestriction><saml:Audience>{SecurityElement.Escape(effectiveAudience)}</saml:Audience></saml:AudienceRestriction>
+                </saml:Conditions>
+            """
+            : string.Empty;
         var xml = $"""
-        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{responseId}" Version="2.0" IssueInstant="{issueInstant}">
-          <saml:Issuer>{issuer}</saml:Issuer>
+        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{responseId}" Version="2.0" IssueInstant="{issueInstant}" Destination="{effectiveRecipient}" InResponseTo="{effectiveInResponseTo}">
+          <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
           <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success" /></samlp:Status>
           <saml:Assertion ID="{assertionId}" Version="2.0" IssueInstant="{issueInstant}">
-            <saml:Issuer>{issuer}</saml:Issuer>
+            <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
             <saml:Subject>
-              <saml:NameID>{email}</saml:NameID>
+              <saml:NameID>{SecurityElement.Escape(email)}</saml:NameID>
+              <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+                <saml:SubjectConfirmationData InResponseTo="{effectiveInResponseTo}" Recipient="{effectiveRecipient}" NotOnOrAfter="{effectiveNotOnOrAfter}" />
+              </saml:SubjectConfirmation>
             </saml:Subject>
+            {conditionsXml}
             <saml:AttributeStatement>
-              <saml:Attribute Name="email"><saml:AttributeValue>{email}</saml:AttributeValue></saml:Attribute>
-              <saml:Attribute Name="first_name"><saml:AttributeValue>{firstName}</saml:AttributeValue></saml:Attribute>
-              <saml:Attribute Name="last_name"><saml:AttributeValue>{lastName}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="email"><saml:AttributeValue>{SecurityElement.Escape(email)}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="first_name"><saml:AttributeValue>{SecurityElement.Escape(firstName)}</saml:AttributeValue></saml:Attribute>
+              <saml:Attribute Name="last_name"><saml:AttributeValue>{SecurityElement.Escape(lastName)}</saml:AttributeValue></saml:Attribute>
             </saml:AttributeStatement>
           </saml:Assertion>
         </samlp:Response>
@@ -425,23 +661,60 @@ public sealed class SamlServiceIntegrationTests
         var xmlDoc = new XmlDocument { PreserveWhitespace = true };
         xmlDoc.LoadXml(xml);
         var responseElement = xmlDoc.DocumentElement!;
+        var assertionElement = (XmlElement)responseElement.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:2.0:assertion")[0]!;
+        if (addExtraUnsignedAssertion)
+        {
+            var extraAssertion = xmlDoc.CreateElement("saml", "Assertion", "urn:oasis:names:tc:SAML:2.0:assertion");
+            extraAssertion.SetAttribute("ID", $"_{Guid.NewGuid():N}");
+            extraAssertion.SetAttribute("Version", "2.0");
+            extraAssertion.SetAttribute("IssueInstant", issueInstant);
+            extraAssertion.InnerXml = $"""
+              <saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">{SecurityElement.Escape(issuer)}</saml:Issuer>
+              <saml:Subject xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+                <saml:NameID>attacker@example.com</saml:NameID>
+              </saml:Subject>
+            """;
+            responseElement.InsertBefore(extraAssertion, assertionElement);
+        }
+
+        mutateBeforeSigning?.Invoke(xmlDoc, responseElement, assertionElement);
         var privateKey = certificate.GetRSAPrivateKey()
             ?? throw new InvalidOperationException("Test certificate does not contain an RSA private key.");
-        var signedXml = new SignedXml(responseElement)
+        var signedElement = signAssertion ? assertionElement : responseElement;
+        var signedXml = new SignedXml(signedElement)
         {
             SigningKey = privateKey
         };
         signedXml.SignedInfo!.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
         signedXml.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA256Url;
-        var reference = new Reference { Uri = $"#{responseId}" };
+        var reference = new Reference { Uri = $"#{signedElement.GetAttribute("ID")}", DigestMethod = SignedXml.XmlDsigSHA256Url };
         reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
         reference.AddTransform(new XmlDsigExcC14NTransform());
         signedXml.AddReference(reference);
         signedXml.KeyInfo = new KeyInfo();
         signedXml.KeyInfo.AddClause(new KeyInfoX509Data(certificate));
         signedXml.ComputeSignature();
-        responseElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), responseElement.FirstChild);
+        signedElement.InsertAfter(xmlDoc.ImportNode(signedXml.GetXml(), true), signedElement.FirstChild);
+        mutateAfterSigning?.Invoke(xmlDoc, responseElement);
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(xmlDoc.OuterXml));
+    }
+
+    private static SamlFlow ParseSamlFlow(string loginUrl)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(loginUrl).Query);
+        var relayState = query["RelayState"].ToString();
+        var samlRequest = query["SAMLRequest"].ToString();
+        relayState.Should().NotBeNullOrWhiteSpace();
+        samlRequest.Should().NotBeNullOrWhiteSpace();
+
+        var xml = InflateSamlRequest(samlRequest!);
+        var xmlDoc = new XmlDocument { XmlResolver = null };
+        xmlDoc.LoadXml(xml);
+        var root = xmlDoc.DocumentElement!;
+        return new SamlFlow(
+            relayState!,
+            root.GetAttribute("ID"),
+            root.GetAttribute("AssertionConsumerServiceURL"));
     }
 
     private static string InflateSamlRequest(string samlRequest)
@@ -452,4 +725,6 @@ public sealed class SamlServiceIntegrationTests
         using var reader = new StreamReader(inflater, Encoding.UTF8);
         return reader.ReadToEnd();
     }
+
+    private sealed record SamlFlow(string RelayState, string RequestId, string AssertionConsumerServiceUrl);
 }

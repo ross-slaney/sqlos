@@ -33,6 +33,7 @@ public class SqlOSFgaFunctionInitializer
     {
         var schema = _options.Schema;
         var tables = _options.TableNames;
+        var maxDepth = Math.Max(1, _options.MaxResourceHierarchyDepth);
 
         var dropFunctionSql = $"DROP FUNCTION IF EXISTS [{schema}].fn_IsResourceAccessible";
 
@@ -53,10 +54,11 @@ RETURN
 
         UNION ALL
 
-        SELECT r.Id, r.ParentId, a.Depth + 1
-        FROM [{schema}].[{tables.Resources}] r
-        INNER JOIN ancestors a ON r.Id = a.ParentId
-    )
+	        SELECT r.Id, r.ParentId, a.Depth + 1
+	        FROM [{schema}].[{tables.Resources}] r
+	        INNER JOIN ancestors a ON r.Id = a.ParentId
+	        WHERE a.Depth < {maxDepth}
+	    )
     SELECT TOP 1 a.Id
     FROM ancestors a
     INNER JOIN [{schema}].[{tables.Grants}] g ON a.Id = g.ResourceId
