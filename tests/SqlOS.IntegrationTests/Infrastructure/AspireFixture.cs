@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.Testing;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -81,6 +82,42 @@ public static class AspireFixture
         await admin.UpsertSeededClientsAsync();
 
         context.WriteLine($"SqlOS integration DB initialized: {databaseName}");
+    }
+
+    public static async Task<TestSqlOSDbContext> CreateIsolatedAuthContextAsync(
+        string databasePrefix = "SqlOSCase",
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(SqlConnectionString))
+        {
+            throw new InvalidOperationException("AspireFixture has not been initialized.");
+        }
+
+        var safePrefix = new string(databasePrefix.Where(char.IsLetterOrDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(safePrefix))
+        {
+            safePrefix = "SqlOSCase";
+        }
+
+        safePrefix = safePrefix.Length > 24 ? safePrefix[..24] : safePrefix;
+        var builder = new SqlConnectionStringBuilder(SqlConnectionString)
+        {
+            InitialCatalog = $"{safePrefix}_{Guid.NewGuid():N}"
+        };
+
+        var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(builder.ConnectionString)
+            .Options;
+        var context = new TestSqlOSDbContext(dbOptions);
+        await context.Database.EnsureCreatedAsync(cancellationToken);
+
+        var schemaInitializer = new SqlOSSchemaInitializer(
+            context,
+            Microsoft.Extensions.Options.Options.Create(Options),
+            LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+        await schemaInitializer.EnsureSchemaAsync(cancellationToken);
+
+        return context;
     }
 
     [AssemblyCleanup]

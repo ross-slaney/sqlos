@@ -192,7 +192,7 @@ public sealed class SqlOSCryptoService
             Id = GenerateId("key"),
             Kid = GenerateOpaqueToken(16),
             PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = ProtectSecret(rsa.ExportPkcs8PrivateKeyPem()),
+            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
             ActivatedAt = DateTime.UtcNow,
             IsActive = true
         };
@@ -227,7 +227,7 @@ public sealed class SqlOSCryptoService
             Id = GenerateId("key"),
             Kid = GenerateOpaqueToken(16),
             PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = ProtectSecret(rsa.ExportPkcs8PrivateKeyPem()),
+            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
             ActivatedAt = now,
             IsActive = true
         };
@@ -271,9 +271,10 @@ public sealed class SqlOSCryptoService
         CancellationToken cancellationToken = default)
     {
         var key = await EnsureActiveSigningKeyAsync(cancellationToken);
+        var signingMaterial = await GetSigningMaterialAsync(key, cancellationToken);
         using var rsa = RSA.Create();
-        rsa.ImportFromPem(UnprotectSecret(key.PrivateKeyPem));
-        var signingKey = new RsaSecurityKey(rsa.ExportParameters(true)) { KeyId = key.Kid };
+        rsa.ImportFromPem(signingMaterial.PrivateKeyPem);
+        var signingKey = new RsaSecurityKey(rsa.ExportParameters(true)) { KeyId = signingMaterial.Key.Kid };
 
         var now = DateTime.UtcNow;
         var claims = new List<Claim>
@@ -310,6 +311,51 @@ public sealed class SqlOSCryptoService
             signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256));
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private async Task<(SqlOSSigningKey Key, string PrivateKeyPem)> GetSigningMaterialAsync(
+        SqlOSSigningKey key,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (key, UnprotectSecret(key.PrivateKeyPem));
+        }
+        catch (InvalidOperationException) when (key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
+        {
+            var replacement = await ReplaceUnreadableActiveSigningKeyAsync(key, cancellationToken);
+            return (replacement, UnprotectSecret(replacement.PrivateKeyPem));
+        }
+    }
+
+    private async Task<SqlOSSigningKey> ReplaceUnreadableActiveSigningKeyAsync(
+        SqlOSSigningKey unreadableKey,
+        CancellationToken cancellationToken)
+    {
+        var activeKey = await _context.Set<SqlOSSigningKey>()
+            .FirstOrDefaultAsync(x => x.Id == unreadableKey.Id && x.IsActive, cancellationToken);
+        if (activeKey == null)
+        {
+            return await EnsureActiveSigningKeyAsync(cancellationToken);
+        }
+
+        var now = DateTime.UtcNow;
+        activeKey.IsActive = false;
+        activeKey.RetiredAt = now;
+
+        using var rsa = RSA.Create(2048);
+        var replacement = new SqlOSSigningKey
+        {
+            Id = GenerateId("key"),
+            Kid = GenerateOpaqueToken(16),
+            PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
+            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
+            ActivatedAt = now,
+            IsActive = true
+        };
+        _context.Set<SqlOSSigningKey>().Add(replacement);
+        await _context.SaveChangesAsync(cancellationToken);
+        return replacement;
     }
 
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
@@ -431,12 +477,14 @@ public sealed class SqlOSCryptoService
 
     private async Task ProtectSigningKeyAtRestIfNeededAsync(SqlOSSigningKey key, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(key.PrivateKeyPem) || key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
+        if (!_options.ProtectSigningKeysWithDataProtection
+            || string.IsNullOrWhiteSpace(key.PrivateKeyPem)
+            || key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
         {
             return;
         }
 
-        var protectedPrivateKey = ProtectSecret(key.PrivateKeyPem);
+        var protectedPrivateKey = ProtectSigningPrivateKey(key.PrivateKeyPem);
         if (string.Equals(protectedPrivateKey, key.PrivateKeyPem, StringComparison.Ordinal))
         {
             return;
@@ -445,4 +493,9 @@ public sealed class SqlOSCryptoService
         key.PrivateKeyPem = protectedPrivateKey;
         await _context.SaveChangesAsync(cancellationToken);
     }
+
+    private string ProtectSigningPrivateKey(string privateKeyPem)
+        => _options.ProtectSigningKeysWithDataProtection
+            ? ProtectSecret(privateKeyPem)
+            : privateKeyPem;
 }

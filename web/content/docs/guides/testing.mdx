@@ -39,6 +39,7 @@ Integration tests use Aspire and SQL Server containers for:
 
 - Auth and FGA schema bootstrap
 - OAuth, OTP, and invitation flows
+- AuthServer resilience across app instance replacement, including persisted signing keys and full PKCE token exchange
 - Client registration and resource indicators
 - FGA checks and EF query composition
 - Example and Todo sample end-to-end paths
@@ -48,6 +49,7 @@ Integration tests use Aspire and SQL Server containers for:
 ```bash
 dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter SqlOSInvitationServiceTests
 dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter RequestEmailOtpSignupAsync
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj --filter AuthServerSigningKeyResilienceIntegrationTests
 ```
 
 Coverage settings live in `tests/coverlet.runsettings`.
