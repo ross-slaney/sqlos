@@ -1,0 +1,159 @@
+---
+title: "SCIM group mapping"
+description: "Use IdP groups as FGA user groups and optional authorization grants."
+order: 15
+section: fga
+---
+
+SCIM group sync is most useful when it feeds the same authorization model your application already uses. SqlOS mirrors IdP groups into FGA user groups, then optionally maps selected groups to roles on resources.
+
+## Default behavior
+
+Every synced SCIM group should become an FGA user group:
+
+| SCIM input | FGA result |
+| --- | --- |
+| group external ID | stable source link for the mirrored group |
+| group display name | `SqlOSFgaUserGroup.Name` |
+| group member | `SqlOSFgaUserGroupMembership` for the member subject |
+| group deletion | remove or deactivate SCIM-owned memberships and mark source state |
+
+This default does not grant access by itself. It makes directory groups visible to the normal FGA and application access tools.
+
+## Why mapping is separate
+
+Most IdP groups are directory structure, not product authorization. Mapping every group to a grant would create accidental access. SqlOS keeps the steps separate:
+
+1. Mirror SCIM groups into FGA user groups.
+2. Match only selected groups against mapping rules.
+3. Create or revoke SCIM-managed grants for matched groups.
+4. Leave unmatched groups available for manual grants, application assignments, and access testing.
+
+## Exact group mapping
+
+Use exact mappings when the IdP group has a stable name or external ID:
+
+```csharp
+scim.MapGroup("Acme-Admins", mapping =>
+{
+    mapping.RoleKey = "org_admin";
+    mapping.ResourceId = "organization::acme";
+    mapping.Description = "Directory-managed organization admins";
+});
+```
+
+The mapped grant should use the group subject, not each user directly. FGA already expands group membership during access checks, so membership changes do not need to rewrite every per-user grant.
+
+## Pattern mapping
+
+Use pattern mappings for repeatable tenant resources:
+
+```csharp
+scim.MapGroupPattern("Store-(?<storeId>.+)-Managers", mapping =>
+{
+    mapping.RoleKey = "store_manager";
+    mapping.ResourceIdTemplate = "store::{storeId}";
+});
+```
+
+When the IdP pushes `Store-123-Managers`, SqlOS can resolve:
+
+| Captured value | Grant field |
+| --- | --- |
+| `storeId = 123` | `ResourceId = store::123` |
+| `RoleKey = store_manager` | matching FGA role |
+| mirrored group subject | grant subject |
+
+Validate that every rendered resource ID already exists or can be created by your application's resource sync. A mapping rule should not silently create authorization roots that do not match your product model.
+
+## Ownership and revocation
+
+SCIM-managed grants need source metadata:
+
+| Field | Reason |
+| --- | --- |
+| connection ID | revoke grants when a connection is disabled |
+| mapping rule ID | update grants when a rule changes |
+| group external ID | reconcile grant state after group rename |
+| source type | distinguish SCIM-managed grants from manual grants |
+
+That metadata lets SqlOS revoke only the access it owns:
+
+- group no longer matches the rule
+- rule is disabled or deleted
+- group is deleted in the IdP
+- user leaves the IdP group
+- user is deprovisioned from the organization
+- SCIM connection is disabled
+
+Manual grants and dashboard-created non-SCIM group memberships should remain intact.
+
+## Dashboard workflow
+
+Open **Fine-Grained Auth > User Groups** to inspect mirrored groups and group membership. Open the organization's **Auth Server > SCIM** tab to manage mapping rules.
+
+The mapping editor should show:
+
+- source group name or external ID
+- match mode: exact name, external ID, or pattern
+- target role
+- target resource or resource template
+- source: seeded, API, or dashboard
+- last applied result
+- warnings for missing roles, missing resources, or ambiguous pattern matches
+
+Use the access tester to verify a synced user receives access through the mapped group.
+
+## Access check behavior
+
+FGA checks already resolve a subject to:
+
+- the user subject
+- any FGA groups the user belongs to
+- roles granted directly to the user
+- roles granted to those groups
+
+That means a SCIM user can inherit access through a group grant without adding application-specific join logic.
+
+```text
+user:ada
+  member of group:Acme-Admins
+    grant role org_admin on organization::acme
+      permission workspace.manage on descendant workspaces
+```
+
+## Application access
+
+Application assignments can also use FGA groups. If a SCIM group is mirrored into FGA, the same group can be assigned to a client application in `selected_users_groups_roles` mode.
+
+Use this for app availability:
+
+```json
+{
+  "principalType": "group",
+  "principalId": "grp_acme_admins",
+  "access": "allowed"
+}
+```
+
+Use FGA grants for permissions inside the app. Keep those two decisions separate: application access decides whether the app can be used; FGA decides what the user can do after they are inside.
+
+## Testing checklist
+
+- group is mirrored with a stable subject ID
+- group rename does not create a duplicate FGA group
+- member add creates one membership and is idempotent
+- member removal removes only SCIM-owned membership
+- exact mapping creates one group grant
+- pattern mapping renders the expected resource ID
+- disabled mapping revokes SCIM-managed grants
+- deprovisioned user loses group-derived access
+- access tester explains the group path
+
+## Related
+
+- [SCIM Directory Sync](/docs/authserver/scim-directory-sync)
+- [SCIM directory sync guide](/docs/guides/scim-directory-sync)
+- [Grants](/docs/fga/grants)
+- [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga)
+- [Application Access](/docs/authserver/application-access)

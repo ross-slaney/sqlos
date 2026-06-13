@@ -46,7 +46,7 @@ Setting `primaryDomain` alone does not route anyone to SSO. Home realm discovery
 
 ## Create a membership
 
-Users join organizations through memberships. Each membership has a role. Public signup does not accept an `organizationId` as permission to join an existing organization; use an invitation, trusted SSO/SCIM provisioning, or an admin-owned workflow to create memberships for existing tenants.
+Users join organizations through memberships. Each membership has a role. Public signup does not accept an `organizationId` as permission to join an existing organization; use an invitation, trusted [SSO](/docs/authserver/saml-sso) or [SCIM provisioning](/docs/authserver/scim-directory-sync), or an admin-owned workflow to create memberships for existing tenants.
 
 ```csharp
 var membership = await adminService.CreateMembershipAsync(

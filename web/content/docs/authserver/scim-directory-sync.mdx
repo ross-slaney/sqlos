@@ -1,0 +1,218 @@
+---
+title: "SCIM Directory Sync"
+description: "Provision and deprovision organization users and groups from an enterprise IdP."
+order: 5
+section: authserver
+---
+
+SCIM 2.0 lets enterprise customers use their identity provider as the source of truth for user lifecycle and directory groups. In SqlOS, SCIM belongs to AuthServer for identity and organization membership, then mirrors groups into FGA for authorization.
+
+SCIM complements SSO. SAML or OIDC answers "how does this user sign in?" SCIM answers "which users and groups should exist, and who should lose access when the directory changes?"
+
+## What SCIM manages
+
+| Area | Behavior |
+| --- | --- |
+| Connection | One SCIM connection per organization, with an org-scoped bearer token |
+| Users | Create, update, activate, deactivate, and link IdP users to SqlOS users |
+| Memberships | Maintain organization membership based on the IdP assignment |
+| Groups | Mirror IdP groups into FGA user groups |
+| Group members | Keep FGA group membership aligned with IdP group membership |
+| Optional mappings | Grant or revoke FGA roles when selected IdP groups match rules |
+| Audit | Record provisioning, deprovisioning, group changes, mapping changes, and failures |
+
+## Endpoint shape
+
+SCIM endpoints should be tenant-scoped by the bearer token. The IdP should not need an operator dashboard session.
+
+```text
+GET    /sqlos/scim/v2/ServiceProviderConfig
+GET    /sqlos/scim/v2/ResourceTypes
+GET    /sqlos/scim/v2/Schemas
+GET    /sqlos/scim/v2/Users
+POST   /sqlos/scim/v2/Users
+GET    /sqlos/scim/v2/Users/{id}
+PUT    /sqlos/scim/v2/Users/{id}
+PATCH  /sqlos/scim/v2/Users/{id}
+DELETE /sqlos/scim/v2/Users/{id}
+GET    /sqlos/scim/v2/Groups
+POST   /sqlos/scim/v2/Groups
+GET    /sqlos/scim/v2/Groups/{id}
+PUT    /sqlos/scim/v2/Groups/{id}
+PATCH  /sqlos/scim/v2/Groups/{id}
+DELETE /sqlos/scim/v2/Groups/{id}
+```
+
+The bearer token resolves the organization and connection. Prefer that over putting an organization ID in the URL, because it keeps IdP setup simpler and reduces cross-tenant routing mistakes.
+
+## Data model
+
+Use one persisted model across code, SDK/API, and dashboard:
+
+| Model | Purpose |
+| --- | --- |
+| `SqlOSScimConnection` | Organization connection, enabled state, token hash, token rotation timestamps, and setup metadata |
+| `SqlOSScimExternalId` | Link from SCIM resource type and external ID to a SqlOS user, membership, or FGA group |
+| `SqlOSScimGroupMapping` | Rule that maps an IdP group name, external ID, or pattern to an FGA role and resource |
+| `SqlOSScimSyncEvent` | Recent operational sync log with request ID, action, result, and error details |
+
+Store durable authorization state in the existing AuthServer and FGA tables. SCIM-specific tables should explain source, ownership, external IDs, and operational history.
+
+## User provisioning
+
+SCIM user create and update should:
+
+- normalize and verify the primary email according to the IdP payload
+- create or update `SqlOSUser`
+- link the SCIM external ID to the user
+- create or update the organization's membership
+- maintain active/inactive state for the SCIM-managed membership
+- sync a corresponding FGA user subject when FGA is enabled
+
+If a user already exists by verified email or previous external identity, link to the existing user instead of creating a duplicate.
+
+## Deprovisioning
+
+When a SCIM user is deactivated or deleted:
+
+- mark the SCIM-managed organization membership inactive
+- revoke active sessions for that organization
+- remove SCIM-managed FGA group memberships
+- revoke SCIM-managed mapped grants that no longer apply
+- keep the user row, external ID link, and audit records for history
+
+Do not remove manually created organization memberships, manually assigned FGA grants, or non-SCIM groups unless a mapping rule explicitly owns them.
+
+## Group provisioning
+
+SCIM group create and update should:
+
+- create or update the mirrored `SqlOSFgaUserGroup`
+- keep the group subject stable across renames
+- store the IdP external ID and display name
+- replace SCIM-managed group membership with the IdP's current membership set
+- apply mapping rules after membership changes
+
+SCIM groups should remain useful even when no mapping rule exists. A mirrored group can still be selected in application access assignments, direct grants, and the access tester.
+
+## Group mapping rules
+
+A mapping rule turns an IdP group into an FGA grant.
+
+| Rule input | Output |
+| --- | --- |
+| group external ID or exact display name | role on a fixed resource |
+| display-name pattern | role on a resource derived from pattern captures |
+| disabled rule | no grant changes, but the group still mirrors |
+
+Example:
+
+```csharp
+scim.MapGroup("Acme-Admins", mapping =>
+{
+    mapping.RoleKey = "org_admin";
+    mapping.ResourceId = "organization::acme";
+});
+
+scim.MapGroupPattern("Store-(?<storeId>.+)-Managers", mapping =>
+{
+    mapping.RoleKey = "store_manager";
+    mapping.ResourceIdTemplate = "store::{storeId}";
+});
+```
+
+Mapped grants should be marked as SCIM-managed so later group membership changes, group deletion, rule disabling, or user deprovisioning can revoke only the access created by SCIM.
+
+## Code, SDK, API, and dashboard parity
+
+SCIM configuration follows the SqlOS pattern: define the system in code, expose the same persisted model through the SDK and admin APIs, and give operators a dashboard surface for setup and support.
+
+| Capability | Code-first | Admin SDK / API | Dashboard |
+| --- | --- | --- | --- |
+| Enable or disable SCIM | `SeedScimConnection(...).Enabled` | update connection enabled state | organization SCIM toggle |
+| Token lifecycle | reference a secret or request rotation | generate, rotate, revoke token | generate, rotate, copy setup token once |
+| IdP setup values | derive from configured public origin | read setup view model | copy base URL and provider instructions |
+| Mapping rules | seed exact and pattern rules | create, update, disable, delete rules | mapping rules table and editor |
+| Sync log | read operational events for tests or support | list sync events | recent activity and error details |
+| Audit | record via audit log service | query audit events | Audit Logs filters and detail view |
+
+If a field cannot be represented on all three surfaces, treat that as a product gap before shipping the feature.
+
+## Admin SDK shape
+
+Host apps should be able to build their own setup screens on top of the same server-side API used by the bundled dashboard:
+
+```csharp
+var connection = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnectionRequest(
+    OrganizationId: organization.Id,
+    DisplayName: "Acme Entra SCIM",
+    Enabled: true));
+
+var token = await admin.RotateScimTokenAsync(connection.Id);
+
+await admin.CreateScimGroupMappingAsync(new SqlOSCreateScimGroupMappingRequest(
+    ConnectionId: connection.Id,
+    GroupDisplayName: "Acme-Admins",
+    RoleKey: "org_admin",
+    ResourceId: $"organization::{organization.Id}"));
+```
+
+The SDK should return setup URLs, token metadata, mapping rule state, and sync log entries without requiring the caller to know dashboard internals.
+
+## Dashboard
+
+Open **Auth Server > Organizations > SCIM** for a tenant.
+
+The dashboard should include:
+
+- connection status and last sync time
+- SCIM base URL and provider-specific setup notes for Okta, Entra, and generic SCIM clients
+- generate, rotate, and revoke token actions
+- code-seeded mapping rules with source labels
+- dashboard-created mapping rules
+- recent user, group, membership, grant, and failure events
+- links into Audit Logs filtered to the organization and `source=scim`
+
+Use source labels such as `seeded`, `dashboard`, and `api` so operators understand whether a value may be overwritten at startup.
+
+## Audit events
+
+Recommended event types:
+
+| Event type | When it is written |
+| --- | --- |
+| `scim.connection.enabled` | SCIM is enabled for an organization |
+| `scim.connection.disabled` | SCIM is disabled |
+| `scim.token.rotated` | A bearer token is generated or rotated |
+| `scim.user.created` | A SCIM user creates a SqlOS user |
+| `scim.user.updated` | SCIM updates user profile or active state |
+| `scim.user.deactivated` | SCIM removes organization access |
+| `scim.group.created` | A SCIM group creates a mirrored FGA group |
+| `scim.group.updated` | Group display name or source metadata changes |
+| `scim.group.deleted` | Group is removed or marked inactive |
+| `scim.group.member_added` | A subject is added to a mirrored group |
+| `scim.group.member_removed` | A subject is removed from a mirrored group |
+| `scim.grant.mapped` | A mapping rule creates a managed grant |
+| `scim.grant.revoked` | A managed grant is removed |
+| `scim.sync.failed` | Any SCIM operation fails after request validation |
+
+Include organization ID, connection ID, SCIM resource type, external ID, SqlOS target IDs, and correlation/request ID where available.
+
+## Security notes
+
+- Hash SCIM bearer tokens before storage.
+- Show the raw token only once during generation or rotation.
+- Scope each token to one organization and one connection.
+- Rate limit invalid token attempts.
+- Accept only SCIM media types and JSON payload sizes appropriate for provisioning.
+- Treat IdP-provided display names as untrusted input.
+- Never let a SCIM request name a different organization than the token's organization.
+
+## Related
+
+- [SCIM directory sync guide](/docs/guides/scim-directory-sync)
+- [SCIM group mapping](/docs/fga/scim-group-mapping)
+- [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga)
+- [SAML SSO](/docs/authserver/saml-sso)
+- [Organizations](/docs/authserver/organizations)
+- [Audit Logs Reference](/docs/reference/audit-logs)
