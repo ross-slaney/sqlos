@@ -1655,6 +1655,30 @@ Admin HTTP endpoints:
 | `GET /sqlos/admin/auth/api/organizations/{organizationId}/mfa-policy` | Read an organization's MFA policy |
 | `PUT /sqlos/admin/auth/api/organizations/{organizationId}/mfa-policy` | Update an organization's MFA policy |
 
+## SCIM Directory Sync
+
+SCIM provisioning endpoints are mounted separately from the admin API and authenticate with an organization-scoped bearer token:
+
+```text
+/sqlos/scim/v2/Users
+/sqlos/scim/v2/Groups
+```
+
+Admin setup endpoints are available under `/sqlos/admin/auth/api`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /organizations/{organizationId}/scim-connections` | List organization SCIM connections |
+| `POST /organizations/{organizationId}/scim-connections` | Create a SCIM connection |
+| `GET /scim-connections/{connectionId}` | Read setup URLs and token metadata |
+| `POST /scim-connections/{connectionId}/token/rotate` | Generate a new bearer token |
+| `GET /scim-connections/{connectionId}/mappings` | List group-to-grant mapping rules |
+| `POST /scim-connections/{connectionId}/mappings` | Create a mapping rule |
+| `PUT /scim-mappings/{mappingId}` | Update a mapping rule |
+| `GET /scim-connections/{connectionId}/sync-events` | Read recent SCIM sync activity |
+
+See [SCIM Directory Sync](/docs/authserver/scim-directory-sync) for the full endpoint list, SDK calls, dashboard workflow, and FGA group mapping behavior.
+
 ---
 
 ## Key Contracts

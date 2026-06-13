@@ -83,9 +83,12 @@ For tenants you manage in code, seed the SCIM connection and any expected mappin
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
+    options.AuthServer.EnableScim = true;
+    options.AuthServer.ScimBasePath = "/sqlos/scim/v2";
+
     options.AuthServer.SeedScimConnection("acme", scim =>
     {
-        scim.OrganizationExternalKey = "acme";
+        scim.OrganizationSlug = "acme";
         scim.DisplayName = "Acme directory sync";
         scim.Enabled = true;
         scim.TokenSecretName = "Acme:ScimBearerToken";
@@ -121,7 +124,8 @@ Use the dashboard to:
 
 - enable or disable SCIM for the organization
 - generate or rotate the bearer token
-- copy the SCIM base URL for the IdP
+- copy the SCIM base URL, Users URL, and Groups URL for the IdP
+- view setup notes for Okta, Microsoft Entra, and generic SCIM 2.0 clients
 - review code-seeded and dashboard-created mapping rules
 - inspect recent sync operations and failures
 
@@ -133,7 +137,9 @@ In Okta, Microsoft Entra, or another SCIM 2.0 IdP:
 
 | IdP field | Value |
 | --- | --- |
-| SCIM base URL | The organization SCIM URL from the SqlOS dashboard |
+| SCIM base URL / tenant URL | The connection base URL from the SqlOS dashboard, usually `/sqlos/scim/v2` |
+| Users endpoint | `{baseUrl}/Users` |
+| Groups endpoint | `{baseUrl}/Groups` |
 | Authentication mode | Bearer token |
 | Bearer token | The current SCIM token copied during generation or rotation |
 | Supported resources | Users and Groups |

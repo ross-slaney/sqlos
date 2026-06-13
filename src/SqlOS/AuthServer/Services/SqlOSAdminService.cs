@@ -14,7 +14,7 @@ using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
 
-public sealed class SqlOSAdminService
+public sealed partial class SqlOSAdminService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;

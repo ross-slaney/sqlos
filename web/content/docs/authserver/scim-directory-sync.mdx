@@ -54,6 +54,7 @@ Use one persisted model across code, SDK/API, and dashboard:
 | `SqlOSScimConnection` | Organization connection, enabled state, token hash, token rotation timestamps, and setup metadata |
 | `SqlOSScimExternalId` | Link from SCIM resource type and external ID to a SqlOS user, membership, or FGA group |
 | `SqlOSScimGroupMapping` | Rule that maps an IdP group name, external ID, or pattern to an FGA role and resource |
+| `SqlOSScimManagedGrant` | Link from a mapping rule to the FGA grant it created, used for precise revocation |
 | `SqlOSScimSyncEvent` | Recent operational sync log with request ID, action, result, and error details |
 
 Store durable authorization state in the existing AuthServer and FGA tables. SCIM-specific tables should explain source, ownership, external IDs, and operational history.
@@ -78,7 +79,7 @@ When a SCIM user is deactivated or deleted:
 - mark the SCIM-managed organization membership inactive
 - revoke active sessions for that organization
 - remove SCIM-managed FGA group memberships
-- revoke SCIM-managed mapped grants that no longer apply
+- revoke access inherited through SCIM-managed groups by removing the user's group memberships
 - keep the user row, external ID link, and audit records for history
 
 Do not remove manually created organization memberships, manually assigned FGA grants, or non-SCIM groups unless a mapping rule explicitly owns them.
@@ -129,10 +130,11 @@ SCIM configuration follows the SqlOS pattern: define the system in code, expose 
 
 | Capability | Code-first | Admin SDK / API | Dashboard |
 | --- | --- | --- | --- |
-| Enable or disable SCIM | `SeedScimConnection(...).Enabled` | update connection enabled state | organization SCIM toggle |
-| Token lifecycle | reference a secret or request rotation | generate, rotate, revoke token | generate, rotate, copy setup token once |
-| IdP setup values | derive from configured public origin | read setup view model | copy base URL and provider instructions |
-| Mapping rules | seed exact and pattern rules | create, update, disable, delete rules | mapping rules table and editor |
+| Enable or disable SCIM | `EnableScim`, `SeedScimConnection(...).Enabled` | update connection enabled state | organization SCIM toggle |
+| Base path | `ScimBasePath` | connection detail returns base, Users, and Groups URLs | copy base URL, Users URL, and Groups URL |
+| Token lifecycle | reference a secret or request rotation | rotate token and read token metadata | rotate and copy setup token once |
+| IdP setup values | derive from configured public origin | read connection setup URLs | copy base URL and provider setup notes |
+| Mapping rules | seed exact and pattern rules | create, update, enable, disable rules | mapping rules table and editor |
 | Sync log | read operational events for tests or support | list sync events | recent activity and error details |
 | Audit | record via audit log service | query audit events | Audit Logs filters and detail view |
 
@@ -150,14 +152,60 @@ var connection = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnec
 
 var token = await admin.RotateScimTokenAsync(connection.Id);
 
-await admin.CreateScimGroupMappingAsync(new SqlOSCreateScimGroupMappingRequest(
-    ConnectionId: connection.Id,
+await admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
+    MatchType: SqlOSScimGroupMappingMatchTypes.DisplayName,
     GroupDisplayName: "Acme-Admins",
+    GroupExternalId: null,
+    GroupPattern: null,
     RoleKey: "org_admin",
-    ResourceId: $"organization::{organization.Id}"));
+    ResourceId: $"organization::{organization.Id}",
+    ResourceIdTemplate: null,
+    Description: "Directory-managed Acme admins",
+    Enabled: true));
 ```
 
 The SDK should return setup URLs, token metadata, mapping rule state, and sync log entries without requiring the caller to know dashboard internals.
+
+## Admin API endpoints
+
+The bundled dashboard uses the same admin API you can call from trusted setup tools. These routes are protected by dashboard admin authorization and return `404` when the caller is not authorized.
+
+```text
+GET  /sqlos/admin/auth/api/organizations/{organizationId}/scim-connections
+POST /sqlos/admin/auth/api/organizations/{organizationId}/scim-connections
+GET  /sqlos/admin/auth/api/scim-connections/{connectionId}
+PUT  /sqlos/admin/auth/api/scim-connections/{connectionId}
+POST /sqlos/admin/auth/api/scim-connections/{connectionId}/enable
+POST /sqlos/admin/auth/api/scim-connections/{connectionId}/disable
+POST /sqlos/admin/auth/api/scim-connections/{connectionId}/token/rotate
+GET  /sqlos/admin/auth/api/scim-connections/{connectionId}/mappings
+POST /sqlos/admin/auth/api/scim-connections/{connectionId}/mappings
+PUT  /sqlos/admin/auth/api/scim-mappings/{mappingId}
+POST /sqlos/admin/auth/api/scim-mappings/{mappingId}/enable
+POST /sqlos/admin/auth/api/scim-mappings/{mappingId}/disable
+GET  /sqlos/admin/auth/api/scim-connections/{connectionId}/sync-events
+```
+
+Create connection request:
+
+```json
+{
+  "displayName": "Acme Entra SCIM",
+  "enabled": true
+}
+```
+
+Create mapping request:
+
+```json
+{
+  "matchType": "display_name",
+  "groupDisplayName": "Acme-Admins",
+  "roleKey": "org_admin",
+  "resourceId": "organization::acme",
+  "enabled": true
+}
+```
 
 ## Dashboard
 
@@ -167,7 +215,7 @@ The dashboard should include:
 
 - connection status and last sync time
 - SCIM base URL and provider-specific setup notes for Okta, Entra, and generic SCIM clients
-- generate, rotate, and revoke token actions
+- rotate bearer tokens and copy the newly generated token once
 - code-seeded mapping rules with source labels
 - dashboard-created mapping rules
 - recent user, group, membership, grant, and failure events

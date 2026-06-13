@@ -24,6 +24,7 @@
     let flashMessage = null;
     let latestSsoDraft = null;
     let latestSsoPortalSession = null;
+    let latestScimToken = null;
     const pagerState = new Map();
     let selectedClientId = null;
     let clientDraftState = null;
@@ -259,7 +260,7 @@
         }
     };
 
-    const organizationTabs = new Set(["general", "users", "invitations", "sso"]);
+    const organizationTabs = new Set(["general", "users", "invitations", "sso", "scim"]);
     const userTabs = new Set(["general", "organizations", "sessions"]);
 
     const fgaViews = {
@@ -1419,20 +1420,34 @@
         const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`);
         const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
         const ssoPortalPager = getPagerState(`auth-org-${organizationId}-sso-portal`);
-        const [organization, users, memberships, invitations, ssoConnections, ssoPortalSessions] = await Promise.all([
+        const scimPager = getPagerState(`auth-org-${organizationId}-scim`);
+        const [organization, users, memberships, invitations, ssoConnections, ssoPortalSessions, scimConnections] = await Promise.all([
             fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
             fetchJson(`${authApiBasePath}/users?page=1&pageSize=500`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?page=${invitationsPager.page}&pageSize=${invitationsPager.pageSize}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?page=${ssoPortalPager.page}&pageSize=${ssoPortalPager.pageSize}`)
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?page=${ssoPortalPager.page}&pageSize=${ssoPortalPager.pageSize}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/scim-connections?page=${scimPager.page}&pageSize=${scimPager.pageSize}`)
         ]);
         const organizationSsoConnections = Array.isArray(ssoConnections?.data) ? ssoConnections.data : [];
         const organizationSsoPortalSessions = Array.isArray(ssoPortalSessions?.data) ? ssoPortalSessions.data : [];
+        const organizationScimConnections = Array.isArray(scimConnections?.data) ? scimConnections.data : [];
+        const scimDetails = tab === "scim"
+            ? await Promise.all(organizationScimConnections.map(async connection => {
+                const [detail, mappings, syncEvents] = await Promise.all([
+                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}`),
+                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/mappings?page=1&pageSize=50`),
+                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/sync-events?page=1&pageSize=10`)
+                ]);
+                return { connection: detail, mappings, syncEvents };
+            }))
+            : [];
         const organizationInvitations = Array.isArray(invitations?.data) ? invitations.data : [];
         const pendingInvitations = organizationInvitations.filter(invitation => invitation.status === "pending").length;
         const latestOrganizationDraft = latestSsoDraft && latestSsoDraft.organizationId === organizationId ? latestSsoDraft : null;
         const latestOrganizationPortalSession = latestSsoPortalSession && latestSsoPortalSession.organizationId === organizationId ? latestSsoPortalSession : null;
+        const latestOrganizationScimToken = latestScimToken && latestScimToken.organizationId === organizationId ? latestScimToken : null;
 
         const summaryHtml = `
             <div class="detail-summary-grid">
@@ -1452,6 +1467,10 @@
                     <div class="summary-label">SSO connections</div>
                     <div class="summary-value">${esc(organization.ssoConnectionCount || ssoConnections.totalCount || 0)}</div>
                 </div>
+                <div class="summary-card">
+                    <div class="summary-label">SCIM connections</div>
+                    <div class="summary-value">${esc(scimConnections.totalCount || 0)}</div>
+                </div>
             </div>
         `;
 
@@ -1461,6 +1480,7 @@
                 ${renderTabLink("users", "Users", tab, organizationId)}
                 ${renderTabLink("invitations", "Invitations", tab, organizationId)}
                 ${renderTabLink("sso", "SSO", tab, organizationId)}
+                ${renderTabLink("scim", "SCIM", tab, organizationId)}
             </div>
         `;
 
@@ -1581,7 +1601,7 @@
                     </section>
                 </div>
             `;
-        } else {
+        } else if (tab === "sso") {
             tabContent = `
                 <div class="panel-stack">
                     ${latestOrganizationDraft ? `
@@ -1698,6 +1718,173 @@
                     </section>
                 </div>
             `;
+        } else {
+            tabContent = `
+                <div class="panel-stack">
+                    ${latestOrganizationScimToken ? `
+                        <section class="panel">
+                            <h2>New SCIM Token</h2>
+                            <div class="callout">
+                                <div><strong>Connection:</strong> ${esc(latestOrganizationScimToken.connectionId)}</div>
+                                <div><strong>Token prefix:</strong> ${esc(latestOrganizationScimToken.tokenPrefix || "n/a")}</div>
+                                <div><strong>Bearer token</strong><br><span class="inline-code">${esc(latestOrganizationScimToken.token)}</span></div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="js-copy-scim-token" data-token="${esc(latestOrganizationScimToken.token)}">Copy token</button>
+                            </div>
+                        </section>
+                    ` : ""}
+                    <div class="panel-grid">
+                        <section class="panel">
+                            <h2>Create SCIM Connection</h2>
+                            <p>Create an organization-scoped SCIM endpoint, then rotate a bearer token before pasting the URL into your identity provider.</p>
+                            <form id="create-scim-connection-form">
+                                <input name="displayName" placeholder="Display name" value="${esc(organization.name)} SCIM" required>
+                                <label class="checkbox-row"><input name="enabled" type="checkbox" checked> Connection is enabled</label>
+                                <button type="submit">Create connection</button>
+                            </form>
+                        </section>
+                        <section class="panel">
+                            <h2>SCIM State</h2>
+                            ${renderMetadataRows([
+                                { label: "Total connections", value: scimConnections.totalCount || 0 },
+                                { label: "Enabled connections", value: organizationScimConnections.filter(item => item.isEnabled).length },
+                                { label: "Managed mappings", value: scimDetails.reduce((total, item) => total + (item.mappings?.totalCount || 0), 0) },
+                                { label: "Last sync", value: formatDate(organizationScimConnections.map(item => item.lastSyncAt).filter(Boolean).sort().at(-1)) }
+                            ])}
+                        </section>
+                        <section class="panel">
+                            <h2>IdP Setup Values</h2>
+                            <p>Use the connection base URL and bearer token in the provider app. SqlOS resolves the organization from the token.</p>
+                            ${renderMetadataRows([
+                                { label: "Okta", value: "Provisioning > Integration: SCIM connector base URL, Bearer token, enable Push Groups." },
+                                { label: "Microsoft Entra", value: "Enterprise App > Provisioning: Tenant URL, Secret Token, mappings for users and groups." },
+                                { label: "Generic SCIM 2.0", value: "Use bearer auth, Users and Groups resources, and stable externalId values." }
+                            ])}
+                        </section>
+                    </div>
+                    <section class="panel">
+                        <div class="panel-actions">
+                            <div>
+                                <h2>SCIM Connections</h2>
+                                <p>Use one connection per identity-provider directory. Tokens are shown only once after rotation.</p>
+                            </div>
+                            <div id="organization-scim-pagination-top">${renderPagination(scimConnections.page, scimConnections.totalPages, scimConnections.totalCount)}</div>
+                        </div>
+                        ${renderList(
+                            scimDetails,
+                            item => `
+                                <div class="list-item-header">
+                                    <strong>${esc(item.connection.displayName)}</strong>
+                                    <span class="inline-code">${item.connection.isEnabled ? "enabled" : "disabled"}</span>
+                                </div>
+                                ${renderMetadataRows([
+                                    { label: "Connection ID", value: item.connection.id },
+                                    { label: "Source", value: item.connection.source || "dashboard" },
+                                    { label: "Base URL", html: `<span class="inline-code">${esc(item.connection.baseUrl || "n/a")}</span>` },
+                                    { label: "Users URL", html: `<span class="inline-code">${esc(item.connection.usersUrl || "n/a")}</span>` },
+                                    { label: "Groups URL", html: `<span class="inline-code">${esc(item.connection.groupsUrl || "n/a")}</span>` },
+                                    { label: "Token prefix", value: item.connection.tokenPrefix || "No token rotated yet" },
+                                    { label: "Token rotated", value: formatDate(item.connection.tokenRotatedAt) },
+                                    { label: "Token last used", value: formatDate(item.connection.tokenLastUsedAt) },
+                                    { label: "Last sync", value: formatDate(item.connection.lastSyncAt) }
+                                ])}
+                                <form id="update-scim-connection-${esc(item.connection.id)}" class="nested-form">
+                                    <input name="displayName" placeholder="Display name" value="${esc(item.connection.displayName)}" required>
+                                    <label class="checkbox-row"><input name="enabled" type="checkbox" ${item.connection.isEnabled ? "checked" : ""}> Connection is enabled</label>
+                                    <button type="submit">Save connection</button>
+                                </form>
+                                <div class="form-actions">
+                                    <button type="button" class="js-rotate-scim-token" data-id="${esc(item.connection.id)}">Rotate token</button>
+                                    ${item.connection.isEnabled
+                                        ? `<button type="button" class="js-disable-scim-connection" data-id="${esc(item.connection.id)}">Disable</button>`
+                                        : `<button type="button" class="js-enable-scim-connection" data-id="${esc(item.connection.id)}">Enable</button>`}
+                                </div>
+                                <details class="client-explainer" open>
+                                    <summary>Group mapping rules</summary>
+                                    <form id="create-scim-mapping-${esc(item.connection.id)}" class="nested-form">
+                                        <select name="matchType">
+                                            <option value="display_name">Display name</option>
+                                            <option value="external_id">External ID</option>
+                                            <option value="pattern">Pattern</option>
+                                        </select>
+                                        <input name="groupDisplayName" placeholder="Group display name">
+                                        <input name="groupExternalId" placeholder="Group external ID">
+                                        <input name="groupPattern" placeholder="Regex pattern with named captures">
+                                        <input name="roleKey" placeholder="FGA role key" required>
+                                        <input name="resourceId" placeholder="FGA resource ID">
+                                        <input name="resourceIdTemplate" placeholder="Resource ID template, e.g. store_{storeId}">
+                                        <input name="description" placeholder="Grant description">
+                                        <label class="checkbox-row"><input name="enabled" type="checkbox" checked> Mapping is enabled</label>
+                                        <button type="submit">Create mapping</button>
+                                    </form>
+                                    ${renderList(
+                                        Array.isArray(item.mappings?.data) ? item.mappings.data : [],
+                                        mapping => `
+                                            <div class="list-item-header">
+                                                <strong>${esc(mapping.roleKey)} -> ${esc(mapping.resourceId || mapping.resourceIdTemplate || "resource")}</strong>
+                                                <span class="inline-code">${mapping.isEnabled ? "enabled" : "disabled"}</span>
+                                            </div>
+                                            ${renderMetadataRows([
+                                                { label: "Mapping ID", value: mapping.id },
+                                                { label: "Match type", value: mapping.matchType },
+                                                { label: "Group display name", value: mapping.groupDisplayName || "n/a" },
+                                                { label: "Group external ID", value: mapping.groupExternalId || "n/a" },
+                                                { label: "Group pattern", value: mapping.groupPattern || "n/a" },
+                                                { label: "Managed grants", value: mapping.activeGrantCount || 0 },
+                                                { label: "Source", value: mapping.source || "dashboard" }
+                                            ])}
+                                            <form id="update-scim-mapping-${esc(mapping.id)}" class="nested-form">
+                                                <select name="matchType">
+                                                    <option value="display_name" ${mapping.matchType === "display_name" ? "selected" : ""}>Display name</option>
+                                                    <option value="external_id" ${mapping.matchType === "external_id" ? "selected" : ""}>External ID</option>
+                                                    <option value="pattern" ${mapping.matchType === "pattern" ? "selected" : ""}>Pattern</option>
+                                                </select>
+                                                <input name="groupDisplayName" placeholder="Group display name" value="${esc(mapping.groupDisplayName || "")}">
+                                                <input name="groupExternalId" placeholder="Group external ID" value="${esc(mapping.groupExternalId || "")}">
+                                                <input name="groupPattern" placeholder="Regex pattern with named captures" value="${esc(mapping.groupPattern || "")}">
+                                                <input name="roleKey" placeholder="FGA role key" value="${esc(mapping.roleKey || "")}" required>
+                                                <input name="resourceId" placeholder="FGA resource ID" value="${esc(mapping.resourceId || "")}">
+                                                <input name="resourceIdTemplate" placeholder="Resource ID template" value="${esc(mapping.resourceIdTemplate || "")}">
+                                                <input name="description" placeholder="Grant description" value="${esc(mapping.description || "")}">
+                                                <label class="checkbox-row"><input name="enabled" type="checkbox" ${mapping.isEnabled ? "checked" : ""}> Mapping is enabled</label>
+                                                <button type="submit">Save mapping</button>
+                                            </form>
+                                            <div class="form-actions">
+                                                ${mapping.isEnabled
+                                                    ? `<button type="button" class="js-disable-scim-mapping" data-id="${esc(mapping.id)}">Disable</button>`
+                                                    : `<button type="button" class="js-enable-scim-mapping" data-id="${esc(mapping.id)}">Enable</button>`}
+                                            </div>
+                                        `,
+                                        "No mapping rules yet."
+                                    )}
+                                </details>
+                                <details class="client-explainer">
+                                    <summary>Recent sync events</summary>
+                                    ${renderList(
+                                        Array.isArray(item.syncEvents?.data) ? item.syncEvents.data : [],
+                                        event => `
+                                            <div class="list-item-header">
+                                                <strong>${esc(event.action)}</strong>
+                                                <span class="inline-code">${esc(event.result)}</span>
+                                            </div>
+                                            ${renderMetadataRows([
+                                                { label: "When", value: formatDate(event.occurredAt) },
+                                                { label: "Resource", value: `${event.resourceType || "n/a"} ${event.resourceId || ""}`.trim() },
+                                                { label: "External ID", value: event.externalId || "n/a" },
+                                                { label: "Error", value: event.error || "n/a" },
+                                                { label: "Request ID", value: event.requestId || "n/a" }
+                                            ])}
+                                        `,
+                                        "No sync events yet."
+                                    )}
+                                </details>
+                            `,
+                            "No SCIM connections yet."
+                        )}
+                    </section>
+                </div>
+            `;
         }
 
         content.innerHTML = `
@@ -1809,7 +1996,7 @@
                 setPagerPage(`auth-org-${organizationId}-invitations`, page);
                 await render();
             });
-        } else {
+        } else if (tab === "sso") {
             document.querySelectorAll(".js-copy-sso-portal-link").forEach(button => {
                 button.addEventListener("click", async () => {
                     const url = button.dataset.url;
@@ -1896,6 +2083,130 @@
 
             bindPagination("#organization-sso-portal-pagination-top", async page => {
                 setPagerPage(`auth-org-${organizationId}-sso-portal`, page);
+                await render();
+            });
+        } else if (tab === "scim") {
+            document.querySelectorAll(".js-copy-scim-token").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const token = button.dataset.token;
+                    if (!token) {
+                        return;
+                    }
+
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(token);
+                        setFlash("success", "SCIM token copied.");
+                    } else {
+                        window.prompt("SCIM bearer token", token);
+                    }
+                    await render();
+                });
+            });
+
+            bindForm("create-scim-connection-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations/${organizationId}/scim-connections`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        displayName: form.get("displayName"),
+                        enabled: form.get("enabled") === "on"
+                    })
+                });
+                latestScimToken = null;
+                setFlash("success", "SCIM connection created.");
+            });
+
+            document.querySelectorAll(".js-rotate-scim-token").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const result = await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(button.dataset.id)}/token/rotate`, {
+                        method: "POST",
+                        body: JSON.stringify({})
+                    });
+                    latestScimToken = { ...result, organizationId };
+                    if (result.token && navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(result.token);
+                    }
+                    setFlash("success", "SCIM token rotated.");
+                    await render();
+                });
+            });
+
+            document.querySelectorAll(".js-enable-scim-connection, .js-disable-scim-connection").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const action = button.classList.contains("js-enable-scim-connection") ? "enable" : "disable";
+                    await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(button.dataset.id)}/${action}`, {
+                        method: "POST",
+                        body: JSON.stringify({})
+                    });
+                    setFlash("success", `SCIM connection ${action}d.`);
+                    await render();
+                });
+            });
+
+            scimDetails.forEach(item => {
+                bindForm(`update-scim-connection-${item.connection.id}`, async form => {
+                    await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}`, {
+                        method: "PUT",
+                        body: JSON.stringify({
+                            displayName: form.get("displayName"),
+                            enabled: form.get("enabled") === "on"
+                        })
+                    });
+                    setFlash("success", "SCIM connection updated.");
+                });
+
+                bindForm(`create-scim-mapping-${item.connection.id}`, async form => {
+                    await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}/mappings`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            matchType: form.get("matchType"),
+                            groupDisplayName: form.get("groupDisplayName") || null,
+                            groupExternalId: form.get("groupExternalId") || null,
+                            groupPattern: form.get("groupPattern") || null,
+                            roleKey: form.get("roleKey"),
+                            resourceId: form.get("resourceId") || null,
+                            resourceIdTemplate: form.get("resourceIdTemplate") || null,
+                            description: form.get("description") || null,
+                            enabled: form.get("enabled") === "on"
+                        })
+                    });
+                    setFlash("success", "SCIM mapping created.");
+                });
+
+                (Array.isArray(item.mappings?.data) ? item.mappings.data : []).forEach(mapping => {
+                    bindForm(`update-scim-mapping-${mapping.id}`, async form => {
+                        await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(mapping.id)}`, {
+                            method: "PUT",
+                            body: JSON.stringify({
+                                matchType: form.get("matchType"),
+                                groupDisplayName: form.get("groupDisplayName") || null,
+                                groupExternalId: form.get("groupExternalId") || null,
+                                groupPattern: form.get("groupPattern") || null,
+                                roleKey: form.get("roleKey"),
+                                resourceId: form.get("resourceId") || null,
+                                resourceIdTemplate: form.get("resourceIdTemplate") || null,
+                                description: form.get("description") || null,
+                                enabled: form.get("enabled") === "on"
+                            })
+                        });
+                        setFlash("success", "SCIM mapping updated.");
+                    });
+                });
+            });
+
+            document.querySelectorAll(".js-enable-scim-mapping, .js-disable-scim-mapping").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const action = button.classList.contains("js-enable-scim-mapping") ? "enable" : "disable";
+                    await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(button.dataset.id)}/${action}`, {
+                        method: "POST",
+                        body: JSON.stringify({})
+                    });
+                    setFlash("success", `SCIM mapping ${action}d.`);
+                    await render();
+                });
+            });
+
+            bindPagination("#organization-scim-pagination-top", async page => {
+                setPagerPage(`auth-org-${organizationId}-scim`, page);
                 await render();
             });
         }

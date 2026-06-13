@@ -117,6 +117,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSMicrosoftGraphCalendarAdapter>();
         services.AddScoped<SqlOSCalendarService>();
         services.AddScoped<SqlOSCalendarSyncService>();
+        services.AddScoped<SqlOSScimService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();

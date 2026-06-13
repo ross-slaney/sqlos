@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -40,6 +41,10 @@ public static class EndpointRouteBuilderExtensions
         var adminApi = adminRoot.MapGroup("/api");
         var ssoSetupApi = endpoints.MapGroup(resolvedSsoSetupApiPath);
         ssoSetupApi.ExcludeFromDescription();
+
+        var scim = endpoints.MapGroup(NormalizeScimBasePath(authOptions.ScimBasePath));
+        scim.ExcludeFromDescription();
+        MapScimEndpoints(scim);
 
         auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
             Results.Ok(await authorizationServerService.GetMetadataAsync(context, cancellationToken)));
@@ -3462,8 +3467,311 @@ public static class EndpointRouteBuilderExtensions
             return Results.Ok(await adminService.GetDashboardSummaryAsync(cancellationToken));
         });
 
+        MapScimAdminEndpoints(adminApi);
         MapAdminEndpoints(adminApi);
         return endpoints;
+    }
+
+    private static void MapScimEndpoints(RouteGroupBuilder scim)
+    {
+        scim.MapGet("/ServiceProviderConfig", async (
+            HttpContext context,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, connection =>
+                Task.FromResult<IResult>(ScimJson(scimService.GetServiceProviderConfig())), cancellationToken));
+
+        scim.MapGet("/ResourceTypes", async (
+            HttpContext context,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, connection =>
+                Task.FromResult<IResult>(ScimJson(scimService.GetResourceTypes())), cancellationToken));
+
+        scim.MapGet("/Schemas", async (
+            HttpContext context,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, connection =>
+                Task.FromResult<IResult>(ScimJson(scimService.GetSchemas())), cancellationToken));
+
+        scim.MapGet("/Users", async (
+            HttpContext context,
+            int? startIndex,
+            int? count,
+            string? filter,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+                ScimJson(await scimService.ListUsersAsync(connection, startIndex, count, filter, cancellationToken)), cancellationToken));
+
+        scim.MapPost("/Users", async (
+            HttpContext context,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                return ScimJson(await scimService.UpsertUserAsync(connection, payload, replace: false, cancellationToken), StatusCodes.Status201Created);
+            }, cancellationToken));
+
+        scim.MapGet("/Users/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+                ScimJson(await scimService.GetUserAsync(connection, id, cancellationToken)), cancellationToken));
+
+        scim.MapPut("/Users/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                payload["id"] = id;
+                return ScimJson(await scimService.UpsertUserAsync(connection, payload, replace: true, cancellationToken));
+            }, cancellationToken));
+
+        scim.MapPatch("/Users/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                return ScimJson(await scimService.PatchUserAsync(connection, id, payload, cancellationToken));
+            }, cancellationToken));
+
+        scim.MapDelete("/Users/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                await scimService.DeleteUserAsync(connection, id, cancellationToken);
+                return Results.NoContent();
+            }, cancellationToken));
+
+        scim.MapGet("/Groups", async (
+            HttpContext context,
+            int? startIndex,
+            int? count,
+            string? filter,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+                ScimJson(await scimService.ListGroupsAsync(connection, startIndex, count, filter, cancellationToken)), cancellationToken));
+
+        scim.MapPost("/Groups", async (
+            HttpContext context,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                return ScimJson(await scimService.UpsertGroupAsync(connection, payload, replace: false, cancellationToken), StatusCodes.Status201Created);
+            }, cancellationToken));
+
+        scim.MapGet("/Groups/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+                ScimJson(await scimService.GetGroupAsync(connection, id, cancellationToken)), cancellationToken));
+
+        scim.MapPut("/Groups/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                payload["id"] = id;
+                return ScimJson(await scimService.UpsertGroupAsync(connection, payload, replace: true, cancellationToken));
+            }, cancellationToken));
+
+        scim.MapPatch("/Groups/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                var payload = await ReadScimPayloadAsync(context, cancellationToken);
+                return ScimJson(await scimService.PatchGroupAsync(connection, id, payload, cancellationToken));
+            }, cancellationToken));
+
+        scim.MapDelete("/Groups/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, async connection =>
+            {
+                await scimService.DeleteGroupAsync(connection, id, cancellationToken);
+                return Results.NoContent();
+            }, cancellationToken));
+    }
+
+    private static void MapScimAdminEndpoints(RouteGroupBuilder api)
+    {
+        api.MapGet("/organizations/{organizationId}/scim-connections", async (
+            HttpContext context,
+            string organizationId,
+            int? page,
+            int? pageSize,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(await adminService.ListOrganizationScimConnectionsAsync(organizationId, page, pageSize, cancellationToken))));
+
+        api.MapPost("/organizations/{organizationId}/scim-connections", async (
+            HttpContext context,
+            string organizationId,
+            CreateScimConnectionDashboardRequest request,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+            {
+                var connection = await adminService.CreateScimConnectionAsync(
+                    new SqlOSCreateScimConnectionRequest(organizationId, request.DisplayName, request.Enabled),
+                    cancellationToken);
+                return Results.Ok(ToScimConnectionAdminResponse(connection));
+            }));
+
+        api.MapGet("/scim-connections/{connectionId}", async (
+            HttpContext context,
+            string connectionId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(await adminService.GetScimConnectionAsync(connectionId, cancellationToken))));
+
+        api.MapPut("/scim-connections/{connectionId}", async (
+            HttpContext context,
+            string connectionId,
+            UpdateScimConnectionDashboardRequest request,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+            {
+                var connection = await adminService.UpdateScimConnectionAsync(
+                    connectionId,
+                    new SqlOSUpdateScimConnectionRequest(request.DisplayName, request.Enabled),
+                    cancellationToken);
+                return Results.Ok(ToScimConnectionAdminResponse(connection));
+            }));
+
+        api.MapPost("/scim-connections/{connectionId}/enable", async (
+            HttpContext context,
+            string connectionId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimConnectionAdminResponse(await adminService.SetScimConnectionEnabledAsync(connectionId, true, cancellationToken)))));
+
+        api.MapPost("/scim-connections/{connectionId}/disable", async (
+            HttpContext context,
+            string connectionId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimConnectionAdminResponse(await adminService.SetScimConnectionEnabledAsync(connectionId, false, cancellationToken)))));
+
+        api.MapPost("/scim-connections/{connectionId}/token/rotate", async (
+            HttpContext context,
+            string connectionId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(await adminService.RotateScimTokenAsync(connectionId, cancellationToken))));
+
+        api.MapGet("/scim-connections/{connectionId}/mappings", async (
+            HttpContext context,
+            string connectionId,
+            int? page,
+            int? pageSize,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(await adminService.ListScimGroupMappingsAsync(connectionId, page, pageSize, cancellationToken))));
+
+        api.MapPost("/scim-connections/{connectionId}/mappings", async (
+            HttpContext context,
+            string connectionId,
+            SqlOSCreateScimGroupMappingRequest request,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimMappingAdminResponse(await adminService.CreateScimGroupMappingAsync(connectionId, request, cancellationToken)))));
+
+        api.MapPut("/scim-mappings/{mappingId}", async (
+            HttpContext context,
+            string mappingId,
+            SqlOSUpdateScimGroupMappingRequest request,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimMappingAdminResponse(await adminService.UpdateScimGroupMappingAsync(mappingId, request, cancellationToken)))));
+
+        api.MapPost("/scim-mappings/{mappingId}/enable", async (
+            HttpContext context,
+            string mappingId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimMappingAdminResponse(await adminService.SetScimGroupMappingEnabledAsync(mappingId, true, cancellationToken)))));
+
+        api.MapPost("/scim-mappings/{mappingId}/disable", async (
+            HttpContext context,
+            string mappingId,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(ToScimMappingAdminResponse(await adminService.SetScimGroupMappingEnabledAsync(mappingId, false, cancellationToken)))));
+
+        api.MapGet("/scim-connections/{connectionId}/sync-events", async (
+            HttpContext context,
+            string connectionId,
+            int? page,
+            int? pageSize,
+            SqlOSAdminService adminService,
+            IOptions<SqlOSAuthServerOptions> options,
+            IHostEnvironment environment,
+            CancellationToken cancellationToken) =>
+            await HandleAdminApiAsync(context, options, environment, async () =>
+                Results.Ok(await adminService.ListScimSyncEventsAsync(connectionId, page, pageSize, cancellationToken))));
     }
 
     private static void MapSsoPortalEndpoints(
@@ -4925,6 +5233,111 @@ public static class EndpointRouteBuilderExtensions
         });
     }
 
+    private static async Task<IResult> HandleScimAsync(
+        HttpContext context,
+        SqlOSScimService scimService,
+        Func<SqlOSScimConnection, Task<IResult>> action,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var connection = await scimService.AuthenticateAsync(context, cancellationToken);
+            return await action(connection);
+        }
+        catch (SqlOSScimException ex)
+        {
+            return ScimError(ex.StatusCode, ex.Message, ex.ScimType);
+        }
+        catch (JsonException ex)
+        {
+            return ScimError(StatusCodes.Status400BadRequest, ex.Message, "invalidSyntax");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ScimError(StatusCodes.Status400BadRequest, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> HandleAdminApiAsync(
+        HttpContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        IHostEnvironment environment,
+        Func<Task<IResult>> action)
+    {
+        if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { message = ex.Message });
+        }
+    }
+
+    private static IResult ScimJson(JsonObject payload, int statusCode = StatusCodes.Status200OK)
+        => Results.Json(payload, statusCode: statusCode, contentType: "application/scim+json");
+
+    private static IResult ScimError(int statusCode, string message, string? scimType = null)
+        => Results.Json(
+            SqlOSScimService.CreateError(statusCode, message, scimType),
+            statusCode: statusCode,
+            contentType: "application/scim+json");
+
+    private static async Task<JsonObject> ReadScimPayloadAsync(HttpContext context, CancellationToken cancellationToken)
+        => await context.Request.ReadFromJsonAsync<JsonObject>(cancellationToken: cancellationToken)
+            ?? throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM JSON body is required.", "invalidSyntax");
+
+    private static string NormalizeScimBasePath(string? basePath)
+    {
+        var path = string.IsNullOrWhiteSpace(basePath) ? "/sqlos/scim/v2" : basePath.Trim();
+        if (!path.StartsWith('/'))
+        {
+            path = "/" + path;
+        }
+
+        return path.TrimEnd('/');
+    }
+
+    private static object ToScimConnectionAdminResponse(SqlOSScimConnection connection) => new
+    {
+        connection.Id,
+        connection.OrganizationId,
+        connection.DisplayName,
+        connection.IsEnabled,
+        connection.Source,
+        connection.SeedKey,
+        connection.TokenPrefix,
+        connection.TokenRotatedAt,
+        connection.TokenLastUsedAt,
+        connection.LastSyncAt,
+        connection.CreatedAt,
+        connection.UpdatedAt
+    };
+
+    private static object ToScimMappingAdminResponse(SqlOSScimGroupMapping mapping) => new
+    {
+        mapping.Id,
+        mapping.ConnectionId,
+        mapping.Source,
+        mapping.SourceKey,
+        mapping.MatchType,
+        mapping.GroupDisplayName,
+        mapping.GroupExternalId,
+        mapping.GroupPattern,
+        mapping.RoleKey,
+        mapping.ResourceId,
+        mapping.ResourceIdTemplate,
+        mapping.Description,
+        mapping.IsEnabled,
+        mapping.CreatedAt,
+        mapping.UpdatedAt
+    };
+
     private static async Task<bool> IsAdminAuthorizedAsync(HttpContext context, SqlOSAuthServerOptions options, IHostEnvironment environment)
     {
         if (options.Dashboard.AuthMode == SqlOSDashboardAuthMode.Password)
@@ -5515,4 +5928,6 @@ public static class EndpointRouteBuilderExtensions
         string? LogoDataUrl);
 
     private sealed record ClientLifecycleRequest(string? Reason);
+    private sealed record CreateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true);
+    private sealed record UpdateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true);
 }

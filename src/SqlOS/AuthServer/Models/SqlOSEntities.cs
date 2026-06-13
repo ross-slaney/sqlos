@@ -13,6 +13,7 @@ public sealed class SqlOSOrganization
 
     public ICollection<SqlOSMembership> Memberships { get; set; } = new List<SqlOSMembership>();
     public ICollection<SqlOSSsoConnection> SsoConnections { get; set; } = new List<SqlOSSsoConnection>();
+    public ICollection<SqlOSScimConnection> ScimConnections { get; set; } = new List<SqlOSScimConnection>();
     public ICollection<SqlOSOrganizationDomain> Domains { get; set; } = new List<SqlOSOrganizationDomain>();
     public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
     public SqlOSOrganizationMfaPolicy? MfaPolicy { get; set; }
@@ -171,6 +172,104 @@ public sealed class SqlOSSsoConnection
     public SqlOSOrganization? Organization { get; set; }
     public ICollection<SqlOSExternalIdentity> ExternalIdentities { get; set; } = new List<SqlOSExternalIdentity>();
     public ICollection<SqlOSSsoPortalSession> PortalSessions { get; set; } = new List<SqlOSSsoPortalSession>();
+}
+
+public sealed class SqlOSScimConnection
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string? SeedKey { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public string? TokenHash { get; set; }
+    public string? TokenPrefix { get; set; }
+    public DateTime? TokenRotatedAt { get; set; }
+    public DateTime? TokenLastUsedAt { get; set; }
+    public DateTime? LastSyncAt { get; set; }
+    public string Source { get; set; } = "dashboard";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public SqlOSOrganization? Organization { get; set; }
+    public ICollection<SqlOSScimExternalId> ExternalIds { get; set; } = new List<SqlOSScimExternalId>();
+    public ICollection<SqlOSScimGroupMapping> GroupMappings { get; set; } = new List<SqlOSScimGroupMapping>();
+    public ICollection<SqlOSScimSyncEvent> SyncEvents { get; set; } = new List<SqlOSScimSyncEvent>();
+}
+
+public sealed class SqlOSScimExternalId
+{
+    public string Id { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string ResourceType { get; set; } = "User";
+    public string ExternalId { get; set; } = string.Empty;
+    public string EntityId { get; set; } = string.Empty;
+    public string? FgaSubjectId { get; set; }
+    public string? DisplayName { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime LastSyncedAt { get; set; }
+
+    public SqlOSScimConnection? Connection { get; set; }
+}
+
+public sealed class SqlOSScimGroupMapping
+{
+    public string Id { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string? SourceKey { get; set; }
+    public string Source { get; set; } = "dashboard";
+    public string MatchType { get; set; } = "display_name";
+    public string? GroupDisplayName { get; set; }
+    public string? GroupExternalId { get; set; }
+    public string? GroupPattern { get; set; }
+    public string RoleKey { get; set; } = string.Empty;
+    public string? ResourceId { get; set; }
+    public string? ResourceIdTemplate { get; set; }
+    public string? Description { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public SqlOSScimConnection? Connection { get; set; }
+    public ICollection<SqlOSScimManagedGrant> ManagedGrants { get; set; } = new List<SqlOSScimManagedGrant>();
+}
+
+public sealed class SqlOSScimManagedGrant
+{
+    public string Id { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string MappingId { get; set; } = string.Empty;
+    public string GroupExternalId { get; set; } = string.Empty;
+    public string FgaGroupId { get; set; } = string.Empty;
+    public string FgaGroupSubjectId { get; set; } = string.Empty;
+    public string GrantId { get; set; } = string.Empty;
+    public string RoleId { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+
+    public SqlOSScimConnection? Connection { get; set; }
+    public SqlOSScimGroupMapping? Mapping { get; set; }
+}
+
+public sealed class SqlOSScimSyncEvent
+{
+    public string Id { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string ResourceType { get; set; } = string.Empty;
+    public string? ResourceId { get; set; }
+    public string? ExternalId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Result { get; set; } = "success";
+    public string? Error { get; set; }
+    public string? DataJson { get; set; }
+    public string? RequestId { get; set; }
+    public DateTime OccurredAt { get; set; }
+
+    public SqlOSScimConnection? Connection { get; set; }
+    public SqlOSOrganization? Organization { get; set; }
 }
 
 public sealed class SqlOSSsoPortalSession
