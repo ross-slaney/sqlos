@@ -1,18 +1,18 @@
 ---
-title: "Google and Microsoft sign-in"
-description: "Configure social OIDC providers from the SqlOS dashboard."
+title: "Social sign-in"
+description: "Configure Google, Microsoft, GitHub, Apple, and custom social providers from the SqlOS dashboard."
 order: 2
 section: guides
 ---
 
 <Banner
   eyebrow="Guide"
-  title="Add Google or Microsoft social login"
-  href="/docs/authserver/google-oidc"
-  actionLabel="Google OIDC reference"
+  title="Add social login"
+  href="/docs/authserver/github-oidc"
+  actionLabel="GitHub provider reference"
 />
 
-You'll learn how to register redirect URIs, create an OIDC connection in SqlOS, and test the hosted login flow.
+You'll learn how to register redirect URIs, create a social provider connection in SqlOS, and test the hosted login flow.
 
 <Callout type="info" title="Prerequisites">
   - SqlOS running with [password login](/docs/guides/password-login) or another primary flow
@@ -21,7 +21,7 @@ You'll learn how to register redirect URIs, create an OIDC connection in SqlOS, 
 
 ## Goal
 
-Users click **Continue with Google** or **Continue with Microsoft** on the hosted AuthPage.
+Users click provider buttons such as **Continue with Google**, **Continue with Microsoft**, or **Continue with GitHub** on the hosted AuthPage.
 
 ## Google
 
@@ -42,6 +42,16 @@ See [Google OIDC](/docs/authserver/google-oidc) for curl-based setup and failure
 
 See [Microsoft OIDC](/docs/authserver/microsoft-oidc).
 
+## GitHub
+
+1. Create a GitHub OAuth App in [GitHub Developer settings](https://github.com/settings/developers).
+2. Open **`/sqlos/admin/auth/oidc`** in your running app.
+3. Create a connection with provider **GitHub**, your GitHub OAuth App client ID, and client secret.
+4. Copy the **provider callback URI** SqlOS shows and set it as the GitHub OAuth App **Authorization callback URL**.
+5. Enable the connection.
+
+SqlOS requests `read:user` and `user:email` by default so it can load the GitHub profile and verified primary email address. See [GitHub OIDC](/docs/authserver/github-oidc) for dashboard, API, and code-first setup.
+
 ## Seed from startup
 
 Instead of clicking through the dashboard, you can seed a connection from code so it exists on a fresh database. This is consistent with `SeedAuthPage`, `SeedAuthEmails`, and client seeding: the bootstrapper reconciles the connection on startup, matched by provider type (and display name for custom providers).
@@ -56,14 +66,19 @@ builder.AddSqlOS<AppDbContext>(options =>
         clientId: builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]!,
         clientSecret: builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"]!,
         tenant: "common",
-        // {connectionId} is replaced with the generated connection id at seed time.
-        "https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}");
+        "https://your-app.example.com/sqlos/auth/oidc/callback");
 
     // "Continue with Google".
     auth.SeedGoogleConnection(
         clientId: builder.Configuration["SqlOS:Oidc:Google:ClientId"]!,
         clientSecret: builder.Configuration["SqlOS:Oidc:Google:ClientSecret"]!,
-        "https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}");
+        "https://your-app.example.com/sqlos/auth/oidc/callback");
+
+    // "Continue with GitHub". GitHub uses OAuth profile/email lookup through the same social provider surface.
+    auth.SeedGitHubConnection(
+        clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+        clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+        "https://your-app.example.com/sqlos/auth/oidc/callback");
 });
 ```
 
@@ -77,7 +92,7 @@ auth.SeedOidcConnection(oidc =>
     oidc.ClientId = builder.Configuration["SqlOS:Oidc:Acme:ClientId"]!;
     oidc.ClientSecret = builder.Configuration["SqlOS:Oidc:Acme:ClientSecret"];
     oidc.DiscoveryUrl = "https://id.acme.com/.well-known/openid-configuration";
-    oidc.AllowedCallbackUris = ["https://your-app.example.com/api/v1/auth/oidc/callback/{connectionId}"];
+    oidc.AllowedCallbackUris = ["https://your-app.example.com/sqlos/auth/oidc/callback"];
 });
 ```
 
@@ -85,7 +100,7 @@ auth.SeedOidcConnection(oidc =>
   - Seeds are reconciled on every startup. Client id, callbacks, scopes, and endpoints are kept in sync with your code.
   - A client secret is only overwritten when the seed supplies one, so configuration without a secret never clears a stored credential.
   - Enable/disable is owner-managed once the connection exists: a manual disable from the dashboard survives restarts.
-  - Add the same SqlOS-owned callback URI to the provider (Entra, Google, etc.). The connection id is shown in the dashboard after the first boot.
+  - Add the same SqlOS-owned callback URI to the provider (Entra, Google, GitHub, etc.). The dashboard shows the callback after the first boot.
 </Callout>
 
 ## Test
@@ -102,4 +117,5 @@ auth.SeedOidcConnection(oidc =>
 
 - [SAML SSO for an org](/docs/guides/saml-sso)
 - [OIDC overview](/docs/authserver/oidc-auth)
+- [GitHub provider reference](/docs/authserver/github-oidc)
 - [Troubleshooting](/docs/guides/troubleshooting)

@@ -24,7 +24,7 @@ Complete reference for every public method in the AuthServer module.
 | MFA / TOTP | `SqlOSAuthService` MFA methods and `SqlOSSettingsService` MFA policy methods |
 | Token validation | `ValidateAccessTokenAsync` |
 | Admin CRUD | `SqlOSAdminService` |
-| OIDC social | `SqlOSOidcAuthService` |
+| OIDC social | `SqlOSOidcAuthService` — Google, Microsoft, GitHub, Apple, and custom providers |
 | SAML SSO | `SqlOSSsoAuthorizationService` |
 
 ## SqlOSAuthService
@@ -907,7 +907,7 @@ await adminService.ImportSsoMetadataAsync(
 
 ### CreateOidcConnectionAsync
 
-Register an OIDC social login provider (Google, Microsoft, Apple, or custom).
+Register an OIDC/social login provider (Google, Microsoft, GitHub, Apple, or custom).
 
 ```csharp
 var conn = await adminService.CreateOidcConnectionAsync(
@@ -931,7 +931,7 @@ var conn = await adminService.CreateOidcConnectionAsync(
 
 | Name | Type | Description |
 |------|------|-------------|
-| `request.ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `Apple`, or `Custom`. |
+| `request.ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `GitHub`, `Apple`, or `Custom`. |
 | `request.DisplayName` | `string` | Display name for the provider. |
 | `request.ClientId` | `string` | OAuth client ID from the provider. |
 | `request.ClientSecret` | `string?` | OAuth client secret. |
@@ -944,6 +944,31 @@ var conn = await adminService.CreateOidcConnectionAsync(
 **Returns**
 
 `Task<SqlOSOidcConnection>` — the created connection.
+
+---
+
+### SeedGitHubConnection
+
+Seed a GitHub social login connection from startup code. Use this for repeatable local, preview, and production environments where the dashboard should already show GitHub after the first boot.
+
+```csharp
+options.AuthServer.SeedGitHubConnection(
+    clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+    clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+    "https://your-app.example.com/sqlos/auth/oidc/callback");
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `clientId` | `string` | GitHub OAuth App client ID. |
+| `clientSecret` | `string` | GitHub OAuth App client secret. |
+| `allowedCallbackUris` | `params string[]` | SqlOS provider callback URIs to allow. Default base path form is `{AuthServer.PublicOrigin}/sqlos/auth/oidc/callback`. |
+
+The seeded connection uses provider type `GitHub`, display name `GitHub`, protocol `OAuthProfile`, default scopes `read:user` and `user:email`, and the built-in GitHub authorization/token/profile endpoints.
+
+See [GitHub OIDC](/docs/authserver/github-oidc).
 
 ---
 
@@ -1181,7 +1206,7 @@ var tokens = await ssoService.ExchangeCodeAsync(
 
 ## SqlOSOidcAuthService
 
-OIDC (social login) authorization flow — Google, Microsoft, Apple, or custom providers.
+OIDC/social login authorization flow — Google, Microsoft, GitHub, Apple, or custom providers.
 
 ---
 
@@ -1242,7 +1267,7 @@ return Results.Redirect(result.AuthorizationUrl);
 |-------|------|-------------|
 | `AuthorizationUrl` | `string` | Provider URL to redirect to. |
 | `ConnectionId` | `string` | The OIDC connection used. |
-| `ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `Apple`, or `Custom`. |
+| `ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `GitHub`, `Apple`, or `Custom`. |
 | `DisplayName` | `string` | Provider display name. |
 
 ---
