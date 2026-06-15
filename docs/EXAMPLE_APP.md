@@ -7,7 +7,7 @@ Use it when you want to explore:
 - local password login
 - hosted and headless auth UI
 - optional SMS OTP through Twilio Verify
-- Google, Microsoft, Apple, and custom OIDC login
+- Google, Microsoft, GitHub, Apple, and custom OIDC/social login
 - org membership
 - organization email invitations
 - SAML SSO initiation and callback flow
@@ -82,6 +82,7 @@ For OIDC setup, use:
 - [OIDC auth guide](../web/content/docs/authserver/oidc-auth.mdx)
 - [Google OIDC](GOOGLE_OIDC.md)
 - [Microsoft OIDC](MICROSOFT_OIDC.md)
+- [GitHub OIDC](GITHUB_OIDC.md)
 - [Apple OIDC](APPLE_OIDC.md)
 - [Custom OIDC](CUSTOM_OIDC.md)
 

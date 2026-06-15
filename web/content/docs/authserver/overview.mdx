@@ -31,7 +31,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
   <Card title="Users" description="Email/password, email OTP, SSO-provisioned, or OIDC-linked identities." />
   <Card title="Sessions" description="JWT access tokens, refresh token rotation, and replay detection." />
   <Card title="MFA and recovery codes" description="Optional self-enrollment, tenant-required TOTP, and recovery-code challenges." />
-  <Card title="OIDC" description="Google, Microsoft, Apple, and custom providers." />
+  <Card title="OIDC" description="Google, Microsoft, GitHub, Apple, and custom providers." />
   <Card title="SAML SSO" description="Enterprise SSO with provisioning and hosted flows." />
   <Card title="Invitations" description="Email-bound organization invites with hosted, headless, and SDK acceptance." />
   <Card title="CLI OAuth" description="Device Authorization Grant for terminal apps and remote sessions." />
@@ -80,7 +80,7 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 | `SqlOSCryptoService` | Token generation, PKCE, password hashing, JWKS |
 | `SqlOSHomeRealmDiscoveryService` | Route users to password or SSO by email domain |
 | `SqlOSSsoAuthorizationService` | SAML SSO authorization and code exchange |
-| `SqlOSOidcAuthService` | Google, Microsoft, Apple, and custom OIDC |
+| `SqlOSOidcAuthService` | Google, Microsoft, GitHub, Apple, and custom social login |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
 
 ## Signing keys and protected secrets

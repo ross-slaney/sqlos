@@ -16,19 +16,19 @@ You'll learn how to register redirect URIs in Google Cloud and create the connec
 
 ## Redirect URI
 
-The callback path is connection-specific:
+The default hosted provider callback path is:
 
 ```text
-https://your-app.example.com/sqlos/admin/auth/api/oidc/callback/{connectionId}
+https://your-app.example.com/sqlos/auth/oidc/callback
 ```
 
-For local development with the example API:
+For local development with the default SqlOS base path:
 
 ```text
-http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+http://localhost:5062/sqlos/auth/oidc/callback
 ```
 
-Create the OIDC connection in SqlOS first, then copy the final callback URI (with `connectionId`) into Google Cloud.
+Create the OIDC connection in SqlOS first, then copy the dashboard callback URI into Google Cloud.
 
 ## Google Cloud setup
 
@@ -45,7 +45,7 @@ Create the OIDC connection in SqlOS first, then copy the final callback URI (wit
    - Provider: **Google**
    - Display name: shown on the login button
    - Client ID and client secret from Google
-3. Save, then update Google’s redirect URIs with the exact callback shown for that connection id.
+3. Save, then update Google's redirect URIs with the exact callback shown by the dashboard.
 4. **Enable** the connection.
 
 Default scopes when left empty: `openid`, `email`, `profile`.

@@ -1,0 +1,146 @@
+---
+title: "GitHub OIDC"
+description: "Configure GitHub OAuth social login for SqlOS AuthServer."
+order: 18
+section: authserver
+---
+
+<Banner
+  eyebrow="Provider"
+  title="Sign in with GitHub"
+  href="/docs/guides/github-oidc"
+  actionLabel="GitHub setup guide"
+/>
+
+Use this page when you need the exact GitHub provider settings for the SqlOS AuthServer dashboard, admin API, or startup seed.
+
+<Callout type="info" title="GitHub is OAuth profile mode">
+  The built-in GitHub provider is managed from the same SqlOS Social Login/OIDC screen as Google, Microsoft, Apple, and custom OIDC providers. GitHub does not use OIDC discovery or ID tokens in SqlOS; SqlOS exchanges the OAuth code and then calls GitHub profile and email APIs.
+</Callout>
+
+## Redirect URI
+
+Register the SqlOS provider callback URL as the GitHub OAuth App **Authorization callback URL**.
+
+Default production form:
+
+```text
+https://your-app.example.com/sqlos/auth/oidc/callback
+```
+
+Default local form:
+
+```text
+http://localhost:5062/sqlos/auth/oidc/callback
+```
+
+If `AuthServer.BasePath` is customized, use:
+
+```text
+{AuthServer.PublicOrigin}{AuthServer.BasePath}/oidc/callback
+```
+
+The dashboard at **`/sqlos/admin/auth/oidc`** shows the exact callback URI for the current host and base path.
+
+## GitHub OAuth App setup
+
+1. Open [GitHub OAuth Apps](https://github.com/settings/developers).
+2. Create a new OAuth App.
+3. Set the homepage URL for your app.
+4. Set **Authorization callback URL** to the SqlOS provider callback URI.
+5. Copy the **Client ID**.
+6. Generate and copy a **Client secret**.
+
+GitHub OAuth Apps have a single authorization callback URL. Create separate OAuth Apps for local, staging, and production when each environment has a different callback URL.
+
+## SqlOS dashboard setup
+
+1. Open **`/sqlos/admin/auth/oidc`**.
+2. Create a connection:
+   - Provider: **GitHub**
+   - Display name: `GitHub`
+   - Client ID: GitHub OAuth App client ID
+   - Client secret: GitHub OAuth App client secret
+   - Allowed callback URI: the prefilled SqlOS provider callback URI
+3. Save the connection.
+4. Enable the connection.
+
+Default scopes when left empty: `read:user`, `user:email`.
+
+## Code-first setup
+
+Seed the connection from `AddSqlOS` when you want fresh databases and preview environments to come up with GitHub login already configured:
+
+```csharp
+var publicOrigin = builder.Configuration["SqlOS:PublicOrigin"]!;
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.PublicOrigin = publicOrigin;
+
+    options.AuthServer.SeedGitHubConnection(
+        clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+        clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+        $"{publicOrigin}/sqlos/auth/oidc/callback");
+});
+```
+
+`SeedGitHubConnection` creates a `SqlOSOidcConnection` with:
+
+| Field | Value |
+| --- | --- |
+| Provider type | `GitHub` |
+| Display name | `GitHub` |
+| Protocol | `OAuthProfile` |
+| Authorization endpoint | `https://github.com/login/oauth/authorize` |
+| Token endpoint | `https://github.com/login/oauth/access_token` |
+| Profile endpoints | `https://api.github.com/user` and `https://api.github.com/user/emails` |
+| Default scopes | `read:user`, `user:email` |
+| Client auth method | `ClientSecretPost` |
+
+## Admin API setup
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerType": "github",
+    "displayName": "GitHub",
+    "clientId": "YOUR_GITHUB_CLIENT_ID",
+    "clientSecret": "YOUR_GITHUB_CLIENT_SECRET",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
+  }'
+```
+
+Enable the connection:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+```
+
+## Runtime behavior
+
+- SqlOS sends users to GitHub with `scope=read:user user:email`.
+- GitHub redirects back to `/sqlos/auth/oidc/callback`.
+- SqlOS exchanges the code for a GitHub OAuth access token.
+- SqlOS calls `/user` for the stable numeric GitHub user id and display profile.
+- SqlOS calls `/user/emails` and requires a verified primary email address.
+- SqlOS links future sign-ins by the GitHub user id and then completes the normal SqlOS login flow.
+
+## Common failures
+
+| Error | Fix |
+| --- | --- |
+| GitHub says the callback URL is incorrect | Register the exact callback URI shown in the SqlOS dashboard. |
+| `GitHub did not return a verified primary email address.` | Ask the user to verify a primary email address in GitHub. |
+| GitHub button is missing | Enable the connection and confirm `/sqlos/auth/oidc/providers` returns the GitHub provider. |
+| Callback uses the wrong host | Set `AuthServer.PublicOrigin` to the public origin of the deployed app. |
+
+## Next steps
+
+- [Add GitHub sign-in](/docs/guides/github-oidc)
+- [OIDC Social Login](/docs/authserver/oidc-auth)
+- [Google OIDC](/docs/authserver/google-oidc)
+- [Microsoft OIDC](/docs/authserver/microsoft-oidc)

@@ -29,7 +29,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **Resource Indicators** — bind `resource` end to end and mint audience-aware access tokens
 - **Organizations & Users** — multi-tenant user management with memberships and roles
 - **Password Credentials** — secure local authentication with session management
-- **Social Login** — Google, Microsoft, Apple, and any custom OIDC provider
+- **Social Login** — Google, Microsoft, GitHub, Apple, and any custom OIDC provider
 - **SAML SSO** — enterprise single sign-on with home realm discovery by verified or operator-managed email domain
 - **Delegated SSO Portal** — one-organization setup links for customer IT admins, with provider guides, DNS TXT domain verification, metadata import, and a headless setup state machine
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
@@ -312,7 +312,7 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 - [Dynamic Client Registration](web/content/docs/authserver/dynamic-client-registration.mdx) — compatibility-mode runtime registration
 - [MCP Resource Indicators and Audience](web/content/docs/authserver/mcp-resource-indicators-and-audience.mdx) — resource-bound tokens and audience validation
 - [OIDC Auth](web/content/docs/authserver/oidc-auth.mdx) — OpenID Connect provider support
-- [Google OIDC](https://sqlos.dev/docs/authserver/google-oidc) · [Microsoft OIDC](https://sqlos.dev/docs/authserver/microsoft-oidc) · [Apple OIDC](https://sqlos.dev/docs/authserver/apple-oidc) · [Custom OIDC](https://sqlos.dev/docs/authserver/custom-oidc)
+- [Google OIDC](https://sqlos.dev/docs/authserver/google-oidc) · [Microsoft OIDC](https://sqlos.dev/docs/authserver/microsoft-oidc) · [GitHub OIDC](https://sqlos.dev/docs/authserver/github-oidc) · [Apple OIDC](https://sqlos.dev/docs/authserver/apple-oidc) · [Custom OIDC](https://sqlos.dev/docs/authserver/custom-oidc)
 - [Guides](https://sqlos.dev/docs/guides/index) — task-oriented walkthroughs
 - [Entra SSO Testing](docs/ENTRA_SSO.md) — SAML SSO with Microsoft Entra
 - [Example App](docs/EXAMPLE_APP.md) — running the demo stack

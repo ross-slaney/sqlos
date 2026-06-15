@@ -11,7 +11,7 @@ section: authserver
 2. Under **Authentication > Web**, add the redirect URI:
 
 ```
-http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}
+http://localhost:5062/sqlos/auth/oidc/callback
 ```
 
 3. Under **Certificates & secrets**, create a client secret
@@ -43,9 +43,9 @@ options.AuthServer.SeedMicrosoftConnection(
     clientId: builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"]!,
     clientSecret: builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"]!,
     tenant: "common",
-    "http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}");
+    "http://localhost:5062/sqlos/auth/oidc/callback");
 ```
 
-See [Google and Microsoft sign-in](/docs/guides/social-oidc#seed-from-startup) for seeding behavior and the general `SeedOidcConnection` form.
+See [Social sign-in](/docs/guides/social-oidc#seed-from-startup) for seeding behavior and the general `SeedOidcConnection` form.
 
 See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
