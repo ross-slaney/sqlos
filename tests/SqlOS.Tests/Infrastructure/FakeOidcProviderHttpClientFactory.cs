@@ -10,8 +10,15 @@ namespace SqlOS.Tests.Infrastructure;
 
 internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
 {
+    private readonly Func<HttpRequestMessage, HttpResponseMessage?>? _responseOverride;
+
+    public FakeOidcProviderHttpClientFactory(Func<HttpRequestMessage, HttpResponseMessage?>? responseOverride = null)
+    {
+        _responseOverride = responseOverride;
+    }
+
     public HttpClient CreateClient(string name)
-        => new(new FakeOidcProviderHttpMessageHandler())
+        => new(new FakeOidcProviderHttpMessageHandler(_responseOverride))
         {
             BaseAddress = new Uri("https://localhost")
         };
@@ -20,9 +27,21 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
     {
         private static readonly RSA Rsa = RSA.Create(2048);
         private static readonly RsaSecurityKey SigningKey = new(Rsa) { KeyId = "fake-oidc-key" };
+        private readonly Func<HttpRequestMessage, HttpResponseMessage?>? _responseOverride;
+
+        public FakeOidcProviderHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage?>? responseOverride)
+        {
+            _responseOverride = responseOverride;
+        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var overrideResponse = _responseOverride?.Invoke(request);
+            if (overrideResponse != null)
+            {
+                return overrideResponse;
+            }
+
             var uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
 
             if (request.Method == HttpMethod.Get && uri.Contains(".well-known/openid-configuration", StringComparison.OrdinalIgnoreCase))
