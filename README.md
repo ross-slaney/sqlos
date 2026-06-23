@@ -60,38 +60,39 @@ Full walkthrough: **[sqlos.dev/docs/getting-started](https://sqlos.dev/docs/gett
    dotnet add package SqlOS
    ```
 
-2. **Use SQL Server for your EF `DbContext`**  
+2. **Use SQL Server for your EF `DbContext`**
    SqlOS uses the same database as your context. Point EF at SQL Server like any other app.
 
-3. **Wire your `DbContext`**  
-   Add the two SqlOS interfaces. Add the FGA `IsResourceAccessible` query. Call `UseSqlOS` in `OnModelCreating`:
+3. **Create your `DbContext`**
+   Derive from `SqlOSDbContext<TContext>` to add the SqlOS auth server model, FGA model, and FGA TVF mapping:
 
    ```csharp
-   public sealed class AppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+   public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+       : SqlOSDbContext<AppDbContext>(options)
    {
-       public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-           string subjectId,
-           string permissionKey)
-           => FromExpression(() => IsResourceAccessible(subjectId, permissionKey));
+       public DbSet<Project> Projects => Set<Project>();
 
-       protected override void OnModelCreating(ModelBuilder modelBuilder)
+       protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
        {
-           base.OnModelCreating(modelBuilder);
-           modelBuilder.UseSqlOS(GetType());
+           modelBuilder.Entity<Project>();
        }
    }
    ```
 
+   The low-level `ISqlOSAuthServerDbContext`, `ISqlOSFgaDbContext`, and `modelBuilder.UseSqlOS(...)` path remains available when you need custom model control.
+
 4. **Register SqlOS on the host**
 
    ```csharp
-   builder.AddSqlOS<AppDbContext>(options =>
-   {
-       options.AuthServer.SeedOwnedWebApp(
-           "todo-web",
-           "Todo Web App",
-           "https://app.example.com/auth/callback");
-   });
+   builder.AddSqlOS<AppDbContext>(
+       db => db.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")),
+       options =>
+       {
+           options.AuthServer.SeedOwnedWebApp(
+               "todo-web",
+               "Todo Web App",
+               "https://app.example.com/auth/callback");
+       });
    ```
 
 5. **Map routes after `Build()`**
@@ -100,6 +101,8 @@ Full walkthrough: **[sqlos.dev/docs/getting-started](https://sqlos.dev/docs/gett
    var app = builder.Build();
    app.MapSqlOS();
    ```
+
+   Protect APIs with `RequireSqlOSAccessToken(audience)`, then use `http.SqlOSUserId()`, `fga.Allows(...)`, `db.AddSqlOSResource(...)`, and `db.GrantSqlOSRole(...)` in normal endpoint code.
 
 On startup, SqlOS updates its own schema. Default URLs: admin at `/sqlos`, OAuth at `/sqlos/auth`. Change the prefix with `DashboardBasePath` if you need to.
 

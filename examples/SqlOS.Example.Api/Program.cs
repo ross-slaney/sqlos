@@ -28,252 +28,251 @@ var connectionString =
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Connection string 'DefaultConnection' was not configured.");
 
-builder.Services.AddDbContext<ExampleAppDbContext>(options =>
-    options.UseSqlServer(connectionString));
-
-builder.AddSqlOS<ExampleAppDbContext>(options =>
-{
-    options.DashboardBasePath = "/sqlos";
-    var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
-    var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? "http://localhost:3000/auth/callback";
-    var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
-        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
-        ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
-    var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
-        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
-        ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
-    var enablePhoneOtp = builder.Configuration.GetValue<bool>("SqlOS:PhoneOtp:Enabled");
-    var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
-        ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
-    var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
-        ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
-    var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
-        ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
-    var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
-        ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
-
-    // "Continue with Microsoft" social login. Secrets are never committed: the AppHost forwards
-    // them as environment variables (SqlOS__Oidc__Microsoft__*) when configured for the developer.
-    var microsoftOidcClientId = builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"];
-    var microsoftOidcClientSecret = builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"];
-    var microsoftOidcTenant = builder.Configuration["SqlOS:Oidc:Microsoft:Tenant"];
-
-    if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
+builder.AddSqlOS<ExampleAppDbContext>(
+    (DbContextOptionsBuilder db) => db.UseSqlServer(connectionString),
+    options =>
     {
-        options.Dashboard.AuthMode = authMode;
-    }
+        options.DashboardBasePath = "/sqlos";
+        var exampleClientId = builder.Configuration["ExampleFrontend:ClientId"] ?? "example-web";
+        var exampleCallbackUrl = builder.Configuration["ExampleFrontend:CallbackUrl"] ?? "http://localhost:3000/auth/callback";
+        var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
+            ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
+            ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
+        var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
+            ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
+            ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
+        var enablePhoneOtp = builder.Configuration.GetValue<bool>("SqlOS:PhoneOtp:Enabled");
+        var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
+            ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
+        var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
+            ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
+        var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
+            ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
+        var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
+            ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
 
-    var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"];
-    if (!string.IsNullOrWhiteSpace(dashboardPassword))
-    {
-        options.Dashboard.Password = dashboardPassword;
-    }
+        // "Continue with Microsoft" social login. Secrets are never committed: the AppHost forwards
+        // them as environment variables (SqlOS__Oidc__Microsoft__*) when configured for the developer.
+        var microsoftOidcClientId = builder.Configuration["SqlOS:Oidc:Microsoft:ClientId"];
+        var microsoftOidcClientSecret = builder.Configuration["SqlOS:Oidc:Microsoft:ClientSecret"];
+        var microsoftOidcTenant = builder.Configuration["SqlOS:Oidc:Microsoft:Tenant"];
 
-    var sessionMinutes = builder.Configuration.GetValue<int?>("SqlOS:Dashboard:SessionLifetimeMinutes");
-    if (sessionMinutes is > 0)
-    {
-        options.Dashboard.SessionLifetime = TimeSpan.FromMinutes(sessionMinutes.Value);
-    }
-
-    var auth = options.AuthServer;
-    auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
-    auth.DefaultSigningKeyRotationIntervalDays = 90;
-    auth.DefaultSigningKeyGraceWindowDays = 7;
-    options.ConfigureEmail(email =>
-    {
-        email.AzureCommunicationServicesConnectionString = emailConnectionString;
-        email.FromAddress = emailFromAddress;
-    });
-    auth.ConfigureEmailOtp(emailOtp =>
-    {
-        emailOtp.AzureCommunicationServicesConnectionString = emailConnectionString;
-        emailOtp.FromAddress = emailFromAddress;
-        emailOtp.ApplicationName = "SqlOS Example";
-    });
-    auth.ConfigurePhoneOtp(phone =>
-    {
-        phone.Enabled = enablePhoneOtp;
-        phone.TwilioAccountSid = twilioAccountSid;
-        phone.TwilioAuthToken = twilioAuthToken;
-        phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
-        if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+        if (Enum.TryParse<SqlOSDashboardAuthMode>(builder.Configuration["SqlOS:Dashboard:AuthMode"], ignoreCase: true, out var authMode))
         {
-            phone.DefaultRegion = phoneOtpDefaultRegion;
+            options.Dashboard.AuthMode = authMode;
         }
-    });
-    auth.ConfigureMfa(mfa =>
-    {
-        mfa.Enabled = true;
-        mfa.AllowUserSelfEnrollmentByDefault = true;
-        mfa.RecoveryCodesEnabledByDefault = true;
-        mfa.Totp.Issuer = "SqlOS Example";
-    });
 
-    var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
-        ?? builder.Configuration["ExampleFrontend:Origin"]
-        ?? "http://localhost:3000";
-    var enableHeadlessAuthPage = builder.Configuration.GetValue<bool?>("SqlOS:EnableHeadlessAuthPage") ?? true;
-
-    auth.SeedAuthPage(page =>
-    {
-        page.PageTitle = "Sign in";
-        page.PageSubtitle = "Use the hosted SqlOS auth page to sign in to the example application.";
-        page.PrimaryColor = "#2563eb";
-        page.AccentColor = "#0f172a";
-        page.BackgroundColor = "#f8fafc";
-        page.Layout = "split";
-        page.EnablePasswordSignup = true;
-        page.EnabledCredentialTypes = enablePhoneOtp
-            ? ["password", "email_otp", "phone_otp"]
-            : ["password", "email_otp"];
-    });
-    auth.SeedAuthEmails(email =>
-    {
-        email.ApplicationName = "SqlOS Example";
-        email.PrimaryColor = "#2563eb";
-        email.AccentColor = "#0f172a";
-        email.BackgroundColor = "#f8fafc";
-    });
-    auth.SeedBrowserClient(
-        exampleClientId,
-        "Example Web Client",
-        exampleCallbackUrl,
-        "https://client.example.local/callback",
-        "sqlos-expo://auth-callback");
-    auth.SeedBrowserClient(
-        "example-angular",
-        "Example Angular Client",
-        "http://localhost:4200/auth/callback");
-    auth.SeedBrowserClient(
-        "example-expo",
-        "Example Expo Client",
-        "sqlos-expo://auth-callback");
-
-    // Seed the Microsoft social connection only when credentials are supplied so a fresh checkout
-    // without Azure configured still boots cleanly (the button simply does not appear).
-    if (!string.IsNullOrWhiteSpace(microsoftOidcClientId) && !string.IsNullOrWhiteSpace(microsoftOidcClientSecret))
-    {
-        var oidcCallbackOrigin = builder.Configuration["SqlOS:Oidc:CallbackBaseUrl"]
-            ?? (Uri.TryCreate(auth.Issuer, UriKind.Absolute, out var issuerUri)
-                ? issuerUri.GetLeftPart(UriPartial.Authority)
-                : "http://localhost:5062");
-        var microsoftCallbackUri = $"{oidcCallbackOrigin.TrimEnd('/')}/api/v1/auth/oidc/callback/{{connectionId}}";
-
-        auth.SeedMicrosoftConnection(
-            microsoftOidcClientId,
-            microsoftOidcClientSecret,
-            microsoftOidcTenant,
-            microsoftCallbackUri);
-    }
-
-    if (enableHeadlessAuthPage)
-    {
-        auth.UseHeadlessAuthPage(headless =>
+        var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"];
+        if (!string.IsNullOrWhiteSpace(dashboardPassword))
         {
-            headless.BuildUiUrl = ctx =>
-            {
-                var origin = ctx.HttpContext.Items["HeadlessFrontendOrigin"] as string
-                    ?? headlessFrontendUrl;
-                var query = new Dictionary<string, string?>
-                {
-                    ["request"] = ctx.RequestId,
-                    ["view"] = ctx.View,
-                    ["error"] = ctx.Error,
-                    ["email"] = ctx.Email,
-                    ["pendingToken"] = ctx.PendingToken,
-                    ["displayName"] = ctx.DisplayName,
-                };
-                return QueryHelpers.AddQueryString(
-                    $"{origin.TrimEnd('/')}/auth/authorize", query);
-            };
+            options.Dashboard.Password = dashboardPassword;
+        }
 
-            headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
-            {
-                var logger = ctx.HttpContext.RequestServices
-                    .GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("HeadlessSignup");
-                var dbContext = ctx.HttpContext.RequestServices.GetRequiredService<ExampleAppDbContext>();
+        var sessionMinutes = builder.Configuration.GetValue<int?>("SqlOS:Dashboard:SessionLifetimeMinutes");
+        if (sessionMinutes is > 0)
+        {
+            options.Dashboard.SessionLifetime = TimeSpan.FromMinutes(sessionMinutes.Value);
+        }
 
-                var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
-                var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
-                var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
-
-                if (string.IsNullOrWhiteSpace(referralSource))
-                {
-                    throw new SqlOSHeadlessValidationException(
-                        "Tell us how you heard about SqlOS.",
-                        new Dictionary<string, string>(StringComparer.Ordinal)
-                        {
-                            ["referralSource"] = "Select a referral source to complete signup."
-                        });
-                }
-
-                var profile = await dbContext.ExampleUserProfiles
-                    .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
-
-                if (profile == null)
-                {
-                    profile = new ExampleUserProfile
-                    {
-                        SqlOSUserId = ctx.User.Id,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    dbContext.ExampleUserProfiles.Add(profile);
-                }
-
-                profile.DefaultEmail = ctx.User.DefaultEmail ?? string.Empty;
-                profile.DisplayName = ctx.User.DisplayName ?? ctx.User.DefaultEmail ?? "Example User";
-                profile.OrganizationId = ctx.Organization?.Id;
-                profile.OrganizationName = ctx.Organization?.Name;
-                profile.ReferralSource = referralSource!;
-                profile.UpdatedAt = DateTime.UtcNow;
-
-                await dbContext.SaveChangesAsync(cancellationToken);
-
-                logger.LogInformation(
-                    "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Referral={Referral}",
-                    ctx.User.DefaultEmail,
-                    ctx.Organization?.Name,
-                    firstName,
-                    lastName,
-                    referralSource);
-            };
+        var auth = options.AuthServer;
+        auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
+        auth.DefaultSigningKeyRotationIntervalDays = 90;
+        auth.DefaultSigningKeyGraceWindowDays = 7;
+        options.ConfigureEmail(email =>
+        {
+            email.AzureCommunicationServicesConnectionString = emailConnectionString;
+            email.FromAddress = emailFromAddress;
         });
-    }
+        auth.ConfigureEmailOtp(emailOtp =>
+        {
+            emailOtp.AzureCommunicationServicesConnectionString = emailConnectionString;
+            emailOtp.FromAddress = emailFromAddress;
+            emailOtp.ApplicationName = "SqlOS Example";
+        });
+        auth.ConfigurePhoneOtp(phone =>
+        {
+            phone.Enabled = enablePhoneOtp;
+            phone.TwilioAccountSid = twilioAccountSid;
+            phone.TwilioAuthToken = twilioAuthToken;
+            phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
+            if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+            {
+                phone.DefaultRegion = phoneOtpDefaultRegion;
+            }
+        });
+        auth.ConfigureMfa(mfa =>
+        {
+            mfa.Enabled = true;
+            mfa.AllowUserSelfEnrollmentByDefault = true;
+            mfa.RecoveryCodesEnabledByDefault = true;
+            mfa.Totp.Issuer = "SqlOS Example";
+        });
 
-    options.Fga.Seed(seed =>
-    {
-        seed.ResourceType(
-            ExampleFgaService.OrganizationResourceTypeId,
-            "Organization",
-            "Organization root for example workspace access.");
-        seed.ResourceType(
-            ExampleFgaService.WorkspaceResourceTypeId,
-            "Workspace",
-            "Workspace resources in the example application.");
-        seed.Permission(
-            "perm_workspace_view",
-            ExampleFgaService.WorkspaceViewPermission,
-            "View workspaces",
-            ExampleFgaService.WorkspaceResourceTypeId);
-        seed.Permission(
-            "perm_workspace_manage",
-            ExampleFgaService.WorkspaceManagePermission,
-            "Manage workspaces",
-            ExampleFgaService.WorkspaceResourceTypeId);
-        seed.Role(
-            "role_org_member",
-            ExampleFgaService.OrgMemberRole,
-            "Organization Member");
-        seed.Role(
-            "role_org_admin",
-            ExampleFgaService.OrgAdminRole,
-            "Organization Admin");
-        seed.RolePermission(ExampleFgaService.OrgMemberRole, ExampleFgaService.WorkspaceViewPermission);
-        seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceViewPermission);
-        seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceManagePermission);
+        var headlessFrontendUrl = builder.Configuration["SqlOS:HeadlessFrontendUrl"]
+            ?? builder.Configuration["ExampleFrontend:Origin"]
+            ?? "http://localhost:3000";
+        var enableHeadlessAuthPage = builder.Configuration.GetValue<bool?>("SqlOS:EnableHeadlessAuthPage") ?? true;
+
+        auth.SeedAuthPage(page =>
+        {
+            page.PageTitle = "Sign in";
+            page.PageSubtitle = "Use the hosted SqlOS auth page to sign in to the example application.";
+            page.PrimaryColor = "#2563eb";
+            page.AccentColor = "#0f172a";
+            page.BackgroundColor = "#f8fafc";
+            page.Layout = "split";
+            page.EnablePasswordSignup = true;
+            page.EnabledCredentialTypes = enablePhoneOtp
+                ? ["password", "email_otp", "phone_otp"]
+                : ["password", "email_otp"];
+        });
+        auth.SeedAuthEmails(email =>
+        {
+            email.ApplicationName = "SqlOS Example";
+            email.PrimaryColor = "#2563eb";
+            email.AccentColor = "#0f172a";
+            email.BackgroundColor = "#f8fafc";
+        });
+        auth.SeedBrowserClient(
+            exampleClientId,
+            "Example Web Client",
+            exampleCallbackUrl,
+            "https://client.example.local/callback",
+            "sqlos-expo://auth-callback");
+        auth.SeedBrowserClient(
+            "example-angular",
+            "Example Angular Client",
+            "http://localhost:4200/auth/callback");
+        auth.SeedBrowserClient(
+            "example-expo",
+            "Example Expo Client",
+            "sqlos-expo://auth-callback");
+
+        // Seed the Microsoft social connection only when credentials are supplied so a fresh checkout
+        // without Azure configured still boots cleanly (the button simply does not appear).
+        if (!string.IsNullOrWhiteSpace(microsoftOidcClientId) && !string.IsNullOrWhiteSpace(microsoftOidcClientSecret))
+        {
+            var oidcCallbackOrigin = builder.Configuration["SqlOS:Oidc:CallbackBaseUrl"]
+                ?? (Uri.TryCreate(auth.Issuer, UriKind.Absolute, out var issuerUri)
+                    ? issuerUri.GetLeftPart(UriPartial.Authority)
+                    : "http://localhost:5062");
+            var microsoftCallbackUri = $"{oidcCallbackOrigin.TrimEnd('/')}/api/v1/auth/oidc/callback/{{connectionId}}";
+
+            auth.SeedMicrosoftConnection(
+                microsoftOidcClientId,
+                microsoftOidcClientSecret,
+                microsoftOidcTenant,
+                microsoftCallbackUri);
+        }
+
+        if (enableHeadlessAuthPage)
+        {
+            auth.UseHeadlessAuthPage(headless =>
+            {
+                headless.BuildUiUrl = ctx =>
+                {
+                    var origin = ctx.HttpContext.Items["HeadlessFrontendOrigin"] as string
+                        ?? headlessFrontendUrl;
+                    var query = new Dictionary<string, string?>
+                    {
+                        ["request"] = ctx.RequestId,
+                        ["view"] = ctx.View,
+                        ["error"] = ctx.Error,
+                        ["email"] = ctx.Email,
+                        ["pendingToken"] = ctx.PendingToken,
+                        ["displayName"] = ctx.DisplayName,
+                    };
+                    return QueryHelpers.AddQueryString(
+                        $"{origin.TrimEnd('/')}/auth/authorize", query);
+                };
+
+                headless.OnHeadlessSignupAsync = async (ctx, cancellationToken) =>
+                {
+                    var logger = ctx.HttpContext.RequestServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("HeadlessSignup");
+                    var dbContext = ctx.HttpContext.RequestServices.GetRequiredService<ExampleAppDbContext>();
+
+                    var firstName = ctx.CustomFields?["firstName"]?.GetValue<string>();
+                    var lastName = ctx.CustomFields?["lastName"]?.GetValue<string>();
+                    var referralSource = ctx.CustomFields?["referralSource"]?.GetValue<string>()?.Trim();
+
+                    if (string.IsNullOrWhiteSpace(referralSource))
+                    {
+                        throw new SqlOSHeadlessValidationException(
+                            "Tell us how you heard about SqlOS.",
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["referralSource"] = "Select a referral source to complete signup."
+                            });
+                    }
+
+                    var profile = await dbContext.ExampleUserProfiles
+                        .FirstOrDefaultAsync(x => x.SqlOSUserId == ctx.User.Id, cancellationToken);
+
+                    if (profile == null)
+                    {
+                        profile = new ExampleUserProfile
+                        {
+                            SqlOSUserId = ctx.User.Id,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        dbContext.ExampleUserProfiles.Add(profile);
+                    }
+
+                    profile.DefaultEmail = ctx.User.DefaultEmail ?? string.Empty;
+                    profile.DisplayName = ctx.User.DisplayName ?? ctx.User.DefaultEmail ?? "Example User";
+                    profile.OrganizationId = ctx.Organization?.Id;
+                    profile.OrganizationName = ctx.Organization?.Name;
+                    profile.ReferralSource = referralSource!;
+                    profile.UpdatedAt = DateTime.UtcNow;
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+
+                    logger.LogInformation(
+                        "Headless signup completed: {Email}, Org={OrgName}, FirstName={First}, LastName={Last}, Referral={Referral}",
+                        ctx.User.DefaultEmail,
+                        ctx.Organization?.Name,
+                        firstName,
+                        lastName,
+                        referralSource);
+                };
+            });
+        }
+
+        options.Fga.Seed(seed =>
+        {
+            seed.ResourceType(
+                ExampleFgaService.OrganizationResourceTypeId,
+                "Organization",
+                "Organization root for example workspace access.");
+            seed.ResourceType(
+                ExampleFgaService.WorkspaceResourceTypeId,
+                "Workspace",
+                "Workspace resources in the example application.");
+            seed.Permission(
+                "perm_workspace_view",
+                ExampleFgaService.WorkspaceViewPermission,
+                "View workspaces",
+                ExampleFgaService.WorkspaceResourceTypeId);
+            seed.Permission(
+                "perm_workspace_manage",
+                ExampleFgaService.WorkspaceManagePermission,
+                "Manage workspaces",
+                ExampleFgaService.WorkspaceResourceTypeId);
+            seed.Role(
+                "role_org_member",
+                ExampleFgaService.OrgMemberRole,
+                "Organization Member");
+            seed.Role(
+                "role_org_admin",
+                ExampleFgaService.OrgAdminRole,
+                "Organization Admin");
+            seed.RolePermission(ExampleFgaService.OrgMemberRole, ExampleFgaService.WorkspaceViewPermission);
+            seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceViewPermission);
+            seed.RolePermission(ExampleFgaService.OrgAdminRole, ExampleFgaService.WorkspaceManagePermission);
+        });
     });
-});
 
 builder.Services.AddScoped<ExampleFgaService>();
 builder.Services.AddScoped<RetailSeedService>();

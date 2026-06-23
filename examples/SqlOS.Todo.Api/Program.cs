@@ -29,7 +29,6 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Connection string 'DefaultConnection' was not configured.");
 }
 
-builder.Services.AddDbContext<TodoSampleDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddScoped<TodoFgaService>();
 builder.Services.Configure<JsonOptions>(options =>
 {
@@ -90,202 +89,204 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.AddSqlOS<TodoSampleDbContext>(options =>
-{
-    options.DashboardBasePath = "/sqlos";
-    var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
-        ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
-        ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
-    var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
-        ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
-        ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
-    var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
-        ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
-    var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
-        ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
-    var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
-        ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
-    var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
-        ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
-    var enabledCredentialTypes = new List<string>();
-    if (sampleConfig.EnableEmailOtp)
+builder.AddSqlOS<TodoSampleDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        enabledCredentialTypes.Add("email_otp");
-    }
-    if (enablePhoneOtp)
-    {
-        enabledCredentialTypes.Add("phone_otp");
-    }
-    if (enabledCredentialTypes.Count == 0)
-    {
-        enabledCredentialTypes.Add("password");
-    }
-    var passwordAuthEnabled = enabledCredentialTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
-
-    var auth = options.AuthServer;
-    auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
-    auth.PublicOrigin = publicOrigin;
-    auth.DefaultAudience = sampleConfig.Resource;
-    auth.EnableLocalPasswordAuth = passwordAuthEnabled;
-    options.ConfigureEmail(email =>
-    {
-        email.AzureCommunicationServicesConnectionString = emailConnectionString;
-        email.FromAddress = emailFromAddress;
-    });
-    auth.ConfigureEmailOtp(email =>
-    {
-        email.AzureCommunicationServicesConnectionString = emailConnectionString;
-        email.FromAddress = emailFromAddress;
-        email.ApplicationName = "SqlOS Todo";
-    });
-    auth.ConfigurePhoneOtp(phone =>
-    {
-        phone.Enabled = enablePhoneOtp;
-        phone.TwilioAccountSid = twilioAccountSid;
-        phone.TwilioAuthToken = twilioAuthToken;
-        phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
-        if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+        options.DashboardBasePath = "/sqlos";
+        var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
+            ?? builder.Configuration["SqlOS:EmailOtp:AzureCommunicationServicesConnectionString"]
+            ?? builder.Configuration["AZURE_EMAIL_CONNECTION_STRING"];
+        var emailFromAddress = builder.Configuration["SqlOS:Email:FromAddress"]
+            ?? builder.Configuration["SqlOS:EmailOtp:FromAddress"]
+            ?? builder.Configuration["AZURE_EMAIL_SENDER_ADDRESS"];
+        var twilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"]
+            ?? builder.Configuration["TWILIO_ACCOUNT_SID"];
+        var twilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"]
+            ?? builder.Configuration["TWILIO_AUTH_TOKEN"];
+        var twilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"]
+            ?? builder.Configuration["TWILIO_VERIFY_SERVICE_SID"];
+        var phoneOtpDefaultRegion = builder.Configuration["SqlOS:PhoneOtp:DefaultRegion"]
+            ?? builder.Configuration["TWILIO_DEFAULT_REGION"];
+        var enabledCredentialTypes = new List<string>();
+        if (sampleConfig.EnableEmailOtp)
         {
-            phone.DefaultRegion = phoneOtpDefaultRegion;
+            enabledCredentialTypes.Add("email_otp");
         }
-    });
-
-    auth.SeedAuthPage(page =>
-    {
-        page.PageTitle = sampleConfig.EnableEmailOtp || enablePhoneOtp ? "Check your code. Ship the Todo app." : "Ship the Todo app first.";
-        page.PageSubtitle = sampleConfig.EnableEmailOtp || enablePhoneOtp
-            ? "Use passwordless email or SMS codes for sign in and sign up, then land back in the hosted-first Todo sample."
-            : "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
-        page.PrimaryColor = "#0f172a";
-        page.AccentColor = "#2563eb";
-        page.BackgroundColor = "#f8fafc";
-        page.Layout = "split";
-        page.EnablePasswordSignup = passwordAuthEnabled;
-        page.EnabledCredentialTypes = enabledCredentialTypes;
-    });
-
-    auth.SeedAuthEmails(email =>
-    {
-        email.ApplicationName = "SqlOS Todo";
-        email.PrimaryColor = "#0f172a";
-        email.AccentColor = "#2563eb";
-        email.BackgroundColor = "#f8fafc";
-    });
-
-    auth.SeedClient(client =>
-    {
-        client.ClientId = sampleConfig.HostedClientId;
-        client.Name = sampleConfig.HostedClientName;
-        client.Description = "Hosted-first web client for the SqlOS Todo sample.";
-        client.Audience = sampleConfig.Resource;
-        client.RedirectUris = [hostedCallbackUrl];
-        client.AllowedScopes = sampleConfig.AllowedScopes;
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = true;
-    });
-
-    auth.SeedClient(client =>
-    {
-        client.ClientId = sampleConfig.LocalClientId;
-        client.Name = "Todo Local";
-        client.Description = "Local preregistered client for localhost MCP development against the Todo sample.";
-        client.Audience = sampleConfig.Resource;
-        client.RedirectUris = [localClientRedirectUri];
-        client.AllowedScopes = sampleConfig.AllowedScopes;
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = false;
-    });
-
-    auth.SeedClient(client =>
-    {
-        client.ClientId = sampleConfig.EmcyClientId;
-        client.Name = "Todo Emcy MCP";
-        client.Description = "Local downstream client for the Emcy-hosted MCP Todo demo.";
-        client.Audience = sampleConfig.Resource;
-        client.RedirectUris = [emcyClientRedirectUri];
-        client.AllowedScopes = sampleConfig.AllowedScopes;
-        client.ClientType = "public_pkce";
-        client.RequirePkce = true;
-        client.IsFirstParty = false;
-    });
-
-    auth.SeedCliClient(
-        sampleConfig.CliClientId,
-        sampleConfig.CliClientName,
-        sampleConfig.Resource,
-        sampleConfig.AllowedScopes.ToArray());
-
-    options.Fga.Seed(seed =>
-    {
-        seed.ResourceType(
-            TodoFgaService.TenantResourceTypeId,
-            "Tenant",
-            "Per-user tenant root for the Todo sample.");
-        seed.ResourceType(
-            TodoFgaService.TodoResourceTypeId,
-            "Todo",
-            "Individual todo items in the Todo sample.");
-        seed.Permission(
-            "perm_tenant_create_todo",
-            TodoFgaService.TenantCreateTodoPermission,
-            "Create todos",
-            TodoFgaService.TenantResourceTypeId);
-        seed.Permission(
-            "perm_todo_read",
-            TodoFgaService.TodoReadPermission,
-            "Read todos",
-            TodoFgaService.TodoResourceTypeId);
-        seed.Permission(
-            "perm_todo_write",
-            TodoFgaService.TodoWritePermission,
-            "Write todos",
-            TodoFgaService.TodoResourceTypeId);
-        seed.Role(
-            "role_tenant_owner",
-            TodoFgaService.TenantOwnerRole,
-            "Tenant Owner",
-            "Single-user owner role for the Todo sample.");
-        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TenantCreateTodoPermission);
-        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoReadPermission);
-        seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoWritePermission);
-    });
-
-    auth.EnablePortableMcpClients(registration =>
-    {
-        foreach (var host in cimdTrustedHosts)
+        if (enablePhoneOtp)
         {
-            registration.Cimd.TrustedHosts.Add(host);
+            enabledCredentialTypes.Add("phone_otp");
         }
-    });
-
-    if (sampleConfig.EnableDcr)
-    {
-        auth.ClientRegistration.Dcr.Enabled = true;
-        auth.ClientRegistration.Dcr.AllowHttpsRedirectUris = true;
-        auth.ClientRegistration.Dcr.AllowLoopbackRedirectUris = true;
-    }
-
-    if (sampleConfig.EnableHeadless)
-    {
-        auth.UseHeadlessAuthPage(headless =>
+        if (enabledCredentialTypes.Count == 0)
         {
-            headless.BuildUiUrl = ctx => QueryHelpers.AddQueryString(
-                $"{publicOrigin}{sampleConfig.HeadlessUiPath}",
-                new Dictionary<string, string?>
-                {
-                    ["request"] = ctx.RequestId,
-                    ["view"] = ctx.View,
-                    ["error"] = ctx.Error,
-                    ["email"] = ctx.Email,
-                    ["pendingToken"] = ctx.PendingToken,
-                    ["displayName"] = ctx.DisplayName,
-                    ["ui_context"] = ctx.UiContext?.ToJsonString()
-                });
+            enabledCredentialTypes.Add("password");
+        }
+        var passwordAuthEnabled = enabledCredentialTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
+
+        var auth = options.AuthServer;
+        auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? $"{publicOrigin}/sqlos/auth";
+        auth.PublicOrigin = publicOrigin;
+        auth.DefaultAudience = sampleConfig.Resource;
+        auth.EnableLocalPasswordAuth = passwordAuthEnabled;
+        options.ConfigureEmail(email =>
+        {
+            email.AzureCommunicationServicesConnectionString = emailConnectionString;
+            email.FromAddress = emailFromAddress;
         });
-    }
-});
+        auth.ConfigureEmailOtp(email =>
+        {
+            email.AzureCommunicationServicesConnectionString = emailConnectionString;
+            email.FromAddress = emailFromAddress;
+            email.ApplicationName = "SqlOS Todo";
+        });
+        auth.ConfigurePhoneOtp(phone =>
+        {
+            phone.Enabled = enablePhoneOtp;
+            phone.TwilioAccountSid = twilioAccountSid;
+            phone.TwilioAuthToken = twilioAuthToken;
+            phone.TwilioVerifyServiceSid = twilioVerifyServiceSid;
+            if (!string.IsNullOrWhiteSpace(phoneOtpDefaultRegion))
+            {
+                phone.DefaultRegion = phoneOtpDefaultRegion;
+            }
+        });
+
+        auth.SeedAuthPage(page =>
+        {
+            page.PageTitle = sampleConfig.EnableEmailOtp || enablePhoneOtp ? "Check your code. Ship the Todo app." : "Ship the Todo app first.";
+            page.PageSubtitle = sampleConfig.EnableEmailOtp || enablePhoneOtp
+                ? "Use passwordless email or SMS codes for sign in and sign up, then land back in the hosted-first Todo sample."
+                : "Start with hosted auth, then graduate to headless and public-client onboarding when you need it.";
+            page.PrimaryColor = "#0f172a";
+            page.AccentColor = "#2563eb";
+            page.BackgroundColor = "#f8fafc";
+            page.Layout = "split";
+            page.EnablePasswordSignup = passwordAuthEnabled;
+            page.EnabledCredentialTypes = enabledCredentialTypes;
+        });
+
+        auth.SeedAuthEmails(email =>
+        {
+            email.ApplicationName = "SqlOS Todo";
+            email.PrimaryColor = "#0f172a";
+            email.AccentColor = "#2563eb";
+            email.BackgroundColor = "#f8fafc";
+        });
+
+        auth.SeedClient(client =>
+        {
+            client.ClientId = sampleConfig.HostedClientId;
+            client.Name = sampleConfig.HostedClientName;
+            client.Description = "Hosted-first web client for the SqlOS Todo sample.";
+            client.Audience = sampleConfig.Resource;
+            client.RedirectUris = [hostedCallbackUrl];
+            client.AllowedScopes = sampleConfig.AllowedScopes;
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+        auth.SeedClient(client =>
+        {
+            client.ClientId = sampleConfig.LocalClientId;
+            client.Name = "Todo Local";
+            client.Description = "Local preregistered client for localhost MCP development against the Todo sample.";
+            client.Audience = sampleConfig.Resource;
+            client.RedirectUris = [localClientRedirectUri];
+            client.AllowedScopes = sampleConfig.AllowedScopes;
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = false;
+        });
+
+        auth.SeedClient(client =>
+        {
+            client.ClientId = sampleConfig.EmcyClientId;
+            client.Name = "Todo Emcy MCP";
+            client.Description = "Local downstream client for the Emcy-hosted MCP Todo demo.";
+            client.Audience = sampleConfig.Resource;
+            client.RedirectUris = [emcyClientRedirectUri];
+            client.AllowedScopes = sampleConfig.AllowedScopes;
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = false;
+        });
+
+        auth.SeedCliClient(
+            sampleConfig.CliClientId,
+            sampleConfig.CliClientName,
+            sampleConfig.Resource,
+            sampleConfig.AllowedScopes.ToArray());
+
+        options.Fga.Seed(seed =>
+        {
+            seed.ResourceType(
+                TodoFgaService.TenantResourceTypeId,
+                "Tenant",
+                "Per-user tenant root for the Todo sample.");
+            seed.ResourceType(
+                TodoFgaService.TodoResourceTypeId,
+                "Todo",
+                "Individual todo items in the Todo sample.");
+            seed.Permission(
+                "perm_tenant_create_todo",
+                TodoFgaService.TenantCreateTodoPermission,
+                "Create todos",
+                TodoFgaService.TenantResourceTypeId);
+            seed.Permission(
+                "perm_todo_read",
+                TodoFgaService.TodoReadPermission,
+                "Read todos",
+                TodoFgaService.TodoResourceTypeId);
+            seed.Permission(
+                "perm_todo_write",
+                TodoFgaService.TodoWritePermission,
+                "Write todos",
+                TodoFgaService.TodoResourceTypeId);
+            seed.Role(
+                "role_tenant_owner",
+                TodoFgaService.TenantOwnerRole,
+                "Tenant Owner",
+                "Single-user owner role for the Todo sample.");
+            seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TenantCreateTodoPermission);
+            seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoReadPermission);
+            seed.RolePermission(TodoFgaService.TenantOwnerRole, TodoFgaService.TodoWritePermission);
+        });
+
+        auth.EnablePortableMcpClients(registration =>
+        {
+            foreach (var host in cimdTrustedHosts)
+            {
+                registration.Cimd.TrustedHosts.Add(host);
+            }
+        });
+
+        if (sampleConfig.EnableDcr)
+        {
+            auth.ClientRegistration.Dcr.Enabled = true;
+            auth.ClientRegistration.Dcr.AllowHttpsRedirectUris = true;
+            auth.ClientRegistration.Dcr.AllowLoopbackRedirectUris = true;
+        }
+
+        if (sampleConfig.EnableHeadless)
+        {
+            auth.UseHeadlessAuthPage(headless =>
+            {
+                headless.BuildUiUrl = ctx => QueryHelpers.AddQueryString(
+                    $"{publicOrigin}{sampleConfig.HeadlessUiPath}",
+                    new Dictionary<string, string?>
+                    {
+                        ["request"] = ctx.RequestId,
+                        ["view"] = ctx.View,
+                        ["error"] = ctx.Error,
+                        ["email"] = ctx.Email,
+                        ["pendingToken"] = ctx.PendingToken,
+                        ["displayName"] = ctx.DisplayName,
+                        ["ui_context"] = ctx.UiContext?.ToJsonString()
+                    });
+            });
+        }
+    });
 
 var app = builder.Build();
 
@@ -451,11 +452,11 @@ app.MapPost("/api/todos", async (
     }
 
     var todoContext = authResult.Context!;
-    var access = await fgaAuthService.CheckAccessAsync(
+    var allowed = await fgaAuthService.Allows(
         todoContext.SubjectId,
         TodoFgaService.TenantCreateTodoPermission,
         todoContext.TenantResourceId);
-    if (!access.Allowed)
+    if (!allowed)
     {
         return CreatePermissionDenied();
     }
@@ -506,11 +507,11 @@ app.MapPost("/api/todos/{id:guid}/toggle", async (
     }
 
     var todoContext = authResult.Context!;
-    var access = await fgaAuthService.CheckAccessAsync(
+    var allowed = await fgaAuthService.Allows(
         todoContext.SubjectId,
         TodoFgaService.TodoWritePermission,
         item.ResourceId);
-    if (!access.Allowed)
+    if (!allowed)
     {
         return CreatePermissionDenied();
     }
@@ -553,11 +554,11 @@ app.MapDelete("/api/todos/{id:guid}", async (
     }
 
     var todoContext = authResult.Context!;
-    var access = await fgaAuthService.CheckAccessAsync(
+    var allowed = await fgaAuthService.Allows(
         todoContext.SubjectId,
         TodoFgaService.TodoWritePermission,
         item.ResourceId);
-    if (!access.Allowed)
+    if (!allowed)
     {
         return CreatePermissionDenied();
     }

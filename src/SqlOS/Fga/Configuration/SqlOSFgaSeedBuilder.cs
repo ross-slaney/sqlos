@@ -93,6 +93,9 @@ public sealed class SqlOSFgaSeedBuilder
         return this;
     }
 
+    public SqlOSFgaSeedBuilder Permission(string key, string name, string resourceTypeId)
+        => Permission(key, key, name, resourceTypeId);
+
     public SqlOSFgaSeedBuilder Role(string id, string key, string name, string? description = null, bool isVirtual = false)
     {
         var normalizedId = RequireValue(id, nameof(id));
@@ -114,6 +117,13 @@ public sealed class SqlOSFgaSeedBuilder
         _rolesById[role.Id] = role;
         _rolesByKey[role.Key] = role;
         return this;
+    }
+
+    public SqlOSFgaRoleSeedBuilder Role(string key, string name)
+    {
+        var normalizedKey = RequireValue(key, nameof(key));
+        Role(normalizedKey, normalizedKey, name);
+        return new SqlOSFgaRoleSeedBuilder(this, normalizedKey);
     }
 
     public SqlOSFgaSeedBuilder RolePermission(string roleKey, string permissionKey)
@@ -183,4 +193,26 @@ public sealed class SqlOSFgaSeedBuilder
             Description = source.Description,
             IsVirtual = source.IsVirtual
         };
+}
+
+public sealed class SqlOSFgaRoleSeedBuilder
+{
+    private readonly SqlOSFgaSeedBuilder _builder;
+    private readonly string _roleKey;
+
+    internal SqlOSFgaRoleSeedBuilder(SqlOSFgaSeedBuilder builder, string roleKey)
+    {
+        _builder = builder;
+        _roleKey = roleKey;
+    }
+
+    public SqlOSFgaSeedBuilder Can(params string[] permissionKeys)
+    {
+        foreach (var permissionKey in permissionKeys)
+        {
+            _builder.RolePermission(_roleKey, permissionKey);
+        }
+
+        return _builder;
+    }
 }

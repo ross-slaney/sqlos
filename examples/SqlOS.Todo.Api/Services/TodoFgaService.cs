@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
-using SqlOS.Fga.Extensions;
+using SqlOS.Extensions;
 using SqlOS.Fga.Models;
 using SqlOS.Todo.Api.Data;
 using SqlOS.Todo.Api.Models;
@@ -55,7 +55,7 @@ public sealed class TodoFgaService
     public string CreateTodoResource(TodoItem item, string tenantResourceId)
     {
         var resourceId = GetTodoResourceId(item.Id);
-        _context.CreateResource(tenantResourceId, item.Title, TodoResourceTypeId, resourceId);
+        _context.AddSqlOSResource(resourceId, tenantResourceId, item.Title, TodoResourceTypeId);
         return resourceId;
     }
 

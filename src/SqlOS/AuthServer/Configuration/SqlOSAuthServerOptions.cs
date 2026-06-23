@@ -367,6 +367,13 @@ public class SqlOSAuthServerOptions
                 .ToList();
         });
 
+    public SqlOSAuthServerOptions SeedMcpStackClient(
+        string clientId,
+        string name,
+        string? audience = null,
+        params string[] allowedScopes)
+        => SeedCliClient(clientId, name, audience, allowedScopes);
+
     public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)
     {
         ClientRegistration.Cimd.Enabled = true;

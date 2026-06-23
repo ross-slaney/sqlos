@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -110,6 +111,81 @@ public sealed class SqlOSResourceBindingTests
 
         nextCalled.Should().BeFalse();
         httpContext.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        httpContext.GetSqlOSValidatedToken().Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RequireSqlOSAccessToken_Filter_StoresValidatedTokenAndUser()
+    {
+        using var context = CreateContext();
+        var (options, _, auth) = CreateAuthHarness(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "filter-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        var tokens = await auth.CreateSessionTokensForUserAsync(
+            user,
+            client,
+            null,
+            "password",
+            "test-agent",
+            "127.0.0.1");
+
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton(auth)
+                .BuildServiceProvider()
+        };
+        httpContext.Request.Headers.Authorization = $"Bearer {tokens.AccessToken}";
+        var invocationContext = new TestEndpointFilterInvocationContext(httpContext);
+        var optionsValue = SqlOSAccessTokenValidationMiddleware.ValidateOptions(new SqlOSAccessTokenValidationOptions
+        {
+            ExpectedAudience = "https://api-a.example.test"
+        });
+
+        var nextCalled = false;
+        var result = await SqlOSAccessTokenEndpointFilter.InvokeAsync(
+            invocationContext,
+            ctx =>
+            {
+                nextCalled = true;
+                ctx.HttpContext.SqlOSUserId().Should().Be(user.Id);
+                return ValueTask.FromResult<object?>("ok");
+            },
+            optionsValue);
+
+        nextCalled.Should().BeTrue();
+        result.Should().Be("ok");
+        httpContext.GetSqlOSValidatedToken().Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task RequireSqlOSAccessToken_Filter_RejectsMissingBearerToken()
+    {
+        using var context = CreateContext();
+        var (_, _, auth) = CreateAuthHarness(context);
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton(auth)
+                .BuildServiceProvider()
+        };
+        var invocationContext = new TestEndpointFilterInvocationContext(httpContext);
+        var optionsValue = SqlOSAccessTokenValidationMiddleware.ValidateOptions(new SqlOSAccessTokenValidationOptions
+        {
+            ExpectedAudience = "https://api-a.example.test"
+        });
+
+        var result = await SqlOSAccessTokenEndpointFilter.InvokeAsync(
+            invocationContext,
+            _ => ValueTask.FromResult<object?>("should-not-run"),
+            optionsValue);
+
+        var unauthorized = result.Should().BeAssignableTo<IResult>().Subject;
+        await unauthorized.ExecuteAsync(httpContext);
+
+        httpContext.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        httpContext.Response.Headers.WWWAuthenticate.ToString().Should().Contain("invalid_token");
         httpContext.GetSqlOSValidatedToken().Should().BeNull();
     }
 
@@ -472,5 +548,15 @@ public sealed class SqlOSResourceBindingTests
         }
 
         return false;
+    }
+
+    private sealed class TestEndpointFilterInvocationContext(HttpContext httpContext) : EndpointFilterInvocationContext
+    {
+        public override HttpContext HttpContext { get; } = httpContext;
+
+        public override IList<object?> Arguments { get; } = [];
+
+        public override T GetArgument<T>(int index)
+            => (T)Arguments[index]!;
     }
 }
