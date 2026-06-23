@@ -160,6 +160,32 @@ public sealed class SqlOSResourceBindingTests
     }
 
     [TestMethod]
+    public async Task RequireSqlOSAccessToken_Filter_SkipsWhenPredicateReturnsFalse()
+    {
+        var httpContext = new DefaultHttpContext();
+        var invocationContext = new TestEndpointFilterInvocationContext(httpContext);
+        var optionsValue = SqlOSAccessTokenValidationMiddleware.ValidateOptions(new SqlOSAccessTokenValidationOptions
+        {
+            ExpectedAudience = "https://api-a.example.test",
+            ShouldValidate = _ => false
+        });
+
+        var nextCalled = false;
+        var result = await SqlOSAccessTokenEndpointFilter.InvokeAsync(
+            invocationContext,
+            _ =>
+            {
+                nextCalled = true;
+                return ValueTask.FromResult<object?>("skipped");
+            },
+            optionsValue);
+
+        nextCalled.Should().BeTrue();
+        result.Should().Be("skipped");
+        httpContext.GetSqlOSValidatedToken().Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task RequireSqlOSAccessToken_Filter_RejectsMissingBearerToken()
     {
         using var context = CreateContext();
@@ -173,7 +199,9 @@ public sealed class SqlOSResourceBindingTests
         var invocationContext = new TestEndpointFilterInvocationContext(httpContext);
         var optionsValue = SqlOSAccessTokenValidationMiddleware.ValidateOptions(new SqlOSAccessTokenValidationOptions
         {
-            ExpectedAudience = "https://api-a.example.test"
+            ExpectedAudience = "https://api-a.example.test",
+            Realm = "Example API",
+            ResourceMetadataUrl = "https://api-a.example.test/.well-known/oauth-protected-resource"
         });
 
         var result = await SqlOSAccessTokenEndpointFilter.InvokeAsync(
@@ -185,8 +213,26 @@ public sealed class SqlOSResourceBindingTests
         await unauthorized.ExecuteAsync(httpContext);
 
         httpContext.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        httpContext.Response.Headers.WWWAuthenticate.ToString().Should().Contain("realm=\"Example API\"");
         httpContext.Response.Headers.WWWAuthenticate.ToString().Should().Contain("invalid_token");
+        httpContext.Response.Headers.WWWAuthenticate.ToString().Should().Contain("resource_metadata=\"https://api-a.example.test/.well-known/oauth-protected-resource\"");
         httpContext.GetSqlOSValidatedToken().Should().BeNull();
+    }
+
+    [TestMethod]
+    public void RequireSqlOSAccessToken_OptionsOverload_AcceptsResourceMetadata()
+    {
+        var app = WebApplication.CreateBuilder().Build();
+        var group = app.MapGroup("/api");
+
+        var result = group.RequireSqlOSAccessToken(options =>
+        {
+            options.ExpectedAudience = "https://api-a.example.test";
+            options.Realm = "Example API";
+            options.ResourceMetadataUrl = "https://api-a.example.test/.well-known/oauth-protected-resource";
+        });
+
+        result.Should().BeSameAs(group);
     }
 
     [TestMethod]

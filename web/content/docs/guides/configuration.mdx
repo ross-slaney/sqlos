@@ -65,7 +65,11 @@ Protect a route group with SqlOS access-token validation, then use the validated
 
 ```csharp
 var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken("https://api.example.com");
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = "https://api.example.com";
+        options.ResourceMetadataUrl = "https://api.example.com/.well-known/oauth-protected-resource";
+    });
 
 api.MapPost("/workspaces", async (
     CreateWorkspace request,
@@ -77,15 +81,16 @@ api.MapPost("/workspaces", async (
     var workspace = new Workspace(request.Name);
 
     db.Workspaces.Add(workspace);
-    db.AddSqlOSResource(workspace.ResourceId, "root", workspace.Name, "workspace");
-    db.GrantSqlOSRole(userId, workspace.ResourceId, "workspace_admin");
+    await db.EnsureSqlOSUserSubjectAsync(userId, userId);
+    await db.EnsureSqlOSResourceAsync(workspace.ResourceId, "root", workspace.Name, "workspace");
+    await db.EnsureSqlOSRoleGrantAsync(userId, workspace.ResourceId, "workspace_admin");
 
     await db.SaveChangesAsync();
     return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```
 
-For idempotent provisioning paths, use `EnsureSqlOSResourceAsync(...)` and `EnsureSqlOSRoleGrantAsync(...)`.
+Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `EnsureSqlOSUserSubjectAsync(...)`, `EnsureSqlOSAgentSubjectAsync(...)`, or `EnsureSqlOSServiceAccountSubjectAsync(...)` before granting roles.
 
 ## Client onboarding modes
 
@@ -101,9 +106,9 @@ options.AuthServer.EnablePortableMcpClients(registration =>
     registration.Cimd.TrustedHosts.Add("clients.example.com");
 });
 
-options.AuthServer.SeedMcpStackClient(
-    "myapp-mcpstack",
-    "MCP Stack",
+options.AuthServer.SeedDeviceFlowClient(
+    "myapp-cli",
+    "CLI",
     "https://api.example.com",
     "workspace.read",
     "workspace.write");

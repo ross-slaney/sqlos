@@ -367,7 +367,7 @@ public class SqlOSAuthServerOptions
                 .ToList();
         });
 
-    public SqlOSAuthServerOptions SeedMcpStackClient(
+    public SqlOSAuthServerOptions SeedDeviceFlowClient(
         string clientId,
         string name,
         string? audience = null,

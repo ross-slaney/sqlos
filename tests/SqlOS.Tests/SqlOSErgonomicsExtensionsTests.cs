@@ -44,19 +44,32 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public async Task ResourceAndGrantHelpers_AddAndEnsureFgaRowsWithoutManualModelTypes()
+    public async Task SubjectResourceAndGrantHelpers_ProvisionExplicitlyAndGrantExistingRows()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        var resource = context.AddSqlOSResource("workspace_1", "root", "Workspace 1", "workspace");
-        var grant = context.GrantSqlOSRole("usr_1", "workspace_1", "owner", "Workspace owner");
+        var user = await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One", "user@example.test");
+        var agent = await context.EnsureSqlOSAgentSubjectAsync("agt_1", "Agent One", "worker", "Background worker");
+        var serviceAccount = await context.EnsureSqlOSServiceAccountSubjectAsync(
+            "sa_1",
+            "Service Account One",
+            "client_1",
+            "hashed-secret",
+            "API integration");
+        var resource = await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1", "workspace");
+        var grant = await context.GrantSqlOSRoleAsync("usr_1", "workspace_1", "owner", "Workspace owner");
         await context.SaveChangesAsync();
 
+        user.SubjectId.Should().Be("usr_1");
+        agent.SubjectId.Should().Be("agt_1");
+        serviceAccount.SubjectId.Should().Be("sa_1");
         resource.Id.Should().Be("workspace_1");
         grant.RoleId.Should().Be("role_owner");
-        (await context.Set<SqlOSFgaSubject>().FindAsync("usr_1")).Should().NotBeNull();
+        (await context.Set<SqlOSFgaUser>().SingleAsync(x => x.SubjectId == "usr_1")).Email.Should().Be("user@example.test");
+        (await context.Set<SqlOSFgaAgent>().SingleAsync(x => x.SubjectId == "agt_1")).AgentType.Should().Be("worker");
+        (await context.Set<SqlOSFgaServiceAccount>().SingleAsync(x => x.SubjectId == "sa_1")).ClientId.Should().Be("client_1");
 
         var ensuredResource = await context.EnsureSqlOSResourceAsync(
             "workspace_1",
@@ -75,6 +88,36 @@ public sealed class SqlOSErgonomicsExtensionsTests
         ensuredResource.Description.Should().Be("Updated");
         ensuredGrant.Description.Should().Be("Updated owner grant");
         context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "workspace_1").Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task GrantSqlOSRole_DoesNotCreateMissingSubject()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        context.GrantSqlOSRole("typo_user", "root", "role_owner");
+
+        context.Set<SqlOSFgaSubject>().Local.Should().NotContain(x => x.Id == "typo_user");
+        (await context.Set<SqlOSFgaSubject>().FindAsync("typo_user")).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task EnsureSqlOSRoleGrantAsync_RequiresExistingSubjectAndResource()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var missingSubject = async () => await context.EnsureSqlOSRoleGrantAsync("missing_user", "root", "owner");
+        await missingSubject.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*subject 'missing_user' was not found*");
+
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        var missingResource = async () => await context.EnsureSqlOSRoleGrantAsync("usr_1", "missing_resource", "owner");
+        await missingResource.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'missing_resource' was not found*");
     }
 
     [TestMethod]
@@ -100,15 +143,15 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public void SeedMcpStackClient_CreatesDeviceFlowPublicClient()
+    public void SeedDeviceFlowClient_CreatesDeviceFlowPublicClient()
     {
         var options = new SqlOSAuthServerOptions();
 
-        options.SeedMcpStackClient("checklist-mcpstack", "MCP Stack", "https://api.example.test", "READ", "WRITE");
+        options.SeedDeviceFlowClient("checklist-cli", "Checklist CLI", "https://api.example.test", "READ", "WRITE");
 
         var client = options.ClientSeeds.Should().ContainSingle().Subject;
-        client.ClientId.Should().Be("checklist-mcpstack");
-        client.Name.Should().Be("MCP Stack");
+        client.ClientId.Should().Be("checklist-cli");
+        client.Name.Should().Be("Checklist CLI");
         client.Audience.Should().Be("https://api.example.test");
         client.ClientType.Should().Be("public_cli");
         client.RequirePkce.Should().BeTrue();
@@ -126,7 +169,10 @@ public sealed class SqlOSErgonomicsExtensionsTests
 
     private static void SeedFgaCore(TestSqlOSInMemoryDbContext context)
     {
-        context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType { Id = "user", Name = "User" });
+        context.Set<SqlOSFgaSubjectType>().AddRange(
+            new SqlOSFgaSubjectType { Id = "user", Name = "User" },
+            new SqlOSFgaSubjectType { Id = "agent", Name = "Agent" },
+            new SqlOSFgaSubjectType { Id = "service_account", Name = "Service Account" });
         context.Set<SqlOSFgaResourceType>().AddRange(
             new SqlOSFgaResourceType { Id = "root", Name = "Root" },
             new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });

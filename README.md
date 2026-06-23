@@ -102,7 +102,7 @@ Full walkthrough: **[sqlos.dev/docs/getting-started](https://sqlos.dev/docs/gett
    app.MapSqlOS();
    ```
 
-   Protect APIs with `RequireSqlOSAccessToken(audience)`, then use `http.SqlOSUserId()`, `fga.Allows(...)`, `db.AddSqlOSResource(...)`, and `db.GrantSqlOSRole(...)` in normal endpoint code.
+   Protect APIs with `RequireSqlOSAccessToken(audience)`, then use `http.SqlOSUserId()`, `fga.Allows(...)`, `db.EnsureSqlOSUserSubjectAsync(...)`, `db.EnsureSqlOSResourceAsync(...)`, and `db.EnsureSqlOSRoleGrantAsync(...)` in normal endpoint code.
 
 On startup, SqlOS updates its own schema. Default URLs: admin at `/sqlos`, OAuth at `/sqlos/auth`. Change the prefix with `DashboardBasePath` if you need to.
 

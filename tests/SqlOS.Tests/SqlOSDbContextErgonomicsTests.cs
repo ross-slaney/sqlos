@@ -67,6 +67,16 @@ public sealed class SqlOSDbContextErgonomicsTests
         context.Model.GetEntityTypes().Should().NotBeEmpty();
     }
 
+    [TestMethod]
+    public void SqlOSDbContext_ConstrainsTypeParameterToDerivedContext()
+    {
+        var typeParameter = typeof(SqlOSDbContext<>).GetGenericArguments().Should().ContainSingle().Subject;
+        var constraint = typeParameter.GetGenericParameterConstraints().Should().ContainSingle().Subject;
+
+        constraint.IsGenericType.Should().BeTrue();
+        constraint.GetGenericTypeDefinition().Should().Be(typeof(SqlOSDbContext<>));
+    }
+
     private sealed class EasyModeTestDbContext(DbContextOptions<EasyModeTestDbContext> options)
         : SqlOSDbContext<EasyModeTestDbContext>(options)
     {

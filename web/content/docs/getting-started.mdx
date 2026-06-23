@@ -28,7 +28,7 @@ You'll learn how to install SqlOS, wire a minimal host, run the Todo sample, and
     Add `SqlOS` to your ASP.NET app.
   </Step>
   <Step title="Register on your DbContext">
-    Implement the SqlOS interfaces and call `AddSqlOS` during host setup.
+    Derive from `SqlOSDbContext<TContext>` and call `AddSqlOS` during host setup.
   </Step>
   <Step title="Map routes and verify">
     Call `MapSqlOS()`, start the app, and open the admin dashboard.
@@ -140,7 +140,11 @@ For API routes that accept SqlOS access tokens, protect a route group and read t
 
 ```csharp
 var api = app.MapGroup("/api")
-    .RequireSqlOSAccessToken("https://localhost:5001/api");
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = "https://localhost:5001/api";
+        options.ResourceMetadataUrl = "https://localhost:5001/.well-known/oauth-protected-resource";
+    });
 
 api.MapGet("/me", (HttpContext http) =>
 {

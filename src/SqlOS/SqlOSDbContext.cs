@@ -11,7 +11,7 @@ namespace SqlOS;
 /// </summary>
 public abstract class SqlOSDbContext<TContext>(DbContextOptions<TContext> options)
     : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
-    where TContext : DbContext
+    where TContext : SqlOSDbContext<TContext>
 {
     public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
         string resourceId,
