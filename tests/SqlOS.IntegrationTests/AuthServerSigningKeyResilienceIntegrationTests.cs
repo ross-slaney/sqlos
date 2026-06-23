@@ -231,6 +231,74 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task RotateSigningKeyAsync_WithConcurrentCalls_PreservesLifecycleInvariants()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyRace");
+            connectionString = setupContext.Database.GetConnectionString();
+            connectionString.Should().NotBeNullOrWhiteSpace();
+
+            var setupCrypto = new SqlOSCryptoService(
+                setupContext,
+                Options.Create(AspireFixture.Options),
+                new EphemeralDataProtectionProvider());
+            await setupCrypto.EnsureActiveSigningKeyAsync();
+
+            await setupContext.DisposeAsync();
+            setupContext = null;
+
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var rotateTasks = Enumerable.Range(0, 8)
+                .Select(async _ =>
+                {
+                    await start.Task;
+                    await using var context = CreateContext(connectionString!);
+                    var crypto = new SqlOSCryptoService(
+                        context,
+                        Options.Create(AspireFixture.Options),
+                        new EphemeralDataProtectionProvider());
+                    return await crypto.RotateSigningKeyAsync();
+                })
+                .ToArray();
+
+            start.SetResult();
+            var rotatedKeys = await Task.WhenAll(rotateTasks);
+            rotatedKeys.Should().OnlyContain(static key => key.IsActive);
+
+            await using var verificationContext = CreateContext(connectionString!);
+            var keys = await verificationContext.Set<SqlOSSigningKey>()
+                .OrderByDescending(x => x.ActivatedAt)
+                .ToListAsync();
+            keys.Should().ContainSingle(static key => key.IsActive);
+            keys.Where(static key => !key.IsActive).Should().OnlyContain(static key => key.RetiredAt != null);
+
+            var diagnostics = await new SqlOSCryptoService(
+                    verificationContext,
+                    Options.Create(AspireFixture.Options),
+                    new EphemeralDataProtectionProvider())
+                .GetSigningKeyDiagnosticsAsync(TimeSpan.FromDays(7));
+            diagnostics.Issues.Should().BeEmpty();
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+
+            if (!string.IsNullOrWhiteSpace(connectionString))
+            {
+                await using var cleanupContext = CreateContext(connectionString);
+                await cleanupContext.Database.EnsureDeletedAsync();
+            }
+        }
+    }
+
     private static SqlOSAuthServerOptions CreateOptions(
         string clientId,
         string redirectUri,

@@ -4447,6 +4447,7 @@ public static class EndpointRouteBuilderExtensions
 
             var keys = await cryptoService.ListSigningKeysAsync(cancellationToken);
             var rotationSettings = await settingsService.GetKeyRotationSettingsAsync(cancellationToken);
+            var diagnostics = await cryptoService.GetSigningKeyDiagnosticsAsync(rotationSettings.GraceWindow, cancellationToken);
             var activeKey = keys.FirstOrDefault(k => k.IsActive);
 
             return Results.Ok(new
@@ -4463,6 +4464,7 @@ public static class EndpointRouteBuilderExtensions
                 }),
                 rotationIntervalDays = rotationSettings.RotationInterval.TotalDays,
                 graceWindowDays = rotationSettings.GraceWindow.TotalDays,
+                diagnostics,
                 nextRotationDue = activeKey != null
                     ? activeKey.ActivatedAt.Add(rotationSettings.RotationInterval)
                     : (DateTime?)null

@@ -197,15 +197,28 @@ public sealed class SqlOSCryptoService
             IsActive = true
         };
         _context.Set<SqlOSSigningKey>().Add(activeKey);
-        await _context.SaveChangesAsync(cancellationToken);
-        return activeKey;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return activeKey;
+        }
+        catch (DbUpdateException)
+        {
+            var concurrentActiveKey = await TryResolveConcurrentActiveSigningKeyAsync(cancellationToken);
+            if (concurrentActiveKey != null)
+            {
+                return concurrentActiveKey;
+            }
+
+            throw;
+        }
     }
 
     public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(TimeSpan? graceWindow = null, CancellationToken cancellationToken = default)
     {
         var cutoff = DateTime.UtcNow.Add(-(graceWindow ?? TimeSpan.FromDays(7)));
         return await _context.Set<SqlOSSigningKey>()
-            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
+            .Where(x => x.IsActive || (x.RetiredAt != null && x.RetiredAt >= cutoff))
             .ToListAsync(cancellationToken);
     }
 
@@ -232,8 +245,21 @@ public sealed class SqlOSCryptoService
             IsActive = true
         };
         _context.Set<SqlOSSigningKey>().Add(newKey);
-        await _context.SaveChangesAsync(cancellationToken);
-        return newKey;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return newKey;
+        }
+        catch (DbUpdateException)
+        {
+            var concurrentActiveKey = await TryResolveConcurrentActiveSigningKeyAsync(cancellationToken);
+            if (concurrentActiveKey != null)
+            {
+                return concurrentActiveKey;
+            }
+
+            throw;
+        }
     }
 
     public async Task<bool> ShouldRotateSigningKeyAsync(TimeSpan rotationInterval, CancellationToken cancellationToken = default)
@@ -262,6 +288,62 @@ public sealed class SqlOSCryptoService
         => await _context.Set<SqlOSSigningKey>()
             .OrderByDescending(x => x.ActivatedAt)
             .ToListAsync(cancellationToken);
+
+    public async Task<SqlOSSigningKeyDiagnostics> GetSigningKeyDiagnosticsAsync(
+        TimeSpan graceWindow,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var cutoff = now.Subtract(graceWindow);
+        var keys = await _context.Set<SqlOSSigningKey>()
+            .AsNoTracking()
+            .OrderByDescending(x => x.ActivatedAt)
+            .ToListAsync(cancellationToken);
+
+        var issues = new List<SqlOSSigningKeyDiagnosticIssue>();
+        var activeKeys = keys.Where(static key => key.IsActive).ToList();
+        if (activeKeys.Count == 0)
+        {
+            issues.Add(new SqlOSSigningKeyDiagnosticIssue(
+                "no_active_signing_key",
+                "critical",
+                "No active signing key exists."));
+        }
+        else if (activeKeys.Count > 1)
+        {
+            issues.Add(new SqlOSSigningKeyDiagnosticIssue(
+                "multiple_active_signing_keys",
+                "critical",
+                "More than one active signing key exists."));
+        }
+
+        foreach (var key in activeKeys.Where(static key => key.RetiredAt != null))
+        {
+            issues.Add(new SqlOSSigningKeyDiagnosticIssue(
+                "active_key_has_retired_at",
+                "error",
+                "An active signing key has a RetiredAt timestamp.",
+                key.Id,
+                key.Kid));
+        }
+
+        foreach (var key in keys.Where(static key => !key.IsActive && key.RetiredAt == null))
+        {
+            issues.Add(new SqlOSSigningKeyDiagnosticIssue(
+                "inactive_key_missing_retired_at",
+                "error",
+                "An inactive signing key is missing RetiredAt.",
+                key.Id,
+                key.Kid));
+        }
+
+        return new SqlOSSigningKeyDiagnostics(
+            keys.Count,
+            activeKeys.Count,
+            keys.Count(key => key.IsActive || (key.RetiredAt != null && key.RetiredAt >= cutoff)),
+            keys.Count(key => !key.IsActive && key.RetiredAt == null),
+            issues);
+    }
 
     public async Task<string> CreateAccessTokenAsync(
         SqlOSUser user,
@@ -354,8 +436,21 @@ public sealed class SqlOSCryptoService
             IsActive = true
         };
         _context.Set<SqlOSSigningKey>().Add(replacement);
-        await _context.SaveChangesAsync(cancellationToken);
-        return replacement;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return replacement;
+        }
+        catch (DbUpdateException)
+        {
+            var concurrentActiveKey = await TryResolveConcurrentActiveSigningKeyAsync(cancellationToken);
+            if (concurrentActiveKey != null)
+            {
+                return concurrentActiveKey;
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
@@ -475,6 +570,24 @@ public sealed class SqlOSCryptoService
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
     }
 
+    private async Task<SqlOSSigningKey?> TryResolveConcurrentActiveSigningKeyAsync(CancellationToken cancellationToken)
+    {
+        if (_context is DbContext dbContext)
+        {
+            foreach (var entry in dbContext.ChangeTracker.Entries<SqlOSSigningKey>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+        }
+
+        return await _context.Set<SqlOSSigningKey>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
+    }
+
     private async Task ProtectSigningKeyAtRestIfNeededAsync(SqlOSSigningKey key, CancellationToken cancellationToken)
     {
         if (!_options.ProtectSigningKeysWithDataProtection
@@ -499,3 +612,17 @@ public sealed class SqlOSCryptoService
             ? ProtectSecret(privateKeyPem)
             : privateKeyPem;
 }
+
+public sealed record SqlOSSigningKeyDiagnostics(
+    int TotalKeyCount,
+    int ActiveKeyCount,
+    int ValidationKeyCount,
+    int InactiveMissingRetiredAtCount,
+    IReadOnlyList<SqlOSSigningKeyDiagnosticIssue> Issues);
+
+public sealed record SqlOSSigningKeyDiagnosticIssue(
+    string Code,
+    string Severity,
+    string Message,
+    string? KeyId = null,
+    string? Kid = null);

@@ -38,6 +38,62 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
+    public async Task GetValidationSigningKeysAsync_ExcludesInactiveKeysWithoutRetiredAt()
+    {
+        using var context = CreateContext();
+        var now = DateTime.UtcNow;
+        context.Set<SqlOSSigningKey>().AddRange(
+            CreateStoredSigningKey("key_active", isActive: true, activatedAt: now.AddDays(-1), retiredAt: null),
+            CreateStoredSigningKey("key_recently_retired", isActive: false, activatedAt: now.AddDays(-3), retiredAt: now.AddDays(-1)),
+            CreateStoredSigningKey("key_inactive_unretired", isActive: false, activatedAt: now.AddDays(-3), retiredAt: null),
+            CreateStoredSigningKey("key_expired_retired", isActive: false, activatedAt: now.AddDays(-20), retiredAt: now.AddDays(-10)));
+        await context.SaveChangesAsync();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+
+        var keys = await service.GetValidationSigningKeysAsync(TimeSpan.FromDays(7));
+
+        keys.Select(static key => key.Id).Should().BeEquivalentTo("key_active", "key_recently_retired");
+    }
+
+    [TestMethod]
+    public async Task GetSigningKeyDiagnosticsAsync_FlagsInvalidLifecycleRows()
+    {
+        using var context = CreateContext();
+        var now = DateTime.UtcNow;
+        context.Set<SqlOSSigningKey>().AddRange(
+            CreateStoredSigningKey("key_active_1", isActive: true, activatedAt: now.AddDays(-1), retiredAt: null),
+            CreateStoredSigningKey("key_active_2", isActive: true, activatedAt: now, retiredAt: now),
+            CreateStoredSigningKey("key_inactive_unretired", isActive: false, activatedAt: now.AddDays(-2), retiredAt: null));
+        await context.SaveChangesAsync();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+
+        var diagnostics = await service.GetSigningKeyDiagnosticsAsync(TimeSpan.FromDays(7));
+
+        diagnostics.ActiveKeyCount.Should().Be(2);
+        diagnostics.InactiveMissingRetiredAtCount.Should().Be(1);
+        diagnostics.Issues.Select(static issue => issue.Code).Should().Contain([
+            "multiple_active_signing_keys",
+            "active_key_has_retired_at",
+            "inactive_key_missing_retired_at"
+        ]);
+    }
+
+    [TestMethod]
+    public async Task RotateSigningKeyAsync_LeavesExactlyOneActiveKeyAndRetiredInactiveKeys()
+    {
+        using var context = CreateContext();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+
+        var original = await service.EnsureActiveSigningKeyAsync();
+        var rotated = await service.RotateSigningKeyAsync();
+
+        rotated.Id.Should().NotBe(original.Id);
+        var keys = await context.Set<SqlOSSigningKey>().ToListAsync();
+        keys.Should().ContainSingle(static key => key.IsActive);
+        keys.Where(static key => !key.IsActive).Should().OnlyContain(static key => key.RetiredAt != null);
+    }
+
+    [TestMethod]
     public async Task EnsureActiveSigningKey_WithDefaultOptions_DoesNotProtectSigningKeyEvenWhenDataProtectionExists()
     {
         using var context = CreateContext();
@@ -158,6 +214,10 @@ public sealed class SqlOSCryptoServiceTests
         var activeKey = context.Set<SqlOSSigningKey>().Single(x => x.IsActive);
         activeKey.Id.Should().NotBe(originalKey.Id);
         activeKey.PrivateKeyPem.Should().Contain("BEGIN PRIVATE KEY");
+        context.Set<SqlOSSigningKey>()
+            .Where(static key => !key.IsActive)
+            .Should()
+            .OnlyContain(static key => key.RetiredAt != null);
     }
 
     [TestMethod]
@@ -183,6 +243,23 @@ public sealed class SqlOSCryptoServiceTests
 
     private static IOptions<SqlOSAuthServerOptions> SigningKeyProtectedOptions()
         => Options.Create(new SqlOSAuthServerOptions { ProtectSigningKeysWithDataProtection = true });
+
+    private static SqlOSSigningKey CreateStoredSigningKey(
+        string id,
+        bool isActive,
+        DateTime activatedAt,
+        DateTime? retiredAt)
+        => new()
+        {
+            Id = id,
+            Kid = $"{id}_kid",
+            Algorithm = "RS256",
+            PublicKeyPem = "public",
+            PrivateKeyPem = "private",
+            IsActive = isActive,
+            ActivatedAt = activatedAt,
+            RetiredAt = retiredAt
+        };
 
     private static SqlOSUser CreateUser()
         => new()

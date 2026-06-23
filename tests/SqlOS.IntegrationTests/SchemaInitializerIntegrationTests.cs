@@ -45,6 +45,9 @@ public sealed class SchemaInitializerIntegrationTests
         {
             Assert.IsTrue(await TableExistsAsync(table), $"Table {table} should exist.");
         }
+
+        Assert.IsTrue(await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSSigningKeys", "UX_SqlOSSigningKeys_Active"));
+        Assert.IsTrue(await CheckConstraintExistsAsync(AspireFixture.SharedContext, "SqlOSSigningKeys", "CK_SqlOSSigningKeys_Lifecycle"));
     }
 
     [TestMethod]
@@ -148,7 +151,43 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(24, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(26, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_RepairsSigningKeyLifecycleInvariants()
+    {
+        var databaseName = $"SqlOSKeys_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion25InvalidSigningKeyLifecycleAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSSigningKeys", "UX_SqlOSSigningKeys_Active"));
+            Assert.IsTrue(await CheckConstraintExistsAsync(context, "SqlOSSigningKeys", "CK_SqlOSSigningKeys_Lifecycle"));
+            Assert.AreEqual(1, await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSSigningKeys] WHERE [IsActive] = 1"));
+            Assert.AreEqual(0, await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSSigningKeys] WHERE [IsActive] = 0 AND [RetiredAt] IS NULL"));
+            Assert.AreEqual(0, await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSSigningKeys] WHERE [IsActive] = 1 AND [RetiredAt] IS NOT NULL"));
+            Assert.AreEqual(26, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -187,7 +226,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
-            Assert.AreEqual(24, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(26, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -297,6 +336,32 @@ public sealed class SchemaInitializerIntegrationTests
         }
     }
 
+    private static async Task<bool> CheckConstraintExistsAsync(DbContext context, string tableName, string constraintName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT COUNT(*)
+                FROM sys.check_constraints ck
+                INNER JOIN sys.tables t ON ck.parent_object_id = t.object_id
+                WHERE t.name = @tableName
+                  AND ck.name = @constraintName
+                  AND t.schema_id = SCHEMA_ID('dbo')
+                """;
+            cmd.Parameters.Add(new SqlParameter("@tableName", tableName));
+            cmd.Parameters.Add(new SqlParameter("@constraintName", constraintName));
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result) > 0;
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
     private static async Task SeedVersion22AuditEventsSchemaAsync(DbContext context)
     {
         await context.Database.ExecuteSqlRawAsync("""
@@ -348,6 +413,33 @@ public sealed class SchemaInitializerIntegrationTests
             CREATE TABLE [dbo].[SqlOSSessions] (
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
             );
+            """);
+    }
+
+    private static async Task SeedVersion25InvalidSigningKeyLifecycleAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (25);
+
+            CREATE TABLE [dbo].[SqlOSSigningKeys] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [Kid] NVARCHAR(120) NOT NULL UNIQUE,
+                [Algorithm] NVARCHAR(20) NOT NULL,
+                [PublicKeyPem] NVARCHAR(MAX) NOT NULL,
+                [PrivateKeyPem] NVARCHAR(MAX) NOT NULL,
+                [IsActive] BIT NOT NULL,
+                [ActivatedAt] DATETIME2 NOT NULL,
+                [RetiredAt] DATETIME2 NULL
+            );
+
+            INSERT INTO [dbo].[SqlOSSigningKeys] (
+                [Id], [Kid], [Algorithm], [PublicKeyPem], [PrivateKeyPem], [IsActive], [ActivatedAt], [RetiredAt]
+            )
+            VALUES
+                ('key_active_old', 'kid_active_old', 'RS256', 'public', 'private', 1, DATEADD(day, -10, SYSUTCDATETIME()), NULL),
+                ('key_active_new', 'kid_active_new', 'RS256', 'public', 'private', 1, SYSUTCDATETIME(), SYSUTCDATETIME()),
+                ('key_inactive_unretired', 'kid_inactive_unretired', 'RS256', 'public', 'private', 0, DATEADD(day, -5, SYSUTCDATETIME()), NULL);
             """);
     }
 

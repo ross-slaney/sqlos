@@ -394,9 +394,19 @@ public static class SqlOSAuthServerModelConfiguration
 
         modelBuilder.Entity<SqlOSSigningKey>(entity =>
         {
-            entity.ToTable("SqlOSSigningKeys", schema, t => t.ExcludeFromMigrations());
+            entity.ToTable("SqlOSSigningKeys", schema, t =>
+            {
+                t.ExcludeFromMigrations();
+                t.HasCheckConstraint(
+                    "CK_SqlOSSigningKeys_Lifecycle",
+                    "(([IsActive] = CONVERT(bit, 1) AND [RetiredAt] IS NULL) OR ([IsActive] = CONVERT(bit, 0) AND [RetiredAt] IS NOT NULL))");
+            });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.Kid).IsUnique();
+            entity.HasIndex(x => x.IsActive)
+                .IsUnique()
+                .HasDatabaseName("UX_SqlOSSigningKeys_Active")
+                .HasFilter("[IsActive] = 1");
             entity.Property(x => x.Kid).HasMaxLength(120);
             entity.Property(x => x.Algorithm).HasMaxLength(20);
         });
