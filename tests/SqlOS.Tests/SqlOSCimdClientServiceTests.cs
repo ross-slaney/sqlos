@@ -160,7 +160,120 @@ public sealed class SqlOSCimdClientServiceTests
             "https://client.example.test/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Trust policy rejected client.*");
+            .WithMessage("*validation failed*");
+        httpFactory.RequestCount.Should().Be(0);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("Trust policy rejected client."))).Should().BeTrue();
+    }
+
+    [DataTestMethod]
+    [DataRow("https://localhost/oauth/client.json")]
+    [DataRow("https://127.0.0.1/oauth/client.json")]
+    [DataRow("https://[::1]/oauth/client.json")]
+    [DataRow("https://10.0.0.1/oauth/client.json")]
+    [DataRow("https://172.16.0.1/oauth/client.json")]
+    [DataRow("https://192.168.0.1/oauth/client.json")]
+    [DataRow("https://169.254.0.1/oauth/client.json")]
+    [DataRow("https://224.0.0.1/oauth/client.json")]
+    [DataRow("https://240.0.0.1/oauth/client.json")]
+    [DataRow("https://[fe80::1]/oauth/client.json")]
+    [DataRow("https://[ff02::1]/oauth/client.json")]
+    public async Task ResolveRequiredClientAsync_RejectsUnsafeMetadataHostsBeforeNetworkIo(string clientId)
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        var clientIdUri = new Uri(clientId);
+        options.ClientRegistration.Cimd.TrustedHosts.Clear();
+        options.ClientRegistration.Cimd.TrustedHosts.Add(clientIdUri.Host);
+        var httpFactory = new FakeHttpClientFactory(_ => throw new InvalidOperationException("Network I/O should not happen for unsafe CIMD hosts."));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, "https://client.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*validation failed*");
+        httpFactory.RequestCount.Should().Be(0);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("not allowed"))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUntrustedMetadataHostsBeforeNetworkIo()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeHttpClientFactory(_ => throw new InvalidOperationException("Network I/O should not happen for untrusted CIMD hosts."));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://untrusted.example.test/oauth/client.json",
+            "https://untrusted.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*validation failed*");
+        httpFactory.RequestCount.Should().Be(0);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("not trusted"))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsRedirectResponsesWithoutFollowing()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeHttpClientFactory(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Redirect);
+            response.Headers.Location = new Uri("https://client.example.test/next-client.json");
+            return response;
+        });
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*redirect*not allowed*");
+        httpFactory.RequestCount.Should().Be(1);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.fetch-failed"
+            && (x.DataJson ?? string.Empty).Contains("redirect"))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsOversizedMetadataWhileStreaming()
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        options.ClientRegistration.Cimd.MaxMetadataBytes = 64;
+        var body = $$"""
+        {
+          "client_id": "https://client.example.test/oauth/client.json",
+          "client_name": "{{new string('A', 512)}}",
+          "redirect_uris": ["https://client.example.test/callback"],
+          "token_endpoint_auth_method": "none"
+        }
+        """;
+        var stream = new TrackingReadStream(Encoding.UTF8.GetBytes(body));
+        var httpFactory = new FakeHttpClientFactory(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(stream)
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            return response;
+        });
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*validation failed*");
+        stream.BytesRead.Should().BeLessThan(stream.LengthBytes);
+        httpFactory.RequestCount.Should().Be(1);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("exceeds the allowed size"))).Should().BeTrue();
     }
 
     [TestMethod]
@@ -184,8 +297,9 @@ public sealed class SqlOSCimdClientServiceTests
             "https://client.example.test/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*exact same client_id*");
-        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed")).Should().BeTrue();
+            .WithMessage("*validation failed*");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("exact same client_id"))).Should().BeTrue();
     }
 
     [TestMethod]
@@ -209,7 +323,9 @@ public sealed class SqlOSCimdClientServiceTests
             "https://client.example.test/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Redirect URI*");
+            .WithMessage("*validation failed*");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("Redirect URI"))).Should().BeTrue();
     }
 
     [TestMethod]
@@ -305,7 +421,9 @@ public sealed class SqlOSCimdClientServiceTests
             "https://client.example.test/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*must be JSON*");
+            .WithMessage("*validation failed*");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("must be JSON"))).Should().BeTrue();
     }
 
     [TestMethod]
@@ -325,11 +443,16 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     private static SqlOSAuthServerOptions CreateOptions()
-        => new()
+    {
+        var options = new SqlOSAuthServerOptions
         {
             Issuer = "https://app.example.com/sqlos/auth",
             PublicOrigin = "https://app.example.com"
         };
+        options.ClientRegistration.Cimd.Enabled = true;
+        options.ClientRegistration.Cimd.TrustedHosts.Add("client.example.test");
+        return options;
+    }
 
     private static SqlOSClientResolutionService CreateResolver(
         TestSqlOSInMemoryDbContext context,
@@ -371,6 +494,76 @@ public sealed class SqlOSCimdClientServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
+    }
+
+    private sealed class TrackingReadStream : Stream
+    {
+        private readonly byte[] _payload;
+        private int _position;
+
+        public TrackingReadStream(byte[] payload)
+        {
+            _payload = payload;
+        }
+
+        public int BytesRead { get; private set; }
+
+        public int LengthBytes => _payload.Length;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var bytesToRead = Math.Min(count, _payload.Length - _position);
+            if (bytesToRead <= 0)
+            {
+                return 0;
+            }
+
+            _payload.AsSpan(_position, bytesToRead).CopyTo(buffer.AsSpan(offset, bytesToRead));
+            _position += bytesToRead;
+            BytesRead += bytesToRead;
+            return bytesToRead;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var bytesToRead = Math.Min(buffer.Length, _payload.Length - _position);
+            if (bytesToRead <= 0)
+            {
+                return ValueTask.FromResult(0);
+            }
+
+            _payload.AsMemory(_position, bytesToRead).CopyTo(buffer);
+            _position += bytesToRead;
+            BytesRead += bytesToRead;
+            return ValueTask.FromResult(bytesToRead);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => throw new NotSupportedException();
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeHttpClientFactory : IHttpClientFactory

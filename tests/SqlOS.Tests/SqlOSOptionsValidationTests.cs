@@ -159,6 +159,49 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenCimdEnabledWithoutTrustedHostsOrTrustPolicy()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.ClientRegistration.Cimd requires at least one TrustedHosts entry or a TrustPolicy when Enabled is true.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_AllowsCimdEnabledWithTrustedHost()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+            options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("client.example.test");
+        });
+
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_AllowsCimdEnabledWithTrustPolicy()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Cimd.Enabled = true;
+            options.AuthServer.ClientRegistration.Cimd.TrustPolicy = (_, _) =>
+                Task.FromResult(SqlOSClientRegistrationPolicyDecision.Allow());
+        });
+
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
     public void AddSqlOS_Throws_WhenDcrRateLimitWindowIsNotPositive()
     {
         var services = new ServiceCollection();
