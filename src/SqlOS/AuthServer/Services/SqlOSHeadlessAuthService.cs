@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 
@@ -439,7 +440,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "password",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: email,
                 displayName: null,
@@ -529,7 +530,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "email-otp",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: email,
                 displayName: null,
@@ -585,7 +586,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: email,
                 displayName: request.DisplayName,
@@ -634,7 +635,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "email-otp-verify",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -773,7 +774,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "email-otp-signup-verify",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -819,7 +820,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "phone-otp",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: null,
                 displayName: null,
@@ -863,7 +864,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "phone-otp-verify",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: null,
                 displayName: null,
@@ -918,7 +919,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "phone-otp-signup",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: null,
                 displayName: request.DisplayName,
@@ -1031,7 +1032,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "phone-otp-signup-verify",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: null,
                 displayName: null,
@@ -1171,7 +1172,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: email,
                 displayName: request.DisplayName,
@@ -1295,7 +1296,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "signup",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: email,
                 displayName: request.DisplayName,
@@ -1349,7 +1350,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "mfa",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -1392,7 +1393,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "mfa-enroll",
-                ex.Message,
+                await PublicViewErrorMessageAsync(null, ex, cancellationToken),
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -1428,7 +1429,7 @@ public sealed class SqlOSHeadlessAuthService
             return View(await BuildViewModelAsync(
                 authorizationRequest,
                 "mfa-enroll",
-                ex.Message,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -1519,6 +1520,26 @@ public sealed class SqlOSHeadlessAuthService
             RequiresMfaEnrollment: requiresMfaEnrollment,
             MfaMethods: mfaMethods ?? Array.Empty<string>(),
             TotpEnrollment: totpEnrollment);
+    }
+
+    private async Task<string> PublicViewErrorMessageAsync(
+        HttpContext? httpContext,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var error = SqlOSPublicAuthErrorMapper.Map(exception, SqlOSPublicAuthErrorSurface.HeadlessView);
+        if (httpContext != null)
+        {
+            await SqlOSPublicAuthErrorAudit.RecordIfDiagnosticAsync(
+                _adminService,
+                httpContext,
+                SqlOSPublicAuthErrorSurface.HeadlessView,
+                exception,
+                error,
+                cancellationToken);
+        }
+
+        return error.PublicMessage;
     }
 
     public static bool IsHeadlessRequest(SqlOSAuthorizationRequest authorizationRequest)
