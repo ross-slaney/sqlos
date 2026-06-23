@@ -79,6 +79,10 @@ public static string? GetSubjectId(this HttpContext http, string expectedAudienc
 
 `ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session state, but it intentionally does not validate `aud`.
 
+## Runtime behavior
+
+Validation keeps the session check online for every request, so session revocation and absolute expiry take effect immediately. SqlOS reduces database churn by caching public validation keys briefly and by persisting session/client `LastSeenAt` at most once per configured debounce interval. Configure these intervals with `AccessTokenValidationSigningKeyCacheTtl` and `AccessTokenValidationLastSeenDebounceInterval` on `AuthServer`.
+
 ## JWKS for external validation
 
 External services can validate SqlOS JWTs without calling the SDK by using the JWKS endpoint:

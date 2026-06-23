@@ -12,6 +12,14 @@ public sealed class TestSqlOSInMemoryDbContext : DbContext, ISqlOSAuthServerDbCo
     {
     }
 
+    public int SaveChangesAsyncCallCount { get; private set; }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveChangesAsyncCallCount++;
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
     public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
         string resourceId,
         string subjectIds,

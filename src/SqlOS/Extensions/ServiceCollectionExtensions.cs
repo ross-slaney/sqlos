@@ -53,6 +53,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<SqlOSSchemaInitializer>();
         services.AddScoped<SqlOSBootstrapper>();
+        services.AddSingleton<SqlOSValidationSigningKeyCache>();
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<ISqlOSAuditLogService, SqlOSAuditLogService>();
         services.AddScoped<SqlOSSettingsService>();

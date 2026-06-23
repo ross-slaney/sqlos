@@ -19,16 +19,19 @@ public sealed class SqlOSCryptoService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly SqlOSValidationSigningKeyCache _validationSigningKeyCache;
     private readonly PasswordHasher<object> _passwordHasher = new();
     private readonly IDataProtector? _secretProtector;
 
     public SqlOSCryptoService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
-        IDataProtectionProvider? dataProtectionProvider = null)
+        IDataProtectionProvider? dataProtectionProvider = null,
+        SqlOSValidationSigningKeyCache? validationSigningKeyCache = null)
     {
         _context = context;
         _options = options.Value;
+        _validationSigningKeyCache = validationSigningKeyCache ?? new SqlOSValidationSigningKeyCache();
         _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
     }
 
@@ -198,15 +201,25 @@ public sealed class SqlOSCryptoService
         };
         _context.Set<SqlOSSigningKey>().Add(activeKey);
         await _context.SaveChangesAsync(cancellationToken);
+        _validationSigningKeyCache.InvalidateAll();
         return activeKey;
     }
 
     public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(TimeSpan? graceWindow = null, CancellationToken cancellationToken = default)
     {
-        var cutoff = DateTime.UtcNow.Add(-(graceWindow ?? TimeSpan.FromDays(7)));
-        return await _context.Set<SqlOSSigningKey>()
-            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
-            .ToListAsync(cancellationToken);
+        var effectiveGraceWindow = graceWindow ?? TimeSpan.FromDays(_options.DefaultSigningKeyGraceWindowDays);
+        var cacheKey = $"{_options.Schema}|{_options.Issuer}|{effectiveGraceWindow.Ticks}";
+        return await _validationSigningKeyCache.GetOrCreateAsync(
+            cacheKey,
+            _options.AccessTokenValidationSigningKeyCacheTtl,
+            async ct =>
+            {
+                var cutoff = DateTime.UtcNow.Add(-effectiveGraceWindow);
+                return await _context.Set<SqlOSSigningKey>()
+                    .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
+                    .ToListAsync(ct);
+            },
+            cancellationToken);
     }
 
     public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
@@ -233,6 +246,7 @@ public sealed class SqlOSCryptoService
         };
         _context.Set<SqlOSSigningKey>().Add(newKey);
         await _context.SaveChangesAsync(cancellationToken);
+        _validationSigningKeyCache.InvalidateAll();
         return newKey;
     }
 
@@ -255,6 +269,7 @@ public sealed class SqlOSCryptoService
             return 0;
         _context.Set<SqlOSSigningKey>().RemoveRange(expired);
         await _context.SaveChangesAsync(cancellationToken);
+        _validationSigningKeyCache.InvalidateAll();
         return expired.Count;
     }
 
@@ -355,6 +370,7 @@ public sealed class SqlOSCryptoService
         };
         _context.Set<SqlOSSigningKey>().Add(replacement);
         await _context.SaveChangesAsync(cancellationToken);
+        _validationSigningKeyCache.InvalidateAll();
         return replacement;
     }
 
@@ -414,23 +430,35 @@ public sealed class SqlOSCryptoService
                 return null;
             }
 
+            var now = DateTime.UtcNow;
             var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
-            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow)
+            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= now)
             {
                 return null;
             }
 
-            session.LastSeenAt = DateTime.UtcNow;
+            var shouldSaveLastSeen = false;
+            if (ShouldPersistValidationLastSeen(session.LastSeenAt, now))
+            {
+                session.LastSeenAt = now;
+                shouldSaveLastSeen = true;
+            }
+
             if (!string.IsNullOrWhiteSpace(session.ClientApplicationId))
             {
                 var client = await _context.Set<SqlOSClientApplication>()
                     .FirstOrDefaultAsync(x => x.Id == session.ClientApplicationId, cancellationToken);
-                if (client != null)
+                if (client != null && ShouldPersistValidationLastSeen(client.LastSeenAt, now))
                 {
-                    client.LastSeenAt = DateTime.UtcNow;
+                    client.LastSeenAt = now;
+                    shouldSaveLastSeen = true;
                 }
             }
-            await _context.SaveChangesAsync(cancellationToken);
+
+            if (shouldSaveLastSeen)
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+            }
 
             return new SqlOSValidatedToken(
                 principal,
@@ -473,6 +501,14 @@ public sealed class SqlOSCryptoService
         rsa.ImportFromPem(key.PublicKeyPem);
         var parameters = rsa.ExportParameters(false);
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
+    }
+
+    private bool ShouldPersistValidationLastSeen(DateTime? currentLastSeenAt, DateTime now)
+    {
+        var debounceInterval = _options.AccessTokenValidationLastSeenDebounceInterval;
+        return debounceInterval <= TimeSpan.Zero
+            || currentLastSeenAt == null
+            || currentLastSeenAt.Value.Add(debounceInterval) <= now;
     }
 
     private async Task ProtectSigningKeyAtRestIfNeededAsync(SqlOSSigningKey key, CancellationToken cancellationToken)

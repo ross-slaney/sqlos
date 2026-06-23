@@ -46,6 +46,20 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
+## Access token validation tuning
+
+SqlOS validates the session row on every access-token validation so revoked or absolute-expired sessions are rejected immediately. To reduce hot-path database work, each app instance caches public JWT validation keys for a short TTL and debounces persisted `LastSeenAt` updates:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.AccessTokenValidationSigningKeyCacheTtl = TimeSpan.FromMinutes(5);
+    options.AuthServer.AccessTokenValidationLastSeenDebounceInterval = TimeSpan.FromMinutes(1);
+});
+```
+
+Setting either value to `TimeSpan.Zero` disables that optimization. Key creation, rotation, replacement, and retired-key cleanup clear the in-process key cache immediately; the TTL bounds stale-key exposure across other app instances or out-of-band database changes.
+
 ## Reading settings in code
 
 ```csharp
