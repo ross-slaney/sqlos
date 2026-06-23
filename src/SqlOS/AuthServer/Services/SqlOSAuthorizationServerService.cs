@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -811,7 +812,19 @@ public sealed class SqlOSAuthorizationServerService
         authorizationRequest.ResolvedAuthMethod = authenticationMethod;
         authorizationRequest.ResolvedOrganizationId = organizationId;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+
         await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
 
         var query = new Dictionary<string, string?>
@@ -900,7 +913,14 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         authorizationCode.ConsumedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization code is no longer valid.", ex);
+        }
 
         var tokens = await _authService.CreateSessionTokensForUserAsync(
             authorizationCode.User!,
@@ -1014,6 +1034,9 @@ public sealed class SqlOSAuthorizationServerService
 
     private SqlOSTotpMfaService RequireTotpMfaService()
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+        => exception.InnerException is SqlException { Number: 2601 or 2627 };
 }
 
 public sealed record SqlOSAuthorizeRequestInput(

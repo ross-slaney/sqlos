@@ -335,6 +335,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
             entity.Property(x => x.IpAddress).HasMaxLength(64);
             entity.Property(x => x.UserAgent).HasMaxLength(500);
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
@@ -625,6 +626,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);
             entity.Property(x => x.ResolvedAuthMethod).HasMaxLength(50);
+            entity.Property(x => x.CompletedAt).IsConcurrencyToken();
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
@@ -652,6 +654,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSAuthorizationCodes", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.CodeHash).IsUnique();
+            entity.HasIndex(x => x.AuthorizationRequestId).IsUnique();
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
             entity.Property(x => x.State).HasMaxLength(256);
             entity.Property(x => x.Scope).HasMaxLength(1000);
@@ -660,6 +663,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);
             entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
+            entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
             entity.HasOne(x => x.AuthorizationRequest)
                 .WithMany()
                 .HasForeignKey(x => x.AuthorizationRequestId)
