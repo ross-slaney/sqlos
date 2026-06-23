@@ -126,35 +126,14 @@ public static class SqlOSErgonomicsExtensions
         resource.ParentId = normalizedParentId;
         resource.Name = RequireValue(name, nameof(name));
         resource.ResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
-        resource.Description = NormalizeOptional(description);
+        if (description != null)
+        {
+            resource.Description = NormalizeOptional(description);
+        }
+
         resource.IsActive = true;
         resource.UpdatedAt = DateTime.UtcNow;
         return resource;
-    }
-
-    public static SqlOSFgaGrant GrantSqlOSRole(
-        this ISqlOSFgaDbContext context,
-        string subjectId,
-        string resourceId,
-        string roleId,
-        string? description = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var normalizedSubjectId = RequireValue(subjectId, nameof(subjectId));
-        var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
-        var normalizedRoleId = RequireValue(roleId, nameof(roleId));
-
-        var grant = new SqlOSFgaGrant
-        {
-            Id = BuildGrantId(normalizedSubjectId, normalizedResourceId, normalizedRoleId),
-            SubjectId = normalizedSubjectId,
-            ResourceId = normalizedResourceId,
-            RoleId = normalizedRoleId,
-            Description = NormalizeOptional(description)
-        };
-        context.Set<SqlOSFgaGrant>().Add(grant);
-        return grant;
     }
 
     public static async Task<SqlOSFgaGrant> GrantSqlOSRoleAsync(
@@ -222,7 +201,11 @@ public static class SqlOSErgonomicsExtensions
             return grant;
         }
 
-        grant.Description = NormalizeOptional(description);
+        if (description != null)
+        {
+            grant.Description = NormalizeOptional(description);
+        }
+
         grant.UpdatedAt = DateTime.UtcNow;
         return grant;
     }
@@ -234,7 +217,7 @@ public static class SqlOSErgonomicsExtensions
         string? email = null,
         string? organizationId = null,
         string? externalRef = null,
-        bool isActive = true,
+        bool? isActive = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -259,14 +242,22 @@ public static class SqlOSErgonomicsExtensions
                 Id = BuildTypedSubjectRowId("usr", subject.Id),
                 SubjectId = subject.Id,
                 Email = NormalizeOptional(email),
-                IsActive = isActive
+                IsActive = isActive ?? true
             };
             users.Add(user);
             return user;
         }
 
-        user.Email = NormalizeOptional(email);
-        user.IsActive = isActive;
+        if (email != null)
+        {
+            user.Email = NormalizeOptional(email);
+        }
+
+        if (isActive.HasValue)
+        {
+            user.IsActive = isActive.Value;
+        }
+
         user.UpdatedAt = DateTime.UtcNow;
         return user;
     }
@@ -309,8 +300,16 @@ public static class SqlOSErgonomicsExtensions
             return agent;
         }
 
-        agent.AgentType = NormalizeOptional(agentType);
-        agent.Description = NormalizeOptional(description);
+        if (agentType != null)
+        {
+            agent.AgentType = NormalizeOptional(agentType);
+        }
+
+        if (description != null)
+        {
+            agent.Description = NormalizeOptional(description);
+        }
+
         agent.UpdatedAt = DateTime.UtcNow;
         return agent;
     }
@@ -359,8 +358,16 @@ public static class SqlOSErgonomicsExtensions
 
         account.ClientId = RequireValue(clientId, nameof(clientId));
         account.ClientSecretHash = RequireValue(clientSecretHash, nameof(clientSecretHash));
-        account.Description = NormalizeOptional(description);
-        account.ExpiresAt = expiresAt;
+        if (description != null)
+        {
+            account.Description = NormalizeOptional(description);
+        }
+
+        if (expiresAt.HasValue)
+        {
+            account.ExpiresAt = expiresAt;
+        }
+
         account.UpdatedAt = DateTime.UtcNow;
         return account;
     }
@@ -469,8 +476,16 @@ public static class SqlOSErgonomicsExtensions
         }
 
         subject.DisplayName = RequireValue(displayName, nameof(displayName));
-        subject.OrganizationId = NormalizeOptional(organizationId);
-        subject.ExternalRef = NormalizeOptional(externalRef) ?? normalizedSubjectId;
+        if (organizationId != null)
+        {
+            subject.OrganizationId = NormalizeOptional(organizationId);
+        }
+
+        if (externalRef != null)
+        {
+            subject.ExternalRef = NormalizeOptional(externalRef);
+        }
+
         subject.UpdatedAt = DateTime.UtcNow;
         return subject;
     }

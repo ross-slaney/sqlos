@@ -91,16 +91,13 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public async Task GrantSqlOSRole_DoesNotCreateMissingSubject()
+    public void GrantSqlOSRole_HasNoPublicSyncOverload()
     {
-        using var context = CreateContext();
-        SeedFgaCore(context);
-        await context.SaveChangesAsync();
-
-        context.GrantSqlOSRole("typo_user", "root", "role_owner");
-
-        context.Set<SqlOSFgaSubject>().Local.Should().NotContain(x => x.Id == "typo_user");
-        (await context.Set<SqlOSFgaSubject>().FindAsync("typo_user")).Should().BeNull();
+        typeof(SqlOSErgonomicsExtensions)
+            .GetMethods()
+            .Where(x => x.Name == "GrantSqlOSRole")
+            .Should()
+            .BeEmpty("role grants must validate subject/resource existence and resolve role keys asynchronously");
     }
 
     [TestMethod]
@@ -118,6 +115,89 @@ public sealed class SqlOSErgonomicsExtensionsTests
         var missingResource = async () => await context.EnsureSqlOSRoleGrantAsync("usr_1", "missing_resource", "owner");
         await missingResource.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource 'missing_resource' was not found*");
+    }
+
+    [TestMethod]
+    public async Task EnsureHelpers_PreserveExistingOptionalMetadataWhenArgumentsAreOmitted()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        await context.EnsureSqlOSUserSubjectAsync(
+            "usr_1",
+            "User One",
+            "user@example.test",
+            "org_1",
+            "external_1",
+            false);
+        await context.EnsureSqlOSAgentSubjectAsync(
+            "agt_1",
+            "Agent One",
+            "worker",
+            "Initial description",
+            "org_1",
+            "agent_external_1");
+        await context.EnsureSqlOSServiceAccountSubjectAsync(
+            "sa_1",
+            "Service Account One",
+            "client_1",
+            "secret_1",
+            "Initial account",
+            new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            "org_1",
+            "sa_external_1");
+        await context.EnsureSqlOSResourceAsync(
+            "workspace_1",
+            "root",
+            "Workspace 1",
+            "workspace",
+            "Initial resource");
+        await context.EnsureSqlOSRoleGrantAsync(
+            "usr_1",
+            "workspace_1",
+            "owner",
+            "Initial grant");
+        await context.SaveChangesAsync();
+
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One Updated");
+        await context.EnsureSqlOSAgentSubjectAsync("agt_1", "Agent One Updated");
+        await context.EnsureSqlOSServiceAccountSubjectAsync("sa_1", "Service Account One Updated", "client_2", "secret_2");
+        await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1 Updated", "workspace");
+        await context.EnsureSqlOSRoleGrantAsync("usr_1", "workspace_1", "owner");
+        await context.SaveChangesAsync();
+
+        var subject = await context.Set<SqlOSFgaSubject>().SingleAsync(x => x.Id == "usr_1");
+        subject.DisplayName.Should().Be("User One Updated");
+        subject.OrganizationId.Should().Be("org_1");
+        subject.ExternalRef.Should().Be("external_1");
+
+        var user = await context.Set<SqlOSFgaUser>().SingleAsync(x => x.SubjectId == "usr_1");
+        user.Email.Should().Be("user@example.test");
+        user.IsActive.Should().BeFalse();
+
+        var agentSubject = await context.Set<SqlOSFgaSubject>().SingleAsync(x => x.Id == "agt_1");
+        agentSubject.OrganizationId.Should().Be("org_1");
+        agentSubject.ExternalRef.Should().Be("agent_external_1");
+        var agent = await context.Set<SqlOSFgaAgent>().SingleAsync(x => x.SubjectId == "agt_1");
+        agent.AgentType.Should().Be("worker");
+        agent.Description.Should().Be("Initial description");
+
+        var serviceAccountSubject = await context.Set<SqlOSFgaSubject>().SingleAsync(x => x.Id == "sa_1");
+        serviceAccountSubject.OrganizationId.Should().Be("org_1");
+        serviceAccountSubject.ExternalRef.Should().Be("sa_external_1");
+        var serviceAccount = await context.Set<SqlOSFgaServiceAccount>().SingleAsync(x => x.SubjectId == "sa_1");
+        serviceAccount.ClientId.Should().Be("client_2");
+        serviceAccount.ClientSecretHash.Should().Be("secret_2");
+        serviceAccount.Description.Should().Be("Initial account");
+        serviceAccount.ExpiresAt.Should().Be(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_1");
+        resource.Name.Should().Be("Workspace 1 Updated");
+        resource.Description.Should().Be("Initial resource");
+
+        var grant = await context.Set<SqlOSFgaGrant>().SingleAsync(x => x.SubjectId == "usr_1" && x.ResourceId == "workspace_1");
+        grant.Description.Should().Be("Initial grant");
     }
 
     [TestMethod]
