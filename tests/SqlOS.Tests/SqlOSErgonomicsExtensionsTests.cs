@@ -118,6 +118,73 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public async Task EnsureSqlOSResourceAsync_RequiresExistingParentResource()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var missingParent = async () => await context.EnsureSqlOSResourceAsync(
+            "workspace_1",
+            "missing_parent",
+            "Workspace 1",
+            "workspace");
+
+        await missingParent.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'missing_parent' was not found*");
+        context.Set<SqlOSFgaResource>().Local.Should().NotContain(x => x.Id == "workspace_1");
+    }
+
+    [TestMethod]
+    public async Task EnsureSqlOSResourceAsync_RequiresExistingResourceType()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var missingResourceType = async () => await context.EnsureSqlOSResourceAsync(
+            "workspace_1",
+            "root",
+            "Workspace 1",
+            "workpsace");
+
+        await missingResourceType.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource type 'workpsace' was not found*");
+        context.Set<SqlOSFgaResource>().Local.Should().NotContain(x => x.Id == "workspace_1");
+    }
+
+    [TestMethod]
+    public async Task EnsureSqlOSResourceAsync_ValidatesParentAndResourceTypeWhenUpdating()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1", "workspace");
+        await context.SaveChangesAsync();
+
+        var missingParent = async () => await context.EnsureSqlOSResourceAsync(
+            "workspace_1",
+            "missing_parent",
+            "Workspace 1",
+            "workspace");
+        await missingParent.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'missing_parent' was not found*");
+
+        var missingResourceType = async () => await context.EnsureSqlOSResourceAsync(
+            "workspace_1",
+            "root",
+            "Workspace 1",
+            "workpsace");
+        await missingResourceType.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource type 'workpsace' was not found*");
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_1");
+        resource.ParentId.Should().Be("root");
+        resource.ResourceTypeId.Should().Be("workspace");
+    }
+
+    [TestMethod]
     public async Task EnsureHelpers_PreserveExistingOptionalMetadataWhenArgumentsAreOmitted()
     {
         using var context = CreateContext();

@@ -108,6 +108,14 @@ public static class SqlOSErgonomicsExtensions
 
         var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
         var normalizedParentId = NormalizeOptional(parentResourceId);
+        var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
+        EnsureResourceParentIsNotSelf(normalizedResourceId, normalizedParentId);
+        await FindRequiredResourceTypeAsync(context, normalizedResourceTypeId, cancellationToken);
+        if (normalizedParentId != null)
+        {
+            await FindRequiredResourceAsync(context, normalizedParentId, cancellationToken);
+        }
+
         await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, normalizedParentId, cancellationToken);
 
         var resource = await FindResourceAsync(context, normalizedResourceId, cancellationToken);
@@ -117,7 +125,7 @@ public static class SqlOSErgonomicsExtensions
                 normalizedResourceId,
                 normalizedParentId,
                 name,
-                resourceTypeId,
+                normalizedResourceTypeId,
                 description);
             context.Set<SqlOSFgaResource>().Add(resource);
             return resource;
@@ -125,7 +133,7 @@ public static class SqlOSErgonomicsExtensions
 
         resource.ParentId = normalizedParentId;
         resource.Name = RequireValue(name, nameof(name));
-        resource.ResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
+        resource.ResourceTypeId = normalizedResourceTypeId;
         if (description != null)
         {
             resource.Description = NormalizeOptional(description);
@@ -522,7 +530,24 @@ public static class SqlOSErgonomicsExtensions
         string resourceId,
         CancellationToken cancellationToken)
         => await FindResourceAsync(context, resourceId, cancellationToken)
-            ?? throw new InvalidOperationException($"FGA resource '{resourceId}' was not found. Provision the resource before granting roles.");
+            ?? throw new InvalidOperationException($"FGA resource '{resourceId}' was not found.");
+
+    private static async Task<SqlOSFgaResourceType?> FindResourceTypeAsync(
+        ISqlOSFgaDbContext context,
+        string resourceTypeId,
+        CancellationToken cancellationToken)
+    {
+        var resourceTypes = context.Set<SqlOSFgaResourceType>();
+        return resourceTypes.Local.FirstOrDefault(x => x.Id == resourceTypeId)
+            ?? await resourceTypes.FirstOrDefaultAsync(x => x.Id == resourceTypeId, cancellationToken);
+    }
+
+    private static async Task<SqlOSFgaResourceType> FindRequiredResourceTypeAsync(
+        ISqlOSFgaDbContext context,
+        string resourceTypeId,
+        CancellationToken cancellationToken)
+        => await FindResourceTypeAsync(context, resourceTypeId, cancellationToken)
+            ?? throw new InvalidOperationException($"FGA resource type '{resourceTypeId}' was not found. Seed or create the resource type before provisioning resources.");
 
     private static async Task<string> ResolveRoleIdAsync(
         ISqlOSFgaDbContext context,
