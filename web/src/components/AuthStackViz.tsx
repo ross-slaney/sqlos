@@ -93,8 +93,9 @@ export default function AuthStackViz() {
   const center = R + 40;
 
   return (
-    <div className="neon-panel flex items-center justify-center rounded-lg p-4">
-      <div className="relative origin-center scale-[0.8] sm:scale-100" style={{ width: R * 2 + 80, height: R * 2 + 80 }}>
+    <div className="flex items-center justify-center">
+      <div className="relative scale-[0.8] sm:scale-100 origin-center" style={{ width: R * 2 + 80, height: R * 2 + 80 }}>
+        {/* Connection lines */}
         <svg className="absolute inset-0 w-full h-full" viewBox={`0 0 ${R * 2 + 80} ${R * 2 + 80}`}>
           {providers.map((p, i) => {
             const isConnected = connected.has(i);
@@ -106,13 +107,7 @@ export default function AuthStackViz() {
                 y1={center}
                 x2={center + positions[i].x}
                 y2={center + positions[i].y}
-                stroke={
-                  isConnected
-                    ? isActive
-                      ? "oklch(0.88 0.2 146 / 0.58)"
-                      : "oklch(0.82 0.17 200 / 0.2)"
-                    : "transparent"
-                }
+                stroke={isConnected ? (isActive ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)") : "transparent"}
                 strokeWidth={isActive ? 2 : 1}
                 className="transition-all duration-500"
               />
@@ -120,16 +115,18 @@ export default function AuthStackViz() {
           })}
         </svg>
 
+        {/* Center hub */}
         <div
           className="absolute flex flex-col items-center"
           style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}
         >
-          <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-neon-cyan/35 bg-neon-cyan/10 shadow-[0_0_34px_oklch(0.82_0.17_200_/_0.18)] backdrop-blur-sm">
-            <span className="text-[11px] font-bold text-neon-cyan">SqlOS</span>
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 border border-white/20 backdrop-blur-sm">
+            <span className="text-[11px] font-bold text-white tracking-tight">SqlOS</span>
           </div>
-          <div className="mt-1.5 text-[10px] font-medium text-muted-foreground">AuthServer</div>
+          <div className="mt-1.5 text-[10px] font-medium text-white/50">AuthServer</div>
         </div>
 
+        {/* Provider nodes */}
         {providers.map((p, i) => {
           const isConnected = connected.has(i);
           const isActive = activeIdx === i;
@@ -147,10 +144,10 @@ export default function AuthStackViz() {
               }}
             >
               <div
-                className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-neon-cyan/15 transition-all duration-300"
+                className="flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-300 overflow-hidden"
                 style={{
                   backgroundColor: isConnected ? p.bg : "#44403c",
-                  boxShadow: isActive ? `0 0 28px ${p.color}55` : "none",
+                  boxShadow: isActive ? `0 0 28px ${p.color}40` : "none",
                   transform: isActive ? "scale(1.15)" : "scale(1)",
                 }}
               >
@@ -158,7 +155,7 @@ export default function AuthStackViz() {
               </div>
               <div
                 className="mt-1.5 text-[9px] font-medium transition-colors duration-300 whitespace-nowrap"
-                style={{ color: isActive ? "var(--neon-green)" : "var(--muted-foreground)" }}
+                style={{ color: isActive ? "#ffffff" : "rgba(255,255,255,0.35)" }}
               >
                 {p.name}
               </div>

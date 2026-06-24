@@ -16,38 +16,29 @@ export default function BrandMark({ className }: { className?: string }) {
           y2="58"
           gradientUnits="userSpaceOnUse"
         >
-          <stop stopColor="oklch(0.88 0.2 146)" />
-          <stop offset="0.54" stopColor="oklch(0.82 0.17 200)" />
-          <stop offset="1" stopColor="oklch(0.72 0.2 24)" />
+          <stop stopColor="hsl(var(--theme-hue) 88% 72%)" />
+          <stop offset="1" stopColor="hsl(var(--theme-hue) 74% 48%)" />
         </linearGradient>
-        <filter id="sqlos-header-glow" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="2.5" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
       </defs>
-      <rect width="64" height="64" rx="10" fill="oklch(0.08 0.026 248)" />
-      <rect
-        x="3"
-        y="3"
-        width="58"
-        height="58"
-        rx="8"
-        stroke="url(#sqlos-header-gradient)"
-        strokeWidth="2"
-        opacity="0.9"
-      />
+      <rect width="64" height="64" rx="16" fill="url(#sqlos-header-gradient)" />
       <path
-        d="M20 15H44C46.7614 15 49 17.2386 49 20V44C49 46.7614 46.7614 49 44 49H20C17.2386 49 15 46.7614 15 44V20C15 17.2386 17.2386 15 20 15Z"
-        fill="oklch(0.16 0.04 238 / 0.86)"
-        stroke="oklch(0.82 0.17 200)"
-        strokeWidth="2"
-        filter="url(#sqlos-header-glow)"
+        d="M14 14C24 8 44 8 52 22C44 18 28 17 18 20C15 18 14 16 14 14Z"
+        fill="#FFFFFF"
+        fillOpacity="0.12"
       />
-      <path d="M23 25H41M23 32H37M23 39H42" stroke="oklch(0.88 0.2 146)" strokeWidth="3" strokeLinecap="round" />
-      <path d="M18 18L46 46" stroke="oklch(0.72 0.2 24 / 0.55)" strokeWidth="1.5" />
+      <text
+        x="50%"
+        y="52%"
+        fill="#FFFFFF"
+        fontFamily="Manrope, 'Helvetica Neue', Arial, sans-serif"
+        fontSize="26"
+        fontWeight="800"
+        letterSpacing="-1.25"
+        textAnchor="middle"
+        dominantBaseline="middle"
+      >
+        SO
+      </text>
     </svg>
   );
 }

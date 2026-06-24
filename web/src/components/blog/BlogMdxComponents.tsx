@@ -158,11 +158,11 @@ const visualCopy: Record<
 function toneClasses(tone: "primary" | "neutral" | "accent") {
   switch (tone) {
     case "primary":
-      return "border-neon-cyan/35 bg-neon-cyan/10 text-foreground";
+      return "border-indigo-300 bg-indigo-50 text-indigo-950 dark:border-indigo-700/70 dark:bg-indigo-950/40 dark:text-indigo-100";
     case "accent":
-      return "border-neon-green/35 bg-neon-green/10 text-foreground";
+      return "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-700/70 dark:bg-emerald-950/30 dark:text-emerald-100";
     default:
-      return "border-border/70 bg-card/70 text-foreground";
+      return "border-zinc-300 bg-zinc-50 text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-100";
   }
 }
 
@@ -170,12 +170,12 @@ export function BlogVisual({ kind }: { kind: VisualKind }) {
   const visual = visualCopy[kind];
 
   return (
-    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-neon-cyan/25 bg-card/80 shadow-[0_18px_70px_oklch(0_0_0_/_0.28)]">
-      <div className="border-b border-border/70 bg-muted/45 px-5 py-4">
-        <h3 className="text-base font-semibold text-foreground">
+    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 bg-zinc-50 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
           {visual.title}
         </h3>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           {visual.caption}
         </p>
       </div>
@@ -186,7 +186,7 @@ export function BlogVisual({ kind }: { kind: VisualKind }) {
             className={`relative rounded-lg border p-4 ${toneClasses(lane.tone)}`}
           >
             <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-neon-cyan/30 bg-background/65 text-xs font-semibold text-neon-cyan">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/75 text-xs font-semibold text-zinc-800 ring-1 ring-black/10 dark:bg-black/20 dark:text-zinc-100 dark:ring-white/10">
                 {index + 1}
               </span>
               <h4 className="text-sm font-semibold">{lane.label}</h4>
@@ -195,7 +195,7 @@ export function BlogVisual({ kind }: { kind: VisualKind }) {
               {lane.nodes.map((node) => (
                 <li
                   key={node}
-                  className="rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm text-muted-foreground"
+                  className="rounded-md bg-white/70 px-3 py-2 text-sm ring-1 ring-black/5 dark:bg-black/20 dark:ring-white/10"
                 >
                   {node}
                 </li>
@@ -218,7 +218,7 @@ export function BlogScreenshot({
   caption?: string;
 }) {
   return (
-    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-neon-cyan/25 bg-card/80 shadow-[0_18px_70px_oklch(0_0_0_/_0.28)]">
+    <figure className="not-prose my-10 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <Image
         src={src}
         alt={alt}
@@ -228,7 +228,7 @@ export function BlogScreenshot({
         className="h-auto w-full"
       />
       {caption ? (
-        <figcaption className="border-t border-border/70 bg-muted/45 px-5 py-3 text-sm text-muted-foreground">
+        <figcaption className="border-t border-zinc-200 bg-zinc-50 px-5 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           {caption}
         </figcaption>
       ) : null}
@@ -244,9 +244,9 @@ export function BlogCallout({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="not-prose my-8 rounded-lg border border-neon-cyan/30 bg-neon-cyan/10 p-5 text-foreground">
-      <h3 className="text-sm font-semibold uppercase text-neon-cyan">{title}</h3>
-      <div className="mt-2 text-sm leading-6 text-muted-foreground">
+    <aside className="not-prose my-8 rounded-lg border border-indigo-200 bg-indigo-50 p-5 text-indigo-950 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100">
+      <h3 className="text-sm font-semibold uppercase tracking-wide">{title}</h3>
+      <div className="mt-2 text-sm leading-6 text-indigo-900 dark:text-indigo-100">
         {children}
       </div>
     </aside>
@@ -257,10 +257,10 @@ function BlogTable(props: TableHTMLAttributes<HTMLTableElement>) {
   const { className, ...tableProps } = props;
 
   return (
-    <div className="not-prose my-8 overflow-x-auto rounded-lg border border-neon-cyan/25">
+    <div className="not-prose my-8 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table
         {...tableProps}
-        className={`min-w-full border-collapse bg-card/75 text-sm [&_td]:border-t [&_td]:border-border/70 [&_td]:px-4 [&_td]:py-3 [&_td]:align-top [&_td]:text-muted-foreground [&_th]:bg-muted/50 [&_th]:px-4 [&_th]:py-3 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground ${className ?? ""}`}
+        className={`min-w-full border-collapse bg-white text-sm dark:bg-zinc-950 [&_td]:border-t [&_td]:border-zinc-200 [&_td]:px-4 [&_td]:py-3 [&_td]:align-top [&_td]:text-zinc-700 dark:[&_td]:border-zinc-800 dark:[&_td]:text-zinc-300 [&_th]:bg-zinc-50 [&_th]:px-4 [&_th]:py-3 [&_th]:text-left [&_th]:font-semibold [&_th]:text-zinc-950 dark:[&_th]:bg-zinc-900 dark:[&_th]:text-zinc-100 ${className ?? ""}`}
       />
     </div>
   );

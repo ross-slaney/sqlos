@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Chip } from "@heroui/react";
 import { getPaginatedPosts } from "@/lib/blog";
 
 export const metadata = {
@@ -28,23 +27,15 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
   const nextPage = currentPage < totalPages ? currentPage + 1 : null;
 
   return (
-    <div className="mx-4 max-w-[360px] overflow-hidden py-16 sm:mx-auto sm:max-w-[1400px] sm:px-6">
-      <Chip
-        size="sm"
-        variant="soft"
-        color="accent"
-        className="border border-neon-cyan/30 bg-neon-cyan/10 text-neon-cyan"
-      >
-        SqlOS notes
-      </Chip>
-      <h1 className="mt-5 text-4xl font-bold text-foreground sm:text-5xl">Blog</h1>
-      <p className="mt-4 max-w-2xl text-lg leading-8 text-muted-foreground">
-        Notes on OAuth, hosted auth, hierarchical authorization, EF Core, and SQL-backed
+    <div className="mx-auto max-w-[1400px] px-6 py-16">
+      <h1 className="text-4xl font-bold text-foreground">Blog</h1>
+      <p className="mt-4 text-lg text-muted-foreground">
+        Notes on auth, hierarchical authorization, EF Core, and practical .NET
         application security.
       </p>
 
       <nav
-        className="mt-8 flex flex-col gap-4 border-b border-border/70 pb-6 sm:flex-row sm:items-center sm:justify-between"
+        className="mt-8 flex items-center justify-between border-b pb-6"
         aria-label="Blog pagination"
       >
         <p className="text-sm text-muted-foreground">
@@ -52,16 +43,16 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
             ? "No posts"
             : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, total)} of ${total} posts`}
         </p>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           {prevPage ? (
             <Link
               href={prevPage === 1 ? "/blog" : `/blog?page=${prevPage}`}
-              className="rounded-md border border-neon-cyan/35 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/10"
+              className="rounded-md border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
               &larr; Previous
             </Link>
           ) : (
-            <span className="cursor-not-allowed rounded-md border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
+            <span className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
               &larr; Previous
             </span>
           )}
@@ -71,12 +62,12 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
           {nextPage ? (
             <Link
               href={`/blog?page=${nextPage}`}
-              className="rounded-md border border-neon-cyan/35 px-4 py-2 text-sm font-medium text-neon-cyan transition-colors hover:bg-neon-cyan/10"
+              className="rounded-md border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
               Next &rarr;
             </Link>
           ) : (
-            <span className="cursor-not-allowed rounded-md border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
+            <span className="cursor-not-allowed rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground opacity-50">
               Next &rarr;
             </span>
           )}
@@ -88,10 +79,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
           <p className="text-muted-foreground">No posts yet. Check back soon!</p>
         ) : (
           posts.map((post) => (
-            <article
-              key={post.slug}
-              className="group max-w-full overflow-hidden rounded-lg border border-border/70 bg-card/55 p-5 shadow-[0_14px_50px_oklch(0_0_0_/_0.18)] transition-colors hover:border-neon-cyan/45"
-            >
+            <article key={post.slug} className="group">
               <Link href={`/blog/${post.slug}`}>
                 <div className="flex flex-col gap-2">
                   <time className="text-sm text-muted-foreground">
@@ -101,7 +89,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
                       day: "numeric",
                     })}
                   </time>
-                  <h2 className="text-balance text-xl font-semibold text-foreground transition-colors group-hover:text-neon-cyan sm:text-2xl">
+                  <h2 className="text-2xl font-semibold text-foreground transition-colors group-hover:text-muted-foreground">
                     {post.title}
                   </h2>
                   <p className="text-muted-foreground">{post.description}</p>
@@ -110,7 +98,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
                       {post.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="inline-flex items-center rounded-md border border-neon-green/25 bg-neon-green/10 px-3 py-1 text-xs font-medium text-neon-green"
+                          className="inline-flex items-center rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
                         >
                           {tag}
                         </span>

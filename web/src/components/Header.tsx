@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Button, Chip } from "@heroui/react";
-import { Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import BrandMark from "@/components/BrandMark";
+import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { GitHubIcon } from "@/components/icons";
 
 const navLinks = [
@@ -38,34 +37,26 @@ export default function Header() {
       className={[
         "sticky top-0 z-50 w-full transition-all duration-200",
         scrolled
-          ? "border-b border-border/70 bg-background/88 shadow-[0_0_34px_oklch(0.82_0.17_200_/_0.08)] backdrop-blur-xl"
-          : "bg-background/35 backdrop-blur-sm",
+          ? "border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+          : "bg-transparent",
       ].join(" ")}
     >
-      <div className="relative mx-auto flex h-14 w-full max-w-[1400px] items-center justify-between px-6">
+      <div className="mx-auto flex h-14 w-full max-w-[1400px] items-center justify-between px-6">
         <Link
           href="/"
-          className="flex min-w-0 items-center gap-2.5 font-semibold text-foreground"
+          className="flex items-center gap-2.5 font-semibold text-foreground"
           onClick={() => setIsMenuOpen(false)}
         >
           <BrandMark className="h-7 w-7" />
           <span>SqlOS</span>
-          <Chip
-            size="sm"
-            variant="soft"
-            color="success"
-            className="hidden border border-neon-green/30 bg-neon-green/10 text-[10px] text-neon-green sm:inline-flex"
-          >
-            Program.cs
-          </Chip>
         </Link>
 
-        <nav className="hidden items-center gap-1 lg:flex">
+        <nav className="hidden items-center gap-1 md:flex">
           {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/10 hover:text-neon-cyan"
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               {link.label}
             </Link>
@@ -74,41 +65,55 @@ export default function Header() {
             href="https://github.com/ross-slaney/sqlos"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/10 hover:text-neon-cyan"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             aria-label="GitHub"
           >
             <GitHubIcon className="h-4 w-4" />
           </a>
+          <ThemeSwitcher className="ml-1" />
           <Link
-            href="/docs/guides/configuration"
-            className="ml-2 rounded-md border border-neon-green/40 bg-neon-green px-3 py-1.5 text-sm font-semibold text-background shadow-[0_0_22px_oklch(0.88_0.2_146_/_0.22)] transition-colors hover:bg-neon-cyan"
+            href="/docs/getting-started"
+            className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Configuration guide
+            Get started
           </Link>
         </nav>
 
-        <div className="absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-2 lg:hidden">
-          <Button
-            isIconOnly
-            size="sm"
-            variant="outline"
-            className="shrink-0 border-neon-cyan/35 bg-card/70 text-neon-cyan"
-            onPress={() => setIsMenuOpen(!isMenuOpen)}
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeSwitcher />
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
             aria-label={isMenuOpen ? "Close menu" : "Open menu"}
           >
-            {isMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </Button>
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+            >
+              {isMenuOpen ? (
+                <path d="M6 6l12 12M18 6L6 18" />
+              ) : (
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              )}
+            </svg>
+          </button>
         </div>
       </div>
 
       {isMenuOpen && (
-        <div className="border-t border-border/70 bg-background/96 p-4 shadow-[0_24px_70px_oklch(0_0_0_/_0.42)] backdrop-blur-xl lg:hidden">
+        <div className="border-t bg-background p-4 md:hidden">
           <nav className="flex flex-col gap-1">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent/10 hover:text-neon-cyan"
+                className="rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
                 onClick={() => setIsMenuOpen(false)}
               >
                 {link.label}
@@ -118,16 +123,16 @@ export default function Header() {
               href="https://github.com/ross-slaney/sqlos"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent/10 hover:text-neon-cyan"
+              className="rounded-md px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
               GitHub
             </a>
             <Link
-              href="/docs/guides/configuration"
-              className="mt-2 rounded-md bg-neon-green px-3 py-2 text-center text-sm font-semibold text-background"
+              href="/docs/getting-started"
+              className="mt-2 rounded-md bg-primary px-3 py-2 text-center text-sm font-medium text-primary-foreground"
               onClick={() => setIsMenuOpen(false)}
             >
-              Configuration guide
+              Get started
             </Link>
           </nav>
         </div>
