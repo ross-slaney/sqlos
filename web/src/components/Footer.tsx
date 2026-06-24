@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Chip } from "@heroui/react";
 import BrandMark from "@/components/BrandMark";
 import { GitHubIcon } from "@/components/icons";
 
@@ -38,7 +39,7 @@ export default function Footer() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="border-t bg-background">
+    <footer className="border-t border-border/70 bg-background/92">
       <div className="mx-auto max-w-[1400px] px-6 py-12">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -47,8 +48,17 @@ export default function Footer() {
               <span>SqlOS</span>
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-6 text-muted-foreground">
-              Embedded auth server and fine-grained authorization for .NET — your database, your process.
+              OAuth, hosted login, SSO, FGA, and dashboard UI for .NET builders who want auth inside
+              their own app boundary.
             </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Chip size="sm" variant="soft" color="accent" className="border border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan">
+                self-hosted
+              </Chip>
+              <Chip size="sm" variant="soft" color="success" className="border border-neon-green/25 bg-neon-green/10 text-neon-green">
+                SQL-backed
+              </Chip>
+            </div>
           </div>
 
           <FooterColumn title="Product" links={productLinks} />
@@ -56,7 +66,7 @@ export default function Footer() {
           <FooterColumn title="Community" links={communityLinks} />
         </div>
 
-        <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t pt-8 sm:flex-row">
+        <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-border/70 pt-8 sm:flex-row">
           <p className="text-sm text-muted-foreground">
             &copy; {currentYear} SqlOS. All rights reserved.
           </p>
@@ -64,7 +74,7 @@ export default function Footer() {
             href="https://github.com/ross-slaney/sqlos"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-muted-foreground transition-colors hover:text-foreground"
+            className="text-muted-foreground transition-colors hover:text-neon-cyan"
             aria-label="GitHub"
           >
             <GitHubIcon className="h-5 w-5" />
@@ -84,7 +94,7 @@ function FooterColumn({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      <h3 className="text-xs font-semibold uppercase text-muted-foreground">
         {title}
       </h3>
       <ul className="mt-3 space-y-2">
@@ -95,14 +105,14 @@ function FooterColumn({
                 href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-foreground/80 transition-colors hover:text-primary"
+                className="text-sm text-foreground/80 transition-colors hover:text-neon-cyan"
               >
                 {link.label}
               </a>
             ) : (
               <Link
                 href={link.href}
-                className="text-sm text-foreground/80 transition-colors hover:text-primary"
+                className="text-sm text-foreground/80 transition-colors hover:text-neon-cyan"
               >
                 {link.label}
               </Link>

@@ -14,28 +14,36 @@
       y2="58"
       gradientUnits="userSpaceOnUse"
     >
-      <stop stop-color="#8B5CF6" />
-      <stop offset="1" stop-color="#6D28D9" />
+      <stop stop-color="oklch(0.88 0.2 146)" />
+      <stop offset="0.54" stop-color="oklch(0.82 0.17 200)" />
+      <stop offset="1" stop-color="oklch(0.72 0.2 24)" />
     </linearGradient>
+    <filter id="sqlos-icon-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
   </defs>
 
-  <rect width="64" height="64" rx="16" fill="url(#sqlos-icon-gradient)" />
-  <path
-    d="M14 14C24 8 44 8 52 22C44 18 28 17 18 20C15 18 14 16 14 14Z"
-    fill="#FFFFFF"
-    fill-opacity="0.12"
+  <rect width="64" height="64" rx="10" fill="oklch(0.08 0.026 248)" />
+  <rect
+    x="3"
+    y="3"
+    width="58"
+    height="58"
+    rx="8"
+    stroke="url(#sqlos-icon-gradient)"
+    stroke-width="2"
   />
-  <text
-    x="50%"
-    y="52%"
-    fill="#FFFFFF"
-    font-family="Manrope, 'Helvetica Neue', Arial, sans-serif"
-    font-size="26"
-    font-weight="800"
-    letter-spacing="-1.25"
-    text-anchor="middle"
-    dominant-baseline="middle"
-  >
-    SO
-  </text>
+  <path
+    d="M20 15H44C46.7614 15 49 17.2386 49 20V44C49 46.7614 46.7614 49 44 49H20C17.2386 49 15 46.7614 15 44V20C15 17.2386 17.2386 15 20 15Z"
+    fill="oklch(0.16 0.04 238 / 0.86)"
+    stroke="oklch(0.82 0.17 200)"
+    stroke-width="2"
+    filter="url(#sqlos-icon-glow)"
+  />
+  <path d="M23 25H41M23 32H37M23 39H42" stroke="oklch(0.88 0.2 146)" stroke-width="3" stroke-linecap="round" />
+  <path d="M18 18L46 46" stroke="oklch(0.72 0.2 24 / 0.55)" stroke-width="1.5" />
 </svg>

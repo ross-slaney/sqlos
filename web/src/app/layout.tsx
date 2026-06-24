@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import "@emcy/docs/styles.css";
 import "./globals.css";
-import ThemeProvider from "@/components/ThemeProvider";
 
 const manrope = Manrope({
   variable: "--font-sans-ui",
@@ -16,9 +15,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SqlOS | Auth, Social Login, SSO, and FGA for .NET",
+  title: "SqlOS | Auth Stack for .NET Builders",
   description:
-    "SqlOS is an embedded platform for auth, social login, SSO, and graph-shaped authorization in .NET. Ship an auth server and FGA runtime inside your application, with premium operator guides and a full example stack.",
+    "SqlOS puts OAuth, hosted login, social auth, SSO, FGA, and an admin dashboard inside your ASP.NET app and SQL Server.",
 };
 
 export default function RootLayout({
@@ -27,9 +26,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning data-theme="violet">
-      <body className={`${manrope.variable} ${ibmPlexMono.variable} antialiased`}>
-        <ThemeProvider>{children}</ThemeProvider>
+    <html lang="en" className="dark" data-theme="dark" data-scrollbar="thin">
+      <body
+        className={`${manrope.variable} ${ibmPlexMono.variable} bg-background text-foreground antialiased`}
+      >
+        {children}
       </body>
     </html>
   );

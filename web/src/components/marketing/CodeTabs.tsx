@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@heroui/react";
 import { useState } from "react";
 
 const tabs = [
@@ -36,25 +37,26 @@ export default function CodeTabs() {
   const current = tabs.find((tab) => tab.id === active) ?? tabs[0];
 
   return (
-    <div className="overflow-hidden rounded-2xl border bg-card shadow-lg">
-      <div className="flex border-b bg-muted/40">
+    <div className="overflow-hidden rounded-lg border border-neon-cyan/25 bg-card/80 shadow-[0_18px_70px_oklch(0_0_0_/_0.32)]">
+      <div className="flex flex-wrap gap-2 border-b border-border/70 bg-muted/40 p-3">
         {tabs.map((tab) => (
-          <button
+          <Button
             key={tab.id}
-            type="button"
-            onClick={() => setActive(tab.id)}
+            size="sm"
+            variant={active === tab.id ? "primary" : "outline"}
+            onPress={() => setActive(tab.id)}
             className={[
-              "px-4 py-2.5 text-xs font-semibold transition-colors sm:text-sm",
+              "text-xs font-semibold sm:text-sm",
               active === tab.id
-                ? "border-b-2 border-primary bg-background text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-neon-green text-background"
+                : "border-neon-cyan/25 bg-transparent text-neon-cyan",
             ].join(" ")}
           >
             {tab.label}
-          </button>
+          </Button>
         ))}
       </div>
-      <pre className="overflow-x-auto px-4 py-5 font-mono text-[12px] leading-7 text-foreground sm:px-5 sm:text-[13px]">
+      <pre className="overflow-x-auto bg-[oklch(0.055_0.022_248)] px-4 py-5 font-mono text-[12px] leading-7 text-foreground sm:px-5 sm:text-[13px]">
         <code>{current.code}</code>
       </pre>
     </div>

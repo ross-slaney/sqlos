@@ -5,7 +5,7 @@ import { fgaConcepts } from "@/components/marketing/constants";
 
 export default function FgaSection() {
   return (
-    <section className="border-t px-6 py-20 sm:py-24">
+    <section className="border-t border-border/70 px-6 py-20 sm:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="grid items-start gap-12 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
           <div className="order-2 space-y-6 lg:order-1">
@@ -17,15 +17,15 @@ export default function FgaSection() {
           </div>
 
           <div className="order-1 lg:order-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            <p className="font-mono text-[11px] font-semibold uppercase text-neon-green">
               Authorization
             </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-semibold text-foreground sm:text-4xl">
               Authorization in SQL, not middleware
             </h2>
             <p className="mt-5 text-base leading-7 text-muted-foreground">
               Every multi-tenant app eventually outgrows{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
+              <code className="rounded-md border border-neon-cyan/20 bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
                 if (user.Role == &quot;Admin&quot;)
               </code>
               . SqlOS FGA mirrors your product hierarchy. Assign a role at any node and permissions cascade
@@ -49,14 +49,14 @@ export default function FgaSection() {
                 href="https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-medium text-primary underline underline-offset-4 hover:text-primary/80"
+                className="font-medium text-neon-cyan underline underline-offset-4 hover:text-neon-green"
               >
                 SHRBAC
               </a>{" "}
               and explained in{" "}
               <Link
                 href="/blog/developers-guide-to-hierarchical-rbac"
-                className="font-medium text-primary underline underline-offset-4 hover:text-primary/80"
+                className="font-medium text-neon-cyan underline underline-offset-4 hover:text-neon-green"
               >
                 The Developer&apos;s Guide to Hierarchical RBAC
               </Link>

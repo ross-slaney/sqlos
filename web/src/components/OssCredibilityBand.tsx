@@ -12,7 +12,7 @@ type OssCredibilityBandProps = {
 
 export default function OssCredibilityBand({ githubStars }: OssCredibilityBandProps) {
   return (
-    <section className="border-y bg-muted/30 px-6 py-8">
+    <section className="border-y border-border/70 bg-background/72 px-6 py-8">
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <CredibilityItem
@@ -20,7 +20,7 @@ export default function OssCredibilityBand({ githubStars }: OssCredibilityBandPr
             title="SqlOS on GitHub"
             description={
               githubStars
-                ? `${githubStars} stars — auth, SSO, and FGA in one .NET package.`
+                ? `${githubStars} stars for the self-hosted .NET auth stack.`
                 : "Auth, SSO, and FGA in one .NET package."
             }
             href={GITHUB_REPO}
@@ -68,16 +68,16 @@ function CredibilityItem({
   icon?: ReactNode;
 }) {
   const className =
-    "group flex flex-col rounded-xl border bg-card/80 p-4 shadow-sm transition-colors hover:border-primary/30 hover:bg-card";
+    "group flex flex-col rounded-lg border border-border/70 bg-card/70 p-4 shadow-[0_14px_50px_oklch(0_0_0_/_0.18)] transition-colors hover:border-neon-cyan/45 hover:bg-card";
 
   const content = (
     <>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <p className="text-[10px] font-semibold uppercase text-muted-foreground">
         {label}
       </p>
       <div className="mt-2 flex items-center gap-2">
         {icon ? (
-          <span className="text-primary transition-colors group-hover:text-primary/80">
+          <span className="text-neon-cyan transition-colors group-hover:text-neon-green">
             {icon}
           </span>
         ) : null}

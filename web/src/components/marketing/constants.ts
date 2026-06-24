@@ -4,7 +4,7 @@ export const authHighlights = [
     body: "The dashboard walks you through Google, Microsoft, Apple, and custom OIDC configuration with provider-specific instructions and copy-ready callback URIs.",
   },
   {
-    title: "Enterprise SSO in minutes",
+    title: "SSO when the app grows",
     body: "Create a SAML draft, hand your customer the Entity ID and ACS URL, import their federation metadata. Home realm discovery routes users by email domain automatically.",
   },
   {
@@ -17,7 +17,7 @@ export const authStackFeatures = [
   {
     title: "SSO for any provider",
     description:
-      "Support SAML and OIDC identity providers with a single integration. Configure per-org from the embedded dashboard.",
+      "Support SAML and OIDC identity providers with a single integration. Configure per org from the embedded dashboard.",
   },
   {
     title: "User and org management",
@@ -72,7 +72,7 @@ export const productFeatures = [
   },
   {
     title: "SAML SSO",
-    description: "Org-scoped enterprise SSO with home realm discovery by email domain.",
+    description: "Org-scoped SSO with home realm discovery by email domain.",
   },
   {
     title: "FGA engine",
@@ -99,7 +99,7 @@ export const productFeatures = [
 export const exampleApps = [
   {
     title: "Todo sample",
-    description: "Hosted auth, per-user FGA, and MCP-oriented client onboarding in about five minutes.",
+    description: "Hosted auth, per-user FGA, and client onboarding in about five minutes.",
     href: "/docs/getting-started#run-the-right-sample",
     cta: "Run Todo sample",
   },

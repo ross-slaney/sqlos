@@ -1,6 +1,7 @@
 import OssCredibilityBand from "@/components/OssCredibilityBand";
 import AuthSection from "@/components/marketing/AuthSection";
 import AuthStackSection from "@/components/marketing/AuthStackSection";
+import ConfigurationWalkthrough from "@/components/marketing/ConfigurationWalkthrough";
 import CtaSection from "@/components/marketing/CtaSection";
 import DeveloperExperienceSection from "@/components/marketing/DeveloperExperienceSection";
 import ExampleAppsSection from "@/components/marketing/ExampleAppsSection";
@@ -16,6 +17,7 @@ export default async function Home() {
   return (
     <div className="relative min-h-screen">
       <HeroSection />
+      <ConfigurationWalkthrough />
       <OssCredibilityBand githubStars={githubStars} />
       <AuthSection />
       <AuthStackSection />

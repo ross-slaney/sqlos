@@ -4,13 +4,13 @@ import Header from "@/components/Header";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sqlos.dev"),
-  title: "SqlOS | Auth, Social Login, SSO, and FGA for .NET",
+  title: "SqlOS | Auth Stack for .NET Builders",
   description:
-    "Embedded OAuth server, branded login, enterprise SSO, and fine-grained authorization for .NET — one NuGet package in your process and your SQL Server.",
+    "OAuth, hosted login, social auth, SSO, FGA, and an admin dashboard in one self-hosted .NET package.",
   openGraph: {
-    title: "SqlOS | Enterprise auth for your .NET app",
+    title: "SqlOS | Auth Stack for .NET Builders",
     description:
-      "OAuth, SAML SSO, social login, and FGA in one self-hosted NuGet package. See the dashboard, run the Todo sample, and ship in minutes.",
+      "Put OAuth, hosted login, social auth, SSO, FGA, and an admin dashboard inside your ASP.NET app and SQL Server.",
     url: "https://sqlos.dev",
     siteName: "SqlOS",
     images: [
@@ -26,9 +26,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "SqlOS | Enterprise auth for your .NET app",
+    title: "SqlOS | Auth Stack for .NET Builders",
     description:
-      "OAuth, SAML SSO, social login, and FGA in one self-hosted NuGet package.",
+      "OAuth, hosted login, social auth, SSO, FGA, and dashboard UI in one self-hosted .NET package.",
     images: ["/docs/dashboard-home.png"],
   },
 };

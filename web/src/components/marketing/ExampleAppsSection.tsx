@@ -4,12 +4,12 @@ import { ArrowIcon } from "@/components/icons";
 
 export default function ExampleAppsSection() {
   return (
-    <section className="border-t px-6 py-20 sm:py-24">
+    <section className="border-t border-border/70 px-6 py-20 sm:py-24">
       <div className="mx-auto max-w-6xl">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <p className="font-mono text-[11px] font-semibold uppercase text-neon-green">
           Example apps
         </p>
-        <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
+        <h2 className="mt-3 text-3xl font-semibold text-foreground sm:text-4xl">
           Run it, then fork it
         </h2>
         <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
@@ -21,11 +21,11 @@ export default function ExampleAppsSection() {
             <Link
               key={app.title}
               href={app.href}
-              className="group flex flex-col rounded-xl border bg-card/70 p-5 shadow-sm transition-colors hover:border-primary/30 hover:bg-accent/30"
+              className="group flex flex-col rounded-lg border border-border/70 bg-card/70 p-5 shadow-[0_14px_50px_oklch(0_0_0_/_0.2)] transition-colors hover:border-neon-cyan/45 hover:bg-card"
             >
               <h3 className="text-sm font-semibold text-foreground">{app.title}</h3>
               <p className="mt-2 flex-1 text-sm leading-6 text-muted-foreground">{app.description}</p>
-              <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+              <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-neon-cyan">
                 {app.cta}
                 <ArrowIcon className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </span>
