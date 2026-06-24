@@ -468,7 +468,10 @@ app.MapPost("/api/todos", async (
         Title = request.Title.Trim(),
         CreatedAt = DateTime.UtcNow
     };
-    item.ResourceId = todoFgaService.CreateTodoResource(item, todoContext.TenantResourceId);
+    item.ResourceId = await todoFgaService.CreateTodoResourceAsync(
+        item,
+        todoContext.TenantResourceId,
+        cancellationToken);
 
     dbContext.TodoItems.Add(item);
     await dbContext.SaveChangesAsync(cancellationToken);

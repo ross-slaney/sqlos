@@ -17,13 +17,13 @@ public sealed class SqlOSDbContextErgonomicsTests
     [TestMethod]
     public void SqlOSDbContext_RegistersInheritedTvfOnRelationalContext()
     {
-        var options = new DbContextOptionsBuilder<EasyModeTestDbContext>()
-            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=SqlOS_EasyMode_Test;Trusted_Connection=True;TrustServerCertificate=True")
+        var options = new DbContextOptionsBuilder<RecommendedSetupTestDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=SqlOS_RecommendedSetup_Test;Trusted_Connection=True;TrustServerCertificate=True")
             .Options;
 
-        using var context = new EasyModeTestDbContext(options);
+        using var context = new RecommendedSetupTestDbContext(options);
 
-        var tvfMethod = typeof(EasyModeTestDbContext).GetMethod(
+        var tvfMethod = typeof(RecommendedSetupTestDbContext).GetMethod(
             nameof(ISqlOSFgaDbContext.IsResourceAccessible),
             [typeof(string), typeof(string), typeof(string)]);
 
@@ -40,19 +40,19 @@ public sealed class SqlOSDbContextErgonomicsTests
     {
         var builder = WebApplication.CreateBuilder();
 
-        builder.AddSqlOS<EasyModeTestDbContext>(
+        builder.AddSqlOS<RecommendedSetupTestDbContext>(
             db => db.UseInMemoryDatabase(Guid.NewGuid().ToString("N")),
-            sqlos => sqlos.Fga.RootResourceId = "easy_mode_root");
+            sqlos => sqlos.Fga.RootResourceId = "recommended_setup_root");
 
         using var app = builder.Build();
         using var scope = app.Services.CreateScope();
 
-        var context = scope.ServiceProvider.GetRequiredService<EasyModeTestDbContext>();
+        var context = scope.ServiceProvider.GetRequiredService<RecommendedSetupTestDbContext>();
 
         context.Database.ProviderName.Should().Be("Microsoft.EntityFrameworkCore.InMemory");
         scope.ServiceProvider.GetRequiredService<ISqlOSAuthServerDbContext>().Should().BeSameAs(context);
         scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>().Should().BeSameAs(context);
-        app.Services.GetRequiredService<IOptions<SqlOSOptions>>().Value.Fga.RootResourceId.Should().Be("easy_mode_root");
+        app.Services.GetRequiredService<IOptions<SqlOSOptions>>().Value.Fga.RootResourceId.Should().Be("recommended_setup_root");
     }
 
     [TestMethod]
@@ -77,14 +77,14 @@ public sealed class SqlOSDbContextErgonomicsTests
         constraint.GetGenericTypeDefinition().Should().Be(typeof(SqlOSDbContext<>));
     }
 
-    private sealed class EasyModeTestDbContext(DbContextOptions<EasyModeTestDbContext> options)
-        : SqlOSDbContext<EasyModeTestDbContext>(options)
+    private sealed class RecommendedSetupTestDbContext(DbContextOptions<RecommendedSetupTestDbContext> options)
+        : SqlOSDbContext<RecommendedSetupTestDbContext>(options)
     {
-        public DbSet<EasyModeEntity> Entities => Set<EasyModeEntity>();
+        public DbSet<RecommendedSetupEntity> Entities => Set<RecommendedSetupEntity>();
 
         protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
         {
-            modelBuilder.Entity<EasyModeEntity>(entity =>
+            modelBuilder.Entity<RecommendedSetupEntity>(entity =>
             {
                 entity.HasKey(x => x.Id);
                 entity.Property(x => x.Name).HasMaxLength(64).IsRequired();
@@ -92,7 +92,7 @@ public sealed class SqlOSDbContextErgonomicsTests
         }
     }
 
-    private sealed class EasyModeEntity
+    private sealed class RecommendedSetupEntity
     {
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
