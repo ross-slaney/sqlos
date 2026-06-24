@@ -35,7 +35,7 @@ export default async function BlogPage({ searchParams }: BlogPageProps) {
         color="accent"
         className="border border-neon-cyan/30 bg-neon-cyan/10 text-neon-cyan"
       >
-        SqlOS dispatches
+        SqlOS notes
       </Chip>
       <h1 className="mt-5 text-4xl font-bold text-foreground sm:text-5xl">Blog</h1>
       <p className="mt-4 max-w-2xl text-lg leading-8 text-muted-foreground">

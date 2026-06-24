@@ -56,7 +56,7 @@ export default function Header() {
             color="success"
             className="hidden border border-neon-green/30 bg-neon-green/10 text-[10px] text-neon-green sm:inline-flex"
           >
-            auth stack
+            Program.cs
           </Chip>
         </Link>
 
@@ -80,10 +80,10 @@ export default function Header() {
             <GitHubIcon className="h-4 w-4" />
           </a>
           <Link
-            href="/docs/getting-started"
+            href="/docs/guides/configuration"
             className="ml-2 rounded-md border border-neon-green/40 bg-neon-green px-3 py-1.5 text-sm font-semibold text-background shadow-[0_0_22px_oklch(0.88_0.2_146_/_0.22)] transition-colors hover:bg-neon-cyan"
           >
-            Start configuring
+            Configuration guide
           </Link>
         </nav>
 
@@ -123,11 +123,11 @@ export default function Header() {
               GitHub
             </a>
             <Link
-              href="/docs/getting-started"
+              href="/docs/guides/configuration"
               className="mt-2 rounded-md bg-neon-green px-3 py-2 text-center text-sm font-semibold text-background"
               onClick={() => setIsMenuOpen(false)}
             >
-              Start configuring
+              Configuration guide
             </Link>
           </nav>
         </div>

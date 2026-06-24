@@ -48,8 +48,8 @@ export default function Footer() {
               <span>SqlOS</span>
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-6 text-muted-foreground">
-              OAuth, hosted login, SSO, FGA, and dashboard UI for .NET builders who want auth inside
-              their own app boundary.
+              A .NET package that adds OAuth endpoints, a hosted AuthPage, FGA policy, dashboard
+              routes, and SQL-backed state to an ASP.NET application.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Chip size="sm" variant="soft" color="accent" className="border border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan">

@@ -15,9 +15,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SqlOS | Auth Stack for .NET Builders",
+  title: "SqlOS | Sample Program Walkthrough",
   description:
-    "SqlOS puts OAuth, hosted login, social auth, SSO, FGA, and an admin dashboard inside your ASP.NET app and SQL Server.",
+    "A source-oriented walkthrough of the ASP.NET Program.cs file that wires SqlOS into a .NET application.",
 };
 
 export default function RootLayout({
