@@ -11,6 +11,247 @@ namespace SqlOS.Tests;
 public sealed class SqlOSResourceEntitySyncTests
 {
     [TestMethod]
+    public void SaveChanges_ReturnsWhenNoResourceEntityChanged()
+    {
+        using var context = CreateContext();
+
+        context.SaveChanges().Should().Be(0);
+    }
+
+    [TestMethod]
+    public void SaveChanges_CreatesUpdatesAndDeletesBackingResourceAndGrants()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
+        {
+            Id = "usr_1",
+            SubjectTypeId = "user",
+            DisplayName = "User One"
+        });
+        var entity = new ResourceBackedEntity
+        {
+            Id = "workspace_1",
+            Name = "Workspace 1",
+            Description = "Initial workspace"
+        };
+        context.Resources.Add(entity);
+
+        context.SaveChanges();
+
+        var resource = context.Set<SqlOSFgaResource>().Single(x => x.Id == "workspace_1");
+        resource.Name.Should().Be("Workspace 1");
+        resource.Description.Should().Be("Initial workspace");
+
+        entity.Name = "Workspace One";
+        entity.Description = "Updated workspace";
+        entity.IsActive = false;
+        context.SaveChanges();
+
+        resource = context.Set<SqlOSFgaResource>().Single(x => x.Id == "workspace_1");
+        resource.Name.Should().Be("Workspace One");
+        resource.Description.Should().Be("Updated workspace");
+        resource.IsActive.Should().BeFalse();
+
+        context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
+        {
+            Id = "grant_1",
+            SubjectId = "usr_1",
+            ResourceId = "workspace_1",
+            RoleId = "role_owner"
+        });
+        context.SaveChanges();
+
+        context.Resources.Remove(entity);
+        context.SaveChanges();
+
+        context.Set<SqlOSFgaResource>().Any(x => x.Id == "workspace_1").Should().BeFalse();
+        context.Set<SqlOSFgaGrant>().Any(x => x.ResourceId == "workspace_1").Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void SaveChanges_AllowsParentAndChildAddedTogetherOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Resources.AddRange(
+            new ResourceBackedEntity
+            {
+                Id = "workspace_parent",
+                Name = "Workspace parent"
+            },
+            new ResourceBackedEntity
+            {
+                Id = "workspace_child",
+                Name = "Workspace child",
+                ParentId = "workspace_parent"
+            });
+
+        context.SaveChanges();
+
+        context.Set<SqlOSFgaResource>()
+            .Single(x => x.Id == "workspace_child")
+            .ParentId
+            .Should()
+            .Be("workspace_parent");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsDuplicateResourceIdsOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Resources.AddRange(
+            new ResourceBackedEntity
+            {
+                Id = "entity_1",
+                ResourceKey = "workspace_1",
+                Name = "Workspace 1"
+            },
+            new ResourceBackedEntity
+            {
+                Id = "entity_2",
+                ResourceKey = "workspace_1",
+                Name = "Workspace duplicate"
+            });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Multiple tracked SqlOS resource entities use resource id 'workspace_1'*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsMissingResourceTypeOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Resources.Add(new ResourceBackedEntity
+        {
+            Id = "workspace_1",
+            Name = "Workspace 1",
+            TypeId = "workpsace"
+        });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*resource type 'workpsace' was not found*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsMissingParentOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Resources.Add(new ResourceBackedEntity
+        {
+            Id = "workspace_1",
+            Name = "Workspace 1",
+            ParentId = "missing_parent"
+        });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*resource 'missing_parent' was not found*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsExistingBackingResourceForAddedEntityOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = "workspace_1",
+            Name = "Existing workspace",
+            ResourceTypeId = "workspace",
+            ParentId = "root"
+        });
+        context.SaveChanges();
+        context.Resources.Add(new ResourceBackedEntity
+        {
+            Id = "workspace_1",
+            Name = "Workspace 1"
+        });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*already exists*new resource-backed entity*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsMissingBackingResourceForModifiedEntityOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
+        context.Resources.Add(entity);
+        context.SaveChanges();
+
+        var resource = context.Set<SqlOSFgaResource>().Single(x => x.Id == "workspace_1");
+        context.Set<SqlOSFgaResource>().Remove(resource);
+        context.SaveChanges();
+
+        entity.Name = "Workspace One";
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*was not found for a modified resource-backed entity*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_DeleteFailsForLocalChildOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
+        context.Resources.Add(entity);
+        context.SaveChanges();
+
+        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = "workspace_child",
+            ParentId = "workspace_1",
+            Name = "Workspace child",
+            ResourceTypeId = "workspace"
+        });
+        context.Resources.Remove(entity);
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*has child resources*Delete or reparent child resources*");
+    }
+
+    [TestMethod]
+    public void SaveChanges_RejectsCycleOnSyncPath()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        context.Resources.AddRange(
+            new ResourceBackedEntity
+            {
+                Id = "workspace_a",
+                Name = "Workspace A",
+                ParentId = "workspace_b"
+            },
+            new ResourceBackedEntity
+            {
+                Id = "workspace_b",
+                Name = "Workspace B",
+                ParentId = "workspace_a"
+            });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*hierarchy contains a cycle*");
+    }
+
+    [TestMethod]
     public async Task SaveChangesAsync_CreatesBackingResourceForAddedEntity()
     {
         using var context = CreateContext();
@@ -316,13 +557,14 @@ public sealed class SqlOSResourceEntitySyncTests
     private sealed class ResourceBackedEntity : ISqlOSResourceEntity
     {
         public string Id { get; set; } = string.Empty;
+        public string? ResourceKey { get; set; }
         public string TypeId { get; set; } = "workspace";
         public string Name { get; set; } = string.Empty;
         public string? ParentId { get; set; } = "root";
         public string? Description { get; set; }
         public bool IsActive { get; set; } = true;
 
-        public string ResourceId => Id;
+        public string ResourceId => ResourceKey ?? Id;
         public string ResourceTypeId => TypeId;
         public string ResourceName => Name;
         public string? ParentResourceId => ParentId;
