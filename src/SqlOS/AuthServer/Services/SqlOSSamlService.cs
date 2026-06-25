@@ -7,6 +7,7 @@ using System.Security;
 using System.IO.Compression;
 using System.Xml;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -235,7 +236,19 @@ public sealed class SqlOSSamlService
         authorizationRequest.ResolvedAuthMethod = "saml";
         authorizationRequest.ResolvedOrganizationId = organizationId;
         authorizationRequest.ResolvedConnectionId = connection.Id;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+
         await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: organizationId, cancellationToken: cancellationToken);
         var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
@@ -792,4 +805,7 @@ public sealed class SqlOSSamlService
     private sealed record SamlValidationContext(string RequestId, string AssertionConsumerServiceUrl, string Audience);
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record SqlOSSamlPrincipal(string Issuer, string Subject, Dictionary<string, string> Attributes);
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+        => exception.InnerException is SqlException { Number: 2601 or 2627 };
 }
