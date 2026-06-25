@@ -102,7 +102,7 @@ Full walkthrough: **[sqlos.dev/docs/getting-started](https://sqlos.dev/docs/gett
    app.MapSqlOS();
    ```
 
-   Protect APIs with `RequireSqlOSAccessToken(audience)`, then use `http.SqlOSUserId()` and `fga.Allows(...)` in endpoint code. For protected rows, implement `ISqlOSResourceEntity`; `SqlOSDbContext<TContext>` syncs the backing FGA resources when EF saves changes. Provision users, agents, or service accounts explicitly with `ProvisionUserSubjectAsync(...)`, `ProvisionAgentSubjectAsync(...)`, or `ProvisionServiceAccountSubjectAsync(...)`, then grant roles with `GrantRoleAsync(...)`. Use manual resource helpers such as `ProvisionResourceWithIdAsync(...)` for non-entity resources, such as tenant roots.
+   For APIs that accept SqlOS access tokens, `RequireSqlOSAccessToken(audience)` validates the token and populates `HttpContext.User`; your app still chooses how to resolve its current subject. Pass explicit `subjectId`, `resourceId`, role, and permission values into FGA APIs. For protected rows, implement `ISqlOSResourceEntity`; `SqlOSDbContext<TContext>` syncs the backing FGA resources when EF saves changes. Provision users, agents, or service accounts explicitly with `ProvisionUserSubjectAsync(...)`, `ProvisionAgentSubjectAsync(...)`, or `ProvisionServiceAccountSubjectAsync(...)`, then grant roles with `GrantRoleAsync(...)`. Use manual resource helpers such as `ProvisionResourceWithIdAsync(...)` for non-entity resources, such as tenant roots.
 
 On startup, SqlOS updates its own schema. Default URLs: admin at `/sqlos`, OAuth at `/sqlos/auth`. Change the prefix with `DashboardBasePath` if you need to.
 

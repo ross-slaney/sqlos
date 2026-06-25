@@ -96,9 +96,9 @@ await db.SaveChangesAsync();
 
 Manual resource APIs such as `CreateResourceAsync(...)`, `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)` are still available for resources that are not backed by an application entity.
 
-## Protected API helpers
+## Protected API token validation
 
-Protect a route group with SqlOS access-token validation, then use the validated token and FGA helpers in endpoints:
+Protect a route group with SqlOS access-token validation when your API accepts SqlOS-issued tokens. The middleware validates the token and populates `HttpContext.User`; your endpoint still resolves the application subject explicitly.
 
 ```csharp
 var api = app.MapGroup("/api")
@@ -115,7 +115,10 @@ api.MapPost("/workspaces", async (
     HttpContext http,
     CancellationToken ct) =>
 {
-    var userId = http.SqlOSUserId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
     var workspaceId = Guid.NewGuid();
 
     var workspace = new Workspace
@@ -128,12 +131,12 @@ api.MapPost("/workspaces", async (
     db.Workspaces.Add(workspace);
 
     await db.ProvisionUserSubjectAsync(
-        userId,
-        displayName: userId,
+        subjectId,
+        displayName: subjectId,
         cancellationToken: ct);
 
     await db.GrantRoleAsync(
-        userId,
+        subjectId,
         workspace,
         "workspace_admin",
         ct);

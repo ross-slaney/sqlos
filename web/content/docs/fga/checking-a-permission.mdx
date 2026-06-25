@@ -57,7 +57,10 @@ app.MapPost("/api/workspaces", async (
     HttpContext http,
     CancellationToken ct) =>
 {
-    var subjectId = http.SqlOSUserId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
     var organizationResourceId = $"org::{request.OrganizationId}";
 
     var access = await authService.CheckAccessAsync(

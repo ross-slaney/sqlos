@@ -141,7 +141,7 @@ options.AuthServer.SeedOwnedWebApp(
 
 ## Protect an API
 
-For API routes that accept SqlOS access tokens, protect a route group and read the validated token from `HttpContext`:
+For API routes that accept SqlOS access tokens, protect a route group with `RequireSqlOSAccessToken(...)`. It validates the token and populates `HttpContext.User`; your app still resolves the current subject explicitly at the route boundary.
 
 ```csharp
 var api = app.MapGroup("/api")
@@ -153,12 +153,15 @@ var api = app.MapGroup("/api")
 
 api.MapGet("/me", (HttpContext http) =>
 {
-    var token = http.SqlOSToken();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
     return Results.Ok(new
     {
-        userId = http.SqlOSUserId(),
-        token.ClientId,
-        token.Audience
+        subjectId,
+        clientId = http.User.FindFirst("client_id")?.Value,
+        audience = http.User.FindFirst(JwtRegisteredClaimNames.Aud)?.Value
     });
 });
 ```

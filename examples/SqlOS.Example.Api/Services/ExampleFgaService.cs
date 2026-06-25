@@ -21,18 +21,18 @@ public sealed class ExampleFgaService
         _context = context;
     }
 
-    public async Task EnsureUserAccessAsync(string userId, string organizationId, CancellationToken cancellationToken = default)
+    public async Task EnsureUserAccessAsync(string subjectId, string organizationId, CancellationToken cancellationToken = default)
     {
         var user = await _context.Set<SqlOSUser>()
-            .FirstAsync(x => x.Id == userId, cancellationToken);
+            .FirstAsync(x => x.Id == subjectId, cancellationToken);
         var organization = await _context.Set<SqlOSOrganization>()
             .FirstAsync(x => x.Id == organizationId, cancellationToken);
         var membership = await _context.Set<SqlOSMembership>()
-            .FirstAsync(x => x.UserId == userId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
+            .FirstAsync(x => x.UserId == subjectId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
 
         await ProvisionSubjectAsync(user, organizationId, cancellationToken);
         await ProvisionOrganizationResourceAsync(organization, cancellationToken);
-        await SyncMembershipGrantAsync(userId, organizationId, membership.Role, cancellationToken);
+        await SyncMembershipGrantAsync(subjectId, organizationId, membership.Role, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
     }
 
@@ -62,7 +62,7 @@ public sealed class ExampleFgaService
             cancellationToken: cancellationToken);
 
     private async Task SyncMembershipGrantAsync(
-        string userId,
+        string subjectId,
         string organizationId,
         string role,
         CancellationToken cancellationToken)
@@ -71,11 +71,11 @@ public sealed class ExampleFgaService
         var roleKey = IsElevatedRole(role) ? OrgAdminRole : OrgMemberRole;
 
         await _context.RevokeRoleAsync(
-            userId,
+            subjectId,
             resourceId,
             roleKey == OrgAdminRole ? OrgMemberRole : OrgAdminRole,
             cancellationToken);
-        await _context.GrantRoleAsync(userId, resourceId, roleKey, cancellationToken);
+        await _context.GrantRoleAsync(subjectId, resourceId, roleKey, cancellationToken);
     }
 
     private static bool IsElevatedRole(string role)

@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
@@ -16,23 +15,6 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSErgonomicsExtensionsTests
 {
-    [TestMethod]
-    public void SqlOSToken_AndSqlOSUserId_ReadValidatedToken()
-    {
-        var httpContext = new DefaultHttpContext();
-        var token = new SqlOS.AuthServer.Contracts.SqlOSValidatedToken(
-            new System.Security.Claims.ClaimsPrincipal(),
-            "sess_1",
-            "usr_1",
-            "org_1",
-            "client_1",
-            "api");
-        httpContext.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = token;
-
-        httpContext.SqlOSToken().Should().BeSameAs(token);
-        httpContext.SqlOSUserId().Should().Be("usr_1");
-    }
-
     [TestMethod]
     public async Task Allows_ReturnsCheckAccessDecision()
     {
@@ -84,7 +66,9 @@ public sealed class SqlOSErgonomicsExtensionsTests
             string.Concat("Ensure", "SqlOS", "Role", "Grant", "Async"),
             string.Concat("Grant", "SqlOS", "Role"),
             string.Concat("Grant", "SqlOS", "Role", "Async"),
-            string.Concat("Add", "SqlOS", "Resource")
+            string.Concat("Add", "SqlOS", "Resource"),
+            "SqlOSUserId",
+            "SqlOSToken"
         };
 
         typeof(SqlOSErgonomicsExtensions)

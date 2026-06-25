@@ -245,9 +245,9 @@ Manual non-entity resources use `CreateResourceAsync(...)`, `CreateResourceWithI
 ### Subject and Grant Helpers
 
 ```csharp
-await db.ProvisionUserSubjectAsync(userId, displayName: userId, cancellationToken: ct);
-await db.GrantRoleAsync(userId, workspace, "workspace_admin", ct);
-await db.RevokeRoleAsync(userId, workspace.ResourceId, "workspace_admin", ct);
+await db.ProvisionUserSubjectAsync(subjectId, displayName: subjectId, cancellationToken: ct);
+await db.GrantRoleAsync(subjectId, workspace, "workspace_admin", ct);
+await db.RevokeRoleAsync(subjectId, workspace.ResourceId, "workspace_admin", ct);
 ```
 
 ### AuthorizedDetailAsync Extension

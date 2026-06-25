@@ -64,7 +64,7 @@ public sealed class TodoFgaService
         return new TodoFgaContext(subjectId, tenantResourceId);
     }
 
-    public static string GetTenantResourceId(string userId) => $"tenant::{userId}";
+    public static string GetTenantResourceId(string subjectId) => $"tenant::{subjectId}";
 
     public static string GetTodoResourceId(Guid todoId) => $"todo::{todoId:D}";
 

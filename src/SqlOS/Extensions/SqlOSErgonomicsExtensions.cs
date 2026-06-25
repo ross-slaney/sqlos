@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlOS.AuthServer.Configuration;
-using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Services;
 using SqlOS.Fga.Interfaces;
@@ -42,25 +41,6 @@ public static class SqlOSErgonomicsExtensions
             SqlOSAccessTokenEndpointFilter.InvokeAsync(context, next, options));
 
         return group;
-    }
-
-    public static SqlOSValidatedToken SqlOSToken(this HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        return context.GetSqlOSValidatedToken()
-            ?? throw new InvalidOperationException("No validated SqlOS access token is available. Protect the endpoint with RequireSqlOSAccessToken(...) or UseSqlOSAccessTokenValidation(...).");
-    }
-
-    public static string SqlOSUserId(this HttpContext context)
-    {
-        var token = context.SqlOSToken();
-        if (string.IsNullOrWhiteSpace(token.UserId))
-        {
-            throw new InvalidOperationException("The validated SqlOS access token does not include a user id.");
-        }
-
-        return token.UserId;
     }
 
     public static async Task<bool> Allows(
