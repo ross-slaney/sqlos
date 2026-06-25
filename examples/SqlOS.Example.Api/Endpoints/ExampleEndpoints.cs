@@ -5,7 +5,6 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Models;
 using SqlOS.Example.Api.Services;
-using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Example.Api.Endpoints;
