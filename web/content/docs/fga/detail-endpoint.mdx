@@ -7,6 +7,8 @@ section: fga
 
 `AuthorizedDetailAsync` fetches a single entity, checks authorization, and returns the appropriate HTTP result. It handles 404, 403, and 200 in one call.
 
+This helper is for read-side authorization. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; `AuthorizedDetailAsync` only needs the inherited `IHasResourceId` contract to check access for a fetched row.
+
 ## Usage
 
 ```csharp

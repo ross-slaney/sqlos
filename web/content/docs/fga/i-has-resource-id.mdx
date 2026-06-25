@@ -1,13 +1,11 @@
 ---
 title: "IHasResourceId"
-description: "Connect your EF Core entities to the FGA resource tree."
+description: "The lower-level resource ID contract used by FGA filters."
 order: 7
 section: fga
 ---
 
-`IHasResourceId` is the interface that connects your domain entities to the FGA resource tree. Any entity that needs authorization filtering must implement it.
-
-## Interface
+`IHasResourceId` is the lower-level contract used by authorization filters. It exposes the FGA resource ID on a domain entity so query filters can join app rows to accessible resources.
 
 ```csharp
 public interface IHasResourceId
@@ -16,48 +14,34 @@ public interface IHasResourceId
 }
 ```
 
-## Implementation
-
-Add `ResourceId` to your entity and implement the interface:
+For protected domain entities whose resource lifecycle should be managed by SqlOS, prefer `ISqlOSResourceEntity`. It extends `IHasResourceId` with resource metadata used by `SqlOSDbContext<TContext>` during `SaveChanges` / `SaveChangesAsync`.
 
 ```csharp
-public class Chain : IHasResourceId
+public sealed class Workspace : ISqlOSResourceEntity
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public Guid Id { get; set; }
     public string ResourceId { get; set; } = "";
     public string Name { get; set; } = "";
-    public string? Description { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string OrganizationId { get; set; } = "";
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string ParentResourceId => $"org::{OrganizationId}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
 }
 ```
 
-## Assigning the ResourceId
-
-When creating an entity, create the FGA resource first and assign the ID:
-
-```csharp
-var resourceId = context.CreateResource("org::acme", request.Name, "chain");
-
-var chain = new Chain
-{
-    ResourceId = resourceId,
-    Name = request.Name
-};
-
-context.Chains.Add(chain);
-await context.SaveChangesAsync(ct);
-```
-
-## How it's used
-
-When you call `GetAuthorizationFilterAsync<T>`, the filter joins your entity's `ResourceId` against the set of accessible resources for the subject:
+When you call `GetAuthorizationFilterAsync<T>`, the filter uses `ResourceId` to restrict the query to resources the subject can access:
 
 ```csharp
 var filter = await authService
-    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+    .GetAuthorizationFilterAsync<Workspace>(subjectId, "WORKSPACE_VIEW");
 
-// The filter expression uses chain.ResourceId to check access
-var chains = await dbContext.Chains.Where(filter).ToListAsync();
+var workspaces = await db.Workspaces
+    .Where(filter)
+    .OrderBy(x => x.Name)
+    .ToListAsync(ct);
 ```
 
-This translates to a SQL Server table-valued function join, so authorization happens at the database level.
+Use plain `IHasResourceId` directly for lower-level/manual resources where your application owns the FGA resource lifecycle. Use `ISqlOSResourceEntity` for the normal SDK path.

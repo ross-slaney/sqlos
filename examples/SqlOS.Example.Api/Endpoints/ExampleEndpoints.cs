@@ -190,14 +190,15 @@ public static class ExampleEndpoints
                 return Results.Json(new { error = "Permission denied" }, statusCode: 403);
             }
 
+            var workspaceId = $"wrk_{Guid.NewGuid():N}"[..28];
             var workspace = new Workspace
             {
-                Id = $"wrk_{Guid.NewGuid():N}"[..28],
+                Id = workspaceId,
                 OrganizationId = organizationId,
+                ResourceId = ExampleFgaService.GetWorkspaceResourceId(workspaceId),
                 Name = request.Name,
                 CreatedAt = DateTime.UtcNow
             };
-            workspace.ResourceId = fgaService.CreateWorkspaceResource(workspace);
 
             context.Workspaces.Add(workspace);
             await context.SaveChangesAsync(cancellationToken);

@@ -7,6 +7,8 @@ section: fga
 
 `GetAuthorizationFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
+This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
+
 ## Basic usage
 
 ```csharp

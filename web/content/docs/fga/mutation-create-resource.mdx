@@ -1,101 +1,110 @@
 ---
 title: "Mutations"
-description: "Authorize writes and create resources in the hierarchy."
+description: "Authorize writes while SqlOS syncs entity-backed resources."
 order: 11
 section: fga
 ---
 
-For create, update, and delete operations, check authorization first with `CheckAccessAsync`, then perform the mutation.
+For create, update, and delete operations, check authorization first with `CheckAccessAsync`, then mutate your EF entity. If the entity implements `ISqlOSResourceEntity` and the DbContext derives from `SqlOSDbContext<TContext>`, SqlOS keeps the backing FGA resource row synchronized when EF saves.
 
 ## Create pattern
 
-1. Check permission on the parent resource
-2. Create the FGA resource
-3. Create your domain entity with the resource ID
-4. Save in one transaction
+1. Check permission on the parent resource.
+2. Create the domain entity.
+3. Assign a stable `ResourceId` before save.
+4. Save the entity. SqlOS syncs the `SqlOSFgaResource` row in the same EF save.
 
 ```csharp
-app.MapPost("/api/chains/{chainId}/locations", async (
-    string chainId,
-    CreateLocationRequest request,
-    ExampleAppDbContext context,
+app.MapPost("/api/workspaces", async (
+    CreateWorkspaceRequest request,
+    AppDbContext db,
     ISqlOSFgaAuthService authService,
-    HttpContext http) =>
+    HttpContext http,
+    CancellationToken ct) =>
 {
-    var subjectId = http.GetSubjectId();
-    var chain = await context.Chains.FindAsync(chainId);
-    if (chain == null) return Results.NotFound();
+    var subjectId = http.SqlOSUserId();
+    var organizationResourceId = $"org::{request.OrganizationId}";
 
     var access = await authService.CheckAccessAsync(
-        subjectId, "LOCATION_EDIT", chain.ResourceId);
+        subjectId,
+        "WORKSPACE_MANAGE",
+        organizationResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    var resourceId = context.CreateResource(
-        chain.ResourceId, request.Name, "location");
-
-    var location = new Location
+    var workspaceId = Guid.NewGuid();
+    var workspace = new Workspace
     {
-        ResourceId = resourceId,
-        ChainId = chainId,
-        Name = request.Name,
-        Address = request.Address
+        Id = workspaceId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        OrganizationId = request.OrganizationId,
+        Name = request.Name.Trim()
     };
-    context.Locations.Add(location);
-    await context.SaveChangesAsync();
 
-    return Results.Created($"/api/locations/{location.Id}", location);
+    db.Workspaces.Add(workspace);
+    await db.SaveChangesAsync(ct);
+
+    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```
 
 ## Update pattern
 
 ```csharp
-app.MapPut("/api/chains/{id}", async (
-    string id,
-    UpdateChainRequest request,
-    ExampleAppDbContext context,
+app.MapPut("/api/workspaces/{id}", async (
+    Guid id,
+    UpdateWorkspaceRequest request,
+    AppDbContext db,
     ISqlOSFgaAuthService authService,
-    HttpContext http) =>
+    HttpContext http,
+    CancellationToken ct) =>
 {
-    var subjectId = http.GetSubjectId();
-    var chain = await context.Chains.FindAsync(id);
-    if (chain == null) return Results.NotFound();
+    var subjectId = http.SqlOSUserId();
+    var workspace = await db.Workspaces.FindAsync([id], ct);
+    if (workspace == null) return Results.NotFound();
 
     var access = await authService.CheckAccessAsync(
-        subjectId, "CHAIN_EDIT", chain.ResourceId);
+        subjectId,
+        "WORKSPACE_MANAGE",
+        workspace.ResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    chain.Name = request.Name;
-    chain.Description = request.Description;
-    await context.SaveChangesAsync();
+    workspace.Name = request.Name.Trim();
+    await db.SaveChangesAsync(ct);
 
-    return Results.Ok(chain);
+    return Results.Ok(workspace);
 });
 ```
+
+Because `ResourceName => Name`, the backing FGA resource display name updates with the entity.
 
 ## Delete pattern
 
 ```csharp
-app.MapDelete("/api/chains/{id}", async (
-    string id,
-    ExampleAppDbContext context,
+app.MapDelete("/api/workspaces/{id}", async (
+    Guid id,
+    AppDbContext db,
     ISqlOSFgaAuthService authService,
-    HttpContext http) =>
+    HttpContext http,
+    CancellationToken ct) =>
 {
-    var subjectId = http.GetSubjectId();
-    var chain = await context.Chains.FindAsync(id);
-    if (chain == null) return Results.NotFound();
+    var subjectId = http.SqlOSUserId();
+    var workspace = await db.Workspaces.FindAsync([id], ct);
+    if (workspace == null) return Results.NotFound();
 
     var access = await authService.CheckAccessAsync(
-        subjectId, "CHAIN_EDIT", chain.ResourceId);
+        subjectId,
+        "WORKSPACE_MANAGE",
+        workspace.ResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    context.Chains.Remove(chain);
-    await context.SaveChangesAsync();
+    db.Workspaces.Remove(workspace);
+    await db.SaveChangesAsync(ct);
 
     return Results.NoContent();
 });
 ```
+
+Deletes remove the backing resource and direct grants. If child resources still reference the resource, SqlOS throws a clear exception so the application can delete or reparent children first.

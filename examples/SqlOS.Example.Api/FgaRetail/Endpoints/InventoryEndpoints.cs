@@ -93,6 +93,8 @@ public static class InventoryEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.InventoryEdit, location.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            // Retail is the lower-level/manual FGA sample. Recommended app entities use
+            // ISqlOSResourceEntity and let SqlOSDbContext sync resources on SaveChanges.
             var resourceId = context.CreateResource(location.ResourceId, request.Name, RetailResourceTypeIds.InventoryItem);
 
             var item = new InventoryItem

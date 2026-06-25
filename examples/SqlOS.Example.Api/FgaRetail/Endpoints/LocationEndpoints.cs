@@ -119,6 +119,8 @@ public static class LocationEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.LocationEdit, chain.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            // Retail is the lower-level/manual FGA sample. Recommended app entities use
+            // ISqlOSResourceEntity and let SqlOSDbContext sync resources on SaveChanges.
             var resourceId = context.CreateResource(chain.ResourceId, request.Name, RetailResourceTypeIds.Location);
 
             var location = new Location
