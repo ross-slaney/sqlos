@@ -12,13 +12,17 @@ This helper is for read-side authorization. Lifecycle-managed domain rows normal
 ## Usage
 
 ```csharp
+using System.IdentityModel.Tokens.Jwt;
+
 app.MapGet("/api/chains/{id}", async (
     string id,
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
     HttpContext http) =>
 {
-    var subjectId = http.GetSubjectId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
 
     return await authService.AuthorizedDetailAsync(
         context.Chains.Include(c => c.Locations),

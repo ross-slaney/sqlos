@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
@@ -424,7 +426,7 @@ app.MapGet("/api/todos", async (
     {
         resource = sampleOptions.Value.Resource,
         audience = todoContext.ValidatedToken.Audience,
-        userId = todoContext.ValidatedToken.UserId,
+        subjectId = todoContext.SubjectId,
         organizationId = todoContext.ValidatedToken.OrganizationId,
         items
     });
@@ -585,7 +587,7 @@ app.MapGet("/api/me", async (
     var todoContext = authResult.Context!;
     return Results.Ok(new
     {
-        todoContext.ValidatedToken.UserId,
+        todoContext.SubjectId,
         todoContext.ValidatedToken.OrganizationId,
         todoContext.ValidatedToken.ClientId,
         audience = todoContext.ValidatedToken.Audience,
@@ -638,12 +640,22 @@ static async Task<TodoRequestAuthResult> RequireTodoContextAsync(
         return TodoRequestAuthResult.Failure(CreateTodoChallenge(httpContext, sampleOptions));
     }
 
-    if (string.IsNullOrWhiteSpace(validated.UserId))
+    httpContext.User = validated.Principal;
+
+    var subjectId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
     {
-        return TodoRequestAuthResult.Failure(Results.BadRequest(new { error = "Token must include a user subject." }));
+        return TodoRequestAuthResult.Failure(Results.Unauthorized());
     }
 
-    var fgaContext = await todoFgaService.EnsureUserTenantAccessAsync(validated, cancellationToken);
+    var displayName = GetDisplayName(httpContext.User, subjectId);
+    var email = GetClaimValue(httpContext.User, "email");
+    var fgaContext = await todoFgaService.EnsureUserTenantAccessAsync(
+        subjectId,
+        displayName,
+        email,
+        cancellationToken);
+
     return TodoRequestAuthResult.Success(new TodoRequestContext(validated, fgaContext.SubjectId, fgaContext.TenantResourceId));
 }
 
@@ -661,6 +673,18 @@ static IResult CreateTodoChallenge(HttpContext httpContext, TodoSampleOptions sa
 
 static IResult CreatePermissionDenied()
     => Results.Json(new { error = "Permission denied" }, statusCode: StatusCodes.Status403Forbidden);
+
+static string GetDisplayName(ClaimsPrincipal principal, string subjectId)
+{
+    var displayName = GetClaimValue(principal, "name")
+        ?? principal.Identity?.Name
+        ?? GetClaimValue(principal, "email");
+
+    return string.IsNullOrWhiteSpace(displayName) ? subjectId : displayName.Trim();
+}
+
+static string? GetClaimValue(ClaimsPrincipal principal, string claimType)
+    => principal.Claims.FirstOrDefault(x => x.Type == claimType)?.Value;
 
 public sealed record CreateTodoRequest(string Title);
 public sealed record TodoRequestContext(SqlOSValidatedToken ValidatedToken, string SubjectId, string TenantResourceId);

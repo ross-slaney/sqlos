@@ -384,10 +384,10 @@ public sealed class TodoSampleIntegrationTests
         var meResponse = await client.SendAsync(meRequest);
         meResponse.EnsureSuccessStatusCode();
         var meJson = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
-        var userId = meJson.RootElement.GetProperty("userId").GetString();
+        var subjectId = meJson.RootElement.GetProperty("subjectId").GetString();
         var tenantResourceId = meJson.RootElement.GetProperty("tenantResourceId").GetString();
 
-        tenantResourceId.Should().Be($"tenant::{userId}");
+        tenantResourceId.Should().Be($"tenant::{subjectId}");
 
         var createResponse = await CreateTodoAsync(client, tokens.AccessToken, "Trace FGA hierarchy");
         var createJson = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());

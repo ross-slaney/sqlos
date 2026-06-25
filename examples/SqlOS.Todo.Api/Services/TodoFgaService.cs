@@ -1,5 +1,3 @@
-using System.Security.Claims;
-using SqlOS.AuthServer.Contracts;
 using SqlOS.Extensions;
 using SqlOS.Todo.Api.Data;
 
@@ -22,17 +20,25 @@ public sealed class TodoFgaService
     }
 
     public async Task<TodoFgaContext> EnsureUserTenantAccessAsync(
-        SqlOSValidatedToken validated,
+        string subjectId,
+        string displayName,
+        string? email = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(validated.UserId))
+        if (string.IsNullOrWhiteSpace(subjectId))
         {
-            throw new InvalidOperationException("Validated token must include a user id.");
+            throw new ArgumentException("Subject id is required.", nameof(subjectId));
         }
 
-        var subjectId = validated.UserId;
-        var displayName = GetDisplayName(validated.Principal, subjectId);
-        var email = GetClaimValue(validated.Principal, "email");
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            displayName = subjectId;
+        }
+
+        subjectId = subjectId.Trim();
+        displayName = displayName.Trim();
+        email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+
         var tenantResourceId = GetTenantResourceId(subjectId);
 
         var user = await _context.ProvisionUserSubjectAsync(
@@ -67,18 +73,6 @@ public sealed class TodoFgaService
     public static string GetTenantResourceId(string subjectId) => $"tenant::{subjectId}";
 
     public static string GetTodoResourceId(Guid todoId) => $"todo::{todoId:D}";
-
-    private static string GetDisplayName(ClaimsPrincipal principal, string subjectId)
-    {
-        var displayName = GetClaimValue(principal, "name")
-            ?? principal.Identity?.Name
-            ?? GetClaimValue(principal, "email");
-
-        return string.IsNullOrWhiteSpace(displayName) ? subjectId : displayName.Trim();
-    }
-
-    private static string? GetClaimValue(ClaimsPrincipal principal, string claimType)
-        => principal.Claims.FirstOrDefault(x => x.Type == claimType)?.Value;
 }
 
 public sealed record TodoFgaContext(string SubjectId, string TenantResourceId);

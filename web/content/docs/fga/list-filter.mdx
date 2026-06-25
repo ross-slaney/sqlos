@@ -54,6 +54,8 @@ var result = await executor.ExecuteAsync(
 From the retail example app:
 
 ```csharp
+using System.IdentityModel.Tokens.Jwt;
+
 app.MapGet("/api/chains", async (
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
@@ -62,7 +64,9 @@ app.MapGet("/api/chains", async (
     string? search, int? pageSize, string? cursor,
     string? sortBy, string? sortDir) =>
 {
-    var subjectId = http.GetSubjectId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
 
     var spec = PagedSpec.For<Chain>(c => c.Id)
         .RequirePermission(RetailPermissionKeys.ChainView)
