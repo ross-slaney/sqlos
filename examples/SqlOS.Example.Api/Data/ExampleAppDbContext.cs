@@ -1,14 +1,11 @@
 using Microsoft.EntityFrameworkCore;
-using SqlOS.AuthServer.Interfaces;
+using SqlOS;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.Models;
-using SqlOS.Extensions;
-using SqlOS.Fga.Interfaces;
-using SqlOS.Fga.Models;
 
 namespace SqlOS.Example.Api.Data;
 
-public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+public sealed class ExampleAppDbContext : SqlOSDbContext<ExampleAppDbContext>
 {
     public ExampleAppDbContext(DbContextOptions<ExampleAppDbContext> options) : base(options)
     {
@@ -20,17 +17,8 @@ public sealed class ExampleAppDbContext : DbContext, ISqlOSAuthServerDbContext, 
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
     public DbSet<ExampleUserProfile> ExampleUserProfiles => Set<ExampleUserProfile>();
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string resourceId,
-        string subjectIds,
-        string permissionId)
-        => FromExpression(() => IsResourceAccessible(resourceId, subjectIds, permissionId));
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.UseSqlOS(Database.IsRelational() ? GetType() : null);
-
         modelBuilder.Entity<Workspace>(entity =>
         {
             entity.HasKey(x => x.Id);

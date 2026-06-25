@@ -12,33 +12,35 @@ section: guides
   actionLabel="Getting Started"
 />
 
-You'll learn the three integration points: host registration, EF model registration, and route mapping.
+You'll learn the recommended SqlOS SDK setup: host registration, DbContext inheritance, and route mapping.
 
 ## Wire SqlOS in three places
 
-1. **Host registration** — `builder.AddSqlOS<AppDbContext>(...)`
-2. **EF model** — `modelBuilder.UseSqlOS(GetType())` in `OnModelCreating`
+1. **Host registration** — `builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(...), options => ...)`
+2. **EF model** — derive from `SqlOSDbContext<AppDbContext>` and put app entities in `OnApplicationModelCreating`
 3. **Routes** — `app.MapSqlOS()` after `Build()`
 
 ## Minimal owned-app setup
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
-    options.AuthServer.PublicOrigin = "https://app.example.com";
-
-    options.AuthServer.SeedAuthPage(page =>
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        page.PageTitle = "Sign in";
-        page.PageSubtitle = "Secure your owned app first.";
-    });
+        options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+        options.AuthServer.PublicOrigin = "https://app.example.com";
 
-    options.AuthServer.SeedOwnedWebApp(
-        "web",
-        "Main Web App",
-        "https://app.example.com/auth/callback");
-});
+        options.AuthServer.SeedAuthPage(page =>
+        {
+            page.PageTitle = "Sign in";
+            page.PageSubtitle = "Secure your owned app first.";
+        });
+
+        options.AuthServer.SeedOwnedWebApp(
+            "web",
+            "Main Web App",
+            "https://app.example.com/auth/callback");
+    });
 ```
 
 ## FGA seeding
@@ -49,11 +51,46 @@ Keep auth and FGA seeding in the same `AddSqlOS` call:
 options.Fga.Seed(seed =>
 {
     seed.ResourceType("workspace", "Workspace");
-    seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
-    seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
-    seed.RolePermission("workspace_admin", "workspace.view");
+    seed.Permission("workspace.read", "Read workspace", "workspace");
+    seed.Permission("workspace.write", "Write workspace", "workspace");
+    seed.Role("workspace_admin", "Workspace Admin").Can("workspace.read", "workspace.write");
 });
 ```
+
+Use the explicit-ID overloads when you need stable IDs that differ from public permission or role keys.
+
+## Protected API helpers
+
+Protect a route group with SqlOS access-token validation, then use the validated token and FGA helpers in endpoints:
+
+```csharp
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = "https://api.example.com";
+        options.ResourceMetadataUrl = "https://api.example.com/.well-known/oauth-protected-resource";
+    });
+
+api.MapPost("/workspaces", async (
+    CreateWorkspace request,
+    AppDbContext db,
+    ISqlOSFgaAuthService fga,
+    HttpContext http) =>
+{
+    var userId = http.SqlOSUserId();
+    var workspace = new Workspace(request.Name);
+
+    db.Workspaces.Add(workspace);
+    await db.EnsureSqlOSUserSubjectAsync(userId, userId);
+    await db.EnsureSqlOSResourceAsync(workspace.ResourceId, "root", workspace.Name, "workspace");
+    await db.EnsureSqlOSRoleGrantAsync(userId, workspace.ResourceId, "workspace_admin");
+
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
+});
+```
+
+Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `EnsureSqlOSUserSubjectAsync(...)`, `EnsureSqlOSAgentSubjectAsync(...)`, or `EnsureSqlOSServiceAccountSubjectAsync(...)` before granting roles.
 
 ## Client onboarding modes
 
@@ -68,6 +105,13 @@ options.AuthServer.EnablePortableMcpClients(registration =>
 {
     registration.Cimd.TrustedHosts.Add("clients.example.com");
 });
+
+options.AuthServer.SeedDeviceFlowClient(
+    "myapp-cli",
+    "CLI",
+    "https://api.example.com",
+    "workspace.read",
+    "workspace.write");
 ```
 
 ## Email OTP and invitations

@@ -175,9 +175,10 @@ var item = new TodoItem
     CreatedAt = DateTime.UtcNow
 };
 
-item.ResourceId = todoFgaService.CreateTodoResource(
+item.ResourceId = await todoFgaService.CreateTodoResourceAsync(
     item,
-    todoContext.TenantResourceId);
+    todoContext.TenantResourceId,
+    cancellationToken);
 
 dbContext.TodoItems.Add(item);
 await dbContext.SaveChangesAsync(cancellationToken);
@@ -186,15 +187,19 @@ await dbContext.SaveChangesAsync(cancellationToken);
 The helper creates `todo::{todoId}` under the tenant resource:
 
 ```csharp
-public string CreateTodoResource(TodoItem item, string tenantResourceId)
+public async Task<string> CreateTodoResourceAsync(
+    TodoItem item,
+    string tenantResourceId,
+    CancellationToken cancellationToken = default)
 {
     var resourceId = GetTodoResourceId(item.Id);
 
-    _context.CreateResource(
+    await _context.EnsureSqlOSResourceAsync(
+        resourceId,
         tenantResourceId,
         item.Title,
         TodoResourceTypeId,
-        resourceId);
+        cancellationToken: cancellationToken);
 
     return resourceId;
 }

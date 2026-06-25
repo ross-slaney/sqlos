@@ -28,7 +28,7 @@ You'll learn how to install SqlOS, wire a minimal host, run the Todo sample, and
     Add `SqlOS` to your ASP.NET app.
   </Step>
   <Step title="Register on your DbContext">
-    Implement the SqlOS interfaces and call `AddSqlOS` during host setup.
+    Derive from `SqlOSDbContext<TContext>` and call `AddSqlOS` during host setup.
   </Step>
   <Step title="Map routes and verify">
     Call `MapSqlOS()`, start the app, and open the admin dashboard.
@@ -47,22 +47,25 @@ A complete minimal `Program.cs` for an owned web app with hosted auth:
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
+using SqlOS;
 using SqlOS.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' was not configured.");
 
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.Issuer = "https://localhost:5001/sqlos/auth";
-    options.AuthServer.PublicOrigin = "https://localhost:5001";
-    options.AuthServer.SeedOwnedWebApp(
-        "web",
-        "My Application",
-        "https://localhost:5001/auth/callback");
-});
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.Issuer = "https://localhost:5001/sqlos/auth";
+        options.AuthServer.PublicOrigin = "https://localhost:5001";
+        options.AuthServer.SeedOwnedWebApp(
+            "web",
+            "My Application",
+            "https://localhost:5001/auth/callback");
+    });
 
 var app = builder.Build();
 app.MapSqlOS();
@@ -71,28 +74,22 @@ app.Run();
 
 ## Set up your DbContext
 
-Your context implements the SqlOS interfaces. This sample includes both auth and FGA:
+Derive from `SqlOSDbContext<TContext>` to include the SqlOS auth server model, FGA model, and FGA TVF mapping. Add application entities in `OnApplicationModelCreating`:
 
 ```csharp
-public sealed class AppDbContext : DbContext,
-    ISqlOSAuthServerDbContext,
-    ISqlOSFgaDbContext
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
 {
     public DbSet<Project> Projects => Set<Project>();
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string subjectId,
-        string permissionKey)
-        => FromExpression(() =>
-            IsResourceAccessible(subjectId, permissionKey));
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.UseSqlOS(GetType());
+        modelBuilder.Entity<Project>();
     }
 }
 ```
+
+If you need full EF model control, the lower-level path is still available: implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, expose `IsResourceAccessible`, and call `modelBuilder.UseSqlOS(...)` yourself.
 
 `appsettings.json` needs a SQL Server connection string and optional dashboard password:
 
@@ -128,15 +125,36 @@ This gives you:
 
 ## Seed a client
 
-Register your frontend as an OAuth client so users can sign in immediately:
+Register your frontend as an OAuth client so users can sign in immediately. Put this inside the `options => { ... }` callback passed to `builder.AddSqlOS`:
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
+options.AuthServer.SeedOwnedWebApp(
+    "my-app",
+    "My Application",
+    "http://localhost:3000/auth/callback");
+```
+
+## Protect an API
+
+For API routes that accept SqlOS access tokens, protect a route group and read the validated token from `HttpContext`:
+
+```csharp
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = "https://localhost:5001/api";
+        options.ResourceMetadataUrl = "https://localhost:5001/.well-known/oauth-protected-resource";
+    });
+
+api.MapGet("/me", (HttpContext http) =>
 {
-    options.AuthServer.SeedOwnedWebApp(
-        "my-app",
-        "My Application",
-        "http://localhost:3000/auth/callback");
+    var token = http.SqlOSToken();
+    return Results.Ok(new
+    {
+        userId = http.SqlOSUserId(),
+        token.ClientId,
+        token.Audience
+    });
 });
 ```
 

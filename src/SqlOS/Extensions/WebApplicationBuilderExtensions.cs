@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Configuration;
 using SqlOS.Fga.Interfaces;
@@ -16,6 +17,21 @@ public static class WebApplicationBuilderExtensions
         where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
     {
         builder.Services.AddSqlOS<TContext>(configure);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the application's EF Core DbContext and SqlOS (auth server + FGA) in one host call.
+    /// After <see cref="WebApplicationBuilder.Build"/>, call <see cref="WebApplicationExtensions.MapSqlOS"/> once to map OAuth and admin API routes.
+    /// </summary>
+    public static WebApplicationBuilder AddSqlOS<TContext>(
+        this WebApplicationBuilder builder,
+        Action<DbContextOptionsBuilder> configureDbContext,
+        Action<SqlOSOptions>? configureSqlOS = null)
+        where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+    {
+        builder.Services.AddDbContext<TContext>(configureDbContext);
+        builder.Services.AddSqlOS<TContext>(configureSqlOS);
         return builder;
     }
 }
