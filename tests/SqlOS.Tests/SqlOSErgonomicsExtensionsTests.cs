@@ -268,6 +268,106 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public async Task ManualResourceApis_CreateProvisionAndDeleteResourceAndGrants()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.SaveChangesAsync();
+
+        await context.CreateResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace 1",
+            "root",
+            "Initial resource");
+        await context.SaveChangesAsync();
+
+        var duplicateCreate = async () => await context.CreateResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace Duplicate",
+            "root");
+        await duplicateCreate.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'workspace_1' already exists*");
+
+        await context.ProvisionResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace One",
+            "root");
+        await context.GrantRoleAsync("usr_1", "workspace_1", "owner");
+        await context.SaveChangesAsync();
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_1");
+        resource.Name.Should().Be("Workspace One");
+        resource.Description.Should().Be("Initial resource");
+        context.Set<SqlOSFgaGrant>().Count(x => x.ResourceId == "workspace_1").Should().Be(1);
+
+        await context.DeleteResourceAsync("workspace_1");
+        await context.SaveChangesAsync();
+
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_1")).Should().BeFalse();
+        (await context.Set<SqlOSFgaGrant>().AnyAsync(x => x.ResourceId == "workspace_1")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task DeleteResourceAsync_FailsWhenChildResourcesStillExist()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.CreateResourceWithIdAsync("workspace_1", "workspace", "Workspace 1", "root");
+        await context.CreateResourceWithIdAsync("workspace_child", "workspace", "Workspace child", "workspace_1");
+        await context.SaveChangesAsync();
+
+        var deleteParent = async () => await context.DeleteResourceAsync("workspace_1");
+
+        await deleteParent.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*has child resources*Delete or reparent child resources*");
+    }
+
+    [TestMethod]
+    public async Task GrantRoleAsync_ResolvesRoleKeyOrIdAndIsIdempotent()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.SaveChangesAsync();
+
+        var byKey = await context.GrantRoleAsync("usr_1", "root", "owner");
+        var byId = await context.GrantRoleAsync("usr_1", "root", "role_owner");
+        await context.SaveChangesAsync();
+
+        byKey.RoleId.Should().Be("role_owner");
+        byId.RoleId.Should().Be("role_owner");
+        context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "root").Should().Be(1);
+
+        await context.RevokeRoleAsync("usr_1", "root", "owner");
+        await context.SaveChangesAsync();
+
+        context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "root").Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GrantRoleAsync_RequiresExistingSubjectAndResourceWithoutProvisioningSubjects()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var missingSubject = async () => await context.GrantRoleAsync("missing_user", "root", "owner");
+        await missingSubject.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*subject 'missing_user' was not found*");
+
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        var missingResource = async () => await context.GrantRoleAsync("usr_1", "missing_resource", "owner");
+        await missingResource.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'missing_resource' was not found*");
+
+        context.Set<SqlOSFgaSubject>().Local.Should().NotContain(x => x.Id == "missing_user");
+    }
+
+    [TestMethod]
     public void FgaSeedDsl_CreatesPermissionsRolesAndRolePermissions()
     {
         var seed = new SqlOSFgaSeedBuilder();

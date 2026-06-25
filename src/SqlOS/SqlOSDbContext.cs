@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Extensions;
+using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -31,5 +32,25 @@ public abstract class SqlOSDbContext<TContext>(DbContextOptions<TContext> option
     /// </summary>
     protected virtual void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
+    }
+
+    public override int SaveChanges()
+        => SaveChanges(acceptAllChangesOnSuccess: true);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        SqlOSResourceEntitySynchronizer.Sync(this);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        await SqlOSResourceEntitySynchronizer.SyncAsync(this, cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

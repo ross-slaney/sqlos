@@ -1,10 +1,7 @@
 using System.Security.Claims;
-using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.Extensions;
-using SqlOS.Fga.Models;
 using SqlOS.Todo.Api.Data;
-using SqlOS.Todo.Api.Models;
 
 namespace SqlOS.Todo.Api.Services;
 
@@ -48,48 +45,23 @@ public sealed class TodoFgaService
         user.LastLoginAt = DateTime.UtcNow;
         user.UpdatedAt = DateTime.UtcNow;
 
-        await _context.EnsureSqlOSResourceAsync(
+        await _context.ProvisionResourceWithIdAsync(
             tenantResourceId,
-            "root",
-            displayName,
             TenantResourceTypeId,
+            displayName,
+            "root",
             $"Todo tenant for {subjectId}",
+            isActive: true,
             cancellationToken);
-        await _context.EnsureSqlOSRoleGrantAsync(
+        await _context.GrantRoleAsync(
             subjectId,
             tenantResourceId,
             TenantOwnerRole,
-            "Todo tenant owner grant.",
             cancellationToken);
 
         await _context.SaveChangesAsync(cancellationToken);
 
         return new TodoFgaContext(subjectId, tenantResourceId);
-    }
-
-    public async Task<string> CreateTodoResourceAsync(
-        TodoItem item,
-        string tenantResourceId,
-        CancellationToken cancellationToken = default)
-    {
-        var resourceId = GetTodoResourceId(item.Id);
-        await _context.EnsureSqlOSResourceAsync(
-            resourceId,
-            tenantResourceId,
-            item.Title,
-            TodoResourceTypeId,
-            cancellationToken: cancellationToken);
-        return resourceId;
-    }
-
-    public async Task RemoveTodoResourceAsync(string resourceId, CancellationToken cancellationToken = default)
-    {
-        var resource = await _context.Set<SqlOSFgaResource>()
-            .FirstOrDefaultAsync(x => x.Id == resourceId, cancellationToken);
-        if (resource != null)
-        {
-            _context.Set<SqlOSFgaResource>().Remove(resource);
-        }
     }
 
     public static string GetTenantResourceId(string userId) => $"tenant::{userId}";

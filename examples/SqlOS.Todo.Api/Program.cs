@@ -461,17 +461,15 @@ app.MapPost("/api/todos", async (
         return CreatePermissionDenied();
     }
 
+    var todoId = Guid.NewGuid();
     var item = new TodoItem
     {
-        Id = Guid.NewGuid(),
+        Id = todoId,
+        ResourceId = TodoFgaService.GetTodoResourceId(todoId),
         SqlOSUserId = todoContext.SubjectId,
         Title = request.Title.Trim(),
         CreatedAt = DateTime.UtcNow
     };
-    item.ResourceId = await todoFgaService.CreateTodoResourceAsync(
-        item,
-        todoContext.TenantResourceId,
-        cancellationToken);
 
     dbContext.TodoItems.Add(item);
     await dbContext.SaveChangesAsync(cancellationToken);
@@ -566,7 +564,6 @@ app.MapDelete("/api/todos/{id:guid}", async (
         return CreatePermissionDenied();
     }
 
-    await todoFgaService.RemoveTodoResourceAsync(item.ResourceId, cancellationToken);
     dbContext.TodoItems.Remove(item);
     await dbContext.SaveChangesAsync(cancellationToken);
     return Results.NoContent();
