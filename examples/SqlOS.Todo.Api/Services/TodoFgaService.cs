@@ -35,7 +35,7 @@ public sealed class TodoFgaService
         var email = GetClaimValue(validated.Principal, "email");
         var tenantResourceId = GetTenantResourceId(subjectId);
 
-        var user = await _context.EnsureSqlOSUserSubjectAsync(
+        var user = await _context.ProvisionUserSubjectAsync(
             subjectId,
             displayName,
             email,

@@ -299,7 +299,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         using var context = CreateContext();
         SeedFgaCore(context);
-        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
         var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
         context.Resources.Add(entity);
         await context.SaveChangesAsync();
@@ -522,7 +522,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         using var context = CreateContext();
         SeedFgaCore(context);
-        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
         var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
         context.Resources.Add(entity);
 
@@ -539,7 +539,7 @@ public sealed class SqlOSResourceEntitySyncTests
     {
         await using var context = CreateManualContext();
         SeedFgaCore(context);
-        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
         await context.SaveChangesAsync();
         var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
         context.Resources.Add(entity);

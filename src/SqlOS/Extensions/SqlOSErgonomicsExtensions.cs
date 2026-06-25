@@ -75,26 +75,6 @@ public static class SqlOSErgonomicsExtensions
         return result.Allowed;
     }
 
-    public static SqlOSFgaResource AddSqlOSResource(
-        this ISqlOSFgaDbContext context,
-        string resourceId,
-        string? parentResourceId,
-        string name,
-        string resourceTypeId,
-        string? description = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var resource = CreateResource(
-            resourceId,
-            parentResourceId,
-            name,
-            resourceTypeId,
-            description);
-        context.Set<SqlOSFgaResource>().Add(resource);
-        return resource;
-    }
-
     public static Task<SqlOSFgaResource> CreateResourceAsync(
         this ISqlOSFgaDbContext context,
         string resourceTypeId,
@@ -229,70 +209,6 @@ public static class SqlOSErgonomicsExtensions
         context.Set<SqlOSFgaResource>().Remove(resource);
     }
 
-    public static async Task<SqlOSFgaResource> EnsureSqlOSResourceAsync(
-        this ISqlOSFgaDbContext context,
-        string resourceId,
-        string? parentResourceId,
-        string name,
-        string resourceTypeId,
-        string? description = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
-        var normalizedParentId = NormalizeOptional(parentResourceId);
-        var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
-        EnsureResourceParentIsNotSelf(normalizedResourceId, normalizedParentId);
-        await FindRequiredResourceTypeAsync(context, normalizedResourceTypeId, cancellationToken);
-        if (normalizedParentId != null)
-        {
-            await FindRequiredResourceAsync(context, normalizedParentId, cancellationToken);
-        }
-
-        await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, normalizedParentId, cancellationToken);
-
-        var resource = await FindResourceAsync(context, normalizedResourceId, cancellationToken);
-        if (resource == null)
-        {
-            resource = CreateResource(
-                normalizedResourceId,
-                normalizedParentId,
-                name,
-                normalizedResourceTypeId,
-                description);
-            context.Set<SqlOSFgaResource>().Add(resource);
-            return resource;
-        }
-
-        resource.ParentId = normalizedParentId;
-        resource.Name = RequireValue(name, nameof(name));
-        resource.ResourceTypeId = normalizedResourceTypeId;
-        if (description != null)
-        {
-            resource.Description = NormalizeOptional(description);
-        }
-
-        resource.IsActive = true;
-        resource.UpdatedAt = DateTime.UtcNow;
-        return resource;
-    }
-
-    public static async Task<SqlOSFgaGrant> GrantSqlOSRoleAsync(
-        this ISqlOSFgaDbContext context,
-        string subjectId,
-        string resourceId,
-        string roleKeyOrId,
-        string? description = null,
-        CancellationToken cancellationToken = default)
-        => await GrantRoleCoreAsync(
-            context,
-            subjectId,
-            resourceId,
-            roleKeyOrId,
-            description,
-            cancellationToken);
-
     public static async Task<SqlOSFgaGrant> GrantRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -364,50 +280,6 @@ public static class SqlOSErgonomicsExtensions
         }
     }
 
-    public static async Task<SqlOSFgaGrant> EnsureSqlOSRoleGrantAsync(
-        this ISqlOSFgaDbContext context,
-        string subjectId,
-        string resourceId,
-        string roleKeyOrId,
-        string? description = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var normalizedSubjectId = RequireValue(subjectId, nameof(subjectId));
-        var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
-        await FindRequiredSubjectAsync(context, normalizedSubjectId, cancellationToken);
-        await FindRequiredResourceAsync(context, normalizedResourceId, cancellationToken);
-        var roleId = await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
-
-        var grant = await FindGrantAsync(
-            context,
-            normalizedSubjectId,
-            normalizedResourceId,
-            roleId,
-            cancellationToken);
-
-        if (grant == null)
-        {
-            return await GrantRoleCoreAsync(
-                context,
-                normalizedSubjectId,
-                normalizedResourceId,
-                roleId,
-                description,
-                cancellationToken,
-                roleAlreadyResolved: true);
-        }
-
-        if (description != null)
-        {
-            grant.Description = NormalizeOptional(description);
-        }
-
-        grant.UpdatedAt = DateTime.UtcNow;
-        return grant;
-    }
-
     private static async Task<SqlOSFgaGrant> GrantRoleCoreAsync(
         ISqlOSFgaDbContext context,
         string subjectId,
@@ -456,7 +328,7 @@ public static class SqlOSErgonomicsExtensions
         return grant;
     }
 
-    public static async Task<SqlOSFgaUser> EnsureSqlOSUserSubjectAsync(
+    public static async Task<SqlOSFgaUser> ProvisionUserSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,
@@ -508,7 +380,7 @@ public static class SqlOSErgonomicsExtensions
         return user;
     }
 
-    public static async Task<SqlOSFgaAgent> EnsureSqlOSAgentSubjectAsync(
+    public static async Task<SqlOSFgaAgent> ProvisionAgentSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,
@@ -560,7 +432,7 @@ public static class SqlOSErgonomicsExtensions
         return agent;
     }
 
-    public static async Task<SqlOSFgaServiceAccount> EnsureSqlOSServiceAccountSubjectAsync(
+    public static async Task<SqlOSFgaServiceAccount> ProvisionServiceAccountSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,

@@ -94,7 +94,7 @@ db.Workspaces.Add(workspace);
 await db.SaveChangesAsync();
 ```
 
-Manual resource APIs such as `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)` are still available for resources that are not backed by an application entity.
+Manual resource APIs such as `CreateResourceAsync(...)`, `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)` are still available for resources that are not backed by an application entity.
 
 ## Protected API helpers
 
@@ -112,10 +112,12 @@ api.MapPost("/workspaces", async (
     CreateWorkspace request,
     AppDbContext db,
     ISqlOSFgaAuthService fga,
-    HttpContext http) =>
+    HttpContext http,
+    CancellationToken ct) =>
 {
     var userId = http.SqlOSUserId();
     var workspaceId = Guid.NewGuid();
+
     var workspace = new Workspace
     {
         Id = workspaceId,
@@ -124,15 +126,24 @@ api.MapPost("/workspaces", async (
     };
 
     db.Workspaces.Add(workspace);
-    await db.EnsureSqlOSUserSubjectAsync(userId, userId);
-    await db.GrantRoleAsync(userId, workspace, "workspace_admin");
 
-    await db.SaveChangesAsync();
+    await db.ProvisionUserSubjectAsync(
+        userId,
+        displayName: userId,
+        cancellationToken: ct);
+
+    await db.GrantRoleAsync(
+        userId,
+        workspace,
+        "workspace_admin",
+        ct);
+
+    await db.SaveChangesAsync(ct);
     return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```
 
-Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `EnsureSqlOSUserSubjectAsync(...)`, `EnsureSqlOSAgentSubjectAsync(...)`, or `EnsureSqlOSServiceAccountSubjectAsync(...)` before granting roles. Grants stay explicit; resource rows for `ISqlOSResourceEntity` instances are synced by `SaveChangesAsync()`.
+Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `ProvisionUserSubjectAsync(...)`, `ProvisionAgentSubjectAsync(...)`, or `ProvisionServiceAccountSubjectAsync(...)` before granting roles. Grants stay explicit; resource rows for `ISqlOSResourceEntity` instances are synced by `SaveChangesAsync()`.
 
 ## Client onboarding modes
 
