@@ -12,13 +12,14 @@ section: guides
   actionLabel="Getting Started"
 />
 
-You'll learn the recommended SqlOS SDK setup: host registration, DbContext inheritance, and route mapping.
+You'll learn the recommended SqlOS SDK setup: host registration, DbContext inheritance, entity-backed FGA resources, explicit role grants, and route mapping.
 
-## Wire SqlOS in three places
+## Wire SqlOS in four places
 
 1. **Host registration** — `builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(...), options => ...)`
 2. **EF model** — derive from `SqlOSDbContext<AppDbContext>` and put app entities in `OnApplicationModelCreating`
-3. **Routes** — `app.MapSqlOS()` after `Build()`
+3. **Protected resources** — make protected domain entities implement `ISqlOSResourceEntity`
+4. **Routes** — `app.MapSqlOS()` after `Build()`
 
 ## Minimal owned-app setup
 
@@ -59,6 +60,42 @@ options.Fga.Seed(seed =>
 
 Use the explicit-ID overloads when you need stable IDs that differ from public permission or role keys.
 
+## Entity-backed FGA resources
+
+For protected application data, make the domain entity describe its FGA resource. `SqlOSDbContext<TContext>` syncs the backing `SqlOSFgaResource` row when EF saves the entity.
+
+```csharp
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string? ParentResourceId => "root";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+```
+
+Keep `ResourceId` stable and set it before saving the entity. If you use SqlOS authorized list queries, keep `ResourceId` as an EF-visible property so it can be translated in SQL.
+
+```csharp
+var workspaceId = Guid.NewGuid();
+var workspace = new Workspace
+{
+    Id = workspaceId,
+    ResourceId = $"workspace::{workspaceId:D}",
+    Name = request.Name.Trim()
+};
+
+db.Workspaces.Add(workspace);
+await db.SaveChangesAsync();
+```
+
+Manual resource APIs such as `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)` are still available for resources that are not backed by an application entity.
+
 ## Protected API helpers
 
 Protect a route group with SqlOS access-token validation, then use the validated token and FGA helpers in endpoints:
@@ -78,19 +115,24 @@ api.MapPost("/workspaces", async (
     HttpContext http) =>
 {
     var userId = http.SqlOSUserId();
-    var workspace = new Workspace(request.Name);
+    var workspaceId = Guid.NewGuid();
+    var workspace = new Workspace
+    {
+        Id = workspaceId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        Name = request.Name.Trim()
+    };
 
     db.Workspaces.Add(workspace);
     await db.EnsureSqlOSUserSubjectAsync(userId, userId);
-    await db.EnsureSqlOSResourceAsync(workspace.ResourceId, "root", workspace.Name, "workspace");
-    await db.EnsureSqlOSRoleGrantAsync(userId, workspace.ResourceId, "workspace_admin");
+    await db.GrantRoleAsync(userId, workspace, "workspace_admin");
 
     await db.SaveChangesAsync();
     return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```
 
-Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `EnsureSqlOSUserSubjectAsync(...)`, `EnsureSqlOSAgentSubjectAsync(...)`, or `EnsureSqlOSServiceAccountSubjectAsync(...)` before granting roles.
+Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `EnsureSqlOSUserSubjectAsync(...)`, `EnsureSqlOSAgentSubjectAsync(...)`, or `EnsureSqlOSServiceAccountSubjectAsync(...)` before granting roles. Grants stay explicit; resource rows for `ISqlOSResourceEntity` instances are synced by `SaveChangesAsync()`.
 
 ## Client onboarding modes
 

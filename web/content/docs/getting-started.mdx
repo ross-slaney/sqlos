@@ -30,6 +30,9 @@ You'll learn how to install SqlOS, wire a minimal host, run the Todo sample, and
   <Step title="Register on your DbContext">
     Derive from `SqlOSDbContext<TContext>` and call `AddSqlOS` during host setup.
   </Step>
+  <Step title="Declare protected resources">
+    Make protected entities implement `ISqlOSResourceEntity` so SqlOS can sync FGA resource rows during EF saves.
+  </Step>
   <Step title="Map routes and verify">
     Call `MapSqlOS()`, start the app, and open the admin dashboard.
   </Step>
@@ -90,6 +93,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 ```
 
 If you need full EF model control, the lower-level path is still available: implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, expose `IsResourceAccessible`, and call `modelBuilder.UseSqlOS(...)` yourself.
+
+For app data that should participate in FGA, implement `ISqlOSResourceEntity` on the domain entity. `SqlOSDbContext<TContext>` creates, updates, and deletes the matching `SqlOSFgaResource` row when you call `SaveChanges` / `SaveChangesAsync`; role grants remain explicit.
 
 `appsettings.json` needs a SQL Server connection string and optional dashboard password:
 

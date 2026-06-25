@@ -74,14 +74,15 @@ TODO_WRITE
 
 Every child todo inherits access from the tenant resource. The sample could add shared projects or organization workspaces later without changing the list endpoint shape. The row points to a resource, and the resource tree explains who can see it.
 
-## The Todo item carries a ResourceId
+## The Todo item describes its FGA resource
 
-Every protected entity implements `IHasResourceId`:
+Every protected entity implements `ISqlOSResourceEntity`. The stored `ResourceId` remains the bridge for SQL query filtering, while the other properties tell SqlOS how to maintain the backing FGA resource:
 
 ```csharp
 using SqlOS.Fga.Interfaces;
+using SqlOS.Todo.Api.Services;
 
-public sealed class TodoItem : IHasResourceId
+public sealed class TodoItem : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
@@ -90,33 +91,35 @@ public sealed class TodoItem : IHasResourceId
     public bool IsCompleted { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+
+    public string ResourceTypeId => TodoFgaService.TodoResourceTypeId;
+    public string ResourceName => Title;
+    public string? ParentResourceId => TodoFgaService.GetTenantResourceId(SqlOSUserId);
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
 }
 ```
 
-The `ResourceId` is the bridge between business data and authorization data. The todo row can still have app-specific columns, indexes, and constraints. SqlOS only needs the resource ID to compose the authorization predicate.
+The todo row can still have app-specific columns, indexes, and constraints. SqlOS uses `ResourceId` to compose the authorization predicate and uses the entity-backed resource contract to sync the FGA resource row during `SaveChangesAsync`.
 
 ## The DbContext maps the SQL function
 
-The Todo sample context implements both SqlOS interfaces and exposes `IsResourceAccessible`:
+The Todo sample context derives from `SqlOSDbContext<TContext>`, which registers the SqlOS EF model and TVF mapping:
 
 ```csharp
-public sealed class TodoSampleDbContext(
-    DbContextOptions<TodoSampleDbContext> options)
-    : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> options)
+    : SqlOSDbContext<TodoSampleDbContext>(options)
 {
     public DbSet<TodoItem> TodoItems => Set<TodoItem>();
 
-    public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
-        string resourceId,
-        string subjectIds,
-        string permissionId)
-        => FromExpression(() =>
-            IsResourceAccessible(resourceId, subjectIds, permissionId));
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
-        modelBuilder.UseSqlOS(Database.IsRelational() ? GetType() : null);
+        modelBuilder.Entity<TodoItem>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ResourceId).HasMaxLength(450).IsRequired();
+            entity.HasIndex(x => x.ResourceId).IsUnique();
+        });
     }
 }
 ```
@@ -164,45 +167,40 @@ That filter composes with search, sort, projection, and pagination. It does not 
 
 ## Creating rows and resources together
 
-When a todo is created, the app creates a domain row and an FGA resource in the same `DbContext` unit of work:
+When a todo is created, the app creates the domain row with a stable `ResourceId`. `SqlOSDbContext<TContext>` creates the backing FGA resource in the same `SaveChangesAsync` call:
 
 ```csharp
+var todoId = Guid.NewGuid();
 var item = new TodoItem
 {
-    Id = Guid.NewGuid(),
+    Id = todoId,
+    ResourceId = TodoFgaService.GetTodoResourceId(todoId),
     SqlOSUserId = todoContext.SubjectId,
     Title = request.Title.Trim(),
     CreatedAt = DateTime.UtcNow
 };
 
-item.ResourceId = await todoFgaService.CreateTodoResourceAsync(
-    item,
-    todoContext.TenantResourceId,
-    cancellationToken);
-
 dbContext.TodoItems.Add(item);
 await dbContext.SaveChangesAsync(cancellationToken);
 ```
 
-The helper creates `todo::{todoId}` under the tenant resource:
+The tenant root is the one resource in this sample that is not backed by a domain entity, so the service provisions it explicitly and keeps grants explicit:
 
 ```csharp
-public async Task<string> CreateTodoResourceAsync(
-    TodoItem item,
-    string tenantResourceId,
-    CancellationToken cancellationToken = default)
-{
-    var resourceId = GetTodoResourceId(item.Id);
+await _context.ProvisionResourceWithIdAsync(
+    tenantResourceId,
+    TodoFgaService.TenantResourceTypeId,
+    displayName,
+    "root",
+    $"Todo tenant for {subjectId}",
+    isActive: true,
+    cancellationToken);
 
-    await _context.EnsureSqlOSResourceAsync(
-        resourceId,
-        tenantResourceId,
-        item.Title,
-        TodoResourceTypeId,
-        cancellationToken: cancellationToken);
-
-    return resourceId;
-}
+await _context.GrantRoleAsync(
+    subjectId,
+    tenantResourceId,
+    TodoFgaService.TenantOwnerRole,
+    cancellationToken);
 ```
 
 That is the practical advantage of keeping app data and authorization data in the same database. If the business write fails, the resource write fails with it. If the resource cannot be created, the todo is not silently created with no authorization node.
