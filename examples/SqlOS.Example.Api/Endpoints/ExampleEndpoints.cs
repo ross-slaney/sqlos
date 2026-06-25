@@ -182,6 +182,12 @@ public static class ExampleEndpoints
                 return Results.BadRequest(new { error = "Token must include sub and org_id to create workspaces." });
             }
 
+            var workspaceName = request.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(workspaceName))
+            {
+                return Results.BadRequest(new { error = "Workspace name is required." });
+            }
+
             await fgaService.EnsureUserAccessAsync(subjectId, organizationId, cancellationToken);
             var organizationResourceId = ExampleFgaService.GetOrganizationResourceId(organizationId);
             var access = await authService.CheckAccessAsync(subjectId, ExampleFgaService.WorkspaceManagePermission, organizationResourceId);
@@ -196,7 +202,7 @@ public static class ExampleEndpoints
                 Id = workspaceId,
                 OrganizationId = organizationId,
                 ResourceId = ExampleFgaService.GetWorkspaceResourceId(workspaceId),
-                Name = request.Name,
+                Name = workspaceName,
                 CreatedAt = DateTime.UtcNow
             };
 

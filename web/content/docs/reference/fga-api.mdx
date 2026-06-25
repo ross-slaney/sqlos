@@ -119,9 +119,9 @@ var trace = await authService.TraceResourceAccessAsync(
 
 ---
 
-## SqlOSFgaConvenienceExtensions
+## SqlOS.Extensions
 
-Extension methods that reduce endpoint boilerplate. Available via `using SqlOS.Fga.Extensions`.
+Canonical SDK helpers for resource lifecycle, subject provisioning, and role grants. Available via `using SqlOS.Extensions`.
 
 ---
 
@@ -154,8 +154,6 @@ Manual resource APIs remain available for resources that are not backed by domai
 | `ProvisionResourceWithIdAsync(...)` | Idempotent create/update for explicit non-entity resources. |
 | `DeleteResourceAsync(...)` | Delete one resource and its direct grants without cascading child resources. |
 
-`SqlOS.Fga.Extensions.CreateResource(...)` is a lower-level/manual lifecycle helper kept for manual FGA samples and existing code. Do not use it as the normal protected-entity creation path.
-
 ---
 
 ### Subject and Grant APIs
@@ -169,6 +167,21 @@ Subjects are provisioned explicitly. Grants never create subjects implicitly.
 | `ProvisionServiceAccountSubjectAsync(...)` | Idempotently provision a service-account FGA subject and typed service-account row. |
 | `GrantRoleAsync(...)` | Idempotently grant a role by key or ID to an existing subject/resource. |
 | `RevokeRoleAsync(...)` | Remove a role grant by key or ID if it exists. |
+
+---
+
+## SqlOS.Fga.Extensions
+
+Lower-level/read-side FGA convenience extensions. Available via `using SqlOS.Fga.Extensions`.
+
+### CreateResource
+
+`CreateResource(...)` is a lower-level/manual lifecycle helper kept for manual FGA samples and existing code. Do not use it as the normal protected-entity creation path. For protected application rows, prefer `ISqlOSResourceEntity` plus `SqlOSDbContext<TContext>`.
+
+```csharp
+// Manual lifecycle sample only.
+var resourceId = context.CreateResource("retail_root", request.Name, "chain");
+```
 
 ---
 

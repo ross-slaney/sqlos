@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Interfaces;
@@ -295,6 +296,51 @@ public sealed class SqlOSResourceEntitySyncTests
     }
 
     [TestMethod]
+    public async Task SaveChangesAsync_ReparentsBackingResourceForModifiedEntity()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        var parentA = new ResourceBackedEntity { Id = "workspace_a", Name = "Workspace A" };
+        var parentB = new ResourceBackedEntity { Id = "workspace_b", Name = "Workspace B" };
+        var child = new ResourceBackedEntity
+        {
+            Id = "workspace_child",
+            Name = "Workspace child",
+            ParentId = "workspace_a"
+        };
+        context.Resources.AddRange(parentA, parentB, child);
+        await context.SaveChangesAsync();
+
+        child.ParentId = "workspace_b";
+        await context.SaveChangesAsync();
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_child");
+        resource.ParentId.Should().Be("workspace_b");
+    }
+
+    [TestMethod]
+    public async Task SaveChangesAsync_RejectsReparentThatCreatesCycle()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        var parent = new ResourceBackedEntity { Id = "workspace_parent", Name = "Workspace parent" };
+        var child = new ResourceBackedEntity
+        {
+            Id = "workspace_child",
+            Name = "Workspace child",
+            ParentId = "workspace_parent"
+        };
+        context.Resources.AddRange(parent, child);
+        await context.SaveChangesAsync();
+
+        parent.ParentId = "workspace_child";
+        var act = async () => await context.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*hierarchy contains a cycle*");
+    }
+
+    [TestMethod]
     public async Task SaveChangesAsync_DeletesBackingResourceAndGrantsForDeletedEntity()
     {
         using var context = CreateContext();
@@ -343,6 +389,34 @@ public sealed class SqlOSResourceEntitySyncTests
         await context.SaveChangesAsync();
 
         (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_1")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SaveChangesAsync_DeletesParentAndChildInSameSaveOnRelationalProvider()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateSqliteContext(connection);
+        await context.Database.EnsureCreatedAsync();
+        await CreateSqliteFgaTablesAsync(context);
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var parent = new ResourceBackedEntity { Id = "workspace_parent", Name = "Workspace parent" };
+        var child = new ResourceBackedEntity
+        {
+            Id = "workspace_child",
+            Name = "Workspace child",
+            ParentId = "workspace_parent"
+        };
+        context.Resources.AddRange(parent, child);
+        await context.SaveChangesAsync();
+
+        context.Resources.RemoveRange(parent, child);
+        await context.SaveChangesAsync();
+
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_parent")).Should().BeFalse();
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_child")).Should().BeFalse();
     }
 
     [TestMethod]
@@ -566,6 +640,14 @@ public sealed class SqlOSResourceEntitySyncTests
         return new ManualResourceEntityTestDbContext(options);
     }
 
+    private static ResourceEntityTestDbContext CreateSqliteContext(SqliteConnection connection)
+    {
+        var options = new DbContextOptionsBuilder<ResourceEntityTestDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        return new ResourceEntityTestDbContext(options);
+    }
+
     private static void SeedFgaCore(DbContext context)
     {
         context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType { Id = "user", Name = "User" });
@@ -584,6 +666,76 @@ public sealed class SqlOSResourceEntitySyncTests
             Key = "owner",
             Name = "Owner"
         });
+    }
+
+    private static async Task CreateSqliteFgaTablesAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys=ON;");
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaSubjectTypes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Name TEXT NOT NULL,
+                Description TEXT NULL
+            );
+            """);
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaSubjects (
+                Id TEXT NOT NULL PRIMARY KEY,
+                SubjectTypeId TEXT NOT NULL,
+                DisplayName TEXT NOT NULL,
+                OrganizationId TEXT NULL,
+                ExternalRef TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL,
+                FOREIGN KEY (SubjectTypeId) REFERENCES SqlOSFgaSubjectTypes(Id) ON DELETE RESTRICT
+            );
+            """);
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaResourceTypes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Name TEXT NOT NULL,
+                Description TEXT NULL
+            );
+            """);
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaResources (
+                Id TEXT NOT NULL PRIMARY KEY,
+                ParentId TEXT NULL,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                ResourceTypeId TEXT NOT NULL,
+                IsActive INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL,
+                FOREIGN KEY (ParentId) REFERENCES SqlOSFgaResources(Id) ON DELETE RESTRICT,
+                FOREIGN KEY (ResourceTypeId) REFERENCES SqlOSFgaResourceTypes(Id) ON DELETE RESTRICT
+            );
+            """);
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaRoles (
+                Id TEXT NOT NULL PRIMARY KEY,
+                "Key" TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                IsVirtual INTEGER NOT NULL
+            );
+            """);
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE SqlOSFgaGrants (
+                Id TEXT NOT NULL PRIMARY KEY,
+                SubjectId TEXT NOT NULL,
+                ResourceId TEXT NOT NULL,
+                RoleId TEXT NOT NULL,
+                Description TEXT NULL,
+                EffectiveFrom TEXT NULL,
+                EffectiveTo TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL,
+                FOREIGN KEY (SubjectId) REFERENCES SqlOSFgaSubjects(Id) ON DELETE RESTRICT,
+                FOREIGN KEY (ResourceId) REFERENCES SqlOSFgaResources(Id) ON DELETE RESTRICT,
+                FOREIGN KEY (RoleId) REFERENCES SqlOSFgaRoles(Id) ON DELETE RESTRICT
+            );
+            """);
     }
 
     private sealed class ResourceEntityTestDbContext(DbContextOptions<ResourceEntityTestDbContext> options)
