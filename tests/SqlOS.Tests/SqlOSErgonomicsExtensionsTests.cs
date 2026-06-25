@@ -312,6 +312,23 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public async Task ProvisionResourceWithIdAsync_PreservesExistingParentWhenParentIsOmitted()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.CreateResourceWithIdAsync("workspace_parent", "workspace", "Workspace parent", "root");
+        await context.CreateResourceWithIdAsync("workspace_child", "workspace", "Workspace child", "workspace_parent");
+        await context.SaveChangesAsync();
+
+        await context.ProvisionResourceWithIdAsync("workspace_child", "workspace", "Workspace child renamed");
+        await context.SaveChangesAsync();
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_child");
+        resource.Name.Should().Be("Workspace child renamed");
+        resource.ParentId.Should().Be("workspace_parent");
+    }
+
+    [TestMethod]
     public async Task CreateResourceAsync_GeneratesResourceId()
     {
         using var context = CreateContext();

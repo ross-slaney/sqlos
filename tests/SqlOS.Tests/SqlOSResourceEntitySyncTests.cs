@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
@@ -314,6 +315,37 @@ public sealed class SqlOSResourceEntitySyncTests
     }
 
     [TestMethod]
+    public async Task SaveChangesAsync_DeletesBackingResourceForDisconnectedStubEntity()
+    {
+        var databaseName = Guid.NewGuid().ToString("N");
+        await using (var setup = CreateContext(databaseName))
+        {
+            SeedFgaCore(setup);
+            setup.Resources.Add(new ResourceBackedEntity
+            {
+                Id = "workspace_1",
+                ResourceKey = "workspace_1",
+                Name = "Workspace 1"
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var context = CreateContext(databaseName);
+        var stub = new ResourceBackedEntity
+        {
+            Id = "workspace_1",
+            ResourceKey = "workspace_1",
+            TypeId = string.Empty,
+            Name = string.Empty,
+            ParentId = null
+        };
+        context.Resources.Remove(stub);
+        await context.SaveChangesAsync();
+
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_1")).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task SaveChangesAsync_DeleteFailsWhenChildResourcesStillExist()
     {
         using var context = CreateContext();
@@ -502,15 +534,39 @@ public sealed class SqlOSResourceEntitySyncTests
         (await context.Set<SqlOSFgaGrant>().AnyAsync(x => x.ResourceId == "workspace_1")).Should().BeTrue();
     }
 
-    private static ResourceEntityTestDbContext CreateContext()
+    [TestMethod]
+    public async Task GrantRoleAsync_RejectsPendingResourceEntityWhenContextDoesNotSyncResources()
+    {
+        await using var context = CreateManualContext();
+        SeedFgaCore(context);
+        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
+        await context.SaveChangesAsync();
+        var entity = new ResourceBackedEntity { Id = "workspace_1", Name = "Workspace 1" };
+        context.Resources.Add(entity);
+
+        var act = async () => await context.GrantRoleAsync("usr_1", entity, "owner");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'workspace_1' was not found*");
+    }
+
+    private static ResourceEntityTestDbContext CreateContext(string? databaseName = null)
     {
         var options = new DbContextOptionsBuilder<ResourceEntityTestDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .UseInMemoryDatabase(databaseName ?? Guid.NewGuid().ToString("N"))
             .Options;
         return new ResourceEntityTestDbContext(options);
     }
 
-    private static void SeedFgaCore(ResourceEntityTestDbContext context)
+    private static ManualResourceEntityTestDbContext CreateManualContext()
+    {
+        var options = new DbContextOptionsBuilder<ManualResourceEntityTestDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        return new ManualResourceEntityTestDbContext(options);
+    }
+
+    private static void SeedFgaCore(DbContext context)
     {
         context.Set<SqlOSFgaSubjectType>().Add(new SqlOSFgaSubjectType { Id = "user", Name = "User" });
         context.Set<SqlOSFgaResourceType>().AddRange(
@@ -536,21 +592,43 @@ public sealed class SqlOSResourceEntitySyncTests
         public DbSet<ResourceBackedEntity> Resources => Set<ResourceBackedEntity>();
 
         protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+            => ConfigureResourceBackedEntity(modelBuilder);
+    }
+
+    private static void ConfigureResourceBackedEntity(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ResourceBackedEntity>(entity =>
         {
-            modelBuilder.Entity<ResourceBackedEntity>(entity =>
-            {
-                entity.HasKey(x => x.Id);
-                entity.Property(x => x.Id).HasMaxLength(128);
-                entity.Property(x => x.Name).HasMaxLength(128).IsRequired();
-                entity.Property(x => x.TypeId).HasMaxLength(128).IsRequired();
-                entity.Property(x => x.ParentId).HasMaxLength(128);
-                entity.Ignore(x => x.ResourceId);
-                entity.Ignore(x => x.ResourceTypeId);
-                entity.Ignore(x => x.ResourceName);
-                entity.Ignore(x => x.ParentResourceId);
-                entity.Ignore(x => x.ResourceDescription);
-                entity.Ignore(x => x.ResourceIsActive);
-            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(128);
+            entity.Property(x => x.Name).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.TypeId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.ParentId).HasMaxLength(128);
+            entity.Ignore(x => x.ResourceId);
+            entity.Ignore(x => x.ResourceTypeId);
+            entity.Ignore(x => x.ResourceName);
+            entity.Ignore(x => x.ParentResourceId);
+            entity.Ignore(x => x.ResourceDescription);
+            entity.Ignore(x => x.ResourceIsActive);
+        });
+    }
+
+    private sealed class ManualResourceEntityTestDbContext(DbContextOptions<ManualResourceEntityTestDbContext> options)
+        : DbContext(options), ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+    {
+        public DbSet<ResourceBackedEntity> Resources => Set<ResourceBackedEntity>();
+
+        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+            string resourceId,
+            string subjectIds,
+            string permissionId)
+            => throw new NotSupportedException("TVFs are not supported for the in-memory test context.");
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.UseSqlOS();
+            ConfigureResourceBackedEntity(modelBuilder);
         }
     }
 

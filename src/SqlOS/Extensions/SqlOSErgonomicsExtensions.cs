@@ -164,23 +164,28 @@ public static class SqlOSErgonomicsExtensions
         ArgumentNullException.ThrowIfNull(context);
 
         var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
+        var parentWasProvided = parentResourceId != null;
         var normalizedParentId = NormalizeOptional(parentResourceId);
         var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
-        EnsureResourceParentIsNotSelf(normalizedResourceId, normalizedParentId);
         await FindRequiredResourceTypeAsync(context, normalizedResourceTypeId, cancellationToken);
-        if (normalizedParentId != null)
+        var resource = await FindResourceAsync(context, normalizedResourceId, cancellationToken);
+        var effectiveParentId = resource == null || parentWasProvided
+            ? normalizedParentId
+            : resource.ParentId;
+
+        EnsureResourceParentIsNotSelf(normalizedResourceId, effectiveParentId);
+        if (effectiveParentId != null)
         {
-            await FindRequiredResourceOrPendingEntityAsync(context, normalizedParentId, cancellationToken);
+            await FindRequiredResourceOrPendingEntityAsync(context, effectiveParentId, cancellationToken);
         }
 
-        await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, normalizedParentId, cancellationToken);
+        await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, effectiveParentId, cancellationToken);
 
-        var resource = await FindResourceAsync(context, normalizedResourceId, cancellationToken);
         if (resource == null)
         {
             resource = CreateResource(
                 normalizedResourceId,
-                normalizedParentId,
+                effectiveParentId,
                 name,
                 normalizedResourceTypeId,
                 description);
@@ -189,7 +194,7 @@ public static class SqlOSErgonomicsExtensions
             return resource;
         }
 
-        resource.ParentId = normalizedParentId;
+        resource.ParentId = effectiveParentId;
         resource.Name = RequireValue(name, nameof(name));
         resource.ResourceTypeId = normalizedResourceTypeId;
         if (description != null)
@@ -776,6 +781,7 @@ public static class SqlOSErgonomicsExtensions
         }
 
         if (context is DbContext dbContext
+            && IsSqlOSResourceEntitySyncContext(dbContext)
             && dbContext.ChangeTracker.Entries().Any(entry =>
                 entry.Entity is ISqlOSResourceEntity resourceEntity
                 && entry.State is EntityState.Added or EntityState.Modified
@@ -785,6 +791,19 @@ public static class SqlOSErgonomicsExtensions
         }
 
         throw new InvalidOperationException($"FGA resource '{resourceId}' was not found.");
+    }
+
+    private static bool IsSqlOSResourceEntitySyncContext(DbContext context)
+    {
+        for (var type = context.GetType(); type != null; type = type.BaseType)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(SqlOSDbContext<>))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task EnsureResourceHasNoChildrenAsync(

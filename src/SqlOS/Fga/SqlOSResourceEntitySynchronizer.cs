@@ -533,14 +533,30 @@ internal static class SqlOSResourceEntitySynchronizer
         bool ResourceIsActive)
     {
         public static ResourceEntityChange From(EntityEntry entry, ISqlOSResourceEntity entity)
-            => new(
+        {
+            var resourceId = RequireValue(entity.ResourceId, nameof(ISqlOSResourceEntity.ResourceId));
+            if (entry.State == EntityState.Deleted)
+            {
+                return new(
+                    entry,
+                    entry.State,
+                    resourceId,
+                    string.Empty,
+                    string.Empty,
+                    null,
+                    null,
+                    true);
+            }
+
+            return new(
                 entry,
                 entry.State,
-                RequireValue(entity.ResourceId, nameof(ISqlOSResourceEntity.ResourceId)),
+                resourceId,
                 RequireValue(entity.ResourceTypeId, nameof(ISqlOSResourceEntity.ResourceTypeId)),
                 RequireValue(entity.ResourceName, nameof(ISqlOSResourceEntity.ResourceName)),
                 NormalizeOptional(entity.ParentResourceId),
                 NormalizeOptional(entity.ResourceDescription),
                 entity.ResourceIsActive);
+        }
     }
 }
