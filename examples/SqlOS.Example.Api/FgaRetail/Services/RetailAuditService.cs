@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
-using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.Example.Api.FgaRetail.Services;
@@ -25,7 +24,7 @@ public sealed class RetailAuditService
         IReadOnlyDictionary<string, object?>? metadata = null,
         CancellationToken cancellationToken = default)
     {
-        var subjectId = http.GetSubjectId();
+        var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
         var profile = await context.ExampleUserProfiles
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.SqlOSUserId == subjectId, cancellationToken);

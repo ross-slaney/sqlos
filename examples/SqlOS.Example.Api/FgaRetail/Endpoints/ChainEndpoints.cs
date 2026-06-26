@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
-using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
@@ -28,7 +27,7 @@ public static class ChainEndpoints
             string? sortBy = null,
             string? sortDir = null) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var spec = PagedSpec.For<Chain>(c => c.Id)
                 .RequirePermission(RetailPermissionKeys.ChainView)
@@ -58,7 +57,7 @@ public static class ChainEndpoints
             ISqlOSFgaAuthService authService,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             return await authService.AuthorizedDetailAsync(
                 context.Chains.Include(c => c.Locations),
@@ -84,7 +83,7 @@ public static class ChainEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.ChainEdit, "retail_root");
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
@@ -137,7 +136,7 @@ public static class ChainEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == id);
             if (chain is null) return Results.NotFound();
@@ -185,7 +184,7 @@ public static class ChainEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == id);
             if (chain is null) return Results.NotFound();
