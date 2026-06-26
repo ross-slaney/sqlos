@@ -468,7 +468,7 @@ app.MapPost("/api/todos", async (
     {
         Id = todoId,
         ResourceId = TodoFgaService.GetTodoResourceId(todoId),
-        SqlOSUserId = todoContext.SubjectId,
+        OwnerSubjectId = todoContext.SubjectId,
         Title = request.Title.Trim(),
         CreatedAt = DateTime.UtcNow
     };

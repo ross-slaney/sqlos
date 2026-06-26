@@ -11,7 +11,7 @@ Most authorization bugs do not start with a dramatic exploit. They start with a 
 The detail endpoint has a check:
 
 ```csharp
-if (!await CanEdit(userId, documentId))
+if (!await CanEdit(subjectId, documentId))
     return Results.Forbid();
 ```
 
@@ -19,7 +19,7 @@ But the list endpoint quietly returns too much:
 
 ```csharp
 var todos = await db.TodoItems
-    .Where(x => x.SqlOSUserId == userId)
+    .Where(x => x.OwnerSubjectId == subjectId)
     .OrderBy(x => x.CreatedAt)
     .ToListAsync();
 ```
@@ -52,7 +52,7 @@ The resource hierarchy is:
 
 ```text
 root
-  tenant::{userId}
+  tenant::{subjectId}
     todo::{todoId}
 ```
 
@@ -86,7 +86,7 @@ public sealed class TodoItem : ISqlOSResourceEntity
 {
     public Guid Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;
-    public string SqlOSUserId { get; set; } = string.Empty;
+    public string OwnerSubjectId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public bool IsCompleted { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -94,7 +94,7 @@ public sealed class TodoItem : ISqlOSResourceEntity
 
     public string ResourceTypeId => TodoFgaService.TodoResourceTypeId;
     public string ResourceName => Title;
-    public string? ParentResourceId => TodoFgaService.GetTenantResourceId(SqlOSUserId);
+    public string? ParentResourceId => TodoFgaService.GetTenantResourceId(OwnerSubjectId);
     public string? ResourceDescription => null;
     public bool ResourceIsActive => true;
 }
@@ -133,7 +133,7 @@ The fragile version asks the app table to carry all authorization meaning:
 ```csharp
 var items = await dbContext.TodoItems
     .AsNoTracking()
-    .Where(x => x.SqlOSUserId == currentUserId)
+    .Where(x => x.OwnerSubjectId == currentSubjectId)
     .OrderBy(x => x.IsCompleted)
     .ThenBy(x => x.CreatedAt)
     .ToListAsync();
@@ -175,7 +175,7 @@ var item = new TodoItem
 {
     Id = todoId,
     ResourceId = TodoFgaService.GetTodoResourceId(todoId),
-    SqlOSUserId = todoContext.SubjectId,
+    OwnerSubjectId = todoContext.SubjectId,
     Title = request.Title.Trim(),
     CreatedAt = DateTime.UtcNow
 };
