@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create SqlOS Issue"
+  short_description: "Draft repo-grounded SqlOS GitHub issues"
+  default_prompt: "Use $create-sqlos-issue to create a high-quality SqlOS GitHub issue from this desired state:"
