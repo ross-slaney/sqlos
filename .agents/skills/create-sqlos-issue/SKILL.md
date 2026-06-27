@@ -22,7 +22,7 @@ Use this skill to convert a rough desired state into a SqlOS issue that is ready
 From the SqlOS repo root, run the bundled snapshot script with the user's key terms:
 
 ```bash
-bash .codex/skills/create-sqlos-issue/scripts/gather-sqlos-issue-context.sh magic link passwordless email
+bash .agents/skills/create-sqlos-issue/scripts/gather-sqlos-issue-context.sh magic link passwordless email
 ```
 
 Then manually inspect the most relevant files. The script is a starting point, not proof by itself.
