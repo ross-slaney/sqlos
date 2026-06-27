@@ -7,6 +7,8 @@ section: fga
 
 `GetAuthorizationFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
+This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
+
 ## Basic usage
 
 ```csharp
@@ -52,6 +54,8 @@ var result = await executor.ExecuteAsync(
 From the retail example app:
 
 ```csharp
+using System.IdentityModel.Tokens.Jwt;
+
 app.MapGet("/api/chains", async (
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
@@ -60,7 +64,9 @@ app.MapGet("/api/chains", async (
     string? search, int? pageSize, string? cursor,
     string? sortBy, string? sortDir) =>
 {
-    var subjectId = http.GetSubjectId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
 
     var spec = PagedSpec.For<Chain>(c => c.Id)
         .RequirePermission(RetailPermissionKeys.ChainView)

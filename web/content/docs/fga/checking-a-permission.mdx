@@ -12,9 +12,8 @@ Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action
 ```csharp
 var access = await authService.CheckAccessAsync(
     subjectId,
-    "CHAIN_EDIT",
-    resourceId
-);
+    "WORKSPACE_MANAGE",
+    resourceId);
 
 if (!access.Allowed)
     return Results.Json(new { error = "Permission denied" }, statusCode: 403);
@@ -22,20 +21,20 @@ if (!access.Allowed)
 
 Use this for:
 
-- **Mutations** -- check before creating, updating, or deleting
-- **Single-resource gates** -- when you already have the resource ID
+- **Mutations** -- check before creating, updating, or deleting.
+- **Single-resource gates** -- when you already have the resource ID.
 
 ## HasCapabilityAsync
 
-Check if a subject has a permission anywhere in the tree (effectively a root-level check):
+Check if a subject has a permission anywhere in the tree:
 
 ```csharp
-var canManageChains = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
+var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKSPACE_MANAGE");
 ```
 
 Use this for:
 
-- **Global UI toggles** -- show/hide "Create Chain" button
+- **Global UI toggles** -- show/hide "Create workspace" button.
 - **Broad capability gates** -- "can this user create anything at all?"
 
 ## Access Tester (dashboard)
@@ -48,39 +47,41 @@ Select a subject, permission, and resource to see whether access is allowed and 
 
 ## Full mutation example
 
-From the retail example -- creating a chain with authorization:
+Create a protected entity after checking access to its parent resource. `SqlOSDbContext<TContext>` syncs the backing FGA resource row when the entity is saved.
 
 ```csharp
-app.MapPost("/api/chains", async (
-    CreateChainRequest request,
-    ExampleAppDbContext context,
+app.MapPost("/api/workspaces", async (
+    CreateWorkspaceRequest request,
+    AppDbContext db,
     ISqlOSFgaAuthService authService,
-    HttpContext http) =>
+    HttpContext http,
+    CancellationToken ct) =>
 {
-    var subjectId = http.GetSubjectId();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
 
-    // 1. Check permission on the parent resource
+    var organizationResourceId = $"org::{request.OrganizationId}";
+
     var access = await authService.CheckAccessAsync(
-        subjectId, "CHAIN_EDIT", "retail_root");
+        subjectId,
+        "WORKSPACE_MANAGE",
+        organizationResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    // 2. Create FGA resource as child of parent
-    var resourceId = context.CreateResource(
-        "retail_root", request.Name, "chain");
-
-    // 3. Create domain entity with the resource ID
-    var chain = new Chain
+    var workspaceId = Guid.NewGuid();
+    var workspace = new Workspace
     {
-        ResourceId = resourceId,
-        Name = request.Name,
-        Description = request.Description
+        Id = workspaceId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        OrganizationId = request.OrganizationId,
+        Name = request.Name.Trim()
     };
-    context.Chains.Add(chain);
 
-    // 4. Save in one transaction
-    await context.SaveChangesAsync();
+    db.Workspaces.Add(workspace);
+    await db.SaveChangesAsync(ct);
 
-    return Results.Created($"/api/chains/{chain.Id}", chain);
+    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```

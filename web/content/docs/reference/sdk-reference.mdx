@@ -221,11 +221,33 @@ var chains = await dbContext.Chains.Where(filter).ToListAsync();
 var trace = await authService.TraceResourceAccessAsync(subjectId, resourceId, "CHAIN_VIEW");
 ```
 
-### CreateResource Extension
+### Resource Lifecycle
 
 ```csharp
-var resourceId = context.CreateResource(parentId, name, resourceTypeId);
-var resourceId = context.CreateResource(parentId, name, resourceTypeId, id: "custom-id");
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public string Name { get; set; } = "";
+    public string OrganizationResourceId { get; set; } = "";
+    public string ResourceId { get; set; } = "";
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string? ParentResourceId => OrganizationResourceId;
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+await db.SaveChangesAsync(ct); // syncs the backing SqlOSFgaResource row
+```
+
+Manual non-entity resources use `CreateResourceAsync(...)`, `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)`.
+
+### Subject and Grant Helpers
+
+```csharp
+await db.ProvisionUserSubjectAsync(subjectId, displayName: subjectId, cancellationToken: ct);
+await db.GrantRoleAsync(subjectId, workspace, "workspace_admin", ct);
+await db.RevokeRoleAsync(subjectId, workspace.ResourceId, "workspace_admin", ct);
 ```
 
 ### AuthorizedDetailAsync Extension
@@ -280,11 +302,12 @@ var result = await executor.ExecuteAsync(dbContext.Chains, spec, subjectId, chai
 
 | Namespace | Contents |
 | --- | --- |
-| `SqlOS` | Bootstrap, options |
+| `SqlOS` | Bootstrap, options, `SqlOSDbContext<TContext>` |
 | `SqlOS.AuthServer.Services` | Auth service classes |
 | `SqlOS.AuthServer.Contracts` | Request/response types |
 | `SqlOS.AuthServer.Models` | EF Core entities |
-| `SqlOS.Fga.Interfaces` | `ISqlOSFgaAuthService`, `IHasResourceId` |
+| `SqlOS.Fga.Interfaces` | `ISqlOSFgaAuthService`, `IHasResourceId`, `ISqlOSResourceEntity` |
+| `SqlOS.Extensions` | `ProvisionUserSubjectAsync`, `ProvisionAgentSubjectAsync`, `ProvisionServiceAccountSubjectAsync`, `GrantRoleAsync`, `RevokeRoleAsync`, manual resource APIs |
 | `SqlOS.Fga.Extensions` | Convenience extensions |
 | `SqlOS.Fga.Models` | FGA entities |
 | `SqlOS.Fga.Specifications` | PagedSpec, ISpecificationExecutor |

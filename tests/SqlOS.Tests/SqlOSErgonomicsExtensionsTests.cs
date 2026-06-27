@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
@@ -16,23 +15,6 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSErgonomicsExtensionsTests
 {
-    [TestMethod]
-    public void SqlOSToken_AndSqlOSUserId_ReadValidatedToken()
-    {
-        var httpContext = new DefaultHttpContext();
-        var token = new SqlOS.AuthServer.Contracts.SqlOSValidatedToken(
-            new System.Security.Claims.ClaimsPrincipal(),
-            "sess_1",
-            "usr_1",
-            "org_1",
-            "client_1",
-            "api");
-        httpContext.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = token;
-
-        httpContext.SqlOSToken().Should().BeSameAs(token);
-        httpContext.SqlOSUserId().Should().Be("usr_1");
-    }
-
     [TestMethod]
     public async Task Allows_ReturnsCheckAccessDecision()
     {
@@ -50,16 +32,16 @@ public sealed class SqlOSErgonomicsExtensionsTests
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        var user = await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One", "user@example.test");
-        var agent = await context.EnsureSqlOSAgentSubjectAsync("agt_1", "Agent One", "worker", "Background worker");
-        var serviceAccount = await context.EnsureSqlOSServiceAccountSubjectAsync(
+        var user = await context.ProvisionUserSubjectAsync("usr_1", "User One", "user@example.test");
+        var agent = await context.ProvisionAgentSubjectAsync("agt_1", "Agent One", "worker", "Background worker");
+        var serviceAccount = await context.ProvisionServiceAccountSubjectAsync(
             "sa_1",
             "Service Account One",
             "client_1",
             "hashed-secret",
             "API integration");
-        var resource = await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1", "workspace");
-        var grant = await context.GrantSqlOSRoleAsync("usr_1", "workspace_1", "owner", "Workspace owner");
+        var resource = await context.CreateResourceWithIdAsync("workspace_1", "workspace", "Workspace 1", "root");
+        var grant = await context.GrantRoleAsync("usr_1", "workspace_1", "owner");
         await context.SaveChangesAsync();
 
         user.SubjectId.Should().Be("usr_1");
@@ -70,65 +52,61 @@ public sealed class SqlOSErgonomicsExtensionsTests
         (await context.Set<SqlOSFgaUser>().SingleAsync(x => x.SubjectId == "usr_1")).Email.Should().Be("user@example.test");
         (await context.Set<SqlOSFgaAgent>().SingleAsync(x => x.SubjectId == "agt_1")).AgentType.Should().Be("worker");
         (await context.Set<SqlOSFgaServiceAccount>().SingleAsync(x => x.SubjectId == "sa_1")).ClientId.Should().Be("client_1");
-
-        var ensuredResource = await context.EnsureSqlOSResourceAsync(
-            "workspace_1",
-            "root",
-            "Workspace One",
-            "workspace",
-            "Updated");
-        var ensuredGrant = await context.EnsureSqlOSRoleGrantAsync(
-            "usr_1",
-            "workspace_1",
-            "owner",
-            "Updated owner grant");
-        await context.SaveChangesAsync();
-
-        ensuredResource.Name.Should().Be("Workspace One");
-        ensuredResource.Description.Should().Be("Updated");
-        ensuredGrant.Description.Should().Be("Updated owner grant");
-        context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "workspace_1").Should().Be(1);
     }
 
     [TestMethod]
-    public void GrantSqlOSRole_HasNoPublicSyncOverload()
+    public void LegacyErgonomicsHelperNames_AreNotPublic()
     {
+        var legacyNames = new[]
+        {
+            string.Concat("Ensure", "SqlOS", "User", "Subject", "Async"),
+            string.Concat("Ensure", "SqlOS", "Agent", "Subject", "Async"),
+            string.Concat("Ensure", "SqlOS", "Service", "Account", "Subject", "Async"),
+            string.Concat("Ensure", "SqlOS", "Resource", "Async"),
+            string.Concat("Ensure", "SqlOS", "Role", "Grant", "Async"),
+            string.Concat("Grant", "SqlOS", "Role"),
+            string.Concat("Grant", "SqlOS", "Role", "Async"),
+            string.Concat("Add", "SqlOS", "Resource"),
+            "SqlOSUserId",
+            "SqlOSToken"
+        };
+
         typeof(SqlOSErgonomicsExtensions)
             .GetMethods()
-            .Where(x => x.Name == "GrantSqlOSRole")
+            .Where(method => legacyNames.Contains(method.Name, StringComparer.Ordinal))
             .Should()
-            .BeEmpty("role grants must validate subject/resource existence and resolve role keys asynchronously");
+            .BeEmpty("the ergonomics API should have one canonical path before it ships");
     }
 
     [TestMethod]
-    public async Task EnsureSqlOSRoleGrantAsync_RequiresExistingSubjectAndResource()
+    public async Task GrantRoleAsync_RequiresExistingSubjectAndResource()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        var missingSubject = async () => await context.EnsureSqlOSRoleGrantAsync("missing_user", "root", "owner");
+        var missingSubject = async () => await context.GrantRoleAsync("missing_user", "root", "owner");
         await missingSubject.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*subject 'missing_user' was not found*");
 
-        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One");
-        var missingResource = async () => await context.EnsureSqlOSRoleGrantAsync("usr_1", "missing_resource", "owner");
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
+        var missingResource = async () => await context.GrantRoleAsync("usr_1", "missing_resource", "owner");
         await missingResource.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource 'missing_resource' was not found*");
     }
 
     [TestMethod]
-    public async Task EnsureSqlOSResourceAsync_RequiresExistingParentResource()
+    public async Task CreateResourceWithIdAsync_RequiresExistingParentResource()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        var missingParent = async () => await context.EnsureSqlOSResourceAsync(
+        var missingParent = async () => await context.CreateResourceWithIdAsync(
             "workspace_1",
-            "missing_parent",
+            "workspace",
             "Workspace 1",
-            "workspace");
+            "missing_parent");
 
         await missingParent.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource 'missing_parent' was not found*");
@@ -136,17 +114,17 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public async Task EnsureSqlOSResourceAsync_RequiresExistingResourceType()
+    public async Task CreateResourceWithIdAsync_RequiresExistingResourceType()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        var missingResourceType = async () => await context.EnsureSqlOSResourceAsync(
+        var missingResourceType = async () => await context.CreateResourceWithIdAsync(
             "workspace_1",
-            "root",
+            "workpsace",
             "Workspace 1",
-            "workpsace");
+            "root");
 
         await missingResourceType.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource type 'workpsace' was not found*");
@@ -154,28 +132,28 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public async Task EnsureSqlOSResourceAsync_ValidatesParentAndResourceTypeWhenUpdating()
+    public async Task ProvisionResourceWithIdAsync_ValidatesParentAndResourceTypeWhenUpdating()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1", "workspace");
+        await context.CreateResourceWithIdAsync("workspace_1", "workspace", "Workspace 1", "root");
         await context.SaveChangesAsync();
 
-        var missingParent = async () => await context.EnsureSqlOSResourceAsync(
+        var missingParent = async () => await context.ProvisionResourceWithIdAsync(
             "workspace_1",
-            "missing_parent",
+            "workspace",
             "Workspace 1",
-            "workspace");
+            "missing_parent");
         await missingParent.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource 'missing_parent' was not found*");
 
-        var missingResourceType = async () => await context.EnsureSqlOSResourceAsync(
+        var missingResourceType = async () => await context.ProvisionResourceWithIdAsync(
             "workspace_1",
-            "root",
+            "workpsace",
             "Workspace 1",
-            "workpsace");
+            "root");
         await missingResourceType.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource type 'workpsace' was not found*");
 
@@ -185,27 +163,27 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
-    public async Task EnsureHelpers_PreserveExistingOptionalMetadataWhenArgumentsAreOmitted()
+    public async Task ProvisionSubjectHelpers_PreserveExistingOptionalMetadataWhenArgumentsAreOmitted()
     {
         using var context = CreateContext();
         SeedFgaCore(context);
         await context.SaveChangesAsync();
 
-        await context.EnsureSqlOSUserSubjectAsync(
+        await context.ProvisionUserSubjectAsync(
             "usr_1",
             "User One",
             "user@example.test",
             "org_1",
             "external_1",
             false);
-        await context.EnsureSqlOSAgentSubjectAsync(
+        await context.ProvisionAgentSubjectAsync(
             "agt_1",
             "Agent One",
             "worker",
             "Initial description",
             "org_1",
             "agent_external_1");
-        await context.EnsureSqlOSServiceAccountSubjectAsync(
+        await context.ProvisionServiceAccountSubjectAsync(
             "sa_1",
             "Service Account One",
             "client_1",
@@ -214,24 +192,11 @@ public sealed class SqlOSErgonomicsExtensionsTests
             new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             "org_1",
             "sa_external_1");
-        await context.EnsureSqlOSResourceAsync(
-            "workspace_1",
-            "root",
-            "Workspace 1",
-            "workspace",
-            "Initial resource");
-        await context.EnsureSqlOSRoleGrantAsync(
-            "usr_1",
-            "workspace_1",
-            "owner",
-            "Initial grant");
         await context.SaveChangesAsync();
 
-        await context.EnsureSqlOSUserSubjectAsync("usr_1", "User One Updated");
-        await context.EnsureSqlOSAgentSubjectAsync("agt_1", "Agent One Updated");
-        await context.EnsureSqlOSServiceAccountSubjectAsync("sa_1", "Service Account One Updated", "client_2", "secret_2");
-        await context.EnsureSqlOSResourceAsync("workspace_1", "root", "Workspace 1 Updated", "workspace");
-        await context.EnsureSqlOSRoleGrantAsync("usr_1", "workspace_1", "owner");
+        await context.ProvisionUserSubjectAsync("usr_1", "User One Updated");
+        await context.ProvisionAgentSubjectAsync("agt_1", "Agent One Updated");
+        await context.ProvisionServiceAccountSubjectAsync("sa_1", "Service Account One Updated", "client_2", "secret_2");
         await context.SaveChangesAsync();
 
         var subject = await context.Set<SqlOSFgaSubject>().SingleAsync(x => x.Id == "usr_1");
@@ -258,13 +223,140 @@ public sealed class SqlOSErgonomicsExtensionsTests
         serviceAccount.ClientSecretHash.Should().Be("secret_2");
         serviceAccount.Description.Should().Be("Initial account");
         serviceAccount.ExpiresAt.Should().Be(new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+    }
+
+    [TestMethod]
+    public async Task ManualResourceApis_CreateProvisionAndDeleteResourceAndGrants()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
+        await context.SaveChangesAsync();
+
+        await context.CreateResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace 1",
+            "root",
+            "Initial resource");
+        await context.SaveChangesAsync();
+
+        var duplicateCreate = async () => await context.CreateResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace Duplicate",
+            "root");
+        await duplicateCreate.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'workspace_1' already exists*");
+
+        await context.ProvisionResourceWithIdAsync(
+            "workspace_1",
+            "workspace",
+            "Workspace One",
+            "root");
+        await context.GrantRoleAsync("usr_1", "workspace_1", "owner");
+        await context.SaveChangesAsync();
 
         var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_1");
-        resource.Name.Should().Be("Workspace 1 Updated");
+        resource.Name.Should().Be("Workspace One");
         resource.Description.Should().Be("Initial resource");
+        context.Set<SqlOSFgaGrant>().Count(x => x.ResourceId == "workspace_1").Should().Be(1);
 
-        var grant = await context.Set<SqlOSFgaGrant>().SingleAsync(x => x.SubjectId == "usr_1" && x.ResourceId == "workspace_1");
-        grant.Description.Should().Be("Initial grant");
+        await context.DeleteResourceAsync("workspace_1");
+        await context.SaveChangesAsync();
+
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == "workspace_1")).Should().BeFalse();
+        (await context.Set<SqlOSFgaGrant>().AnyAsync(x => x.ResourceId == "workspace_1")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ProvisionResourceWithIdAsync_PreservesExistingParentWhenParentIsOmitted()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.CreateResourceWithIdAsync("workspace_parent", "workspace", "Workspace parent", "root");
+        await context.CreateResourceWithIdAsync("workspace_child", "workspace", "Workspace child", "workspace_parent");
+        await context.SaveChangesAsync();
+
+        await context.ProvisionResourceWithIdAsync("workspace_child", "workspace", "Workspace child renamed");
+        await context.SaveChangesAsync();
+
+        var resource = await context.Set<SqlOSFgaResource>().SingleAsync(x => x.Id == "workspace_child");
+        resource.Name.Should().Be("Workspace child renamed");
+        resource.ParentId.Should().Be("workspace_parent");
+    }
+
+    [TestMethod]
+    public async Task CreateResourceAsync_GeneratesResourceId()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var resource = await context.CreateResourceAsync(
+            "workspace",
+            "Generated workspace",
+            "root");
+        await context.SaveChangesAsync();
+
+        resource.Id.Should().StartWith("workspace::");
+        (await context.Set<SqlOSFgaResource>().AnyAsync(x => x.Id == resource.Id)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task DeleteResourceAsync_FailsWhenChildResourcesStillExist()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.CreateResourceWithIdAsync("workspace_1", "workspace", "Workspace 1", "root");
+        await context.CreateResourceWithIdAsync("workspace_child", "workspace", "Workspace child", "workspace_1");
+        await context.SaveChangesAsync();
+
+        var deleteParent = async () => await context.DeleteResourceAsync("workspace_1");
+
+        await deleteParent.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*has child resources*Delete or reparent child resources*");
+    }
+
+    [TestMethod]
+    public async Task GrantRoleAsync_ResolvesRoleKeyOrIdAndIsIdempotent()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
+        await context.SaveChangesAsync();
+
+        var byKey = await context.GrantRoleAsync("usr_1", "root", "owner");
+        var byId = await context.GrantRoleAsync("usr_1", "root", "role_owner");
+        await context.SaveChangesAsync();
+
+        byKey.RoleId.Should().Be("role_owner");
+        byId.RoleId.Should().Be("role_owner");
+        context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "root").Should().Be(1);
+
+        await context.RevokeRoleAsync("usr_1", "root", "owner");
+        await context.SaveChangesAsync();
+
+        context.Set<SqlOSFgaGrant>().Count(x => x.SubjectId == "usr_1" && x.ResourceId == "root").Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task GrantRoleAsync_RequiresExistingSubjectAndResourceWithoutProvisioningSubjects()
+    {
+        using var context = CreateContext();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+
+        var missingSubject = async () => await context.GrantRoleAsync("missing_user", "root", "owner");
+        await missingSubject.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*subject 'missing_user' was not found*");
+
+        await context.ProvisionUserSubjectAsync("usr_1", "User One");
+        var missingResource = async () => await context.GrantRoleAsync("usr_1", "missing_resource", "owner");
+        await missingResource.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource 'missing_resource' was not found*");
+
+        context.Set<SqlOSFgaSubject>().Local.Should().NotContain(x => x.Id == "missing_user");
     }
 
     [TestMethod]

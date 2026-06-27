@@ -1,18 +1,20 @@
 using System.IdentityModel.Tokens.Jwt;
 
-namespace SqlOS.Example.Api.FgaRetail.Middleware;
+namespace SqlOS.Example.Api.FgaRetail.Services;
 
-public static class SubjectIdExtensions
+public static class RetailSubjectResolver
 {
-    public static string GetSubjectId(this HttpContext context)
+    public static string ResolveSubjectId(HttpContext http)
     {
+        ArgumentNullException.ThrowIfNull(http);
+
         // JWT bearer token (AuthServer users)
-        var sub = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+        var sub = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
         if (!string.IsNullOrWhiteSpace(sub))
             return sub;
 
         // API key or agent token (resolved by middleware)
-        if (context.Items.TryGetValue("SubjectId", out var subjectId)
+        if (http.Items.TryGetValue("SubjectId", out var subjectId)
             && subjectId is string id
             && !string.IsNullOrWhiteSpace(id))
             return id;

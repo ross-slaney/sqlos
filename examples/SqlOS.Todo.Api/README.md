@@ -55,12 +55,12 @@ That creates one first-party public PKCE application with `openid`, `profile`, `
 Resource hierarchy:
 
 - `root`
-- `tenant::{userId}`
+- `tenant::{subjectId}`
 - `todo::{todoId}`
 
 Role and permission matrix:
 
-- `tenant_owner` on `tenant::{userId}`
+- `tenant_owner` on `tenant::{subjectId}`
 - permissions: `TENANT_CREATE_TODO`, `TODO_READ`, `TODO_WRITE`
 
 Each authenticated user gets one tenant root resource under `root`. Every todo is created as a child resource beneath that tenant node, so the dashboard shows the hierarchy directly and list queries can use the SqlOS FGA filter instead of hand-written owner predicates.

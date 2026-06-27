@@ -91,14 +91,23 @@ It is less attractive for high-volume rows:
 
 WorkOS documentation recommends keeping very high-cardinality content in your database with a reference to a parent FGA resource. That avoids syncing millions of leaf records, but it means the authorization decision is often about the parent, while the actual rows still live in your database.
 
-SqlOS takes the opposite default for a SQL Server app. Resources are database rows, so creating a resource beside a domain row is just part of the app write:
+SqlOS takes the opposite default for a SQL Server app. Resources are database rows, so a protected domain row can describe its resource and `SqlOSDbContext<TContext>` syncs the backing `SqlOSFgaResource` during the app write:
 
 ```csharp
-project.ResourceId = dbContext.CreateResource(
-    parentId: workspace.ResourceId,
-    name: project.Name,
-    resourceTypeId: "project",
-    id: $"project::{project.Id:D}");
+var projectId = Guid.NewGuid();
+var project = new Project
+{
+    Id = projectId,
+    WorkspaceId = workspace.Id,
+    WorkspaceResourceId = workspace.ResourceId,
+    ResourceId = $"project::{projectId:D}",
+    Name = request.Name
+};
+
+// Project implements ISqlOSResourceEntity:
+// ResourceTypeId => "project"
+// ParentResourceId => WorkspaceResourceId
+// ResourceName => Name
 
 dbContext.Projects.Add(project);
 await dbContext.SaveChangesAsync(cancellationToken);

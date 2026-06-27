@@ -38,13 +38,13 @@ options.Fga.Seed(seed =>
 });
 ```
 
-2. **Create resource instances** when your app creates domain rows (see [Creating resources](/docs/fga/creating-resources)).
+2. **Create resource-backed domain rows** by implementing `ISqlOSResourceEntity`; `SqlOSDbContext<TContext>` syncs FGA resources when EF saves. Use manual resource APIs only for non-entity roots (see [Creating resources](/docs/fga/creating-resources)).
 
 3. **Assign grants** at the right node — a grant on a workspace applies to descendant projects automatically.
 
 4. **Open `/sqlos/admin/fga/`** to inspect the tree, grants, and access tester.
 
-The retail example in `examples/SqlOS.Example.Api` (`FgaRetail`) shows chain → store → inventory hierarchies.
+The retail example in `examples/SqlOS.Example.Api` (`FgaRetail`) shows chain → store → inventory hierarchies as a lower-level/manual FGA sample. The Todo sample and configuration guide show the recommended entity-backed SDK path.
 
 ## Expected outcome
 

@@ -15,11 +15,16 @@ public sealed class TodoSampleDbContext(DbContextOptions<TodoSampleDbContext> op
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.ResourceId).HasMaxLength(450).IsRequired();
-            entity.Property(x => x.SqlOSUserId).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.OwnerSubjectId).HasMaxLength(64).IsRequired();
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
             entity.HasIndex(x => x.ResourceId).IsUnique();
-            entity.HasIndex(x => x.SqlOSUserId);
-            entity.HasIndex(x => new { x.SqlOSUserId, x.IsCompleted });
+            entity.HasIndex(x => x.OwnerSubjectId);
+            entity.HasIndex(x => new { x.OwnerSubjectId, x.IsCompleted });
+            entity.Ignore(x => x.ResourceTypeId);
+            entity.Ignore(x => x.ResourceName);
+            entity.Ignore(x => x.ParentResourceId);
+            entity.Ignore(x => x.ResourceDescription);
+            entity.Ignore(x => x.ResourceIsActive);
         });
     }
 }

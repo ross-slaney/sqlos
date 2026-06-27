@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.IdentityModel.Tokens.Jwt;
 using FluentAssertions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -149,7 +150,7 @@ public sealed class SqlOSResourceBindingTests
             ctx =>
             {
                 nextCalled = true;
-                ctx.HttpContext.SqlOSUserId().Should().Be(user.Id);
+                ctx.HttpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value.Should().Be(user.Id);
                 return ValueTask.FromResult<object?>("ok");
             },
             optionsValue);

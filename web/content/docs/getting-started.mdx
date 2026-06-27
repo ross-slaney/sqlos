@@ -30,6 +30,9 @@ You'll learn how to install SqlOS, wire a minimal host, run the Todo sample, and
   <Step title="Register on your DbContext">
     Derive from `SqlOSDbContext<TContext>` and call `AddSqlOS` during host setup.
   </Step>
+  <Step title="Declare protected resources">
+    Make protected entities implement `ISqlOSResourceEntity` so SqlOS can sync FGA resource rows during EF saves.
+  </Step>
   <Step title="Map routes and verify">
     Call `MapSqlOS()`, start the app, and open the admin dashboard.
   </Step>
@@ -91,6 +94,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 If you need full EF model control, the lower-level path is still available: implement `ISqlOSAuthServerDbContext` and `ISqlOSFgaDbContext`, expose `IsResourceAccessible`, and call `modelBuilder.UseSqlOS(...)` yourself.
 
+For app data that should participate in FGA, implement `ISqlOSResourceEntity` on the domain entity. `SqlOSDbContext<TContext>` creates, updates, and deletes the matching `SqlOSFgaResource` row when you call `SaveChanges` / `SaveChangesAsync`; role grants remain explicit.
+
 `appsettings.json` needs a SQL Server connection string and optional dashboard password:
 
 ```json
@@ -136,7 +141,7 @@ options.AuthServer.SeedOwnedWebApp(
 
 ## Protect an API
 
-For API routes that accept SqlOS access tokens, protect a route group and read the validated token from `HttpContext`:
+For API routes that accept SqlOS access tokens, protect a route group with `RequireSqlOSAccessToken(...)`. It validates the token and populates `HttpContext.User`; your app still resolves the current subject explicitly at the route boundary.
 
 ```csharp
 var api = app.MapGroup("/api")
@@ -148,12 +153,15 @@ var api = app.MapGroup("/api")
 
 api.MapGet("/me", (HttpContext http) =>
 {
-    var token = http.SqlOSToken();
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
     return Results.Ok(new
     {
-        userId = http.SqlOSUserId(),
-        token.ClientId,
-        token.Audience
+        subjectId,
+        clientId = http.User.FindFirst("client_id")?.Value,
+        audience = http.User.FindFirst(JwtRegisteredClaimNames.Aud)?.Value
     });
 });
 ```

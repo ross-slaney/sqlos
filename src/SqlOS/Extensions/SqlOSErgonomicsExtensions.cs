@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlOS.AuthServer.Configuration;
-using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Services;
 using SqlOS.Fga.Interfaces;
@@ -44,25 +43,6 @@ public static class SqlOSErgonomicsExtensions
         return group;
     }
 
-    public static SqlOSValidatedToken SqlOSToken(this HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        return context.GetSqlOSValidatedToken()
-            ?? throw new InvalidOperationException("No validated SqlOS access token is available. Protect the endpoint with RequireSqlOSAccessToken(...) or UseSqlOSAccessTokenValidation(...).");
-    }
-
-    public static string SqlOSUserId(this HttpContext context)
-    {
-        var token = context.SqlOSToken();
-        if (string.IsNullOrWhiteSpace(token.UserId))
-        {
-            throw new InvalidOperationException("The validated SqlOS access token does not include a user id.");
-        }
-
-        return token.UserId;
-    }
-
     public static async Task<bool> Allows(
         this ISqlOSFgaAuthService authService,
         string subjectId,
@@ -75,63 +55,106 @@ public static class SqlOSErgonomicsExtensions
         return result.Allowed;
     }
 
-    public static SqlOSFgaResource AddSqlOSResource(
+    public static Task<SqlOSFgaResource> CreateResourceAsync(
         this ISqlOSFgaDbContext context,
-        string resourceId,
-        string? parentResourceId,
-        string name,
         string resourceTypeId,
-        string? description = null)
+        string name,
+        string? parentResourceId = null,
+        string? description = null,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var resource = CreateResource(
-            resourceId,
-            parentResourceId,
+        var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
+        return context.CreateResourceWithIdAsync(
+            $"{normalizedResourceTypeId}::{Guid.NewGuid():N}",
+            normalizedResourceTypeId,
             name,
-            resourceTypeId,
-            description);
-        context.Set<SqlOSFgaResource>().Add(resource);
-        return resource;
+            parentResourceId,
+            description,
+            cancellationToken);
     }
 
-    public static async Task<SqlOSFgaResource> EnsureSqlOSResourceAsync(
+    public static async Task<SqlOSFgaResource> CreateResourceWithIdAsync(
         this ISqlOSFgaDbContext context,
         string resourceId,
-        string? parentResourceId,
-        string name,
         string resourceTypeId,
+        string name,
+        string? parentResourceId = null,
         string? description = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
+        if (await FindResourceAsync(context, normalizedResourceId, cancellationToken) != null)
+        {
+            throw new InvalidOperationException($"FGA resource '{normalizedResourceId}' already exists.");
+        }
+
         var normalizedParentId = NormalizeOptional(parentResourceId);
         var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
         EnsureResourceParentIsNotSelf(normalizedResourceId, normalizedParentId);
         await FindRequiredResourceTypeAsync(context, normalizedResourceTypeId, cancellationToken);
         if (normalizedParentId != null)
         {
-            await FindRequiredResourceAsync(context, normalizedParentId, cancellationToken);
+            await FindRequiredResourceOrPendingEntityAsync(context, normalizedParentId, cancellationToken);
         }
 
         await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, normalizedParentId, cancellationToken);
 
+        var resource = CreateResource(
+            normalizedResourceId,
+            normalizedParentId,
+            name,
+            normalizedResourceTypeId,
+            description);
+        context.Set<SqlOSFgaResource>().Add(resource);
+        return resource;
+    }
+
+    public static async Task<SqlOSFgaResource> ProvisionResourceWithIdAsync(
+        this ISqlOSFgaDbContext context,
+        string resourceId,
+        string resourceTypeId,
+        string name,
+        string? parentResourceId = null,
+        string? description = null,
+        bool? isActive = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
+        var parentWasProvided = parentResourceId != null;
+        var normalizedParentId = NormalizeOptional(parentResourceId);
+        var normalizedResourceTypeId = RequireValue(resourceTypeId, nameof(resourceTypeId));
+        await FindRequiredResourceTypeAsync(context, normalizedResourceTypeId, cancellationToken);
         var resource = await FindResourceAsync(context, normalizedResourceId, cancellationToken);
+        var effectiveParentId = resource == null || parentWasProvided
+            ? normalizedParentId
+            : resource.ParentId;
+
+        EnsureResourceParentIsNotSelf(normalizedResourceId, effectiveParentId);
+        if (effectiveParentId != null)
+        {
+            await FindRequiredResourceOrPendingEntityAsync(context, effectiveParentId, cancellationToken);
+        }
+
+        await EnsureParentChainDoesNotCreateCycleAsync(context, normalizedResourceId, effectiveParentId, cancellationToken);
+
         if (resource == null)
         {
             resource = CreateResource(
                 normalizedResourceId,
-                normalizedParentId,
+                effectiveParentId,
                 name,
                 normalizedResourceTypeId,
                 description);
+            resource.IsActive = isActive ?? true;
             context.Set<SqlOSFgaResource>().Add(resource);
             return resource;
         }
 
-        resource.ParentId = normalizedParentId;
+        resource.ParentId = effectiveParentId;
         resource.Name = RequireValue(name, nameof(name));
         resource.ResourceTypeId = normalizedResourceTypeId;
         if (description != null)
@@ -139,45 +162,82 @@ public static class SqlOSErgonomicsExtensions
             resource.Description = NormalizeOptional(description);
         }
 
-        resource.IsActive = true;
+        if (isActive.HasValue)
+        {
+            resource.IsActive = isActive.Value;
+        }
+
         resource.UpdatedAt = DateTime.UtcNow;
         return resource;
     }
 
-    public static async Task<SqlOSFgaGrant> GrantSqlOSRoleAsync(
+    public static async Task DeleteResourceAsync(
         this ISqlOSFgaDbContext context,
-        string subjectId,
         string resourceId,
-        string roleKeyOrId,
-        string? description = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var normalizedSubjectId = RequireValue(subjectId, nameof(subjectId));
         var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
-        await FindRequiredSubjectAsync(context, normalizedSubjectId, cancellationToken);
-        await FindRequiredResourceAsync(context, normalizedResourceId, cancellationToken);
-        var roleId = await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
+        var resource = await FindRequiredResourceAsync(context, normalizedResourceId, cancellationToken);
+        await EnsureResourceHasNoChildrenAsync(context, normalizedResourceId, cancellationToken);
 
-        var grant = new SqlOSFgaGrant
-        {
-            Id = BuildGrantId(normalizedSubjectId, normalizedResourceId, roleId),
-            SubjectId = normalizedSubjectId,
-            ResourceId = normalizedResourceId,
-            RoleId = roleId,
-            Description = NormalizeOptional(description)
-        };
-        context.Set<SqlOSFgaGrant>().Add(grant);
-        return grant;
+        var grants = await context.Set<SqlOSFgaGrant>()
+            .Where(grant => grant.ResourceId == normalizedResourceId)
+            .ToListAsync(cancellationToken);
+        context.Set<SqlOSFgaGrant>().RemoveRange(grants);
+        context.Set<SqlOSFgaResource>().Remove(resource);
     }
 
-    public static async Task<SqlOSFgaGrant> EnsureSqlOSRoleGrantAsync(
+    public static async Task<SqlOSFgaGrant> GrantRoleAsync(
+        this ISqlOSFgaDbContext context,
+        string subjectId,
+        ISqlOSResourceEntity resource,
+        string roleKeyOrId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+
+        return await GrantRoleCoreAsync(
+            context,
+            subjectId,
+            resource.ResourceId,
+            roleKeyOrId,
+            description: null,
+            cancellationToken);
+    }
+
+    public static async Task<SqlOSFgaGrant> GrantRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string resourceId,
         string roleKeyOrId,
-        string? description = null,
+        CancellationToken cancellationToken = default)
+        => await GrantRoleCoreAsync(
+            context,
+            subjectId,
+            resourceId,
+            roleKeyOrId,
+            description: null,
+            cancellationToken);
+
+    public static async Task RevokeRoleAsync(
+        this ISqlOSFgaDbContext context,
+        string subjectId,
+        ISqlOSResourceEntity resource,
+        string roleKeyOrId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+
+        await RevokeRoleAsync(context, subjectId, resource.ResourceId, roleKeyOrId, cancellationToken);
+    }
+
+    public static async Task RevokeRoleAsync(
+        this ISqlOSFgaDbContext context,
+        string subjectId,
+        string resourceId,
+        string roleKeyOrId,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -185,7 +245,7 @@ public static class SqlOSErgonomicsExtensions
         var normalizedSubjectId = RequireValue(subjectId, nameof(subjectId));
         var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
         await FindRequiredSubjectAsync(context, normalizedSubjectId, cancellationToken);
-        await FindRequiredResourceAsync(context, normalizedResourceId, cancellationToken);
+        await FindRequiredResourceOrPendingEntityAsync(context, normalizedResourceId, cancellationToken);
         var roleId = await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
 
         var grant = await FindGrantAsync(
@@ -194,7 +254,37 @@ public static class SqlOSErgonomicsExtensions
             normalizedResourceId,
             roleId,
             cancellationToken);
+        if (grant != null)
+        {
+            context.Set<SqlOSFgaGrant>().Remove(grant);
+        }
+    }
 
+    private static async Task<SqlOSFgaGrant> GrantRoleCoreAsync(
+        ISqlOSFgaDbContext context,
+        string subjectId,
+        string resourceId,
+        string roleKeyOrId,
+        string? description,
+        CancellationToken cancellationToken,
+        bool roleAlreadyResolved = false)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var normalizedSubjectId = RequireValue(subjectId, nameof(subjectId));
+        var normalizedResourceId = RequireValue(resourceId, nameof(resourceId));
+        await FindRequiredSubjectAsync(context, normalizedSubjectId, cancellationToken);
+        await FindRequiredResourceOrPendingEntityAsync(context, normalizedResourceId, cancellationToken);
+        var roleId = roleAlreadyResolved
+            ? RequireValue(roleKeyOrId, nameof(roleKeyOrId))
+            : await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
+
+        var grant = await FindGrantAsync(
+            context,
+            normalizedSubjectId,
+            normalizedResourceId,
+            roleId,
+            cancellationToken);
         if (grant == null)
         {
             grant = new SqlOSFgaGrant
@@ -218,7 +308,7 @@ public static class SqlOSErgonomicsExtensions
         return grant;
     }
 
-    public static async Task<SqlOSFgaUser> EnsureSqlOSUserSubjectAsync(
+    public static async Task<SqlOSFgaUser> ProvisionUserSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,
@@ -270,7 +360,7 @@ public static class SqlOSErgonomicsExtensions
         return user;
     }
 
-    public static async Task<SqlOSFgaAgent> EnsureSqlOSAgentSubjectAsync(
+    public static async Task<SqlOSFgaAgent> ProvisionAgentSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,
@@ -322,7 +412,7 @@ public static class SqlOSErgonomicsExtensions
         return agent;
     }
 
-    public static async Task<SqlOSFgaServiceAccount> EnsureSqlOSServiceAccountSubjectAsync(
+    public static async Task<SqlOSFgaServiceAccount> ProvisionServiceAccountSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
         string displayName,
@@ -531,6 +621,67 @@ public static class SqlOSErgonomicsExtensions
         CancellationToken cancellationToken)
         => await FindResourceAsync(context, resourceId, cancellationToken)
             ?? throw new InvalidOperationException($"FGA resource '{resourceId}' was not found.");
+
+    private static async Task FindRequiredResourceOrPendingEntityAsync(
+        ISqlOSFgaDbContext context,
+        string resourceId,
+        CancellationToken cancellationToken)
+    {
+        if (await FindResourceAsync(context, resourceId, cancellationToken) != null)
+        {
+            return;
+        }
+
+        if (context is DbContext dbContext
+            && IsSqlOSResourceEntitySyncContext(dbContext)
+            && dbContext.ChangeTracker.Entries().Any(entry =>
+                entry.Entity is ISqlOSResourceEntity resourceEntity
+                && entry.State is EntityState.Added or EntityState.Modified
+                && string.Equals(NormalizeOptional(resourceEntity.ResourceId), resourceId, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"FGA resource '{resourceId}' was not found.");
+    }
+
+    private static bool IsSqlOSResourceEntitySyncContext(DbContext context)
+    {
+        for (var type = context.GetType(); type != null; type = type.BaseType)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(SqlOSDbContext<>))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task EnsureResourceHasNoChildrenAsync(
+        ISqlOSFgaDbContext context,
+        string resourceId,
+        CancellationToken cancellationToken)
+    {
+        if (context is DbContext dbContext)
+        {
+            var hasLocalChild = dbContext.ChangeTracker
+                .Entries<SqlOSFgaResource>()
+                .Any(entry => entry.Entity.ParentId == resourceId && entry.State != EntityState.Deleted);
+            if (hasLocalChild)
+            {
+                throw new InvalidOperationException($"FGA resource '{resourceId}' has child resources. Delete or reparent child resources before deleting this resource.");
+            }
+        }
+
+        var hasChild = await context.Set<SqlOSFgaResource>()
+            .AsNoTracking()
+            .AnyAsync(resource => resource.ParentId == resourceId, cancellationToken);
+        if (hasChild)
+        {
+            throw new InvalidOperationException($"FGA resource '{resourceId}' has child resources. Delete or reparent child resources before deleting this resource.");
+        }
+    }
 
     private static async Task<SqlOSFgaResourceType?> FindResourceTypeAsync(
         ISqlOSFgaDbContext context,
