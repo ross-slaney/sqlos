@@ -21,6 +21,7 @@ public sealed class SqlOSHeadlessAuthService
     private readonly SqlOSSamlService _samlService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSMagicLinkService? _magicLinkService;
     private readonly SqlOSPhoneOtpService? _phoneOtpService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSDeviceAuthorizationService? _deviceAuthorizationService;
@@ -41,7 +42,8 @@ public sealed class SqlOSHeadlessAuthService
         SqlOSDeviceAuthorizationService? deviceAuthorizationService = null,
         SqlOSAuthPageSessionService? authPageSessionService = null,
         SqlOSPhoneOtpService? phoneOtpService = null,
-        SqlOSAuthService? authService = null)
+        SqlOSAuthService? authService = null,
+        SqlOSMagicLinkService? magicLinkService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -52,6 +54,7 @@ public sealed class SqlOSHeadlessAuthService
         _samlService = samlService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _magicLinkService = magicLinkService;
         _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
         _deviceAuthorizationService = deviceAuthorizationService;
@@ -595,6 +598,56 @@ public sealed class SqlOSHeadlessAuthService
         }
     }
 
+    public async Task<SqlOSHeadlessActionResult> RequestMagicLinkAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessMagicLinkStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+        var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
+        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+        if (ssoRedirect != null)
+        {
+            return ssoRedirect;
+        }
+
+        try
+        {
+            var start = await RequireMagicLinkService().StartForAuthorizationRequestAsync(
+                authorizationRequest,
+                email,
+                httpContext,
+                cancellationToken);
+
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "magic-link-sent",
+                error: null,
+                pendingToken: null,
+                email: email,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                info: start.Message,
+                cancellationToken: cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "magic-link",
+                ex.Message,
+                pendingToken: null,
+                email: email,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                info: null,
+                cancellationToken: cancellationToken));
+        }
+    }
+
     public async Task<SqlOSHeadlessActionResult> VerifyEmailOtpAsync(
         HttpContext httpContext,
         SqlOSHeadlessEmailOtpVerifyRequest request,
@@ -644,6 +697,43 @@ public sealed class SqlOSHeadlessAuthService
                 challengeToken: request.ChallengeToken,
                 cancellationToken: cancellationToken));
         }
+    }
+
+    public async Task<SqlOSHeadlessActionResult> CompleteMagicLinkAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessMagicLinkCompleteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await RequireMagicLinkService().CompleteAsync(
+            new SqlOSMagicLinkCompleteRequest(request.Token),
+            request.RequestId,
+            requireAuthorizationRequestMatch: !string.IsNullOrWhiteSpace(request.RequestId),
+            cancellationToken);
+        var authorizationRequestId = verification.Payload.AuthorizationRequestId ?? request.RequestId;
+        if (string.IsNullOrWhiteSpace(authorizationRequestId))
+        {
+            throw new InvalidOperationException("The sign-in link is invalid or expired.");
+        }
+
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+        if (!string.Equals(verification.Payload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The sign-in link is invalid or expired.");
+        }
+
+        var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            authorizationRequest,
+            verification.User,
+            verification.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+
+        return await BuildCompletionActionResultAsync(
+            authorizationRequest,
+            completion,
+            verification.Payload.Email,
+            cancellationToken);
     }
 
     public async Task<SqlOSHeadlessActionResult> VerifyEmailOtpSignupAsync(
@@ -1595,6 +1685,8 @@ public sealed class SqlOSHeadlessAuthService
             "email-otp" => "email-otp",
             "email-otp-verify" => "email-otp-verify",
             "email-otp-signup-verify" => "email-otp-signup-verify",
+            "magic-link" => "magic-link",
+            "magic-link-sent" => "magic-link-sent",
             "phone-otp" => "phone-otp",
             "phone-otp-verify" => "phone-otp-verify",
             "phone-otp-signup" => "phone-otp-signup",
@@ -1673,11 +1765,19 @@ public sealed class SqlOSHeadlessAuthService
     private static SqlOSHeadlessActionResult View(SqlOSHeadlessViewModel viewModel)
         => new("view", null, viewModel);
 
+    private SqlOSMagicLinkService RequireMagicLinkService()
+        => _magicLinkService ?? throw new InvalidOperationException("Magic-link service is not registered.");
+
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)
     {
         if (credentialSettings.EmailOtpEnabled)
         {
             return "email-otp";
+        }
+
+        if (credentialSettings.MagicLinkEnabled)
+        {
+            return "magic-link";
         }
 
         if (credentialSettings.PhoneOtpEnabled)

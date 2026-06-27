@@ -194,6 +194,38 @@ public sealed class SqlOSAuthPageRendererTests
         html.Should().Contain("src=\"data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3C%2Fsvg%3E\"");
     }
 
+    [TestMethod]
+    public void RenderPage_MagicLinkConfirm_UsesPostOnlyCompletionForm()
+    {
+        var settings = new SqlOSAuthPageSettingsDto(
+            LogoBase64: null,
+            PrimaryColor: "#0D9488",
+            AccentColor: "#1A1A1A",
+            BackgroundColor: "#FAFAF8",
+            Layout: "split",
+            PageTitle: "Sign in",
+            PageSubtitle: "Test auth page",
+            EnablePasswordSignup: false,
+            EnabledCredentialTypes: ["magic_link"],
+            UpdatedAt: DateTime.UtcNow,
+            ManagedByStartupSeed: false,
+            HeadlessCapabilityRegistered: false,
+            LocalPasswordRuntimeEnabled: false,
+            EmailOtpRuntimeConfigured: false,
+            MagicLinkRuntimeConfigured: true);
+
+        var html = SqlOSAuthPageRenderer.RenderPage(CreateModel(
+            mode: "magic-link-confirm",
+            requestId: "req_magic",
+            pendingToken: "magic_token_123",
+            settings: settings));
+
+        html.Should().Contain("action=\"/sqlos/auth/login/magic-link/complete\"");
+        html.Should().Contain("method=\"post\"");
+        html.Should().Contain("name=\"token\" value=\"magic_token_123\"");
+        html.Should().NotContain("action=\"/sqlos/auth/login/magic-link/complete?token=");
+    }
+
     private static SqlOSAuthPageViewModel CreateModel(
         string mode,
         string? requestId = null,

@@ -34,7 +34,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **Delegated SSO Portal** — one-organization setup links for customer IT admins, with provider guides, DNS TXT domain verification, metadata import, and a headless setup state machine
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
 - **Signing Key Rotation** — automatic RS256 key rotation with configurable intervals
-- **Email OTP** — passwordless sign-in with Azure Communication Services Email
+- **Email OTP and magic links** — passwordless sign-in with Azure Communication Services Email
 - **Audit Logging** — track authentication events across your system
 
 ### FGA (Fine-Grained Authorization)
@@ -304,7 +304,8 @@ examples/SqlOS.Example.AppHost           # Aspire orchestration
 
 - [Configuration](https://sqlos.dev/docs/guides/configuration) — service registration, EF integration, dashboard setup
 - [Auth Page](docs/AUTH_PAGE.md) — hosted OAuth endpoints and branded UI
-- [Email OTP](docs/EMAIL_OTP.md) — passwordless login/signup across hosted, headless, and SDK flows
+- [Email OTP](docs/EMAIL_OTP.md) — passwordless code login/signup across hosted, headless, and SDK flows
+- [Magic Link](docs/MAGIC_LINK.md) — passwordless email-link login across hosted, headless, and SDK flows
 - [SMS OTP](docs/SMS_OTP.md) — passwordless phone-code login/signup through Twilio Verify
 - [Email Invitations](docs/INVITATIONS.md) — organization invite links, dashboard, SDK, hosted, and headless flows
 - [Audit Logs](docs/AUDIT_LOGS.md) — central event model, application scoping, dashboard filters, export, and host-app ingestion

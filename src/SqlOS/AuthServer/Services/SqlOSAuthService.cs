@@ -30,6 +30,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailOtpService _emailOtpService;
+    private readonly SqlOSMagicLinkService? _magicLinkService;
     private readonly SqlOSPhoneOtpService? _phoneOtpService;
     private readonly SqlOSMfaPolicyService? _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
@@ -51,7 +52,8 @@ public sealed class SqlOSAuthService
         SqlOSPhoneOtpService? phoneOtpService = null,
         ISqlOSAuthEmailSender? authEmailSender = null,
         SqlOSMfaPolicyService? mfaPolicyService = null,
-        SqlOSTotpMfaService? totpMfaService = null)
+        SqlOSTotpMfaService? totpMfaService = null,
+        SqlOSMagicLinkService? magicLinkService = null)
     {
         _context = context;
         _options = options.Value;
@@ -60,6 +62,7 @@ public sealed class SqlOSAuthService
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _emailOtpService = emailOtpService;
+        _magicLinkService = magicLinkService;
         _phoneOtpService = phoneOtpService;
         _invitationService = invitationService;
         _passwordLoginAbuseService = passwordLoginAbuseService
@@ -162,6 +165,12 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
         => await _emailOtpService.StartSignupForClientAsync(request, httpContext, cancellationToken);
+
+    public async Task<SqlOSMagicLinkStartResult> RequestMagicLinkAsync(
+        SqlOSMagicLinkStartRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+        => await RequireMagicLinkService().StartForClientAsync(request, httpContext, cancellationToken);
 
     public async Task<SqlOSPhoneOtpStartResult> RequestPhoneOtpAsync(
         SqlOSPhoneOtpStartRequest request,
@@ -339,6 +348,33 @@ public sealed class SqlOSAuthService
             verification.User,
             client,
             verification.Challenge.RequestedOrganizationId,
+            verification.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSLoginResult> CompleteMagicLinkAsync(
+        SqlOSMagicLinkCompleteRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var verification = await RequireMagicLinkService().CompleteAsync(
+            request,
+            expectedAuthorizationRequestId: null,
+            requireAuthorizationRequestMatch: true,
+            cancellationToken);
+        if (verification.Token.ClientApplicationId == null)
+        {
+            throw new InvalidOperationException("The sign-in link is invalid or expired.");
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstAsync(x => x.Id == verification.Token.ClientApplicationId, cancellationToken);
+
+        return await FinalizeClientLoginAsync(
+            verification.User,
+            client,
+            verification.Payload.RequestedOrganizationId,
             verification.AuthenticationMethod,
             httpContext,
             cancellationToken);
@@ -2113,6 +2149,9 @@ public sealed class SqlOSAuthService
 
     private SqlOSPhoneOtpService RequirePhoneOtpService()
         => _phoneOtpService ?? throw new InvalidOperationException("Phone OTP service is not registered.");
+
+    private SqlOSMagicLinkService RequireMagicLinkService()
+        => _magicLinkService ?? throw new InvalidOperationException("Magic-link service is not registered.");
 
     private SqlOSTotpMfaService RequireTotpMfaService()
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");

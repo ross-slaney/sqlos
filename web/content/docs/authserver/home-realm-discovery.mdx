@@ -5,7 +5,7 @@ order: 13
 section: authserver
 ---
 
-Home realm discovery inspects an email address and returns the appropriate login method. It determines whether a user may use local credentials such as password or Email OTP, or must be redirected to their organization's SSO identity provider.
+Home realm discovery inspects an email address and returns the appropriate login method. It determines whether a user may use local credentials such as password, Email OTP, or magic link, or must be redirected to their organization's SSO identity provider.
 
 ## How it works
 
@@ -33,7 +33,7 @@ switch (discovery.Mode)
         break;
     case "password":
         // Show the configured local credential method:
-        // password, Email OTP, or provider buttons
+        // password, Email OTP, magic link, or provider buttons
         break;
 }
 ```
@@ -67,4 +67,4 @@ Or for an SSO user:
 
 ## Usage in the login UI
 
-The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows the configured local credential method or redirects to SSO. If the mode is `password`, the UI can show password, [Email OTP](/docs/authserver/email-otp), and configured [OIDC providers](/docs/authserver/oidc-auth), depending on AuthPage settings.
+The example apps use discovery as the first step of login. The user enters their email, the app calls discover, and then shows the configured local credential method or redirects to SSO. If the mode is `password`, the UI can show password, [Email OTP](/docs/authserver/email-otp), [Magic Link](/docs/authserver/magic-link), and configured [OIDC providers](/docs/authserver/oidc-auth), depending on AuthPage settings.

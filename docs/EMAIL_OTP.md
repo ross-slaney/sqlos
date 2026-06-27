@@ -1,6 +1,6 @@
 # Email OTP
 
-SqlOS Email OTP provides passwordless email-code login and signup across hosted AuthPage, headless UI, and backend SDK usage.
+SqlOS Email OTP provides passwordless email-code login and signup across hosted AuthPage, headless UI, and backend SDK usage. For email-link sign-in without a code entry step, see [Magic Link](MAGIC_LINK.md).
 
 ## Azure Communication Services
 

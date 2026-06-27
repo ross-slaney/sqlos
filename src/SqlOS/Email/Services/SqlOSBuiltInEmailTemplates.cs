@@ -3,6 +3,7 @@ namespace SqlOS.Email.Services;
 public static class SqlOSBuiltInEmailTemplates
 {
     public const string AuthEmailOtpKey = "auth.email-otp";
+    public const string AuthMagicLinkKey = "auth.magic-link";
     public const string AuthInvitationKey = "auth.invitation";
     public const string AuthPasswordResetKey = "auth.password-reset";
 
@@ -29,6 +30,29 @@ public static class SqlOSBuiltInEmailTemplates
             """,
             "Your {applicationName} {purposeLabel} code is {code}. It expires in {expiresInMinutes} minute(s).",
             """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","purposeLabel":"sign-in","heading":"Your sign-in code","action":"signing in","maskedEmail":"us***@example.com","code":"123456","expiresInMinutes":"10","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
+            SuppressRenderedContentStorage: true),
+        new(
+            AuthMagicLinkKey,
+            "Auth magic link",
+            "Sign in to {applicationName}",
+            """
+            <!DOCTYPE html>
+            <html lang="en">
+            <body style="margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};">
+              <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+                <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
+                <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
+                <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">Sign in to {applicationName}</h1>
+                <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this one-time link to finish signing in as {maskedEmail}. It expires in {expiresInMinutes} minute(s).</p>
+                <p style="margin:0 0 20px;"><a href="{loginUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a></p>
+                <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {loginUrl}</p>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
+              </div>
+            </body>
+            </html>
+            """,
+            "Sign in to {applicationName} as {maskedEmail}: {loginUrl}. This link expires in {expiresInMinutes} minute(s).",
+            """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","maskedEmail":"us***@example.com","loginUrl":"https://app.example.test/sqlos/auth/login/magic-link/complete?token=sample","expiresInMinutes":"10","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true),
         new(
             AuthInvitationKey,

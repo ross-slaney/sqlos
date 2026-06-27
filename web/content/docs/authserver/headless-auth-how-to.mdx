@@ -285,6 +285,25 @@ await postAction("/oauth/headless/email-otp/verify", {
 
 If the email belongs to a configured SSO organization, SqlOS returns a redirect before creating an OTP challenge.
 
+### Magic-link sign in
+
+Use magic links when `model.settings.enabledCredentialTypes` includes `magic_link`. Start sends the email link; complete consumes the token from the link and returns the same redirect, organization, or MFA states as other local credentials.
+
+```tsx
+await postAction("/oauth/headless/magic-link/start", {
+  requestId: model.requestId,
+  email,
+  invitationToken,
+});
+
+await postAction("/oauth/headless/magic-link/complete", {
+  requestId: model.requestId,
+  token,
+});
+```
+
+Magic links are a primary credential, not an MFA factor. If MFA is required, render the returned MFA view before the authorization code is issued.
+
 ### Signup
 
 In the Example app, signup sends custom fields in `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx`:

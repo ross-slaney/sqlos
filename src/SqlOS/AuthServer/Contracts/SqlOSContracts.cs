@@ -535,6 +535,7 @@ public sealed record SqlOSAuthPageSettingsDto(
     bool HeadlessCapabilityRegistered,
     bool LocalPasswordRuntimeEnabled,
     bool EmailOtpRuntimeConfigured,
+    bool MagicLinkRuntimeConfigured = false,
     bool PhoneOtpRuntimeConfigured = false);
 
 public sealed record SqlOSAuthEmailBrandingSettingsDto(

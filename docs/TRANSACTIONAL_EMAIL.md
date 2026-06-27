@@ -1,6 +1,6 @@
 # Transactional Email
 
-SqlOS transactional email provides audited, template-key based delivery for both host application messages and built-in AuthServer messages. Every SqlOS implementation automatically gets built-in templates for Email OTP, organization invitations, and password reset emails during startup.
+SqlOS transactional email provides audited, template-key based delivery for both host application messages and built-in AuthServer messages. Every SqlOS implementation automatically gets built-in templates for Email OTP, magic links, organization invitations, and password reset emails during startup.
 
 ## ACS setup
 
@@ -54,7 +54,7 @@ Open `SqlOS Dashboard > Communications`.
 
 - Templates: create, edit, activate, deactivate, delete templates without delivery history, and preview rendered output with sample variables.
 - Messages: filter delivery log entries by status, template key, recipient, and date range.
-- Built-in auth templates: `auth.email-otp`, `auth.invitation`, and `auth.password-reset` are created automatically and can be customized like other templates.
+- Built-in auth templates: `auth.email-otp`, `auth.magic-link`, `auth.invitation`, and `auth.password-reset` are created automatically and can be customized like other templates.
 
 ## Retention and PII posture
 
@@ -64,7 +64,7 @@ Use `options.Email.DeliveryRetention` as the retention policy value for host cle
 
 ## Auth email flows
 
-Email OTP, organization invitations, and password reset emails use the built-in transactional templates when transactional delivery is configured. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
+Email OTP, magic links, organization invitations, and password reset emails use the built-in transactional templates when transactional delivery is configured. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
 
 Upgrade behavior is additive for normal AuthServer email configuration. Existing `AuthServer.ConfigureEmailOtp(...)` ACS settings continue to work; configuring `options.Email` is optional unless you want separate transactional email credentials.
 

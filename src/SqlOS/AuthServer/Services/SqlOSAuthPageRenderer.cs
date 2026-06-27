@@ -60,6 +60,8 @@ public static class SqlOSAuthPageRenderer
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "password");
         var supportsEmailOtp = model.Settings.EmailOtpRuntimeConfigured
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "email_otp");
+        var supportsMagicLink = model.Settings.MagicLinkRuntimeConfigured
+            && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "magic_link");
         var supportsPhoneOtp = model.Settings.PhoneOtpRuntimeConfigured
             && SupportsCredentialType(model.Settings.EnabledCredentialTypes, "phone_otp");
         var supportsPasswordSignup = supportsPassword && model.Settings.EnablePasswordSignup;
@@ -76,6 +78,9 @@ public static class SqlOSAuthPageRenderer
             : string.Empty;
         var emailOtpLink = supportsEmailOtp
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Use an email code instead</a>"
+            : string.Empty;
+        var magicLinkLink = supportsMagicLink
+            ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/magic-link", model.AuthorizationRequestId, ("email", model.Email)))}\">Email me a sign-in link</a>"
             : string.Empty;
         var phoneOtpLink = supportsPhoneOtp
             ? $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Use a phone code instead</a>"
@@ -211,6 +216,14 @@ public static class SqlOSAuthPageRenderer
                   {{RenderPrimaryAction("Email me a sign-in code", "Sending code")}}
                 </form>
                 """ : string.Empty)}}
+                {{(supportsMagicLink ? $$"""
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/magic-link/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  {{RenderPrimaryAction("Email me a sign-in link", "Sending link")}}
+                </form>
+                """ : string.Empty)}}
                 {{(supportsInvitationSignup ? $$"""
                 <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/invitation/submit"))}}">
                   {{requestIdInput}}
@@ -251,7 +264,7 @@ public static class SqlOSAuthPageRenderer
                   {{RenderPrimaryAction("Continue with password", "Signing in")}}
                 </form>
                 """ : string.Empty)}}
-                {{(!supportsEmailOtp && !supportsPassword && !supportsInvitationSignup && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
+                {{(!supportsEmailOtp && !supportsMagicLink && !supportsPassword && !supportsInvitationSignup && !supportsPasswordSignup ? BuildCallout("error", "No compatible sign-in method is enabled for this invitation.") : string.Empty)}}
                 {{RenderProvidersSection(model)}}
                 """,
             "device" => $$"""
@@ -313,7 +326,7 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Continue", "Signing in")}}
                 </form>
-                {{RenderFooterLinks(string.Join(string.Empty, new[] { forgotPasswordLink, emailOtpLink, phoneOtpLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { forgotPasswordLink, emailOtpLink, magicLinkLink, phoneOtpLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderProvidersSection(model)}}
                 {{RenderFooterPrompt("Don't have an account?", signupLink)}}
                 """,
@@ -353,8 +366,45 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Email me a code", "Sending code")}}
                 </form>
-                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, phoneOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, magicLinkLink, phoneOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderProvidersSection(model)}}
+                """,
+            "magic-link" => $$"""
+                {{RenderPanelIntro("Email Link", "Get a one-time sign-in link sent to your email address.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/magic-link/start"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <label class="field">
+                    <span>Email</span>
+                    <input name="email" type="email" value="{{emailValue}}" placeholder="Your email address" autocomplete="email" required{{emailReadonly}} />
+                  </label>
+                  {{RenderPrimaryAction("Email me a link", "Sending link")}}
+                </form>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, emailOtpLink, phoneOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderProvidersSection(model)}}
+                """,
+            "magic-link-sent" => $$"""
+                <div class="state-card">
+                  <span class="state-icon">OK</span>
+                  <div class="state-copy">
+                    <strong>Check your email.</strong>
+                    <p>If the account exists, a sign-in link is on the way.</p>
+                  </div>
+                </div>
+                {{RenderFooterLinks(string.Join(string.Empty, new[] {
+                    $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/magic-link", model.AuthorizationRequestId, ("email", model.Email)))}\">Request another link</a>",
+                    emailOtpLink,
+                    passwordLink
+                }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                """,
+            "magic-link-confirm" => $$"""
+                {{RenderPanelIntro("Continue Sign In", "Confirm this browser should use the emailed sign-in link.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/login/magic-link/complete"))}}">
+                  <input type="hidden" name="token" value="{{Html(model.PendingToken ?? string.Empty)}}" />
+                  {{RenderPrimaryAction("Continue sign in", "Signing in")}}
+                </form>
+                {{RenderFooterLinks(loginLink)}}
                 """,
             "phone-otp" => $$"""
                 {{RenderPanelIntro("Phone Code", "Get a one-time code sent to your phone.")}}
@@ -368,7 +418,7 @@ public static class SqlOSAuthPageRenderer
                   </label>
                   {{RenderPrimaryAction("Text me a code", "Sending code")}}
                 </form>
-                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, emailOtpLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
+                {{RenderFooterLinks(string.Join(string.Empty, new[] { passwordLink, emailOtpLink, magicLinkLink, signupLink }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 {{RenderProvidersSection(model)}}
                 """,
             "phone-otp-verify" => $$"""
@@ -388,7 +438,8 @@ public static class SqlOSAuthPageRenderer
                 {{RenderFooterLinks(string.Join(string.Empty, new[] {
                     $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/phone-otp", model.AuthorizationRequestId, ("phoneNumber", model.PhoneNumber)))}\">Send a new code</a>",
                     passwordLink,
-                    emailOtpLink
+                    emailOtpLink,
+                    magicLinkLink
                 }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 """,
             "phone-otp-signup" => $$"""
@@ -445,6 +496,7 @@ public static class SqlOSAuthPageRenderer
                 {{RenderFooterLinks(string.Join(string.Empty, new[] {
                     $"<a class=\"secondary-link\" href=\"{Html(AuthPathWithQuery(model, "/login/email-otp", model.AuthorizationRequestId, ("email", model.Email)))}\">Send a new code</a>",
                     passwordLink,
+                    magicLinkLink,
                     phoneOtpLink
                 }.Where(link => !string.IsNullOrWhiteSpace(link))))}}
                 """,

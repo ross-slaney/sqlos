@@ -1,0 +1,137 @@
+---
+title: "Magic Link"
+description: "Passwordless email-link sign in for hosted, headless, and SDK flows."
+order: 11
+section: authserver
+---
+
+Magic links let users sign in from a short-lived email link. They use the same AuthServer user, client, organization, email branding, transactional email, session, and audit infrastructure as [Email OTP](/docs/authserver/email-otp).
+
+<Callout type="info" title="Primary credential, not MFA">
+  Magic links are a first-factor local credential. If tenant policy requires TOTP, SqlOS still returns the normal MFA challenge after the link is completed.
+</Callout>
+
+## Enable AuthPage magic links
+
+Add `magic_link` to the AuthPage credential list:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["magic_link"];
+        page.EnablePasswordSignup = false;
+    });
+});
+```
+
+To make Email OTP primary while still allowing password fallback:
+
+```csharp
+options.AuthServer.SeedAuthPage(page =>
+{
+    page.EnabledCredentialTypes = ["email_otp", "password"];
+    page.EnablePasswordSignup = false;
+});
+```
+
+## Hosted flow
+
+Hosted AuthPage exposes:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /sqlos/auth/login/magic-link` | Render the hosted magic-link request form |
+| `POST /sqlos/auth/login/magic-link/start` | Create and send the link |
+| `GET /sqlos/auth/login/magic-link/complete?token=...` | Render a confirmation page without consuming the token |
+| `POST /sqlos/auth/login/magic-link/complete` | Consume the token and finish sign-in |
+
+The `GET /complete` route is intentionally passive. It renders a form that posts the token to `POST /complete`, which consumes the token, validates client or authorization-request binding, issues the session or OAuth redirect, and then handles organization selection or MFA as needed.
+
+## Headless flow
+
+Headless UIs call SqlOS for auth state transitions:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sqlos/auth/headless/magic-link/start` | Start a magic-link sign-in for an authorization request |
+| `POST /sqlos/auth/headless/magic-link/complete` | Consume the emailed token and complete the authorization request |
+
+Start with the active authorization request id and email:
+
+```json
+{
+  "requestId": "sar_...",
+  "email": "jane@example.com"
+}
+```
+
+Complete with the token from the email link:
+
+```json
+{
+  "token": "..."
+}
+```
+
+SqlOS runs home realm discovery before creating the link. If the email must use SSO, the start response redirects to the identity provider instead of sending a local link.
+
+## SDK flow
+
+Backend developers can use `SqlOSAuthService` directly:
+
+```csharp
+await authService.RequestMagicLinkAsync(
+    new SqlOSMagicLinkStartRequest(
+        Email: "jane@example.com",
+        ClientId: "web",
+        OrganizationId: null),
+    httpContext,
+    ct);
+```
+
+The start response is intentionally generic for known and unknown addresses. Complete the link with:
+
+```csharp
+var login = await authService.CompleteMagicLinkAsync(
+    new SqlOSMagicLinkCompleteRequest(token),
+    httpContext,
+    ct);
+```
+
+## Email delivery
+
+SqlOS creates the built-in `auth.magic-link` transactional template automatically. It uses [Email Branding](/docs/authserver/email-branding), and rendered bodies are suppressed in delivery history because they contain token-bearing links.
+
+For complete control, configure a message builder:
+
+```csharp
+options.AuthServer.ConfigureMagicLink(link =>
+{
+    link.ApplicationName = "Acme";
+    link.BuildMessage = ctx => new SqlOSAuthEmailMessage(
+        ctx.Email,
+        $"Sign in to {ctx.ApplicationName}",
+        $"<p><a href=\"{ctx.LoginUrl}\">Sign in</a></p>",
+        $"Sign in: {ctx.LoginUrl}");
+});
+```
+
+## Security controls
+
+Magic-link tokens are stored only as hashes in `SqlOSTemporaryTokens`. The token payload binds each link to the normalized email, user email id when one exists, client id, optional organization id, optional authorization request id, source IP, user agent, and sent status.
+
+```csharp
+options.AuthServer.ConfigureMagicLink(link =>
+{
+    link.TokenLifetime = TimeSpan.FromMinutes(10);
+    link.ResendCooldown = TimeSpan.FromSeconds(30);
+    link.RateLimitWindow = TimeSpan.FromHours(1);
+    link.MaxLinksPerEmailPerWindow = 5;
+    link.MaxLinksPerIpPerWindow = 60;
+    link.MaxLinksPerClientPerWindow = 300;
+});
+```
+
+Audit events include `magic_link.requested`, `magic_link.completed`, `magic_link.rejected`, `magic_link.rate_limit_rejected`, and `magic_link.send_failed`.

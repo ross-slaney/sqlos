@@ -46,4 +46,5 @@ public sealed record SqlOSResolvedCredentialSettings(
     bool PasswordEnabled,
     bool PasswordSignupEnabled,
     bool EmailOtpEnabled,
+    bool MagicLinkEnabled,
     bool PhoneOtpEnabled);

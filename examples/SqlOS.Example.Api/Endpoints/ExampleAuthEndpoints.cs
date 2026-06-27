@@ -86,6 +86,44 @@ public static class ExampleAuthEndpoints
                     cancellationToken));
             }));
 
+        auth.MapPost("/magic-link/start", (ExampleMagicLinkStartRequest request, SqlOSAuthService authService, IOptions<ExampleWebOptions> webOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
+            TryAsync(async () =>
+            {
+                var result = await authService.RequestMagicLinkAsync(
+                    new SqlOSMagicLinkStartRequest(request.Email, webOptions.Value.ClientId, request.OrganizationId),
+                    httpContext,
+                    cancellationToken);
+
+                return Results.Ok(result);
+            }));
+
+        auth.MapPost("/magic-link/complete", (ExampleMagicLinkCompleteRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
+            TryAsync(async () =>
+            {
+                var result = await authService.CompleteMagicLinkAsync(
+                    new SqlOSMagicLinkCompleteRequest(request.Token),
+                    httpContext,
+                    cancellationToken);
+
+                if (result.Tokens == null)
+                {
+                    return Results.Ok(new
+                    {
+                        result.RequiresOrganizationSelection,
+                        result.PendingAuthToken,
+                        result.Organizations
+                    });
+                }
+
+                return Results.Ok(await ToTokenResponseAsync(
+                    result.Tokens,
+                    context,
+                    authService,
+                    fgaService,
+                    authOptions.Value.DefaultAudience,
+                    cancellationToken));
+            }));
+
         auth.MapPost("/select-organization", (ExampleSelectOrganizationRequest request, SqlOSAuthService authService, ExampleFgaService fgaService, ExampleAppDbContext context, IOptions<SqlOSAuthServerOptions> authOptions, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
@@ -557,6 +595,8 @@ public static class ExampleAuthEndpoints
     private sealed record ExamplePasswordLoginRequest(string Email, string Password, string? OrganizationId);
     private sealed record ExampleEmailOtpStartRequest(string Email, string? OrganizationId);
     private sealed record ExampleEmailOtpVerifyRequest(string ChallengeToken, string Code);
+    private sealed record ExampleMagicLinkStartRequest(string Email, string? OrganizationId);
+    private sealed record ExampleMagicLinkCompleteRequest(string Token);
     private sealed record ExampleSelectOrganizationRequest(string PendingAuthToken, string OrganizationId);
     private sealed record ExampleSsoStartRequest(string Email);
     private sealed record ExampleSsoExchangeRequest(string Code, string State);

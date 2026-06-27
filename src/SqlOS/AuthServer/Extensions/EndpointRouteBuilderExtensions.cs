@@ -130,6 +130,7 @@ public static class EndpointRouteBuilderExtensions
                     "password" => "password",
                     "forgot-password" => "forgot-password",
                     "email-otp" => "email-otp",
+                    "magic-link" => "magic-link",
                     "phone-otp" => "phone-otp",
                     "phone-otp-signup" => "phone-otp-signup",
                     _ when invitation != null => "invite",
@@ -1134,6 +1135,257 @@ public static class EndpointRouteBuilderExtensions
                     invitationToken: invitationToken,
                     invitationService: invitationService,
                     deviceUserCode: deviceUserCode);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/login/magic-link", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var invitationToken = ReadInvitationToken(context);
+            var deviceUserCode = ReadDeviceUserCode(context);
+            var invitation = !string.IsNullOrWhiteSpace(invitationToken)
+                ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
+                : null;
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    uiContext["invitationToken"] = invitationToken;
+                }
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
+                }
+
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    "magic-link",
+                    context.Request.Query["request"].ToString(),
+                    invitation?.Email ?? context.Request.Query["email"].ToString(),
+                    uiContext));
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "magic-link",
+                context.Request.Query["request"].ToString(),
+                invitation?.Email ?? context.Request.Query["email"].ToString(),
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitation: invitation,
+                deviceUserCode: deviceUserCode);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/magic-link/start", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSMagicLinkService magicLinkService,
+            SqlOSInvitationService invitationService,
+            SqlOSHomeRealmDiscoveryService discoveryService,
+            SqlOSSamlService samlService,
+            ISqlOSAuthServerDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                email = invitation?.Email ?? email;
+                var ssoRedirect = await RedirectToSsoIfRequiredAsync(
+                    authorizationRequest,
+                    email,
+                    discoveryService,
+                    samlService,
+                    dbContext,
+                    cancellationToken);
+                if (ssoRedirect != null)
+                {
+                    return ssoRedirect;
+                }
+
+                var start = await magicLinkService.StartForAuthorizationRequestAsync(
+                    authorizationRequest,
+                    email,
+                    context,
+                    cancellationToken);
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "magic-link-sent",
+                    requestId,
+                    email,
+                    null,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: start.Message,
+                    invitationToken: invitationToken,
+                    invitation: invitation,
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
+                return Html(page);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "magic-link",
+                    requestId,
+                    email,
+                    ex.Message,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        auth.MapGet("/login/magic-link/complete", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            CancellationToken cancellationToken) =>
+        {
+            var token = context.Request.Query["token"].ToString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                var loginPage = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    null,
+                    "The sign-in link is invalid or expired.",
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(loginPage, StatusCodes.Status400BadRequest);
+            }
+
+            var page = await BuildAuthPageViewModelAsync(
+                "magic-link-confirm",
+                null,
+                null,
+                null,
+                null,
+                token,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken);
+            return Html(page);
+        });
+
+        auth.MapPost("/login/magic-link/complete", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSMagicLinkService magicLinkService,
+            SqlOSAuthService authService,
+            SqlOSAuthPageSessionService authPageSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var token = form["token"].ToString();
+
+            try
+            {
+                var verification = await magicLinkService.CompleteAsync(
+                    new SqlOSMagicLinkCompleteRequest(token),
+                    expectedAuthorizationRequestId: null,
+                    requireAuthorizationRequestMatch: false,
+                    cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(verification.Payload.AuthorizationRequestId))
+                {
+                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
+                    await authPageSessionService.SignInAsync(
+                        context,
+                        verification.User,
+                        organizationId,
+                        verification.AuthenticationMethod,
+                        cancellationToken);
+                    return RedirectAfterStandaloneSignIn(authPrefix, "signed-in", deviceUserCode: null);
+                }
+
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(
+                    verification.Payload.AuthorizationRequestId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException("The sign-in link is invalid or expired.");
+                if (!string.Equals(authorizationRequest.ClientApplicationId, verification.Token.ClientApplicationId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The sign-in link is invalid or expired.");
+                }
+
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    authorizationRequest,
+                    verification.User,
+                    verification.AuthenticationMethod,
+                    context,
+                    cancellationToken);
+
+                if (completion.RequiresOrganizationSelection)
+                {
+                    var organizationPage = await BuildAuthPageViewModelAsync(
+                        "organization",
+                        authorizationRequest.Id,
+                        verification.Payload.Email,
+                        null,
+                        null,
+                        completion.PendingToken,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        completion.Organizations);
+                    return Html(organizationPage);
+                }
+
+                if (completion.RequiresMfa)
+                {
+                    return await RenderMfaChallengeAsync(
+                        completion,
+                        authorizationRequest.Id,
+                        verification.Payload.Email,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken);
+                }
+
+                return Results.Redirect(completion.RedirectUrl!);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "magic-link-confirm",
+                    null,
+                    null,
+                    ex.Message,
+                    null,
+                    token,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
@@ -2509,6 +2761,48 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/magic-link/start", async (
+            SqlOSHeadlessMagicLinkStartRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.RequestMagicLinkAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        headless.MapPost("/magic-link/complete", async (
+            SqlOSHeadlessMagicLinkCompleteRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.CompleteMagicLinkAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         headless.MapPost("/signup/email-otp/start", async (
             SqlOSHeadlessEmailOtpSignupStartRequest request,
             HttpContext context,
@@ -2935,6 +3229,12 @@ public static class EndpointRouteBuilderExtensions
 
         auth.MapPost("/email-otp/verify", async (SqlOSEmailOtpVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.VerifyEmailOtpAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/magic-link/start", async (SqlOSMagicLinkStartRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.RequestMagicLinkAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/magic-link/complete", async (SqlOSMagicLinkCompleteRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.CompleteMagicLinkAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/select-organization", async (SqlOSSelectOrganizationRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.SelectOrganizationForLoginAsync(request, httpContext, cancellationToken)));
@@ -4810,6 +5110,11 @@ public static class EndpointRouteBuilderExtensions
         if (credentialSettings.EmailOtpEnabled)
         {
             return "email-otp";
+        }
+
+        if (credentialSettings.MagicLinkEnabled)
+        {
+            return "magic-link";
         }
 
         if (credentialSettings.PhoneOtpEnabled)

@@ -69,6 +69,7 @@ export type HeadlessSettings = {
   enabledCredentialTypes?: string[];
   localPasswordRuntimeEnabled?: boolean;
   emailOtpRuntimeConfigured?: boolean;
+  magicLinkRuntimeConfigured?: boolean;
   phoneOtpRuntimeConfigured?: boolean;
 };
 
@@ -154,6 +155,39 @@ export async function headlessRequestEmailOtp(requestId: string, email: string):
 
 export async function headlessVerifyEmailOtp(requestId: string, challengeToken: string, code: string): Promise<HeadlessActionResult> {
   return headlessPost("/email-otp/verify", { requestId, challengeToken, code });
+}
+
+export async function headlessRequestMagicLink(requestId: string, email: string): Promise<HeadlessActionResult> {
+  return headlessPost("/magic-link/start", { requestId, email });
+}
+
+export async function headlessCompleteMagicLink(token: string, requestId?: string | null): Promise<HeadlessActionResult> {
+  return headlessPost("/magic-link/complete", { token, requestId });
+}
+
+export async function headlessRequestEmailOtpSignup(
+  requestId: string,
+  displayName: string,
+  email: string,
+  organizationName: string,
+  customFields?: Record<string, string>,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/signup/email-otp/start", {
+    requestId,
+    displayName,
+    email,
+    organizationName,
+    customFields,
+  });
+}
+
+export async function headlessVerifyEmailOtpSignup(
+  requestId: string,
+  signupToken: string,
+  challengeToken: string,
+  code: string,
+): Promise<HeadlessActionResult> {
+  return headlessPost("/signup/email-otp/verify", { requestId, signupToken, challengeToken, code });
 }
 
 export async function headlessRequestPhoneOtp(requestId: string, phoneNumber: string): Promise<HeadlessActionResult> {

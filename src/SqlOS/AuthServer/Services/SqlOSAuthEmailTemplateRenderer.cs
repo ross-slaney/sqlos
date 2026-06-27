@@ -29,6 +29,28 @@ internal static class SqlOSAuthEmailTemplateRenderer
         return $"Your {context.Branding.ApplicationName} {action} code is {context.Code}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
     }
 
+    public static string BuildMagicLinkHtmlBody(SqlOSMagicLinkMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.TokenLifetime.TotalMinutes));
+        var loginUrl = WebUtility.HtmlEncode(context.LoginUrl);
+        var intro = $"Use this one-time link to finish signing in as {context.MaskedEmail}. It expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
+        return BuildShell(
+            context.Branding,
+            $"Sign in to {WebUtility.HtmlEncode(context.ApplicationName)}",
+            WebUtility.HtmlEncode(intro),
+            $"""
+            <p style="margin:0 0 20px;"><a href="{loginUrl}" style="display:inline-block;background:{Css(context.Branding.PrimaryColor, "#2563eb")};color:{ButtonText(context.Branding.PrimaryColor)};text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Continue sign in</a></p>
+            <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {loginUrl}</p>
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this link, you can ignore this email.</p>
+            """);
+    }
+
+    public static string BuildMagicLinkTextBody(SqlOSMagicLinkMessageContext context)
+    {
+        var minutes = Math.Max(1, (int)Math.Ceiling(context.TokenLifetime.TotalMinutes));
+        return $"Sign in to {context.ApplicationName} as {context.MaskedEmail}: {context.LoginUrl}. This link expires in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.";
+    }
+
     public static string BuildInvitationHtmlBody(SqlOSInvitationMessageContext context)
     {
         var days = Math.Max(1, (int)Math.Ceiling(context.Lifetime.TotalDays));

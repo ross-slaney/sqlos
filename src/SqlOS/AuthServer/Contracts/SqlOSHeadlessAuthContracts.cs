@@ -92,6 +92,16 @@ public sealed record SqlOSHeadlessEmailOtpVerifyRequest(
     string Code,
     string? InvitationToken = null);
 
+public sealed record SqlOSHeadlessMagicLinkStartRequest(
+    string RequestId,
+    string Email,
+    string? InvitationToken = null);
+
+public sealed record SqlOSHeadlessMagicLinkCompleteRequest(
+    string Token,
+    string? RequestId = null,
+    string? InvitationToken = null);
+
 public sealed record SqlOSHeadlessEmailOtpSignupStartRequest(
     string RequestId,
     string DisplayName,

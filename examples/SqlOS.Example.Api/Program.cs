@@ -121,10 +121,10 @@ builder.AddSqlOS<ExampleAppDbContext>(
             page.AccentColor = "#0f172a";
             page.BackgroundColor = "#f8fafc";
             page.Layout = "split";
-            page.EnablePasswordSignup = true;
+            page.EnablePasswordSignup = false;
             page.EnabledCredentialTypes = enablePhoneOtp
-                ? ["password", "email_otp", "phone_otp"]
-                : ["password", "email_otp"];
+                ? ["email_otp", "password", "phone_otp"]
+                : ["email_otp", "password"];
         });
         auth.SeedAuthEmails(email =>
         {

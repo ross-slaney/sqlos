@@ -21,7 +21,7 @@ The default. SqlOS renders the sign-in, sign-up, invite acceptance, OTP, CLI dev
 
 - Working OAuth 2.0 flow out of the box
 - Branded login page with your app name and logo
-- Password, Email OTP, OIDC, and SAML support
+- Password, Email OTP, magic-link, OIDC, and SAML support
 - CLI device verification and approve/deny pages
 - No frontend auth code to write
 
@@ -45,7 +45,7 @@ SqlOS owns the OAuth protocol. Your app owns the UI.
 - Full control over the authorize UI
 - App-owned signup fields via `customFields`
 - Same OAuth protocol underneath (PKCE, redirect validation, code issuance)
-- Email OTP, invitations, CLI device approval, OIDC, and SAML still handled by SqlOS
+- Email OTP, magic links, invitations, CLI device approval, OIDC, and SAML still handled by SqlOS
 
 **Downside:** You build and host the authorize page.
 
@@ -75,6 +75,6 @@ Want your own UI? Use **headless**. Still let SqlOS own codes, tokens, and PKCE.
 
 ## Switching modes
 
-You can flip hosted ↔ headless. OAuth, tokens, sessions, OTP, invitations, CLI device flow, and refresh stay the same. Only the login UI changes.
+You can flip hosted ↔ headless. OAuth, tokens, sessions, OTP, magic links, invitations, CLI device flow, and refresh stay the same. Only the login UI changes.
 
 How-to: [Headless Auth](/docs/authserver/headless-auth) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth)

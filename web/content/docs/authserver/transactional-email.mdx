@@ -5,7 +5,7 @@ order: 11
 section: authserver
 ---
 
-Transactional email is the audited template system for operational messages and built-in AuthServer email. Every SqlOS implementation automatically gets templates for Email OTP, organization invitations, and password reset emails during startup.
+Transactional email is the audited template system for operational messages and built-in AuthServer email. Every SqlOS implementation automatically gets templates for Email OTP, magic links, organization invitations, and password reset emails during startup.
 
 ## Configure ACS Email
 
@@ -56,7 +56,7 @@ Open `SqlOS Dashboard > Communications`.
 
 - Templates: create, edit, activate, deactivate, delete templates without delivery history, and preview rendered output with sample variables.
 - Messages: filter delivery log entries by status, template key, recipient, and date range.
-- Built-in auth templates: `auth.email-otp`, `auth.invitation`, and `auth.password-reset` are created automatically and can be customized like other templates.
+- Built-in auth templates: `auth.email-otp`, `auth.magic-link`, `auth.invitation`, and `auth.password-reset` are created automatically and can be customized like other templates.
 
 ## Retention and PII posture
 
@@ -66,7 +66,7 @@ Rendered HTML bodies are not stored unless `options.Email.PersistRenderedHtmlPre
 
 ## Built-in auth email
 
-Email OTP, organization invitations, and password reset emails use the built-in transactional templates by default. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
+Email OTP, magic links, organization invitations, and password reset emails use the built-in transactional templates by default. Their rendered bodies are suppressed in delivery history because they contain codes or token-bearing links.
 
 Upgrade behavior is additive for normal AuthServer email configuration. Existing `AuthServer.ConfigureEmailOtp(...)` ACS settings continue to work; configuring `options.Email` is optional unless you want separate transactional email credentials.
 

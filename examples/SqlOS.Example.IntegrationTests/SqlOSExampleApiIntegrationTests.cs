@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.IO.Compression;
+using System.Net.Http.Headers;
 using System.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -13,6 +14,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Example.IntegrationTests.Infrastructure;
@@ -51,37 +53,34 @@ public sealed class SqlOSExampleApiIntegrationTests
     [TestMethod]
     public async Task Signup_CanCreateAndListWorkspaces()
     {
-        var email = $"user-{Guid.NewGuid():N}@example.com";
-        var signupResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/signup", new
+        using var factory = CreateOtpFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
-            displayName = "Alice",
-            email,
-            password = "P@ssword123!",
-            organizationName = "Acme",
-            clientId = "example-web"
+            AllowAutoRedirect = false
         });
-        signupResponse.EnsureSuccessStatusCode();
-        var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
-        var accessToken = signupJson.RootElement.GetProperty("tokens").GetProperty("accessToken").GetString();
+        var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+
+        var email = $"user-{Guid.NewGuid():N}@example.com";
+        var accessToken = await SignUpWithEmailOtpAsync(client, sender, email, "Alice", "Acme");
 
         var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/workspaces")
         {
             Content = JsonContent.Create(new { name = "North America Workspace" })
         };
-        createRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-        var createResponse = await ExampleApiFixture.Client.SendAsync(createRequest);
+        createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var createResponse = await client.SendAsync(createRequest);
         createResponse.EnsureSuccessStatusCode();
 
         var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/workspaces");
-        listRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-        var listResponse = await ExampleApiFixture.Client.SendAsync(listRequest);
+        listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var listResponse = await client.SendAsync(listRequest);
         listResponse.EnsureSuccessStatusCode();
         var listContent = await listResponse.Content.ReadAsStringAsync();
         listContent.Should().Contain("North America Workspace");
     }
 
     [TestMethod]
-    public async Task PasswordSignupEndpoint_WithExistingOrganizationId_ReturnsFailureAndNoMembership()
+    public async Task PasswordSignupEndpoint_WhenDisabled_ReturnsFailureAndNoMembership()
     {
         var orgResponse = await AdminPostAsync("/sqlos/admin/auth/api/organizations", new
         {
@@ -101,7 +100,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         });
         existingOrgResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
         var existingBody = await existingOrgResponse.Content.ReadAsStringAsync();
-        existingBody.Should().Contain("Joining an existing organization requires an invitation or approved join policy.");
+        existingBody.Should().Contain("Password signup is disabled.");
         existingBody.Should().NotContain(organizationId);
 
         var unknownOrgResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/signup", new
@@ -139,19 +138,41 @@ public sealed class SqlOSExampleApiIntegrationTests
         });
         var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
         var email = $"reset-{Guid.NewGuid():N}@example.com";
-        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        var orgResponse = await client.PostAsJsonAsync("/sqlos/admin/auth/api/organizations", new
+        {
+            name = "Reset Org"
+        });
+        orgResponse.EnsureSuccessStatusCode();
+        var orgJson = JsonDocument.Parse(await orgResponse.Content.ReadAsStringAsync());
+        var organizationId = orgJson.RootElement.GetProperty("id").GetString();
+
+        var userResponse = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new
         {
             displayName = "Reset User",
             email,
-            password = "OldPassword123!",
-            organizationName = "Reset Org",
-            clientId = "example-web"
+            password = "OldPassword123!"
         });
-        signupResponse.EnsureSuccessStatusCode();
-        var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
-        var tokens = signupJson.RootElement.GetProperty("tokens");
-        var refreshToken = tokens.GetProperty("refreshToken").GetString();
-        var organizationId = tokens.GetProperty("organizationId").GetString();
+        userResponse.EnsureSuccessStatusCode();
+        var userJson = JsonDocument.Parse(await userResponse.Content.ReadAsStringAsync());
+        var userId = userJson.RootElement.GetProperty("id").GetString();
+
+        var membershipResponse = await client.PostAsJsonAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships", new
+        {
+            userId,
+            role = "member"
+        });
+        membershipResponse.EnsureSuccessStatusCode();
+
+        var initialLoginResponse = await client.PostAsJsonAsync("/sqlos/auth/password/login", new
+        {
+            email,
+            password = "OldPassword123!",
+            clientId = "example-web",
+            organizationId
+        });
+        initialLoginResponse.EnsureSuccessStatusCode();
+        var loginJson = JsonDocument.Parse(await initialLoginResponse.Content.ReadAsStringAsync());
+        var refreshToken = loginJson.RootElement.GetProperty("tokens").GetProperty("refreshToken").GetString();
 
         var refreshResponse = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
         {
@@ -822,6 +843,108 @@ public sealed class SqlOSExampleApiIntegrationTests
         };
         request.Headers.Add("Cookie", cookie);
         return await ExampleApiFixture.Client.SendAsync(request);
+    }
+
+    private static WebApplicationFactory<Program> CreateOtpFactory()
+        => ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:EnableHeadlessAuthPage", "true");
+            builder.UseSetting("SqlOS:HeadlessFrontendUrl", "http://localhost:3000");
+            builder.UseSetting("ExampleFrontend:ClientId", "example-web");
+            builder.UseSetting("ExampleFrontend:CallbackUrl", "http://localhost:3000/auth/callback");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSAuthEmailSender>();
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<TestAuthEmailSender>();
+                services.AddSingleton<ISqlOSAuthEmailSender>(sp => sp.GetRequiredService<TestAuthEmailSender>());
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<TestAuthEmailSender>());
+            });
+        });
+
+    private static async Task<string> SignUpWithEmailOtpAsync(
+        HttpClient client,
+        TestAuthEmailSender sender,
+        string email,
+        string displayName,
+        string organizationName)
+    {
+        const string verifier = "example-api-email-otp-signup-verifier-123456789";
+        var challenge = CreateCodeChallenge(verifier);
+
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = "example-api-email-otp-signup-state",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["view"] = "signup"
+        }));
+        authorizeResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
+        var requestId = QueryHelpers.ParseQuery(authorizeResponse.Headers.Location!.Query)["request"].ToString();
+        requestId.Should().NotBeNullOrWhiteSpace();
+
+        var startResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup/email-otp/start", new
+        {
+            requestId,
+            displayName,
+            email,
+            organizationName,
+            customFields = new
+            {
+                referralSource = "docs",
+                firstName = displayName,
+                lastName = "Example"
+            }
+        });
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var viewModel = startJson.RootElement.GetProperty("viewModel");
+        var signupToken = viewModel.GetProperty("signupToken").GetString();
+        var challengeToken = viewModel.GetProperty("challengeToken").GetString();
+
+        var verifyResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/signup/email-otp/verify", new
+        {
+            requestId,
+            signupToken,
+            challengeToken,
+            code = sender.GetLatestCode(email)
+        });
+        verifyResponse.EnsureSuccessStatusCode();
+        var verifyJson = JsonDocument.Parse(await verifyResponse.Content.ReadAsStringAsync());
+        var redirectUrl = verifyJson.RootElement.GetProperty("redirectUrl").GetString();
+        redirectUrl.Should().NotBeNullOrWhiteSpace();
+
+        var tokenJson = await ExchangeAuthCodeAsync(client, redirectUrl!, verifier);
+        return tokenJson.RootElement.GetProperty("access_token").GetString()!;
+    }
+
+    private static async Task<JsonDocument> ExchangeAuthCodeAsync(HttpClient client, string redirectUrl, string verifier)
+    {
+        var redirectUri = new Uri(redirectUrl);
+        var query = QueryHelpers.ParseQuery(redirectUri.Query);
+        var code = query["code"].ToString();
+        code.Should().NotBeNullOrWhiteSpace();
+
+        var tokenResponse = await client.PostAsync("/sqlos/auth/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["code_verifier"] = verifier
+        }));
+        tokenResponse.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await tokenResponse.Content.ReadAsStringAsync());
+    }
+
+    private static string CreateCodeChallenge(string verifier)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(verifier));
+        return WebEncoders.Base64UrlEncode(bytes);
     }
 
     private static string ExtractResetToken(string textBody)
