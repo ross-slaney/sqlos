@@ -68,7 +68,7 @@ public sealed class SqlOSCalendarSyncService
 
         try
         {
-            var accessToken = await _calendarService.EnsureFreshAccessTokenAsync(connection, cancellationToken);
+            var accessToken = await _calendarService.EnsureFreshAccessTokenAsync(connection, forceRefresh: false, cancellationToken);
             var adapter = _calendarService.RequireAdapter(connection.ProviderType);
 
             var syncStates = await _context.Set<SqlOSCalendarSyncState>()
@@ -193,7 +193,7 @@ public sealed class SqlOSCalendarSyncService
             throw new InvalidOperationException("The event end time must be after its start time.");
         }
 
-        var accessToken = await _calendarService.EnsureFreshAccessTokenAsync(connection, cancellationToken);
+        var accessToken = await _calendarService.EnsureFreshAccessTokenAsync(connection, forceRefresh: false, cancellationToken);
         var adapter = _calendarService.RequireAdapter(connection.ProviderType);
         var created = await adapter.CreateEventAsync(accessToken, providerCalendarId, draft, cancellationToken);
 

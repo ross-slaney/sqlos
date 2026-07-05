@@ -366,7 +366,7 @@ public sealed class SqlOSCalendarService
         CancellationToken cancellationToken = default)
     {
         var connection = await RequireConnectionAsync(calendarConnectionId, forUserId, forOrganizationId, includeRevoked: false, cancellationToken);
-        var accessToken = await EnsureFreshAccessTokenAsync(connection, cancellationToken);
+        var accessToken = await EnsureFreshAccessTokenAsync(connection, forceRefresh: false, cancellationToken);
         return new SqlOSCalendarAccessTokenResult(
             accessToken,
             connection.AccessTokenExpiresAt ?? DateTime.UtcNow,
@@ -382,7 +382,7 @@ public sealed class SqlOSCalendarService
         CancellationToken cancellationToken = default)
     {
         var connection = await RequireConnectionAsync(calendarConnectionId, forUserId, forOrganizationId, includeRevoked: false, cancellationToken);
-        var accessToken = await EnsureFreshAccessTokenAsync(connection, cancellationToken);
+        var accessToken = await EnsureFreshAccessTokenAsync(connection, forceRefresh: false, cancellationToken);
         return await RequireAdapter(connection.ProviderType).ListCalendarsAsync(accessToken, cancellationToken);
     }
 
@@ -507,8 +507,8 @@ public sealed class SqlOSCalendarService
     /// </summary>
     public async Task<string> EnsureFreshAccessTokenAsync(
         SqlOSCalendarConnection connection,
-        CancellationToken cancellationToken = default,
-        bool forceRefresh = false)
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
     {
         if (connection.RevokedAt != null)
         {
@@ -584,7 +584,7 @@ public sealed class SqlOSCalendarService
         CancellationToken cancellationToken = default)
     {
         var connection = await RequireConnectionAsync(calendarConnectionId, null, null, includeRevoked: false, cancellationToken);
-        await EnsureFreshAccessTokenAsync(connection, cancellationToken, forceRefresh: true);
+        await EnsureFreshAccessTokenAsync(connection, forceRefresh: true, cancellationToken);
         return ToSummary(connection);
     }
 

@@ -100,38 +100,55 @@ public sealed class SqlOSGoogleCalendarAdapter : ISqlOSCalendarProviderAdapter
         string? syncCursor,
         CancellationToken cancellationToken = default)
     {
-        var url = new StringBuilder($"{CalendarApiBaseUrl}/calendars/{Uri.EscapeDataString(providerCalendarId)}/events?singleEvents=true");
+        var baseUrl = new StringBuilder($"{CalendarApiBaseUrl}/calendars/{Uri.EscapeDataString(providerCalendarId)}/events?singleEvents=true");
         if (string.IsNullOrWhiteSpace(syncCursor))
         {
-            url.Append("&timeMin=").Append(Uri.EscapeDataString(SqlOSCalendarProviderHttp.FormatUtc(windowStartUtc)));
-            url.Append("&timeMax=").Append(Uri.EscapeDataString(SqlOSCalendarProviderHttp.FormatUtc(windowEndUtc)));
+            baseUrl.Append("&timeMin=").Append(Uri.EscapeDataString(SqlOSCalendarProviderHttp.FormatUtc(windowStartUtc)));
+            baseUrl.Append("&timeMax=").Append(Uri.EscapeDataString(SqlOSCalendarProviderHttp.FormatUtc(windowEndUtc)));
         }
         else
         {
-            url.Append("&syncToken=").Append(Uri.EscapeDataString(syncCursor));
+            baseUrl.Append("&syncToken=").Append(Uri.EscapeDataString(syncCursor));
         }
 
-        using var payload = await SqlOSCalendarProviderHttp.GetJsonAsync(
-            CreateClient(),
-            url.ToString(),
-            accessToken,
-            "The Google calendar events request failed.",
-            cancellationToken);
-
         var events = new List<SqlOSCalendarEventSnapshot>();
-        if (payload.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+        string? nextCursor = null;
+        string? pageToken = null;
+
+        // Follow nextPageToken pages; Google only returns nextSyncToken on the final page.
+        for (var page = 0; page < 25; page++)
         {
-            foreach (var item in items.EnumerateArray())
+            var url = pageToken == null
+                ? baseUrl.ToString()
+                : $"{baseUrl}&pageToken={Uri.EscapeDataString(pageToken)}";
+
+            using var payload = await SqlOSCalendarProviderHttp.GetJsonAsync(
+                CreateClient(),
+                url,
+                accessToken,
+                "The Google calendar events request failed.",
+                cancellationToken);
+
+            if (payload.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
             {
-                var snapshot = MapEvent(item);
-                if (snapshot != null)
+                foreach (var item in items.EnumerateArray())
                 {
-                    events.Add(snapshot);
+                    var snapshot = MapEvent(item);
+                    if (snapshot != null)
+                    {
+                        events.Add(snapshot);
+                    }
                 }
+            }
+
+            nextCursor = SqlOSCalendarProviderHttp.GetString(payload.RootElement, "nextSyncToken") ?? nextCursor;
+            pageToken = SqlOSCalendarProviderHttp.GetString(payload.RootElement, "nextPageToken");
+            if (string.IsNullOrWhiteSpace(pageToken))
+            {
+                break;
             }
         }
 
-        var nextCursor = SqlOSCalendarProviderHttp.GetString(payload.RootElement, "nextSyncToken");
         return new SqlOSCalendarEventPage(events, nextCursor);
     }
 
