@@ -546,6 +546,43 @@ public sealed class SqlOSCalendarServiceTests
     }
 
     [TestMethod]
+    public async Task CreateEvent_MicrosoftTwoWay_PushesToGraph()
+    {
+        using var context = CreateContext();
+        var services = CreateServices(context);
+        var organization = await services.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Acme", "acme-ms"));
+        var oidc = await CreateMicrosoftConnectionAsync(services.Admin);
+        var completion = await services.Calendar.CompleteConnectAsync(
+            new CalendarConnectRequestPayload(
+                oidc.Id,
+                SqlOSCalendarIntegrationMode.TwoWay,
+                null,
+                organization.Id,
+                null,
+                ["openid", "email", "offline_access", "Calendars.ReadWrite"],
+                ReturnUri,
+                "verifier",
+                "https://tests.example.local/sqlos/auth/calendar/callback",
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token"),
+            "success:cal-ms@example.com");
+
+        var created = await services.Sync.CreateEventAsync(
+            completion.CalendarConnectionId,
+            "graph-default",
+            new SqlOSCalendarEventDraft(
+                "Board meeting",
+                new DateTime(2026, 7, 10, 14, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 7, 10, 15, 0, 0, DateTimeKind.Utc),
+                Location: "HQ",
+                Description: "Quarterly review"),
+            forOrganizationId: organization.Id);
+
+        created.ProviderEventId.Should().Be("graph-created-1");
+        created.Subject.Should().Be("Board meeting");
+        context.Set<SqlOSCalendarEvent>().Single().Origin.Should().Be("push");
+    }
+
+    [TestMethod]
     public async Task AdminSurface_ListsConnectionsAndSummary()
     {
         using var context = CreateContext();
