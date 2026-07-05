@@ -353,6 +353,7 @@ app.Use(async (context, next) =>
 
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
+app.MapExampleCalendarEndpoints();
 app.MapDemoEndpoints();
 app.MapChainEndpoints();
 app.MapLocationEndpoints();

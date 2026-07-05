@@ -1,0 +1,143 @@
+---
+title: "Calendar integration"
+description: "Connect Google Calendar and Microsoft 365 calendars per user or organization with connection-only, read-pull, or two-way modes."
+order: 4
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Connect Google and Microsoft calendars"
+  href="/docs/authserver/calendar-integration"
+  actionLabel="Calendar reference"
+/>
+
+You'll learn how to reuse your existing Google/Microsoft OAuth apps for calendar access, pick an integration mode, run the connect flow, and read normalized events.
+
+<Callout type="info" title="Prerequisites">
+  - SqlOS running with a seeded [Google](/docs/authserver/google-oidc) or [Microsoft](/docs/authserver/microsoft-oidc) social connection
+  - Admin access to `/sqlos/admin/calendar/`
+</Callout>
+
+## Goal
+
+Your app connects a user's (or an organization's) Google or Outlook calendar without writing any OAuth, token storage, or refresh code. Sign-in stays untouched: login flows never request calendar scopes, and calendar consent is a separate browser round-trip that users grant explicitly.
+
+## Pick an integration mode
+
+Apps choose per connection how much SqlOS does:
+
+| Mode | What SqlOS stores | When to use |
+|------|-------------------|-------------|
+| `ConnectionOnly` | Encrypted tokens only | Your app calls the Google/Graph APIs itself and just needs a fresh access token on demand. |
+| `ReadPull` | Encrypted tokens + normalized events | You need availability/busy data served from your own database on a schedule. |
+| `TwoWay` | Encrypted tokens + normalized events | You also create events on the provider calendar and want conflicts delegated to your code. |
+
+<Callout type="tip" title="Recommended path for scheduling products">
+  Booking and scheduling apps should start with `ReadPull`: import busy blocks on the sync schedule, keep the booking engine on your own tables, and only move to `TwoWay` when you need SqlOS to write confirmed bookings back to the provider calendar.
+</Callout>
+
+## 1. Grant calendar scopes to your OAuth apps
+
+Calendar connections reuse the client id/secret of your seeded social connection, so there is nothing new to register — only new scopes to allow.
+
+**Google Cloud Console** ([APIs & Services](https://console.cloud.google.com/apis/dashboard)):
+
+1. Enable the **Google Calendar API** for the project that owns your OAuth client.
+2. Add the scopes to the OAuth consent screen: `https://www.googleapis.com/auth/calendar.readonly` (read) and `https://www.googleapis.com/auth/calendar.events` (two-way writes).
+3. Add the SqlOS calendar callback to the client's authorized redirect URIs:
+
+```
+https://your-app.example.com/sqlos/auth/calendar/callback
+```
+
+**Microsoft Entra** ([App registrations](https://entra.microsoft.com/)):
+
+1. Under **API permissions**, add Microsoft Graph delegated permissions: `Calendars.Read` (read) or `Calendars.ReadWrite` (two-way), plus `offline_access`.
+2. Under **Authentication > Web**, add the same SqlOS calendar callback redirect URI.
+
+SqlOS requests `access_type=offline&prompt=consent` for Google and `offline_access` for Microsoft automatically so refresh tokens are always issued.
+
+## 2. Start the connect flow
+
+From your app's backend (the user is already signed in), start a connect session and redirect the browser to the returned URL:
+
+```csharp
+app.MapPost("/api/calendar/connect", async (
+    HttpContext http,
+    SqlOSCalendarService calendarService,
+    SqlOSOidcAuthService oidcAuthService,
+    CancellationToken ct) =>
+{
+    var userId = http.User.FindFirst("sub")!.Value;
+    var providers = await oidcAuthService.ListEnabledProvidersAsync(ct);
+    var google = providers.First(p => p.ProviderType == "Google");
+
+    var result = await calendarService.StartConnectAsync(
+        new SqlOSStartCalendarConnectRequest(
+            google.ConnectionId,
+            SqlOSCalendarIntegrationMode.ReadPull,
+            ReturnUri: "https://your-app.example.com/settings/calendar",
+            UserId: userId),
+        http,
+        ct);
+
+    return Results.Ok(new { url = result.AuthorizationUrl });
+});
+```
+
+SqlOS handles the provider callback at `{BasePath}/calendar/callback`, exchanges the code, encrypts the tokens at rest, and redirects the browser to your `ReturnUri` with `?calendarConnectionId=...` (or `?error=...`).
+
+Bind to an organization instead by passing `OrganizationId` — exactly one of the two must be set.
+
+## 3. Read events (ReadPull / TwoWay)
+
+The background scheduler syncs due connections automatically (every 15 minutes by default, primary calendar first). Read the normalized copies from SqlOS:
+
+```csharp
+var events = await calendarService.ListEventsAsync(
+    calendarConnectionId,
+    fromUtc: DateTime.UtcNow.Date,
+    toUtc: DateTime.UtcNow.Date.AddDays(30),
+    forUserId: userId); // ownership check: throws if the connection belongs to someone else
+```
+
+Each event carries `StartsAtUtc`, `EndsAtUtc`, `ShowAs` (`busy`, `free`, `tentative`, `oof`), `Status`, and `Subject`. Enroll additional calendars with `EnableCalendarSyncAsync`, or trigger a sync immediately with `SqlOSCalendarSyncService.SyncConnectionAsync`.
+
+## 4. Or call the provider yourself (ConnectionOnly)
+
+```csharp
+var token = await calendarService.GetAccessTokenAsync(calendarConnectionId, forUserId: userId);
+// token.AccessToken is short-lived; SqlOS refreshes it transparently when close to expiry.
+```
+
+SqlOS never stores event copies for `ConnectionOnly` connections — `ListEventsAsync` throws by design.
+
+## 5. Two-way writes and conflicts
+
+```csharp
+await syncService.CreateEventAsync(
+    calendarConnectionId,
+    providerCalendarId,
+    new SqlOSCalendarEventDraft("Kickoff", startUtc, endUtc));
+```
+
+When a later pull finds that a provider changed an event your app created through SqlOS, the conflict is delegated to your callback (provider wins when you don't set one):
+
+```csharp
+options.Calendar.OnTwoWayConflictAsync = (conflict, ct) =>
+    Task.FromResult(conflict.Remote.Status == "cancelled"
+        ? SqlOSCalendarConflictDecision.PreferProvider
+        : SqlOSCalendarConflictDecision.PreferLocal);
+```
+
+## Verify
+
+- **Dashboard**: `/sqlos/admin/calendar/connections` shows connection status, last sync, per-calendar cursors, and errors, with force sync/refresh/disconnect actions.
+- **Audit**: connect, disconnect, sync, refresh failures, and event creation are recorded as `calendar.*` audit events.
+
+## Next steps
+
+- [Calendar reference](/docs/authserver/calendar-integration) — options, scopes, service APIs, admin API
+- [Social sign-in](/docs/guides/social-oidc) — seed the Google/Microsoft connections calendar reuses
+- [Audit logs](/docs/guides/audit-logs) — query the `calendar.*` events
