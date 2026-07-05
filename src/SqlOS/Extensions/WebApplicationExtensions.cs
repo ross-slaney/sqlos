@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Extensions;
+using SqlOS.Calendar.Extensions;
 using SqlOS.Configuration;
 using SqlOS.Email.Extensions;
 
@@ -21,6 +22,11 @@ public static class WebApplicationExtensions
         app.MapAuthServer(authOptions.BasePath);
         app.MapSqlOSAuditLogsAdmin(sqlosOptions.DashboardBasePath);
         app.MapSqlOSEmailAdmin(sqlosOptions.DashboardBasePath);
+        if (sqlosOptions.Calendar.Enabled)
+        {
+            app.MapSqlOSCalendarConnect(authOptions.BasePath);
+            app.MapSqlOSCalendarAdmin(sqlosOptions.DashboardBasePath);
+        }
 
         return app;
     }
