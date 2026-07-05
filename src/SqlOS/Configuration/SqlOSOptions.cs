@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Calendar.Configuration;
 using SqlOS.Email.Configuration;
 using SqlOS.Fga.Configuration;
 
@@ -25,6 +26,7 @@ public sealed class SqlOSOptions
     public SqlOSFgaOptions Fga { get; } = new();
     public SqlOSAuthServerOptions AuthServer { get; } = new();
     public SqlOSEmailOptions Email { get; } = new();
+    public SqlOSCalendarOptions Calendar { get; } = new();
 
     public SqlOSOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
     {
@@ -41,6 +43,12 @@ public sealed class SqlOSOptions
     public SqlOSOptions ConfigureEmail(Action<SqlOSEmailOptions> configure)
     {
         configure(Email);
+        return this;
+    }
+
+    public SqlOSOptions ConfigureCalendar(Action<SqlOSCalendarOptions> configure)
+    {
+        configure(Calendar);
         return this;
     }
 }
