@@ -20,6 +20,14 @@ public sealed class CalendarIntegrationTests
 {
     private const string ReturnUri = "https://app.example.local/settings/calendar";
 
+    /// <summary>
+    /// Calendar connections hold foreign keys to social connections, so leftover rows would
+    /// break other test classes that clear all OIDC connections in their own resets. Clean
+    /// up after every test (including failures) so no calendar rows outlive this class.
+    /// </summary>
+    [TestCleanup]
+    public async Task CleanupAsync() => await ResetCalendarStateAsync();
+
     [TestMethod]
     public async Task GoogleReadPull_ConnectSyncListDisconnect_WorksOnSqlServer()
     {

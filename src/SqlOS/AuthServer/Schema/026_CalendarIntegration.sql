@@ -1,4 +1,7 @@
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSCalendarConnections' AND schema_id = SCHEMA_ID('{Schema}'))
+   AND OBJECT_ID('{Schema}.SqlOSUsers', 'U') IS NOT NULL
+   AND OBJECT_ID('{Schema}.SqlOSOrganizations', 'U') IS NOT NULL
+   AND OBJECT_ID('{Schema}.SqlOSAuthOidcConnections', 'U') IS NOT NULL
 BEGIN
     CREATE TABLE [{Schema}].[SqlOSCalendarConnections] (
         [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
@@ -41,6 +44,7 @@ END
 GO
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSCalendarSyncStates' AND schema_id = SCHEMA_ID('{Schema}'))
+   AND OBJECT_ID('{Schema}.SqlOSCalendarConnections', 'U') IS NOT NULL
 BEGIN
     CREATE TABLE [{Schema}].[SqlOSCalendarSyncStates] (
         [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
@@ -67,6 +71,7 @@ END
 GO
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SqlOSCalendarEvents' AND schema_id = SCHEMA_ID('{Schema}'))
+   AND OBJECT_ID('{Schema}.SqlOSCalendarConnections', 'U') IS NOT NULL
 BEGIN
     CREATE TABLE [{Schema}].[SqlOSCalendarEvents] (
         [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
