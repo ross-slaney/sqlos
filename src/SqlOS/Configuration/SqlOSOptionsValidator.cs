@@ -1,4 +1,5 @@
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Calendar.Configuration;
 using SqlOS.Email.Configuration;
 
 namespace SqlOS.Configuration;
@@ -77,6 +78,7 @@ internal static class SqlOSOptionsValidator
         ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
         ValidatePasswordResetOptions(options.AuthServer.PasswordReset, errors);
         ValidateEmailOptions(options.Email, errors);
+        ValidateCalendarOptions(options.Calendar, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
 
@@ -411,6 +413,49 @@ internal static class SqlOSOptionsValidator
         if (options.RenderedTextPreviewMaxLength <= 0)
         {
             errors.Add("Email.RenderedTextPreviewMaxLength must be greater than zero.");
+        }
+    }
+
+    private static void ValidateCalendarOptions(SqlOSCalendarOptions options, List<string> errors)
+    {
+        if (options.ConnectSessionLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.ConnectSessionLifetime must be greater than zero.");
+        }
+
+        if (options.AccessTokenRefreshSkew < TimeSpan.Zero)
+        {
+            errors.Add("Calendar.AccessTokenRefreshSkew must be zero or greater.");
+        }
+
+        if (options.SyncWindowPastDays < 0)
+        {
+            errors.Add("Calendar.SyncWindowPastDays must be zero or greater.");
+        }
+
+        if (options.SyncWindowFutureDays <= 0)
+        {
+            errors.Add("Calendar.SyncWindowFutureDays must be greater than zero.");
+        }
+
+        if (!options.SyncScheduler.Enabled)
+        {
+            return;
+        }
+
+        if (options.SyncScheduler.Interval <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.SyncScheduler.Interval must be greater than zero.");
+        }
+
+        if (options.SyncScheduler.SyncEvery <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.SyncScheduler.SyncEvery must be greater than zero.");
+        }
+
+        if (options.SyncScheduler.MaxConnectionsPerRun <= 0)
+        {
+            errors.Add("Calendar.SyncScheduler.MaxConnectionsPerRun must be greater than zero.");
         }
     }
 
