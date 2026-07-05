@@ -35,6 +35,7 @@ Think **WorkOS / AuthKit**, but **self-hosted** and **your database**.
 - **Sessions & Refresh Tokens** — full lifecycle management with revocation
 - **Signing Key Rotation** — automatic RS256 key rotation with configurable intervals
 - **Email OTP** — passwordless sign-in with Azure Communication Services Email
+- **Calendar Integration** — Google Calendar and Microsoft 365 connections per user or organization with encrypted tokens and connection-only, read-pull, or two-way modes
 - **Audit Logging** — track authentication events across your system
 
 ### FGA (Fine-Grained Authorization)
