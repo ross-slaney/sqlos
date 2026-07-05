@@ -233,5 +233,15 @@ public sealed class CalendarIntegrationTests
         var connections = await context.Set<SqlOSCalendarConnection>().ToListAsync();
         context.Set<SqlOSCalendarConnection>().RemoveRange(connections);
         await context.SaveChangesAsync();
+
+        // Providers are unique per type, so clear social connections the same way the
+        // OIDC integration tests do (external identities first to satisfy the FK).
+        var externalIdentities = await context.Set<SqlOSExternalIdentity>()
+            .Where(x => x.OidcConnectionId != null)
+            .ToListAsync();
+        context.Set<SqlOSExternalIdentity>().RemoveRange(externalIdentities);
+        var oidcConnections = await context.Set<SqlOSOidcConnection>().ToListAsync();
+        context.Set<SqlOSOidcConnection>().RemoveRange(oidcConnections);
+        await context.SaveChangesAsync();
     }
 }
