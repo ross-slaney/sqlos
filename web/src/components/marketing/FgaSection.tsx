@@ -1,11 +1,12 @@
 import Link from "next/link";
 import FgaViz from "@/components/FgaViz";
 import ProductScreenshot from "@/components/ProductScreenshot";
+import SectionHeading from "@/components/marketing/SectionHeading";
 import { fgaConcepts } from "@/components/marketing/constants";
 
 export default function FgaSection() {
   return (
-    <section className="border-t px-6 py-20 sm:py-24">
+    <section className="border-t px-6 py-24 sm:py-28">
       <div className="mx-auto max-w-6xl">
         <div className="grid items-start gap-12 lg:grid-cols-[1.15fr_1fr] lg:gap-16">
           <div className="order-2 space-y-6 lg:order-1">
@@ -17,12 +18,11 @@ export default function FgaSection() {
           </div>
 
           <div className="order-1 lg:order-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Authorization
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
-              Authorization in SQL, not middleware
-            </h2>
+            <SectionHeading
+              index="04"
+              eyebrow="Authorization"
+              title="Authorization in SQL, not middleware"
+            />
             <p className="mt-5 text-base leading-7 text-muted-foreground">
               Every multi-tenant app eventually outgrows{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
@@ -32,10 +32,10 @@ export default function FgaSection() {
               down — no role explosion, no per-request policy service.
             </p>
 
-            <div className="mt-6 space-y-1">
+            <div className="mt-7 divide-y rounded-xl border bg-card/60">
               {fgaConcepts.map((item) => (
-                <div key={item.label} className="flex items-start gap-3 py-2">
-                  <span className="mt-0.5 w-20 shrink-0 text-xs font-semibold text-foreground">
+                <div key={item.label} className="flex items-start gap-4 p-4">
+                  <span className="mt-0.5 w-24 shrink-0 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-primary">
                     {item.label}
                   </span>
                   <span className="text-sm leading-6 text-muted-foreground">{item.description}</span>
@@ -43,7 +43,7 @@ export default function FgaSection() {
               ))}
             </div>
 
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">
+            <p className="mt-6 text-sm leading-6 text-muted-foreground">
               Built on{" "}
               <a
                 href="https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf"
