@@ -5,14 +5,15 @@ on:
     branches: [main]
 
 env:
-  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
-  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-  AZURE_DNS_RESOURCE_GROUP: ${{ vars.AZURE_DNS_RESOURCE_GROUP || 'foundation' }}
-  AZURE_DNS_ZONE_NAME: ${{ vars.AZURE_DNS_ZONE_NAME || 'sqlos.dev' }}
-  AZURE_NAME_PREFIX: ${{ vars.AZURE_NAME_PREFIX }}
-  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_DNS_RESOURCE_GROUP: ${{ secrets.AZURE_DNS_RESOURCE_GROUP || 'SQLOS' }}
+  AZURE_DNS_ZONE_NAME: ${{ secrets.AZURE_DNS_ZONE_NAME || 'sqlos.dev' }}
+  AZURE_NAME_PREFIX: ${{ secrets.AZURE_NAME_PREFIX }}
+  AZURE_ACR_NAME: ${{ secrets.AZURE_ACR_NAME }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   deploy:
@@ -25,25 +26,31 @@ jobs:
 
       - name: Validate Azure login inputs
         env:
-          INPUT_AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          INPUT_AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          INPUT_AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          INPUT_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          INPUT_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          INPUT_AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           INPUT_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          INPUT_AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+          INPUT_AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          INPUT_AZURE_NAME_PREFIX: ${{ secrets.AZURE_NAME_PREFIX }}
         run: |
           set -euo pipefail
 
           missing=()
 
-          [[ -n "${INPUT_AZURE_CLIENT_ID:-}" ]] || missing+=("AZURE_CLIENT_ID (repository variable)")
-          [[ -n "${INPUT_AZURE_TENANT_ID:-}" ]] || missing+=("AZURE_TENANT_ID (repository variable)")
-          [[ -n "${INPUT_AZURE_SUBSCRIPTION_ID:-}" ]] || missing+=("AZURE_SUBSCRIPTION_ID (repository variable)")
+          [[ -n "${INPUT_AZURE_CLIENT_ID:-}" ]] || missing+=("AZURE_CLIENT_ID (repository secret)")
+          [[ -n "${INPUT_AZURE_TENANT_ID:-}" ]] || missing+=("AZURE_TENANT_ID (repository secret)")
+          [[ -n "${INPUT_AZURE_SUBSCRIPTION_ID:-}" ]] || missing+=("AZURE_SUBSCRIPTION_ID (repository secret)")
           [[ -n "${INPUT_AZURE_CLIENT_SECRET:-}" ]] || missing+=("AZURE_CLIENT_SECRET (repository secret)")
+          [[ -n "${INPUT_AZURE_LOCATION:-}" ]] || missing+=("AZURE_LOCATION (repository secret)")
+          [[ -n "${INPUT_AZURE_RESOURCE_GROUP:-}" ]] || missing+=("AZURE_RESOURCE_GROUP (repository secret)")
+          [[ -n "${INPUT_AZURE_NAME_PREFIX:-}" ]] || missing+=("AZURE_NAME_PREFIX (repository secret)")
 
           if (( ${#missing[@]} > 0 )); then
-            echo "Missing Azure login values:"
+            echo "Missing Azure configuration values:"
             printf ' - %s\n' "${missing[@]}"
             echo ""
-            echo "Add repository variables/secrets at:"
+            echo "Add repository secrets at:"
             echo "Settings -> Secrets and variables -> Actions"
             echo ""
             echo "This workflow does not read GitHub Environment-scoped values."
@@ -53,7 +60,7 @@ jobs:
       - name: Azure login
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ vars.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Install Azure Container Apps extension
         run: |
@@ -85,6 +92,7 @@ jobs:
             --parameters \
               location="$AZURE_LOCATION" \
               projectPrefix="$AZURE_NAME_PREFIX" \
+              acrNameOverride="${AZURE_ACR_NAME:-}" \
             --output none
 
           ACR_NAME="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name foundation --query "properties.outputs.acrName.value" --output tsv)"

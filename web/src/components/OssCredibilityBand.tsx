@@ -12,41 +12,39 @@ type OssCredibilityBandProps = {
 
 export default function OssCredibilityBand({ githubStars }: OssCredibilityBandProps) {
   return (
-    <section className="border-y bg-muted/30 px-6 py-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <CredibilityItem
-            label="Open source"
-            title="SqlOS on GitHub"
-            description={
-              githubStars
-                ? `${githubStars} stars — auth, SSO, and FGA in one .NET package.`
-                : "Auth, SSO, and FGA in one .NET package."
-            }
-            href={GITHUB_REPO}
-            external
-            icon={<GitHubIcon className="h-5 w-5" />}
-          />
-          <CredibilityItem
-            label="Research"
-            title="SHRBAC / COMPSAC 2026"
-            description="Hierarchical RBAC with SQL-native access checks and bounded query cost."
-            href={PAPER_URL}
-            external
-          />
-          <CredibilityItem
-            label="Performance"
-            title="3.47ms per page"
-            description="At 1.2M rows with O(k·D) point checks — authorization in the query plan."
-            href="/blog/developers-guide-to-hierarchical-rbac"
-          />
-          <CredibilityItem
-            label="Example apps"
-            title="Todo, Retail FGA, full stack"
-            description="Runnable samples with hosted auth, headless flows, and EF Core filters."
-            href="/docs/getting-started#run-the-right-sample"
-          />
-        </div>
+    <section className="border-y bg-muted/30 px-6">
+      <div className="mx-auto grid max-w-6xl divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
+        <CredibilityItem
+          label="Open source"
+          title="SqlOS on GitHub"
+          description={
+            githubStars
+              ? `${githubStars} stars — auth, SSO, and FGA in one .NET package.`
+              : "Auth, SSO, and FGA in one .NET package."
+          }
+          href={GITHUB_REPO}
+          external
+          icon={<GitHubIcon className="h-4 w-4" />}
+        />
+        <CredibilityItem
+          label="Research"
+          title="SHRBAC / COMPSAC 2026"
+          description="Hierarchical RBAC with SQL-native access checks and bounded query cost."
+          href={PAPER_URL}
+          external
+        />
+        <CredibilityItem
+          label="Performance"
+          title="3.47ms per page"
+          description="At 1.2M rows with O(k·D) point checks — authorization in the query plan."
+          href="/blog/developers-guide-to-hierarchical-rbac"
+        />
+        <CredibilityItem
+          label="Example apps"
+          title="Todo, Retail FGA, full stack"
+          description="Runnable samples with hosted auth, headless flows, and EF Core filters."
+          href="/docs/getting-started#run-the-right-sample"
+        />
       </div>
     </section>
   );
@@ -68,22 +66,22 @@ function CredibilityItem({
   icon?: ReactNode;
 }) {
   const className =
-    "group flex flex-col rounded-xl border bg-card/80 p-4 shadow-sm transition-colors hover:border-primary/30 hover:bg-card";
+    "group flex flex-col px-1 py-6 transition-colors hover:bg-accent/30 sm:px-5 lg:py-8";
 
   const content = (
     <>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary/80">
         {label}
       </p>
       <div className="mt-2 flex items-center gap-2">
         {icon ? (
-          <span className="text-primary transition-colors group-hover:text-primary/80">
+          <span className="text-muted-foreground transition-colors group-hover:text-primary">
             {icon}
           </span>
         ) : null}
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
-      <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{description}</p>
+      <p className="mt-1.5 text-[13px] leading-6 text-muted-foreground">{description}</p>
     </>
   );
 

@@ -1,31 +1,40 @@
 import Link from "next/link";
+import SectionHeading from "@/components/marketing/SectionHeading";
 import { productFeatures } from "@/components/marketing/constants";
 import { ArrowIcon } from "@/components/icons";
 
+// bento spans on lg: rows of [2,1] / [1,1,1] / [2,1] / [1,1,1]
+const spans = [2, 1, 1, 1, 1, 2, 1, 1, 1, 1];
+
 export default function FeaturesSection() {
   return (
-    <section className="border-t px-6 py-20 sm:py-24">
+    <section className="border-t px-6 py-24 sm:py-28">
       <div className="mx-auto max-w-6xl">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          What ships
-        </p>
-        <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">
-          Everything you need for OAuth, AuthN, and AuthZ in .NET
-        </h2>
-        <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
-          SqlOS combines authentication and authorization in one library with OAuth 2.0, SAML SSO, OIDC, a
-          branded login page, and FGA-based access control — built for large datasets with strong
-          consistency.
-        </p>
+        <SectionHeading
+          index="07"
+          eyebrow="What ships"
+          title="Everything you need for OAuth, AuthN, and AuthZ in .NET"
+          description="SqlOS combines authentication and authorization in one library with OAuth 2.0, SAML SSO, OIDC, a branded login page, and FGA-based access control — built for large datasets with strong consistency."
+        />
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {productFeatures.map((feature) => (
+        <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {productFeatures.map((feature, i) => (
             <div
               key={feature.title}
-              className="rounded-xl border bg-card/70 p-5 shadow-sm transition-colors hover:bg-accent/40"
+              className={[
+                "group relative overflow-hidden rounded-xl border bg-card/70 p-6 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30",
+                spans[i] === 2 ? "lg:col-span-2" : "",
+              ].join(" ")}
             >
-              <h3 className="text-sm font-semibold text-foreground">{feature.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{feature.description}</p>
+              <span className="pointer-events-none absolute right-4 top-4 font-mono text-[10px] text-muted-foreground/40 transition-colors group-hover:text-primary/60">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <h3 className="text-sm font-semibold tracking-tight text-foreground">
+                {feature.title}
+              </h3>
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                {feature.description}
+              </p>
             </div>
           ))}
         </div>

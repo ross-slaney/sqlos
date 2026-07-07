@@ -17,11 +17,11 @@ export default async function Home() {
     <div className="relative min-h-screen">
       <HeroSection />
       <OssCredibilityBand githubStars={githubStars} />
+      <HowItWorksSection />
       <AuthSection />
       <AuthStackSection />
       <FgaSection />
       <DeveloperExperienceSection />
-      <HowItWorksSection />
       <ExampleAppsSection />
       <FeaturesSection />
       <CtaSection />
