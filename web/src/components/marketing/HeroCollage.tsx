@@ -36,8 +36,8 @@ export default function HeroCollage() {
         </div>
 
         <h1 className="mt-8 text-balance text-[clamp(2.6rem,5vw,4.25rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-foreground">
-          Enterprise auth, <span className="text-primary">compiled</span> into
-          your SQL.
+          Enterprise auth, <span className="text-primary">embedded</span> in
+          your database.
         </h1>
 
         <p className="mx-auto mt-6 max-w-xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
