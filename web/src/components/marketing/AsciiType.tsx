@@ -3,13 +3,12 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Real-time ASCII + ordered-dithering canvas, rendered as a single WebGL2
- * fragment shader (technique after Codrops' "Efecto": cell-based luminance
- * sampling, procedural 5x7 glyphs selected by brightness, 4x4 Bayer matrix
- * dithering before quantization).
- *
- * The canvas is transparent; glyphs draw in the theme's primary color (or
- * white) with per-glyph alpha, so it composes onto any surface.
+ * Giant typography rendered as a live ASCII/dither field (Codrops "Efecto"
+ * technique, pointed at type instead of an image): the word is drawn to an
+ * offscreen canvas, sampled per-cell as a luminance mask, shimmered with fbm,
+ * warped by a pointer ripple, Bayer-dithered, and rasterized as procedural
+ * 5x7 glyphs in the theme's primary color. Transparent outside the strokes,
+ * so it composes cleanly onto a light page.
  */
 
 const VERT = `#version 300 es
@@ -23,15 +22,14 @@ precision highp float;
 
 uniform vec2  u_res;
 uniform float u_time;
-uniform vec2  u_mouse;      // px, canvas space
-uniform vec3  u_ink;        // glyph color
-uniform float u_cell;       // cell size in px
-uniform float u_intensity;  // overall alpha scale
+uniform vec2  u_mouse;
+uniform vec3  u_ink;
+uniform float u_cell;
+uniform float u_intensity;
+uniform sampler2D u_text;
 
 out vec4 outColor;
 
-// 5x7 glyph bitmaps, bit i = y*5+x, packed lo/hi.
-// Ramp (dark -> bright): ' ' . : - = + * # % @
 const uvec2 GLYPHS[10] = uvec2[10](
   uvec2(0u, 0u),
   uvec2(134217728u, 0u),
@@ -45,7 +43,6 @@ const uvec2 GLYPHS[10] = uvec2[10](
   uvec2(2212165166u, 7u)
 );
 
-// 4x4 Bayer matrix
 const float BAYER[16] = float[16](
    0., 8., 2., 10.,
   12., 4., 14., 6.,
@@ -68,27 +65,12 @@ float vnoise(vec2 p) {
 
 float fbm(vec2 p) {
   float v = 0., a = 0.5;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 3; i++) {
     v += a * vnoise(p);
     p = p * 2.03 + vec2(17.3, 9.1);
     a *= 0.5;
   }
   return v;
-}
-
-// Drifting domain-warped field + pointer glow/ripple.
-float field(vec2 uv, float t) {
-  vec2 p = uv * 3.0;
-  vec2 warp = vec2(
-    fbm(p * 0.9 + vec2(0.0, t * 0.11)),
-    fbm(p * 0.9 + vec2(5.2, -t * 0.09)));
-  float b = fbm(p + 1.6 * warp + vec2(t * 0.05, -t * 0.03));
-  b = smoothstep(0.28, 0.86, b);
-
-  float d = length((uv - u_mouse / u_res) * vec2(u_res.x / u_res.y, 1.0));
-  b += 0.55 * exp(-d * d * 22.0);
-  b += 0.18 * exp(-d * 4.0) * sin(d * 34.0 - t * 3.2);
-  return clamp(b, 0., 1.);
 }
 
 void main() {
@@ -97,19 +79,27 @@ void main() {
   vec2 cellCenter = (cellId + 0.5) * u_cell;
   vec2 uv = cellCenter / u_res;
 
-  float b = field(uv, u_time);
+  // pointer ripple: displace the sample point radially, fading with distance
+  vec2 m = u_mouse / u_res;
+  float aspect = u_res.x / u_res.y;
+  float d = length((uv - m) * vec2(aspect, 1.0));
+  vec2 dir = normalize((uv - m) * vec2(aspect, 1.0) + 1e-4);
+  vec2 suv = uv + dir * vec2(1.0 / aspect, 1.0) * 0.014 * exp(-d * 2.2) * sin(d * 26.0 - u_time * 3.4);
 
-  // gentle radial vignette so the field breathes at the edges
-  vec2 c = uv * 2.0 - 1.0;
-  b *= 1.0 - 0.30 * dot(c, c);
+  float b = texture(u_text, suv).r;
 
-  // ordered dithering before quantization to the 10-step ramp
+  // organic shimmer drifting through the strokes
+  b *= 0.68 + 0.5 * fbm(uv * vec2(5.0 * aspect, 5.0) + vec2(u_time * 0.14, -u_time * 0.1));
+  // pointer glow, confined to the strokes
+  b += 0.35 * exp(-d * d * 16.0) * texture(u_text, suv).r;
+  b = clamp(b, 0.0, 1.0);
+
+  // ordered dithering, then quantize to the glyph ramp
   ivec2 bi = ivec2(mod(cellId, 4.0));
   float threshold = (BAYER[bi.y * 4 + bi.x] + 0.5) / 16.0;
   float steps = 10.0;
   int idx = int(clamp(floor(b * steps + (threshold - 0.5) * 1.35), 0.0, steps - 1.0));
 
-  // rasterize the glyph: 5x7 grid centered in an 8x11 cell
   vec2 local = fract(frag / u_cell);
   vec2 g = local * vec2(8.0, 11.0) - vec2(1.5, 2.0);
   float on = 0.0;
@@ -122,26 +112,10 @@ void main() {
     on = float((word >> uint(bit & 31)) & 1u);
   }
 
-  float alpha = on * (0.22 + 0.78 * b) * u_intensity;
-  outColor = vec4(u_ink * alpha, alpha);       // premultiplied
+  float alpha = on * (0.3 + 0.7 * b) * u_intensity * step(0.02, b);
+  outColor = vec4(u_ink * alpha, alpha);
 }
 `;
-
-type AsciiShaderProps = {
-  className?: string;
-  /** Cell size in CSS px */
-  cell?: number;
-  /** Animation speed multiplier */
-  speed?: number;
-  /** Overall opacity of the glyph field */
-  intensity?: number;
-  /** Track pointer for glow/ripple */
-  interactive?: boolean;
-  /** Glyph color source */
-  ink?: "theme" | "white";
-  /** Floor for the ink lightness (0-1) — use ~0.6 on dark surfaces */
-  minLightness?: number;
-};
 
 function readThemeInk(minLightness = 0): [number, number, number] {
   const raw = getComputedStyle(document.documentElement)
@@ -159,15 +133,20 @@ function readThemeInk(minLightness = 0): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
-export default function AsciiShader({
+type AsciiTypeProps = {
+  text?: string;
+  className?: string;
+  /** Cell size in CSS px — bigger = chunkier glyphs */
+  cell?: number;
+  intensity?: number;
+};
+
+export default function AsciiType({
+  text = "SQLOS",
   className,
-  cell = 11,
-  speed = 1,
+  cell = 13,
   intensity = 1,
-  interactive = true,
-  ink = "theme",
-  minLightness = 0,
-}: AsciiShaderProps) {
+}: AsciiTypeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -186,7 +165,7 @@ export default function AsciiShader({
       gl.shaderSource(s, src);
       gl.compileShader(s);
       if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-        console.error("AsciiShader:", gl.getShaderInfoLog(s));
+        console.error("AsciiType:", gl.getShaderInfoLog(s));
         return null;
       }
       return s;
@@ -208,16 +187,23 @@ export default function AsciiShader({
       ink: gl.getUniformLocation(prog, "u_ink"),
       cell: gl.getUniformLocation(prog, "u_cell"),
       intensity: gl.getUniformLocation(prog, "u_intensity"),
+      text: gl.getUniformLocation(prog, "u_text"),
     };
 
-    const readInk = (): [number, number, number] =>
-      ink === "white" ? [1, 1, 1] : readThemeInk(minLightness);
+    const texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.uniform1i(loc.text, 0);
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let width = 0;
     let height = 0;
     const mouse = { x: -9999, y: -9999, tx: -9999, ty: -9999 };
-    let inkColor = readInk();
+    let ink = readThemeInk();
     let raf = 0;
     let visible = true;
     let pageVisible = !document.hidden;
@@ -225,13 +211,39 @@ export default function AsciiShader({
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const start = performance.now();
 
+    // rasterize the word to a mask texture, sized to the canvas
+    const drawTextMask = () => {
+      const mask = document.createElement("canvas");
+      mask.width = width;
+      mask.height = height;
+      const ctx = mask.getContext("2d")!;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const family = getComputedStyle(document.body).fontFamily;
+      let size = height * 1.06;
+      ctx.font = `800 ${size}px ${family}`;
+      const measured = ctx.measureText(text).width;
+      const maxWidth = width * 0.96;
+      if (measured > maxWidth) size *= maxWidth / measured;
+      ctx.font = `800 ${size}px ${family}`;
+      ctx.fillText(text, width / 2, height * 0.56);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, mask);
+    };
+
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      width = Math.max(1, Math.round(rect.width * dpr));
-      height = Math.max(1, Math.round(rect.height * dpr));
-      if (canvas.width !== width || canvas.height !== height) {
+      const w = Math.max(1, Math.round(rect.width * dpr));
+      const h = Math.max(1, Math.round(rect.height * dpr));
+      if (w !== width || h !== height) {
+        width = w;
+        height = h;
         canvas.width = width;
         canvas.height = height;
+        drawTextMask();
       }
     };
 
@@ -241,12 +253,12 @@ export default function AsciiShader({
       gl.disable(gl.DEPTH_TEST);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      mouse.x += (mouse.tx - mouse.x) * 0.08;
-      mouse.y += (mouse.ty - mouse.y) * 0.08;
+      mouse.x += (mouse.tx - mouse.x) * 0.1;
+      mouse.y += (mouse.ty - mouse.y) * 0.1;
       gl.uniform2f(loc.res, width, height);
-      gl.uniform1f(loc.time, ((now - start) / 1000) * speed);
+      gl.uniform1f(loc.time, (now - start) / 1000);
       gl.uniform2f(loc.mouse, mouse.x * dpr, height - mouse.y * dpr);
-      gl.uniform3f(loc.ink, inkColor[0], inkColor[1], inkColor[2]);
+      gl.uniform3f(loc.ink, ink[0], ink[1], ink[2]);
       gl.uniform1f(loc.cell, cell * dpr);
       gl.uniform1f(loc.intensity, intensity);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -267,7 +279,7 @@ export default function AsciiShader({
         running = false;
         cancelAnimationFrame(raf);
       }
-      if (!shouldRun) draw(performance.now()); // static frame
+      if (!shouldRun) draw(performance.now());
     };
 
     const io = new IntersectionObserver(([entry]) => {
@@ -292,11 +304,10 @@ export default function AsciiShader({
         mouse.y = mouse.ty;
       }
     };
-    if (interactive) window.addEventListener("pointermove", onPointer, { passive: true });
+    window.addEventListener("pointermove", onPointer, { passive: true });
 
-    // re-read the ink color when the theme (class or data-theme) changes
     const mo = new MutationObserver(() => {
-      inkColor = readInk();
+      ink = readThemeInk();
       if (!running) draw(performance.now());
     });
     mo.observe(document.documentElement, {
@@ -319,10 +330,11 @@ export default function AsciiShader({
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVis);
       reducedMotion.removeEventListener("change", sync);
-      if (interactive) window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("pointermove", onPointer);
+      gl.deleteTexture(texture);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
-  }, [cell, speed, intensity, interactive, ink, minLightness]);
+  }, [text, cell, intensity]);
 
   return (
     <canvas
