@@ -19,14 +19,13 @@ You can configure SAML in two ways:
 **SDK**:
 
 ```csharp
-var draft = await adminService.CreateSsoConnectionDraftAsync(new CreateSsoConnectionDraftRequest
-{
-    OrganizationId = org.Id,
-    DisplayName = "Acme Entra SSO",
-    PrimaryDomain = "acme.com",
-    AutoProvisionUsers = true,
-    AutoLinkByEmail = true
-});
+var draft = await adminService.CreateSsoConnectionDraftAsync(
+    new SqlOSCreateSsoConnectionDraftRequest(
+        OrganizationId: org.Id,
+        DisplayName: "Acme Entra SSO",
+        PrimaryDomain: "acme.com",
+        AutoProvisionUsers: true,
+        AutoLinkByEmail: true));
 ```
 
 **Admin API**:

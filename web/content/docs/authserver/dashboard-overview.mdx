@@ -11,7 +11,16 @@ The dashboard is admin UI inside your app. It covers AuthServer, Audit Logs, com
 
 Default path is `DashboardBasePath` (`/sqlos`). Register SqlOS. Call `app.MapSqlOS()` after `Build()`.
 
-Example: `http://localhost:5062/sqlos/`. Protect it with a password in `appsettings.json` (or env vars).
+Example: `http://localhost:5062/sqlos/`. Protect it by assigning dashboard options in the `AddSqlOS` callback:
+
+```csharp
+options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+options.Dashboard.Password =
+    builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException("SqlOS dashboard password is required.");
+```
+
+The password can come from user secrets, an environment variable, or another configuration provider, but SqlOS does not bind the `SqlOS` configuration section automatically.
 
 ![Dashboard home](/docs/dashboard-home.png)
 

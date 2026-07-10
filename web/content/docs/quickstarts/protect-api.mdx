@@ -1,0 +1,172 @@
+---
+title: "Protect an API"
+description: "Validate SqlOS access tokens for an exact API audience."
+order: 2
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Quickstart"
+  title="Reject the wrong token at the route boundary"
+  href="#complete-program"
+  actionLabel="View the code"
+>
+  Apply `RequireSqlOSAccessToken` to a route group. SqlOS validates signature, lifetime, session state, revocation, and audience before your endpoint runs.
+</Banner>
+
+## Goal
+
+Add `/api/me` to a one-application SqlOS host. Requests without a bearer token receive `401`; a valid SqlOS token minted for the configured API audience exposes its user, organization, client, and audience.
+
+## Prerequisites
+
+- SqlOS 3.16.0;
+- .NET 9 and EF Core 9;
+- the [Add SqlOS to one app](/docs/quickstarts/add-to-app) setup;
+- a browser or other PKCE client that completes the SqlOS authorization-code flow.
+
+## Complete program
+
+This is the complete `Program.cs` from the one-app quickstart with an audience-protected route group added:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Configuration;
+using SqlOS.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not configured.");
+
+const string publicOrigin = "http://localhost:5050";
+const string apiAudience = $"{publicOrigin}/api";
+var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException(
+        "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.PublicOrigin = publicOrigin;
+        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+
+        options.UseSingleApplication("Acme", app =>
+        {
+            app.Origin = publicOrigin;
+            app.ClientId = "acme-web";
+            app.Audience = apiAudience;
+        });
+
+        options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+        options.Dashboard.Password = dashboardPassword;
+    });
+
+var app = builder.Build();
+
+app.MapSqlOS();
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = apiAudience;
+        options.Realm = "Acme API";
+    });
+
+api.MapGet("/me", (HttpContext http) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    if (token is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    return Results.Ok(new
+    {
+        token.UserId,
+        token.OrganizationId,
+        token.ClientId,
+        token.Audience
+    });
+});
+
+app.Run();
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+}
+```
+
+`RequireSqlOSAccessToken` is an endpoint filter on the route group. After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
+
+## Verify
+
+Start the application:
+
+```bash
+dotnet run --urls http://localhost:5050
+```
+
+Without a token:
+
+```bash
+curl -i http://localhost:5050/api/me
+```
+
+Expected result: `401 Unauthorized` with a `WWW-Authenticate: Bearer` challenge.
+
+After completing your `acme-web` authorization-code flow, call the same endpoint with the returned access token:
+
+```bash
+curl http://localhost:5050/api/me \
+  -H "Authorization: Bearer <access-token>"
+```
+
+Expected result:
+
+```json
+{
+  "userId": "usr_...",
+  "organizationId": "org_...",
+  "clientId": "acme-web",
+  "audience": "http://localhost:5050/api"
+}
+```
+
+## Common failures
+
+### Every request returns `401`
+
+Compare the token's `aud` claim with `ExpectedAudience`. Audience matching is exact. A token minted for another API is intentionally rejected even when the issuer and user are valid.
+
+### The bearer token is valid but revoked
+
+Validation also checks the persisted session and client state. Signing out all sessions, revoking the session, disabling the client, or removing application access can invalidate an otherwise well-formed JWT.
+
+### `GetSqlOSValidatedToken()` is null
+
+Confirm the endpoint belongs to the route group returned by `MapGroup(...).RequireSqlOSAccessToken(...)` and import `SqlOS.AuthServer.Extensions`.
+
+### The browser cannot call the API
+
+Bearer validation does not configure CORS. Add an explicit CORS policy for trusted frontend origins; do not use permissive credentials and origins in production.
+
+## Production notes
+
+- Use an HTTPS audience that identifies the deployed resource server.
+- Keep audiences distinct when separate APIs should not accept each other's tokens.
+- Resolve the acting subject from the validated token or `HttpContext.User`; never trust a subject ID supplied in a request body.
+- For MCP or third-party resource discovery, publish protected-resource metadata and set `ResourceMetadataUrl` in the validation options.
+- Use authorization checks in addition to token validation. A valid token identifies the caller; it does not grant access to every application row.
+
+## Next steps
+
+- [Authorize EF Core queries](/docs/quickstarts/ef-authorization)
+- [Token validation guide](/docs/authserver/token-validation)
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens)
+- [Resource indicators and audiences](/docs/authserver/mcp-resource-indicators-and-audience)

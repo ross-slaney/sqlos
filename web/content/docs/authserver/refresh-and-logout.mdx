@@ -11,7 +11,7 @@ Refresh uses the old refresh token. SqlOS returns a new pair. Idle timeout exten
 
 ```csharp
 var tokens = await authService.RefreshAsync(
-    new SqlOSRefreshRequest(refreshToken, organizationId: null), ct);
+    new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 ```
 
 **Frontend**:

@@ -1,0 +1,130 @@
+---
+title: "Run the full example stack"
+description: "Explore the broad SqlOS surface across .NET, Next.js, Angular, and the Todo sample."
+order: 10
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Optional deep dive"
+  title="Use the broad example after the first quickstart"
+  href="/docs/quickstarts/run-todo"
+  actionLabel="Start with Todo"
+>
+  The full Aspire stack is a feature explorer, not the recommended first integration. It runs the .NET API, Next.js and Angular clients, the Todo sample, and two SQL Server databases together.
+</Banner>
+
+## Goal
+
+Compare hosted and headless auth, organization workflows, SSO, sessions, audit logs, and FGA across several clients without assembling the stack yourself.
+
+## Prerequisites
+
+- SqlOS repository checked out at version 3.16.0;
+- .NET 9 SDK;
+- Node.js and npm;
+- Docker running with enough memory for SQL Server;
+- ports `1434`, `3010`, `4200`, `5062`, and `5080` available.
+
+If you only want to see the normal hosted-login path, use [Run the Todo sample](/docs/quickstarts/run-todo). The full stack intentionally contains advanced surfaces.
+
+## Install frontend dependencies
+
+From the repository root:
+
+```bash
+npm install --prefix examples/SqlOS.Example.Web
+npm install --prefix examples/SqlOS.Example.AngularWeb
+```
+
+## Run
+
+```bash
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Wait for SQL Server, `api`, `todo-api`, `web`, and `angular-web` to report healthy.
+
+## Open the stack
+
+| URL | Application |
+| --- | --- |
+| `http://localhost:3010` | Next.js example client |
+| `http://localhost:4200` | Angular example client |
+| `http://localhost:5062/swagger` | Example .NET API |
+| `http://localhost:5062/sqlos` | Example-stack SqlOS dashboard |
+| `http://localhost:5080` | Narrow Todo sample |
+
+The AppHost creates separate `sqlos-example` and `sqlos-todo` databases in one persistent local SQL Server container. The examples do not share identity or authorization rows accidentally.
+
+## Pick one flow
+
+Avoid testing everything at once. Choose the flow that answers your current question:
+
+### Hosted authentication
+
+1. Open the Next.js client.
+2. Start hosted sign-up.
+3. Create a password user and organization.
+4. Complete the PKCE callback.
+5. Inspect the session and claims returned to the client.
+
+### Headless authentication
+
+Use the headless route in the Next.js example to compare app-owned screens with the same SqlOS request, credential, organization-selection, and token state machine.
+
+### Organization administration
+
+Open the dashboard, then inspect users, organizations, memberships, invitations, sessions, applications, and audit events. Create an invitation if email delivery is configured, or copy its acceptance link for a local flow.
+
+### Fine-grained authorization
+
+Use the Retail/workspace surfaces to create protected data, then inspect resources, grants, roles, permissions, and the Access Tester in the FGA dashboard.
+
+### Enterprise identity
+
+Configure social login or a SAML connection only when you have provider credentials. The stack runs without them. The delegated SSO example at `http://localhost:3010/retail/sso` demonstrates how a host application can create a customer-scoped setup session.
+
+## Optional provider secrets
+
+Provider-backed features are disabled until configured. Store local values on the AppHost project rather than committing them:
+
+```bash
+dotnet user-secrets --project examples/SqlOS.Example.AppHost set \
+  "SqlOS:Oidc:Microsoft:ClientId" "<client-id>"
+
+dotnet user-secrets --project examples/SqlOS.Example.AppHost set \
+  "SqlOS:Oidc:Microsoft:ClientSecret" "<client-secret>"
+```
+
+Email OTP, SMS OTP, transactional email, and calendar consent likewise require their documented provider settings. They are optional extensions, not startup requirements.
+
+## Common failures
+
+### A frontend resource exits immediately
+
+Install that frontend's npm dependencies from the repository root, then restart the AppHost. The AppHost runs the existing `dev` scripts; it does not replace `npm install`.
+
+### One of the fixed ports is occupied
+
+Stop the conflicting local process. The seeded issuer and callback URLs use the documented local ports, so changing only one endpoint will cause issuer or redirect mismatches.
+
+### SQL Server starts with old state
+
+The AppHost uses a persistent data volume. Preserve it when the data matters; use a clean development volume when intentionally resetting an obsolete local schema or seed model.
+
+### A provider button is missing
+
+The corresponding OIDC/social connection is enabled only when its credentials are present or it has been configured in the dashboard.
+
+## Production notes
+
+This stack demonstrates integration boundaries; it is not a production topology recommendation. A production app should choose only the required clients, use HTTPS origins, persist secrets and Data Protection keys correctly, restrict admin routes, and test its own organization and authorization rules.
+
+## Next steps
+
+- [Add SqlOS to one app](/docs/quickstarts/add-to-app)
+- [Hosted vs headless auth](/docs/authserver/hosted-vs-headless)
+- [Social sign-in](/docs/guides/social-oidc)
+- [SAML SSO](/docs/guides/saml-sso)
+- [Model authorization](/docs/guides/model-fga)

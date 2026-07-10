@@ -59,6 +59,15 @@ public sealed record SqlOSLoginResult(
     bool RequiresMfaEnrollment = false,
     IReadOnlyList<string>? MfaMethods = null);
 
+/// <summary>
+/// Represents the claims and SqlOS identifiers recovered from a successfully validated access token.
+/// </summary>
+/// <param name="Principal">The authenticated claims principal created from the token.</param>
+/// <param name="SessionId">The active SqlOS session identifier associated with the token.</param>
+/// <param name="UserId">The authenticated SqlOS user identifier, when present.</param>
+/// <param name="OrganizationId">The active organization identifier, when present.</param>
+/// <param name="ClientId">The OAuth client identifier, when present.</param>
+/// <param name="Audience">The validated token audience, when present.</param>
 public sealed record SqlOSValidatedToken(
     ClaimsPrincipal Principal,
     string SessionId,

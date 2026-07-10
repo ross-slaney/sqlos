@@ -1,7 +1,7 @@
 ---
 title: "Audit Logs Reference"
 description: "Record, query, inspect, and export SqlOS and application audit events."
-order: 12
+order: 13
 section: reference
 ---
 
@@ -36,10 +36,8 @@ Audit events are not debug logs, traces, metrics, or product analytics. Keep the
 `AddSqlOS<TContext>()` registers `ISqlOSAuditLogService`.
 
 ```csharp
-builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
-{
-    options.UseSqlServer(connectionString);
-});
+builder.AddSqlOS<ExampleAppDbContext>(
+    db => db.UseSqlServer(connectionString));
 ```
 
 Inject the service into server-side application code. Frontends should not write audit rows directly.
