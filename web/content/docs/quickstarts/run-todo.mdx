@@ -1,0 +1,111 @@
+---
+title: "Run the Todo sample"
+description: "See SqlOS hosted login and authorized EF Core queries before changing an application."
+order: 0
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Quickstart"
+  title="Get working proof in one command"
+  href="#run"
+  actionLabel="Run the sample"
+>
+  The Todo sample is the fastest way to evaluate SqlOS. Aspire starts SQL Server and the .NET API; the sample already includes hosted auth, a PKCE client, token validation, and FGA-filtered data.
+</Banner>
+
+## Goal
+
+Create an account, receive a SqlOS access token, create Todo rows, and see authorization resources in the embedded dashboard without editing code.
+
+## Prerequisites
+
+- the SqlOS repository checked out locally;
+- .NET 9 SDK;
+- Docker running with enough memory for SQL Server;
+- ports `1435` and `5080` available.
+
+This quickstart uses the source at **SqlOS 3.16.0**. It does not require an external identity provider or email service; password signup is enabled by default.
+
+## Run
+
+From the repository root:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Wait for the SQL Server resource and `todo-api` to report healthy, then open:
+
+```text
+http://localhost:5080/
+```
+
+The AppHost uses a persistent SQL Server container and passes the database connection string to the API. SqlOS initializes its schema, signing key, OAuth client, and FGA seed data when the API starts.
+
+## Verify
+
+1. Select the hosted sign-up action in the Todo app.
+2. Create a password account.
+3. Complete the redirect back to the Todo app.
+4. Create two Todo items and mark one complete.
+5. Refresh the page. Both rows should remain visible.
+6. Open `http://localhost:5080/sqlos/admin/fga/resources`.
+7. Confirm the resource tree contains a tenant resource for your user and child Todo resources.
+
+Useful endpoints:
+
+| URL | What it proves |
+| --- | --- |
+| `http://localhost:5080/sample/config` | Issuer, audience, client, and enabled sample features |
+| `http://localhost:5080/sqlos/auth/.well-known/oauth-authorization-server` | OAuth server metadata |
+| `http://localhost:5080/.well-known/oauth-protected-resource` | Protected-resource metadata |
+| `http://localhost:5080/swagger` | Sample API endpoints |
+| `http://localhost:5080/sqlos` | Embedded dashboard |
+
+## What the sample demonstrates
+
+The normal flow is intentionally visible:
+
+1. The browser starts an authorization-code flow with PKCE.
+2. SqlOS renders the hosted login and signup pages.
+3. SqlOS redirects to the sample callback with a one-time code.
+4. The sample exchanges the code and calls `/api/todos` with a bearer token.
+5. `RequireSqlOSAccessToken` validates the Todo audience.
+6. `GetAuthorizationFilterAsync<TodoItem>` adds the authorization predicate to the EF Core query.
+
+The sample also contains CLI, CIMD, DCR, Email OTP, and SMS OTP examples. Those are optional paths, not prerequisites for your first application.
+
+## Common failures
+
+### SQL Server never becomes healthy
+
+Confirm Docker is running and port `1435` is free. On Apple silicon, the SQL Server image runs through the platform setting in the AppHost and may take longer on first start.
+
+### Port 5080 is already in use
+
+Stop the process using the port before restarting. The sample OAuth issuer and callback are intentionally fixed to `http://localhost:5080`, so changing only the ASP.NET port will produce redirect or issuer mismatches.
+
+### Old sample data behaves differently
+
+The AppHost uses a persistent data volume. If you previously ran an older schema or FGA model, use a clean development volume before diagnosing current behavior. Do not remove a volume that contains data you need.
+
+### Direct login does not return to Todo
+
+Start sign-in from `http://localhost:5080/`. Opening the hosted login URL directly does not create the Todo app's complete PKCE transaction.
+
+## Production notes
+
+The Todo project is an evaluation sample, not a production deployment template. In production:
+
+- use HTTPS and a stable public origin;
+- protect `/sqlos` with password mode plus a private network, VPN, identity-aware proxy, or equivalent admin control;
+- store database credentials, dashboard credentials, provider secrets, and Data Protection keys outside source control;
+- create application-specific resource types and permission names instead of reusing the Todo model.
+
+## Next steps
+
+- [Add SqlOS to one application](/docs/quickstarts/add-to-app)
+- [Protect an API](/docs/quickstarts/protect-api)
+- [Authorize EF Core queries](/docs/quickstarts/ef-authorization)
+- [Todo sample details](/docs/authserver/todo-sample)

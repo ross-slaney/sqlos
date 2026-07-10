@@ -1,11 +1,11 @@
 ---
 title: "FGA API Reference"
-description: "Complete method reference for access checks, entity-backed resources, grants, and FGA query helpers."
+description: "Application-facing access checks, entity-backed resources, grants, and FGA query helpers."
 order: 10
 section: reference
 ---
 
-Complete reference for the public FGA SDK surface. The recommended application path is `SqlOSDbContext<TContext>` plus `ISqlOSResourceEntity` for protected domain rows, explicit subject provisioning, and explicit role grants.
+This page documents the application-facing FGA surface. The recommended path is `SqlOSDbContext<TContext>` plus `ISqlOSResourceEntity` for protected domain rows, explicit subject provisioning, and explicit role grants. Public schema/bootstrap implementation classes are not intended as normal application extension points.
 
 ## ISqlOSFgaAuthService
 
@@ -45,7 +45,7 @@ if (!access.Allowed)
 
 ### HasCapabilityAsync
 
-Check if a subject has a specific permission at root level — i.e., anywhere in the resource tree. Use for global capability gates.
+Check whether a subject has a permission on the configured FGA root resource. Use it for an intentionally global capability granted at root; it does not scan for the permission on arbitrary descendants.
 
 ```csharp
 var canEdit = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
@@ -62,7 +62,7 @@ if (!canEdit)
 
 **Returns**
 
-`Task<bool>` — `true` if the subject has any grant with a role that includes the permission.
+`Task<bool>` — the result of `CheckAccessAsync(subjectId, permissionKey, RootResourceId)`.
 
 ---
 
@@ -255,10 +255,19 @@ var spec = PagedSpec.For<Chain>(c => c.Id)
 | `For<T>(idSelector)` | `Expression<Func<T, string>>` | Start builder with the ID/tiebreaker column. |
 | `.RequirePermission(key)` | `string` | Set the FGA permission key for authorization filtering. |
 | `.SortByString(name, selector, isDefault?)` | `string`, `Expression<Func<T, string>>`, `bool` | Register a named string sort column. |
-| `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string>>[]` | Add text search across the given fields. |
+| `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string?>>[]` | Add text search across the given fields. |
 | `.Where(predicate)` | `Expression<Func<T, bool>>` | Add a static filter. |
-| `.Configure(action)` | `Action<IQueryable<T>>` | Configure the query (e.g., `.Include()`). |
+| `.Configure(configurator)` | `Func<IQueryable<T>, IQueryable<T>>` | Return a configured query (for example `query => query.Include(...)`). |
 | `.Build(pageSize, cursor, sortBy, sortDir)` | `int`, `string?`, `string?`, `string?` | Build the final `PagedSpecification<T>`. |
+
+The exact query-configuration signature is:
+
+```csharp
+public PagedSpecificationBuilder<T> Configure(
+    Func<IQueryable<T>, IQueryable<T>> configurator)
+```
+
+The function must return the query it configures. An `Action<IQueryable<T>>` is not accepted.
 
 ---
 
@@ -282,9 +291,10 @@ var result = await executor.ExecuteAsync(
         LocationCount = c.Locations.Count
     });
 
-// result.Items     — the page of DTOs
-// result.NextCursor — pass to next request for pagination
-// result.HasMore   — whether more pages exist
+// result.Data        — the page of DTOs
+// result.PageSize    — the clamped page size used
+// result.NextCursor  — pass to the next request
+// result.HasNextPage — whether NextCursor is non-null
 ```
 
 **Parameters**
@@ -305,9 +315,10 @@ var result = await executor.ExecuteAsync(
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Items` | `List<TDto>` | The current page of results. |
+| `Data` | `List<TDto>` | The current page of results. |
+| `PageSize` | `int` | The page size used by the result. |
 | `NextCursor` | `string?` | Opaque cursor for the next page. `null` if no more pages. |
-| `HasMore` | `bool` | Whether additional pages exist. |
+| `HasNextPage` | `bool` | `true` when `NextCursor` is not `null`. |
 
 ---
 

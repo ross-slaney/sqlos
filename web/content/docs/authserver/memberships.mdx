@@ -14,12 +14,11 @@ For human onboarding, prefer [Email Invitations](/docs/authserver/invitations) o
 **SDK**:
 
 ```csharp
-var membership = await adminService.CreateMembershipAsync(new CreateMembershipRequest
-{
-    OrganizationId = org.Id,
-    UserId = user.Id,
-    Role = "admin"
-});
+var membership = await adminService.CreateMembershipAsync(
+    org.Id,
+    new SqlOSCreateMembershipRequest(
+        UserId: user.Id,
+        Role: "admin"));
 ```
 
 **Admin API**:

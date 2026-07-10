@@ -1,6 +1,6 @@
 ---
 title: "AuthServer API Reference"
-description: "Complete method reference for login, signup, SSO, OIDC, token management, and admin operations."
+description: "Application-facing methods for login, signup, OTP, SSO, OIDC, token management, and trusted admin workflows."
 order: 11
 section: reference
 ---
@@ -14,13 +14,14 @@ section: reference
   New to SqlOS? Complete [Getting Started](/docs/getting-started) and the [Guides](/docs/guides/index) first. Use this page when you need the exact signature for a specific service method.
 </Banner>
 
-Complete reference for every public method in the AuthServer module.
+This page documents the AuthServer methods intended for application and trusted backend use. It is not an inventory of every public implementation class in the assembly. Hosting and route-mapping APIs are in [Hosting API](/docs/reference/hosting-api); namespace and adjacent service coverage are in the [.NET SDK Map](/docs/reference/sdk-reference).
 
 ## Common flows
 
 | Task | Start here |
 | --- | --- |
 | Login / signup | `SqlOSAuthService` — password and Email OTP sections below |
+| Phone-code login / signup | `SqlOSAuthService` phone OTP methods and `ConfigurePhoneOtp` |
 | MFA / TOTP | `SqlOSAuthService` MFA methods and `SqlOSSettingsService` MFA policy methods |
 | Token validation | `ValidateAccessTokenAsync` |
 | Admin CRUD | `SqlOSAdminService` |
@@ -246,7 +247,9 @@ return Results.Ok(result.Tokens);
 | `Password` | `string` | User's password. |
 | `OrganizationName` | `string?` | If set, a new organization is created and the user is added. |
 | `ClientId` | `string?` | Client application ID. |
-| `OrganizationId` | `string?` | Join existing org instead of creating one. |
+| `OrganizationId` | `string?` | Must be null for self-service signup. A supplied ID is rejected; it never joins an existing organization. |
+
+The same restriction applies to password, Email OTP, and phone OTP self-service signup. To add a user to an existing organization, use the [invitation flow](/docs/authserver/invitations) or trusted backend provisioning with `CreateUserAsync` followed by `CreateMembershipAsync`.
 
 **Returns**
 
@@ -304,7 +307,94 @@ var result = await authService.VerifyEmailOtpSignupAsync(
     ct);
 ```
 
-Signup verification creates the user, marks the primary email verified, creates the organization or membership, creates a session, and returns `SqlOSLoginResult`.
+Signup verification creates the user, marks the primary email verified, creates a new organization when `OrganizationName` is supplied, creates a session, and returns `SqlOSLoginResult`. `OrganizationId` must be null; existing-organization membership requires an invitation or trusted backend provisioning as described above.
+
+---
+
+### Phone OTP sign-in and signup
+
+Phone OTP uses Twilio Verify through the configured `ISqlOSOtpDeliveryChannel`. Enable and configure it during host registration:
+
+```csharp
+options.AuthServer.ConfigurePhoneOtp(phone =>
+{
+    phone.Enabled = true;
+    phone.TwilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"];
+    phone.TwilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"];
+    phone.TwilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"];
+    phone.DefaultRegion = "US";
+});
+```
+
+Sign in with a phone code:
+
+```csharp
+var start = await authService.RequestPhoneOtpAsync(
+    new SqlOSPhoneOtpStartRequest(
+        PhoneNumber: phoneNumber,
+        ClientId: "my-app",
+        OrganizationId: null),
+    httpContext,
+    ct);
+
+var login = await authService.VerifyPhoneOtpAsync(
+    new SqlOSPhoneOtpVerifyRequest(
+        ChallengeToken: start.ChallengeToken,
+        Code: code),
+    httpContext,
+    ct);
+```
+
+Passwordless signup:
+
+```csharp
+var start = await authService.RequestPhoneOtpSignupAsync(
+    new SqlOSPhoneOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        PhoneNumber: phoneNumber,
+        ClientId: "my-app",
+        OrganizationName: "Acme",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext,
+    ct);
+
+var signup = await authService.VerifyPhoneOtpSignupAsync(
+    new SqlOSPhoneOtpSignupVerifyRequest(
+        SignupToken: start.SignupToken,
+        ChallengeToken: start.ChallengeToken,
+        Code: code),
+    httpContext,
+    ct);
+```
+
+**Signatures**
+
+```csharp
+Task<SqlOSPhoneOtpStartResult> RequestPhoneOtpAsync(
+    SqlOSPhoneOtpStartRequest request,
+    HttpContext? httpContext = null,
+    CancellationToken cancellationToken = default);
+
+Task<SqlOSPhoneOtpSignupStartResult> RequestPhoneOtpSignupAsync(
+    SqlOSPhoneOtpSignupStartRequest request,
+    HttpContext? httpContext = null,
+    CancellationToken cancellationToken = default);
+
+Task<SqlOSLoginResult> VerifyPhoneOtpAsync(
+    SqlOSPhoneOtpVerifyRequest request,
+    HttpContext httpContext,
+    CancellationToken cancellationToken = default);
+
+Task<SqlOSLoginResult> VerifyPhoneOtpSignupAsync(
+    SqlOSPhoneOtpSignupVerifyRequest request,
+    HttpContext httpContext,
+    CancellationToken cancellationToken = default);
+```
+
+`SqlOSPhoneOtpStartResult` includes `ChallengeToken`, normalized and masked phone values, a public message, `ExpiresAt`, and `NextAllowedSendAt`. The signup result also includes `SignupToken`.
+
+Configuration or runtime validation can throw `InvalidOperationException` when phone OTP is enabled without a complete Twilio configuration, the client is invalid, or a challenge cannot be started or verified. Rate limits, country allow/deny lists, resend timing, and whether phone OTP satisfies MFA are configured through `SqlOSPhoneOtpOptions`.
 
 ---
 
@@ -785,7 +875,7 @@ var user = await adminService.CreateUserAsync(
 |------|------|-------------|
 | `request.DisplayName` | `string` | Display name. |
 | `request.Email` | `string` | Email address (normalized and deduplicated). |
-| `request.Password` | `string?` | Password. If null, the user can only log in via SSO/OIDC. |
+| `request.Password` | `string?` | Optional local password. If null, the user can use configured passwordless methods (including Email OTP) and linked SSO/OIDC providers. |
 
 **Returns**
 
@@ -878,7 +968,7 @@ await adminService.ImportSsoMetadataAsync(
 
 **Returns**
 
-`Task<SqlOSSsoConnectionDraft>` — the created draft with an ID.
+`Task<SqlOSSsoConnection>` — the disabled connection draft with its generated `Id`.
 
 ---
 
@@ -901,7 +991,7 @@ await adminService.ImportSsoMetadataAsync(
 
 **Returns**
 
-`Task`
+`Task<SqlOSSsoConnection>` — the updated connection. The two-argument overload enables the connection after importing valid metadata; an overload accepts `enableConnection` explicitly.
 
 ---
 
@@ -1023,11 +1113,11 @@ var isMember = await adminService.UserHasMembershipAsync(userId, orgId);
 
 ### NormalizeEmail
 
-Normalize an email address (lowercase, trim).
+Normalize an email lookup key by trimming and applying `ToUpperInvariant()`.
 
 ```csharp
 var email = SqlOSAdminService.NormalizeEmail("  Jane@ACME.com ");
-// "jane@acme.com"
+// "JANE@ACME.COM"
 ```
 
 **Parameters**
@@ -1052,14 +1142,14 @@ Home realm discovery checks active verified organization domains first. If no ve
 
 ### DiscoverAsync
 
-Look up the authentication method for an email address. Returns whether the domain maps to an SSO connection, OIDC provider, or password login.
+Look up the authentication method for an email address. Returns whether the domain maps to an SSO connection or password login.
 
 ```csharp
 var result = await hrdService.DiscoverAsync(
     new SqlOSHomeRealmDiscoveryRequest(Email: request.Email));
 
-// result.Mode: "password" | "sso" | "oidc"
-// result.ConnectionId: SSO/OIDC connection ID (if applicable)
+// result.Mode: "password" | "sso"
+// result.ConnectionId: SSO connection ID (when Mode is "sso")
 // result.OrganizationId: matched org ID
 ```
 
@@ -1075,11 +1165,11 @@ var result = await hrdService.DiscoverAsync(
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Mode` | `string` | Authentication mode: `"password"`, `"sso"`, or `"oidc"`. |
+| `Mode` | `string` | Authentication mode: `"password"` or `"sso"`. |
 | `OrganizationId` | `string?` | Matched organization. |
 | `OrganizationName` | `string?` | Organization display name. |
 | `PrimaryDomain` | `string?` | The matched domain. |
-| `ConnectionId` | `string?` | SSO or OIDC connection ID to use. |
+| `ConnectionId` | `string?` | SSO connection ID to use when `Mode` is `"sso"`. |
 
 ---
 
@@ -1221,7 +1311,7 @@ var providers = await oidcService.ListEnabledProvidersAsync();
 
 **Returns**
 
-`Task<List<SqlOSOidcProviderInfo>>`
+`Task<IReadOnlyList<SqlOSOidcProviderSummary>>`
 
 ---
 
@@ -1316,7 +1406,7 @@ var tokens = await authService.CreateSessionTokensForUserAsync(
 | `Email` | `string` | User's email from the provider. |
 | `DisplayName` | `string` | User's display name from the provider. |
 | `OrganizationId` | `string?` | Matched organization (if any). |
-| `AuthenticationMethod` | `string` | e.g., `"oidc_google"`. |
+| `AuthenticationMethod` | `string` | Provider method: `"google"`, `"microsoft"`, `"apple"`, `"github"`, or `"oidc"` for a custom OIDC provider. |
 
 ---
 
@@ -1352,11 +1442,14 @@ var settings = await settingsService.GetResolvedSecuritySettingsAsync();
 Update the security settings.
 
 ```csharp
-await settingsService.UpdateSecuritySettingsAsync(
+var settings = await settingsService.UpdateSecuritySettingsAsync(
     new SqlOSUpdateSecuritySettingsRequest(
         RefreshTokenLifetimeMinutes: 1440,
         SessionIdleTimeoutMinutes: 60,
-        SessionAbsoluteLifetimeMinutes: 10080));
+        SessionAbsoluteLifetimeMinutes: 10080,
+        SigningKeyRotationIntervalDays: 90,
+        SigningKeyGraceWindowDays: 7,
+        SigningKeyRetiredCleanupDays: 30));
 ```
 
 **Parameters**
@@ -1366,10 +1459,14 @@ await settingsService.UpdateSecuritySettingsAsync(
 | `request.RefreshTokenLifetimeMinutes` | `int` | Refresh token lifetime in minutes. |
 | `request.SessionIdleTimeoutMinutes` | `int` | Idle timeout in minutes. |
 | `request.SessionAbsoluteLifetimeMinutes` | `int` | Absolute lifetime in minutes. |
+| `request.SigningKeyRotationIntervalDays` | `int` | Signing key rotation interval in days. |
+| `request.SigningKeyGraceWindowDays` | `int` | Grace period for a previous signing key in days; must be shorter than the rotation interval. |
+| `request.SigningKeyRetiredCleanupDays` | `int` | Retention period for retired signing keys in days. |
+| `request.RefreshTokenGraceWindowSeconds` | `int` | Optional refresh-token replay grace window in seconds. Defaults to `30`. |
 
 **Returns**
 
-`Task`
+`Task<SqlOSSecuritySettingsDto>` — the persisted security settings.
 
 ---
 
@@ -1455,6 +1552,32 @@ public sealed record SqlOSLoginResult(
     string? MfaToken = null,
     bool RequiresMfaEnrollment = false,
     IReadOnlyList<string>? MfaMethods = null);
+```
+
+### Phone OTP contracts
+
+```csharp
+public sealed record SqlOSPhoneOtpStartRequest(
+    string PhoneNumber,
+    string ClientId,
+    string? OrganizationId);
+
+public sealed record SqlOSPhoneOtpVerifyRequest(
+    string ChallengeToken,
+    string Code);
+
+public sealed record SqlOSPhoneOtpSignupStartRequest(
+    string DisplayName,
+    string PhoneNumber,
+    string ClientId,
+    string? OrganizationName,
+    string? OrganizationId,
+    JsonObject? CustomFields);
+
+public sealed record SqlOSPhoneOtpSignupVerifyRequest(
+    string SignupToken,
+    string ChallengeToken,
+    string Code);
 ```
 
 ### SqlOSValidatedToken

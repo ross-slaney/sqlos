@@ -44,9 +44,9 @@ var result = await executor.ExecuteAsync(
         CreatedAt = chain.CreatedAt
     });
 
-// result.Items     → authorized, searched, sorted, paged
+// result.Data       → authorized, searched, sorted, paged
 // result.NextCursor → cursor for next page
-// result.HasMore   → whether more results exist
+// result.HasNextPage → whether more results exist
 ```
 
 ## Full endpoint example

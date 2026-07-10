@@ -61,7 +61,7 @@ Refresh tokens are opaque and rotated on every use. Each refresh consumes the ol
 
 ```csharp
 var tokens = await authService.RefreshAsync(
-    new SqlOSRefreshRequest(refreshToken, organizationId: null), ct);
+    new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 ```
 
 **Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.

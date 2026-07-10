@@ -16,12 +16,11 @@ Organizations are tenants in SqlOS. Each organization has its own users (via mem
 **SDK**:
 
 ```csharp
-var org = await adminService.CreateOrganizationAsync(new CreateOrganizationRequest
-{
-    Name = "Acme Corp",
-    Slug = "acme",
-    PrimaryDomain = "acme.com"
-});
+var org = await adminService.CreateOrganizationAsync(
+    new SqlOSCreateOrganizationRequest(
+        Name: "Acme Corp",
+        Slug: "acme",
+        PrimaryDomain: "acme.com"));
 ```
 
 **Admin API**:
@@ -47,12 +46,11 @@ When you set a primary domain, AuthServer uses it for [home realm discovery](/do
 Users join organizations through memberships. Each membership has a role. Public signup does not accept an `organizationId` as permission to join an existing organization; use an invitation, trusted SSO/SCIM provisioning, or an admin-owned workflow to create memberships for existing tenants.
 
 ```csharp
-var membership = await adminService.CreateMembershipAsync(new CreateMembershipRequest
-{
-    OrganizationId = org.Id,
-    UserId = user.Id,
-    Role = "admin"
-});
+var membership = await adminService.CreateMembershipAsync(
+    org.Id,
+    new SqlOSCreateMembershipRequest(
+        UserId: user.Id,
+        Role: "admin"));
 ```
 
 ## Multi-org login
@@ -61,7 +59,7 @@ When a user belongs to multiple organizations and logs in without specifying one
 
 ```csharp
 var result = await authService.LoginWithPasswordAsync(
-    new SqlOSPasswordLoginRequest(email, password, clientId),
+    new SqlOSPasswordLoginRequest(email, password, clientId, OrganizationId: null),
     httpContext, ct);
 
 if (result.RequiresOrganizationSelection)

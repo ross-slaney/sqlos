@@ -1,363 +1,206 @@
 ---
-title: "API Reference"
-description: "HTTP endpoints for auth, admin, and FGA."
-order: 9
+title: "HTTP Protocol API"
+description: "Consumer-facing OAuth, hosted-auth, headless-auth, OIDC, SAML, and optional registration routes mounted by MapSqlOS."
+order: 12
 section: reference
 ---
 
 <Banner
-  eyebrow="Reference"
-  title="HTTP endpoints mounted by MapSqlOS"
-  href="../getting-started"
-  actionLabel="Getting Started"
+  eyebrow="HTTP reference"
+  title="Routes mounted by MapSqlOS"
+  href="/docs/reference/hosting-api"
+  actionLabel="Hosting API"
 >
-  Use [Guides](/docs/guides/index) for task walkthroughs. This page lists the routes SqlOS exposes on your origin.
+  This page covers consumer-facing protocol and authentication routes from the `SqlOS` package. Dashboard APIs and routes created by example applications have different support boundaries described below.
 </Banner>
 
-For the central governance event model, service APIs, dashboard filters, and CSV export limits, see [Audit Logs Reference](/docs/reference/audit-logs).
+## Base paths
 
-## OAuth Endpoints
+`app.MapSqlOS()` reads the configured paths and maps the package routes.
 
-Call `app.MapSqlOS()` to mount OAuth. Default base: `{DashboardBasePath}/auth` (e.g. `/sqlos/auth`).
-
-| Method | Endpoint | Description |
+| Surface | Default base path | Configuration |
 | --- | --- | --- |
-| GET | `/sqlos/auth/.well-known/oauth-authorization-server` | OAuth metadata |
-| GET | `/sqlos/auth/.well-known/jwks.json` | Public keys for JWT validation |
-| GET | `/sqlos/auth/authorize` | OAuth authorize (PKCE) |
-| POST | `/sqlos/auth/token` | Token exchange (code or refresh) |
-| GET | `/sqlos/auth/login` | Hosted login page |
-| GET | `/sqlos/auth/signup` | Hosted signup page |
-| POST | `/sqlos/auth/mfa/challenge/verify` | Verify TOTP or recovery code for a direct MFA challenge |
-| POST | `/sqlos/auth/mfa/challenge/totp/enroll/start` | Start TOTP enrollment for a direct MFA challenge |
-| POST | `/sqlos/auth/mfa/challenge/totp/enroll/verify` | Verify TOTP enrollment for a direct MFA challenge |
+| OAuth and hosted auth | `/sqlos/auth` | `SqlOSOptions.AuthServer.BasePath` |
+| Auth dashboard | `/sqlos/admin/auth` | Derived from the auth/dashboard base path |
+| FGA dashboard | `/sqlos/admin/fga` | `SqlOSOptions.DashboardBasePath` |
+| Audit dashboard | `/sqlos/admin/audit` | `SqlOSOptions.DashboardBasePath` |
+| Email dashboard | `/sqlos/admin/email` | `SqlOSOptions.DashboardBasePath` |
+| Calendar dashboard | `/sqlos/admin/calendar` | Mapped only when calendar is enabled |
 
-## Headless Auth Endpoints
+Changing `DashboardBasePath` also aligns the default AuthServer base path. `AuthServer.Issuer` must be an absolute URI whose path matches `AuthServer.BasePath`; when `PublicOrigin` is configured, the issuer must be `{PublicOrigin}{BasePath}`.
 
-Base path: `/sqlos/auth/headless`.
+## OAuth discovery and keys
 
-| Method | Endpoint | Description |
+| Method | Route | Request | Response |
+| --- | --- | --- | --- |
+| `GET` | `/sqlos/auth/.well-known/oauth-authorization-server` | None | OAuth authorization-server metadata JSON |
+| `GET` | `/sqlos/auth/.well-known/jwks.json` | None | JWKS containing active and grace-window validation keys |
+
+Discovery is the authoritative source for endpoint URLs and advertised capabilities. Do not synthesize endpoint URLs in portable clients when discovery is available.
+
+## Authorization code and refresh tokens
+
+| Method | Route | Content type | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/sqlos/auth/authorize` | Query parameters | Start OAuth authorization code + PKCE |
+| `POST` | `/sqlos/auth/token` | `application/x-www-form-urlencoded` | Exchange an authorization code, refresh token, or device code |
+
+The authorization request supports standard OAuth fields including `client_id`, `redirect_uri`, `response_type=code`, `state`, `scope`, `code_challenge`, and `code_challenge_method=S256`. Resource-bound clients can also send `resource` when resource indicators are enabled.
+
+Authorization-code exchange:
+
+```bash
+curl -X POST https://app.example.com/sqlos/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=authorization_code' \
+  --data-urlencode 'client_id=acme-web' \
+  --data-urlencode 'code=...' \
+  --data-urlencode 'redirect_uri=https://app.example.com/auth/callback' \
+  --data-urlencode 'code_verifier=...'
+```
+
+Refresh:
+
+```bash
+curl -X POST https://app.example.com/sqlos/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=refresh_token' \
+  --data-urlencode 'client_id=acme-web' \
+  --data-urlencode 'refresh_token=...'
+```
+
+Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, and `expires_in`. OAuth errors use an `error` code and may include `error_description`.
+
+## Device authorization
+
+| Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/requests/{requestId}` | Load the current authorization request view model |
-| POST | `/identify` | Submit email for home realm discovery |
-| POST | `/password/login` | Submit email and password |
-| POST | `/email-otp/start` | Start email OTP sign-in |
-| POST | `/email-otp/verify` | Verify email OTP sign-in |
-| POST | `/signup` | Create a password user and complete authorization |
-| POST | `/signup/email-otp/start` | Start passwordless signup |
-| POST | `/signup/email-otp/verify` | Verify passwordless signup |
-| POST | `/organization/select` | Select an organization after primary login |
-| POST | `/mfa/verify` | Verify TOTP or recovery code |
-| POST | `/mfa/totp/enroll/start` | Start forced TOTP enrollment |
-| POST | `/mfa/totp/enroll/verify` | Verify forced TOTP enrollment and continue authorization |
+| `POST` | `/sqlos/auth/device_authorization` | Start a device authorization request from a client allowed to use device flow |
+| `GET` | `/sqlos/auth/device` | Open the user verification page |
+| `POST` | `/sqlos/auth/device/verify` | Resolve a user code in the hosted UI |
+| `POST` | `/sqlos/auth/device/approve` | Approve the resolved request |
+| `POST` | `/sqlos/auth/device/deny` | Deny the resolved request |
+| `POST` | `/sqlos/auth/token` | Poll with `grant_type=urn:ietf:params:oauth:grant-type:device_code` |
 
-## Auth API (Example)
-
-The sample API exposes REST helpers around SqlOS. Copy the shape you need.
-
-### Discover
+Device authorization start uses form data:
 
 ```bash
-curl -X POST http://localhost:5062/api/v1/auth/discover \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@acme.com"}'
+curl -X POST https://app.example.com/sqlos/auth/device_authorization \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'client_id=acme-cli' \
+  --data-urlencode 'scope=openid offline_access' \
+  --data-urlencode 'resource=https://app.example.com/api'
 ```
 
-```json
-{"mode": "password", "organizations": []}
-```
+## Hosted AuthPage
 
-### Login
+These browser routes render or process the SqlOS-hosted sign-in experience. Applications normally begin at `/authorize`; they do not call each form handler directly.
 
-```bash
-curl -X POST http://localhost:5062/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@retail.demo", "password": "RetailDemo1!"}'
-```
-
-```json
-{
-  "accessToken": "eyJhbG...",
-  "refreshToken": "rt_...",
-  "sessionId": "ses_...",
-  "organizationId": "org_...",
-  "requiresOrganizationSelection": false
-}
-```
-
-### Select Organization
-
-```bash
-curl -X POST http://localhost:5062/api/v1/auth/select-organization \
-  -H "Content-Type: application/json" \
-  -d '{"pendingAuthToken": "...", "organizationId": "org_..."}'
-```
-
-### Refresh
-
-```bash
-curl -X POST http://localhost:5062/api/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refreshToken": "rt_...", "organizationId": null}'
-```
-
-### Session
-
-```bash
-curl http://localhost:5062/api/v1/auth/session \
-  -H "Authorization: Bearer eyJhbG..."
-```
-
-```json
-{
-  "userId": "usr_...",
-  "sessionId": "ses_...",
-  "organizationId": "org_...",
-  "email": "admin@retail.demo",
-  "displayName": "Company Admin"
-}
-```
-
-### Logout
-
-```bash
-curl -X POST http://localhost:5062/api/v1/auth/logout \
-  -H "Content-Type: application/json" \
-  -d '{"refreshToken": "rt_..."}'
-```
-
-### OIDC Providers
-
-```bash
-curl http://localhost:5062/api/v1/auth/oidc/providers
-```
-
-```json
-[{"connectionId": "oidc_...", "providerType": "google", "displayName": "Google"}]
-```
-
-### Start SSO
-
-```bash
-curl -X POST http://localhost:5062/api/v1/auth/sso/start \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@acme.com"}'
-```
-
-### Host-launched SSO Portal Link
-
-The example API demonstrates how a host app can launch the delegated org-admin portal for the current `org_id` instead of exposing the full dashboard admin API to its frontend.
-
-```bash
-curl -X POST http://localhost:5062/api/sso-portal-links \
-  -H "Authorization: Bearer eyJhbG..." \
-  -H "Content-Type: application/json" \
-  -d '{"provider": "microsoft-entra"}'
-```
-
-```json
-{
-  "id": "ssp_...",
-  "organizationId": "org_...",
-  "status": "pending",
-  "setupUrl": "https://localhost/sqlos/admin/auth/sso-portal/start?token=..."
-}
-```
-
----
-
-## Dashboard Admin API
-
-Used by the dashboard UI. Base path: `/sqlos/admin/auth/api`.
-
-### Organizations
-
-```bash
-# List
-curl http://localhost:5062/sqlos/admin/auth/api/organizations
-
-# Create
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/organizations \
-  -d '{"name": "Acme Corp", "slug": "acme", "primaryDomain": "acme.com"}'
-```
-
-### Users
-
-```bash
-# List
-curl http://localhost:5062/sqlos/admin/auth/api/users
-
-# Create
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/users \
-  -d '{"displayName": "Jane Doe", "email": "jane@acme.com", "password": "secret123"}'
-```
-
-### Memberships
-
-```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/memberships \
-  -d '{"organizationId": "org_...", "userId": "usr_...", "role": "admin"}'
-```
-
-### Clients
-
-```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
-  -d '{"clientId": "my-app", "name": "My App", "audience": "sqlos", "redirectUris": ["http://localhost:3000/callback"]}'
-```
-
-### Security Settings
-
-```bash
-# Get
-curl http://localhost:5062/sqlos/admin/auth/api/settings/security
-
-# Update
-curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
-  -d '{"refreshTokenLifetimeMinutes": 10080, "sessionIdleTimeoutMinutes": 1440, "sessionAbsoluteLifetimeMinutes": 43200}'
-```
-
-### MFA Settings
-
-```bash
-# Get global MFA settings
-curl http://localhost:5062/sqlos/admin/auth/api/settings/mfa
-
-# Update global MFA settings
-curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/mfa \
-  -H "Content-Type: application/json" \
-  -d '{
-    "enabled": true,
-    "totpEnabled": true,
-    "userSelfEnrollmentEnabled": true,
-    "recoveryCodesEnabled": true,
-    "requireForAllUsers": false,
-    "requireForOwnersAndAdmins": true,
-    "requiredRoles": ["owner", "admin"],
-    "availableFactors": ["totp", "recovery_code"]
-  }'
-
-# Update one organization's MFA policy
-curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
-  -H "Content-Type: application/json" \
-  -d '{
-    "isEnabled": true,
-    "requireMfaForAllUsers": true,
-    "requireMfaForOwnersAndAdmins": false,
-    "userSelfEnrollmentEnabled": true,
-    "recoveryCodesEnabled": true,
-    "requiredRoles": ["owner", "admin"],
-    "availableFactors": ["totp", "recovery_code"]
-  }'
-```
-
-### Sessions
-
-```bash
-curl http://localhost:5062/sqlos/admin/auth/api/sessions
-```
-
-### Delegated SSO Portal Sessions
-
-```bash
-# Create a one-organization setup link
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"organizationId": "org_...", "provider": "okta"}'
-
-# List setup links for an organization
-curl http://localhost:5062/sqlos/admin/auth/api/organizations/org_.../sso-portal/sessions
-
-# Revoke a setup link or opened portal session
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions/ssp_.../revoke \
-  -H "Content-Type: application/json" \
-  -d '{"reason": "rotated"}'
-```
-
-The setup URL opens `/sqlos/admin/auth/sso-portal/start?token=...`. The first open consumes the URL token and sets a server-side portal session cookie. Portal APIs under `/sqlos/admin/auth/sso-portal/api` require that cookie and are scoped to the linked organization:
-
-| Method | Endpoint | Description |
+| Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/state` | Organization, provider guides, SP values, connection status |
-| PUT | `/provider` | Choose `microsoft-entra`, `okta`, `google-workspace`, or `generic-saml` |
-| POST | `/domain` | Create or reuse a pending domain-ownership TXT record |
-| POST | `/domains/{domainId}/confirm` | Verify DNS TXT ownership and activate the domain claim |
-| POST | `/metadata/validate` | Validate pasted or uploaded metadata XML |
-| POST | `/metadata` | Save metadata and hold the connection for activation |
-| POST | `/activate` | Enable the SAML connection after review |
-| POST | `/disable` | Disable the organization SAML connection |
-| POST | `/test` | Validate readiness or create a SAML redirect when `clientId` and `redirectUri` are supplied |
-| POST | `/signout` | Clear the portal session cookie |
+| `GET` | `/sqlos/auth/login` | Hosted sign-in page |
+| `POST` | `/sqlos/auth/login/identify` | Home-realm discovery |
+| `POST` | `/sqlos/auth/login/password` | Password sign-in form |
+| `GET` / `POST` | `/sqlos/auth/login/email-otp` and child routes | Email-code sign-in UI/start/verify |
+| `GET` / `POST` | `/sqlos/auth/login/phone-otp` and child routes | Phone-code sign-in UI/start/verify |
+| `POST` | `/sqlos/auth/login/select-organization` | Complete multi-organization selection |
+| `GET` / `POST` | `/sqlos/auth/signup` and child routes | Password, email-code, phone-code, or invitation signup |
+| `POST` | `/sqlos/auth/mfa/verify` | Verify a hosted MFA challenge |
+| `POST` | `/sqlos/auth/mfa/totp/enroll/verify` | Complete required TOTP enrollment |
+| `GET` | `/sqlos/auth/invitations/accept?token=...` | Open an email invitation |
+| `GET` / `POST` | `/sqlos/auth/logout` | End the current session/token flow |
+| `GET` | `/sqlos/auth/logged-out` | Hosted post-logout page |
 
-The headless setup API defaults to `/sqlos/admin/auth/sso-portal/api/setup`, can be moved with `SsoPortal.HeadlessApiBasePath`, and returns `SqlOSSsoSetupActionResult` records for custom admin UIs:
+Form routes can change with the hosted UI. Integrate through `/authorize`, `/token`, and the documented AuthPage configuration unless you are intentionally building a headless UI.
 
-| Method | Endpoint | Description |
+## Headless AuthPage API
+
+The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthServer.Headless.HeadlessApiBasePath`. These endpoints use JSON and operate on SqlOS authorization-request state.
+
+| Method | Relative route | Purpose |
 | --- | --- | --- |
-| GET | `/` | Current setup view model |
-| PUT | `/provider` | Select provider and advance to the domain step |
-| POST | `/domain` | Start DNS TXT verification |
-| POST | `/domains/{domainId}/confirm` | Confirm ownership |
-| POST | `/metadata/validate` | Validate metadata XML |
-| POST | `/metadata` | Import metadata and advance to activation |
-| POST | `/activate` | Activate if allowed actions permit it |
-| POST | `/disable` | Disable the connection |
-| POST | `/test` | Run or record a readiness test |
-| POST | `/signout` | Close the portal session |
+| `POST` | `/start` | Start/load a headless authorization flow |
+| `GET` | `/requests/{requestId}` | Read the current view model |
+| `POST` | `/identify` | Run home-realm discovery |
+| `POST` | `/password/login` | Password sign-in |
+| `POST` | `/password/forgot` | Request a password reset email |
+| `POST` | `/password/reset` | Complete a password reset |
+| `POST` | `/email-otp/start` | Start email-code sign-in |
+| `POST` | `/email-otp/verify` | Verify email-code sign-in |
+| `POST` | `/phone-otp/start` | Start phone-code sign-in |
+| `POST` | `/phone-otp/verify` | Verify phone-code sign-in |
+| `POST` | `/signup` | Password signup |
+| `POST` | `/signup/email-otp/start` | Start email-code signup |
+| `POST` | `/signup/email-otp/verify` | Verify email-code signup |
+| `POST` | `/signup/phone-otp/start` | Start phone-code signup |
+| `POST` | `/signup/phone-otp/verify` | Verify phone-code signup |
+| `POST` | `/invitations/resolve` | Resolve an invitation for the current flow |
+| `POST` | `/invitations/signup` | Accept an invitation through signup |
+| `POST` | `/organization/select` | Select an organization |
+| `POST` | `/mfa/verify` | Verify TOTP or recovery code |
+| `POST` | `/mfa/totp/enroll/start` | Start required TOTP enrollment |
+| `POST` | `/mfa/totp/enroll/verify` | Verify required TOTP enrollment |
+| `POST` | `/provider/start` | Start a configured social/OIDC provider |
+| `POST` | `/device/resolve` | Resolve a device code request |
+| `POST` | `/device/approve` | Approve a device request |
+| `POST` | `/device/deny` | Deny a device request |
 
-The setup view model includes `domain`, `serviceProvider`, `providers`, `latestTest`, and `allowedActions`. Domain ownership uses a TXT record shaped like `_sqlos-verify.acme.com = sqlos-domain-verification=...` by default. Hosts can customize both prefixes with `SsoPortal.DomainVerificationRecordPrefix` and `SsoPortal.DomainVerificationRecordValuePrefix`.
+For browser clients on a different origin, send credentialed requests so the reusable AuthPage session cookie is preserved. See [Headless Auth](/docs/authserver/headless-auth) for request/response walkthroughs.
 
----
+## Social OIDC and SAML callbacks
 
-## FGA Admin API
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/sqlos/auth/oidc/providers` | List enabled social/OIDC providers |
+| `POST` | `/sqlos/auth/oidc/authorization-url` | Create a provider authorization URL |
+| `GET` / `POST` | `/sqlos/auth/oidc/callback` | Complete the provider callback |
+| `POST` | `/sqlos/auth/oidc/exchange` | Exchange the SqlOS PKCE result |
+| `POST` | `/sqlos/auth/sso/authorization-url` | Create a SAML authorization URL |
+| `GET` | `/sqlos/auth/saml/login/{connectionId}` | Redirect to the organization IdP |
+| `POST` | `/sqlos/auth/saml/acs/{connectionId}` | SAML assertion consumer service |
 
-Base path: `/sqlos/admin/fga/api`.
+Prefer the hosted/headless flow abstractions over invoking callback routes manually.
 
-### Resources
+## Dynamic client registration
 
-```bash
-# List (tree)
-curl http://localhost:5062/sqlos/admin/fga/api/resources
+`POST /sqlos/auth/register` is mapped only when `AuthServer.ClientRegistration.Dcr.Enabled` is `true`. It accepts a `SqlOSDynamicClientRegistrationRequest` JSON document and applies the configured DCR redirect, client-type, rate-limit, and policy constraints.
 
-# Create
-curl -X POST http://localhost:5062/sqlos/admin/fga/api/resources \
-  -d '{"name": "New Chain", "typeId": "chain", "parentId": "retail_root"}'
-```
+CIMD does not add a registration route. When enabled, SqlOS resolves URL-shaped client IDs through client metadata documents subject to its trust configuration. See [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr).
 
-### Grants
+## Calendar callback
 
-```bash
-# List
-curl http://localhost:5062/sqlos/admin/fga/api/grants
+When `SqlOSOptions.Calendar.Enabled` is `true`, `MapSqlOS` adds:
 
-# Create
-curl -X POST http://localhost:5062/sqlos/admin/fga/api/grants \
-  -d '{"subjectId": "usr_...", "roleId": "role_...", "resourceId": "org::acme"}'
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/sqlos/auth/calendar/callback` | Complete Google/Microsoft calendar consent and redirect to the request's return URI |
 
-# Revoke
-curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{id}
-```
+Applications start the flow through `SqlOSCalendarService.StartConnectAsync`; there is no public HTTP start endpoint supplied by the package.
 
-### Access Test
+## Dashboard and operator APIs
 
-```bash
-curl -X POST http://localhost:5062/sqlos/admin/fga/api/access-test \
-  -d '{"subjectId": "usr_...", "resourceId": "chain-1", "permissionKey": "CHAIN_VIEW"}'
-```
+`MapSqlOS` also maps APIs used by the embedded auth, FGA, audit, email, SSO-setup, and optional calendar dashboards. Those routes:
 
-```json
-{"allowed": true}
-```
+- are excluded from endpoint/OpenAPI discovery;
+- are protected by the dashboard authorization/session rules;
+- return `404` when the current environment/request is not authorized;
+- are implementation endpoints for the bundled operator UI, not a stable browser-facing management SDK.
 
-### Roles and Permissions
+For trusted backend administration, inject the corresponding .NET service (`SqlOSAdminService`, `ISqlOSAuditLogService`, `SqlOSEmailAdminService`, or `SqlOSCalendarService`) rather than coupling application code to dashboard JSON shapes. Restrict `/sqlos` and `/sqlos/admin/*` at the network/edge layer in production.
 
-```bash
-curl http://localhost:5062/sqlos/admin/fga/api/roles
-curl http://localhost:5062/sqlos/admin/fga/api/permissions
-curl http://localhost:5062/sqlos/admin/fga/api/subjects
-```
+## Example-application routes are not package APIs
 
----
+Routes such as the following are defined under `examples/` and are not mounted by `MapSqlOS`:
 
-## Swagger
+- `/api/v1/auth/*`
+- `/api/todos`
+- `/api/sso-portal-links`
+- `/sample/config`
+- `/.well-known/oauth-protected-resource`
+- `/swagger` and `/swagger/v1/swagger.json`
 
-Open `http://localhost:5062/swagger` for the interactive API explorer when running the example stack.
+They demonstrate how a consuming application can wrap SqlOS services, publish protected-resource metadata, or expose its own product API. Copy the pattern only after checking the example source against your authorization and trust boundary.
+
+## OpenAPI boundary
+
+The current package protocol and dashboard routes call `ExcludeFromDescription()`, so a consuming app's Swagger/OpenAPI document does not automatically become the canonical SqlOS protocol specification. Use OAuth discovery for machine-readable OAuth endpoint metadata and this source-aligned route reference for the remaining package routes. Swagger shown by the example stack describes the example application's endpoints, not the complete SqlOS package surface.

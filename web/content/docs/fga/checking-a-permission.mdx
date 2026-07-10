@@ -26,7 +26,7 @@ Use this for:
 
 ## HasCapabilityAsync
 
-Check if a subject has a permission anywhere in the tree:
+Check if a subject has a permission on the configured root resource:
 
 ```csharp
 var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKSPACE_MANAGE");
@@ -34,8 +34,10 @@ var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKS
 
 Use this for:
 
-- **Global UI toggles** -- show/hide "Create workspace" button.
-- **Broad capability gates** -- "can this user create anything at all?"
+- **Global UI toggles** -- show a create action backed by a root-level grant.
+- **Platform gates** -- enforce capabilities intentionally assigned at the root.
+
+This method calls `CheckAccessAsync` for `RootResourceId`; it does not scan descendant resources to answer whether the subject has that permission somewhere.
 
 ## Access Tester (dashboard)
 
