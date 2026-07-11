@@ -25,25 +25,55 @@ section: guides
 
 ## Authentication and identity
 
+<div className="sqlos-guide-card-grid">
 <CardGrid cols={2}>
-  <Card title="Password login" description="Add hosted password auth to an existing ASP.NET app." href="/docs/guides/password-login" />
-  <Card title="Social sign-in" description="Configure Google, Microsoft, GitHub, Apple, or custom login." href="/docs/guides/social-oidc" />
-  <Card title="GitHub sign-in" description="Create the GitHub OAuth App and enable the provider." href="/docs/guides/github-oidc" />
-  <Card title="Authenticator MFA" description="Enable TOTP, recovery codes, and tenant-required MFA." href="/docs/guides/mfa-totp" />
-  <Card title="SAML SSO for an organization" description="Connect Entra or another SAML identity provider." href="/docs/guides/saml-sso" />
-  <Card title="Standalone identity server" description="Run one SqlOS auth host for several application surfaces." href="/docs/guides/standalone-identity-server" />
+  <Card title="Password login" description="Add hosted password auth to an existing ASP.NET app." href="/docs/guides/password-login">
+    <img className="sqlos-guide-card-image" src="/docs/guides-password-login.png" alt="Hosted AuthPage password credential step" />
+  </Card>
+  <Card title="Social sign-in" description="Configure Google, Microsoft, GitHub, Apple, or custom login." href="/docs/guides/social-oidc">
+    <img className="sqlos-guide-card-image" src="/docs/guides-social-sign-in.png" alt="Hosted AuthPage with social sign-in providers" />
+  </Card>
+  <Card title="GitHub sign-in" description="Create the GitHub OAuth App and enable the provider." href="/docs/guides/github-oidc">
+    <img className="sqlos-guide-card-image" src="/docs/guides-github-sign-in.png" alt="Configured GitHub provider in the dashboard" />
+  </Card>
+  <Card title="Authenticator MFA" description="Enable TOTP, recovery codes, and tenant-required MFA." href="/docs/guides/mfa-totp">
+    <img className="sqlos-guide-card-image" src="/docs/guides-mfa-totp.png" alt="Authenticator MFA policy dashboard" />
+  </Card>
+  <Card title="SAML SSO for an organization" description="Connect Entra or another SAML identity provider." href="/docs/guides/saml-sso">
+    <img className="sqlos-guide-card-image" src="/docs/sso-page.png" alt="Organization SAML SSO configuration" />
+  </Card>
+  <Card title="Standalone identity server" description="Run one SqlOS auth host for several application surfaces." href="/docs/guides/standalone-identity-server">
+    <img className="sqlos-guide-card-image" src="/docs/guides-standalone-identity-server.svg" alt="Standalone identity server topology" />
+  </Card>
 </CardGrid>
+</div>
 
 ## Authorization and operations
 
+<div className="sqlos-guide-card-grid">
 <CardGrid cols={2}>
-  <Card title="Model FGA" description="Design a multi-tenant resource hierarchy." href="/docs/guides/model-fga" />
-  <Card title="Filter EF queries" description="Compose authorization into a LINQ WHERE clause." href="/docs/guides/ef-query-filters" />
-  <Card title="Audit logs" description="Record application events and review them in the dashboard." href="/docs/guides/audit-logs" />
-  <Card title="Calendar integration" description="Connect Google Calendar or Microsoft 365." href="/docs/guides/calendar-integration" />
-  <Card title="Configuration" description="Review service registration, dashboard, and client modes." href="/docs/guides/configuration" />
-  <Card title="Testing" description="Run unit, integration, and docs checks locally." href="/docs/guides/testing" />
-  <Card title="Troubleshooting" description="Diagnose common setup, OAuth, SAML, and SQL issues." href="/docs/guides/troubleshooting" />
+  <Card title="Model FGA" description="Design a multi-tenant resource hierarchy." href="/docs/guides/model-fga">
+    <img className="sqlos-guide-card-image" src="/docs/dashboard-fga-resources.png" alt="FGA resource hierarchy dashboard" />
+  </Card>
+  <Card title="Filter EF queries" description="Compose authorization into a LINQ WHERE clause." href="/docs/guides/ef-query-filters">
+    <img className="sqlos-guide-card-image" src="/docs/dashboard-access-tester.png" alt="FGA Access Tester" />
+  </Card>
+  <Card title="Audit logs" description="Record application events and review them in the dashboard." href="/docs/guides/audit-logs">
+    <img className="sqlos-guide-card-image" src="/docs/guides-audit-logs.png" alt="Audit Logs dashboard" />
+  </Card>
+  <Card title="Calendar integration" description="Connect Google Calendar or Microsoft 365." href="/docs/guides/calendar-integration">
+    <img className="sqlos-guide-card-image" src="/docs/guides-calendar-integration.png" alt="Calendar Connections dashboard" />
+  </Card>
+  <Card title="Configuration" description="Review service registration, dashboard, and client modes." href="/docs/guides/configuration">
+    <img className="sqlos-guide-card-image" src="/docs/guides-configuration.png" alt="Configured SqlOS dashboard" />
+  </Card>
+  <Card title="Testing" description="Run unit, integration, and docs checks locally." href="/docs/guides/testing">
+    <img className="sqlos-guide-card-image" src="/docs/guides-testing.svg" alt="SqlOS testing pipeline" />
+  </Card>
+  <Card title="Troubleshooting" description="Diagnose common setup, OAuth, SAML, and SQL issues." href="/docs/guides/troubleshooting">
+    <img className="sqlos-guide-card-image" src="/docs/guides-troubleshooting.svg" alt="SqlOS troubleshooting flow" />
+  </Card>
 </CardGrid>
+</div>
 
 Use [SDK Reference](/docs/reference/sdk-reference) and [HTTP API Reference](/docs/reference/api-reference) for exact contracts after selecting a task.
