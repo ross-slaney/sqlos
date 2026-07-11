@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">SqlOS Guides visual index</title>
+  <desc id="desc">Authentication, authorization, operations, and delivery guide groups with their individual guide topics.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fafc"/><stop offset="1" stop-color="#eef2ff"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="14" flood-opacity=".10"/></filter>
+    <style>
+      .eyebrow{font:700 15px system-ui,sans-serif;letter-spacing:2px;fill:#6366f1}.title{font:750 42px system-ui,sans-serif;fill:#111827}.subtitle{font:400 20px system-ui,sans-serif;fill:#64748b}.group{font:700 21px system-ui,sans-serif;fill:#111827}.item{font:500 16px system-ui,sans-serif;fill:#334155}.count{font:700 14px system-ui,sans-serif;fill:#fff}.icon{font:700 18px system-ui,sans-serif;fill:#fff}
+    </style>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <rect x="64" y="55" width="54" height="54" rx="16" fill="url(#brand)"/><text x="91" y="90" text-anchor="middle" class="icon">SO</text>
+  <text x="144" y="75" class="eyebrow">GUIDES</text><text x="144" y="112" class="title">From setup to production proof</text>
+  <text x="64" y="154" class="subtitle">Every guide pairs the configuration with the screen, dashboard, or system flow you should expect.</text>
+  <g filter="url(#shadow)">
+    <rect x="64" y="195" width="360" height="445" rx="24" fill="#fff" stroke="#dbe4f0"/>
+    <rect x="460" y="195" width="360" height="445" rx="24" fill="#fff" stroke="#dbe4f0"/>
+    <rect x="856" y="195" width="360" height="445" rx="24" fill="#fff" stroke="#dbe4f0"/>
+  </g>
+  <circle cx="105" cy="238" r="22" fill="#7c3aed"/><text x="105" y="244" text-anchor="middle" class="icon">A</text><text x="142" y="246" class="group">Authentication &amp; identity</text>
+  <rect x="356" y="221" width="40" height="26" rx="13" fill="#7c3aed"/><text x="376" y="239" text-anchor="middle" class="count">6</text>
+  <g class="item"><text x="98" y="295">Password login</text><text x="98" y="343">Social sign-in</text><text x="98" y="391">GitHub sign-in</text><text x="98" y="439">Authenticator MFA</text><text x="98" y="487">SAML SSO</text><text x="98" y="535">Standalone identity server</text></g>
+  <g fill="#c4b5fd"><circle cx="80" cy="289" r="5"/><circle cx="80" cy="337" r="5"/><circle cx="80" cy="385" r="5"/><circle cx="80" cy="433" r="5"/><circle cx="80" cy="481" r="5"/><circle cx="80" cy="529" r="5"/></g>
+  <circle cx="501" cy="238" r="22" fill="#2563eb"/><text x="501" y="244" text-anchor="middle" class="icon">F</text><text x="538" y="246" class="group">Authorization</text>
+  <rect x="752" y="221" width="40" height="26" rx="13" fill="#2563eb"/><text x="772" y="239" text-anchor="middle" class="count">2</text>
+  <g class="item"><text x="494" y="295">Model FGA resources</text><text x="494" y="343">Filter EF queries</text></g>
+  <g fill="#93c5fd"><circle cx="476" cy="289" r="5"/><circle cx="476" cy="337" r="5"/></g>
+  <path d="M510 407h126v-38l86 70-86 70v-38H510z" fill="#eff6ff" stroke="#93c5fd" stroke-width="3"/><text x="614" y="431" text-anchor="middle" class="item">Policy becomes SQL</text><text x="614" y="454" text-anchor="middle" class="item">filtering and proof</text>
+  <circle cx="897" cy="238" r="22" fill="#0f766e"/><text x="897" y="244" text-anchor="middle" class="icon">O</text><text x="934" y="246" class="group">Operations &amp; delivery</text>
+  <rect x="1148" y="221" width="40" height="26" rx="13" fill="#0f766e"/><text x="1168" y="239" text-anchor="middle" class="count">5</text>
+  <g class="item"><text x="890" y="295">Calendar integration</text><text x="890" y="343">Audit logs</text><text x="890" y="391">Configuration</text><text x="890" y="439">Testing</text><text x="890" y="487">Troubleshooting</text></g>
+  <g fill="#5eead4"><circle cx="872" cy="289" r="5"/><circle cx="872" cy="337" r="5"/><circle cx="872" cy="385" r="5"/><circle cx="872" cy="433" r="5"/><circle cx="872" cy="481" r="5"/></g>
+  <rect x="888" y="541" width="296" height="64" rx="16" fill="#f0fdfa" stroke="#99f6e4"/><text x="1036" y="568" text-anchor="middle" class="item">Configure → run → inspect</text><text x="1036" y="591" text-anchor="middle" class="item">→ verify → ship</text>
+</svg>
