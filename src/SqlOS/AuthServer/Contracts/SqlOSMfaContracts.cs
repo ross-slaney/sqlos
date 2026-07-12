@@ -102,7 +102,7 @@ public sealed record SqlOSMfaChallengeVerifyResult(
     SqlOSTokenResponse? Tokens,
     string? RedirectUrl);
 
-public sealed record SqlOSMfaChallengePayload(
+internal sealed record SqlOSMfaChallengePayload(
     string Flow,
     string ClientId,
     string AuthenticationMethod,
