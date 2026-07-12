@@ -281,6 +281,81 @@ public sealed class SqlOSAuthLifecycleTests
         var subject = await harness.CreateOrganizationSubjectAsync("password-reset");
         var tokens = await harness.IssueTokensAsync(subject);
         var authPageCookie = await harness.CreateAuthPageSessionAsync(subject);
+        const string verifier = "password-reset-verifier-123456789012345678901";
+        var authorizationRequest = new SqlOSAuthorizationRequest
+        {
+            Id = $"req_{Guid.NewGuid():N}",
+            ClientApplicationId = subject.Client.Id,
+            ClientApplication = subject.Client,
+            RedirectUri = "https://client.example.test/callback",
+            State = "password-reset-state",
+            Scope = "openid",
+            CodeChallenge = harness.Crypto.CreatePkceCodeChallenge(verifier),
+            CodeChallengeMethod = "S256",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+        };
+        harness.Context.Set<SqlOSAuthorizationRequest>().Add(authorizationRequest);
+        await harness.Context.SaveChangesAsync();
+        var codeRedirect = await harness.Authorization.IssueAuthorizationRedirectAsync(
+            authorizationRequest,
+            subject.User,
+            subject.Organization.Id,
+            "password",
+            new DefaultHttpContext());
+        var pendingCode = QueryHelpers.ParseQuery(new Uri(codeRedirect).Query)["code"].ToString();
+        var pendingMfaToken = await harness.Crypto.CreateTemporaryTokenAsync(
+            SqlOSAuthService.MfaChallengePurpose,
+            subject.User.Id,
+            subject.Client.Id,
+            subject.Organization.Id,
+            new { Flow = "client" },
+            TimeSpan.FromMinutes(5));
+        var now = DateTime.UtcNow;
+        var pendingDevice = new SqlOSDeviceAuthorization
+        {
+            Id = $"dev_{Guid.NewGuid():N}",
+            DeviceCodeHash = harness.Crypto.HashToken("pending-device-code"),
+            UserCodeHash = harness.Crypto.HashToken("PENDING1"),
+            UserCode = "PENDING1",
+            ClientApplicationId = subject.Client.Id,
+            Status = SqlOSDeviceAuthorizationService.ApprovedStatus,
+            ApprovedUserId = subject.User.Id,
+            ApprovedOrganizationId = subject.Organization.Id,
+            AuthenticationMethod = "password",
+            CreatedAt = now,
+            ApprovedAt = now,
+            ExpiresAt = now.AddMinutes(10)
+        };
+        var emailChallenge = new SqlOSEmailOtpChallenge
+        {
+            Id = $"emc_{Guid.NewGuid():N}",
+            ChallengeTokenHash = harness.Crypto.HashToken("email-challenge"),
+            CodeHash = harness.Crypto.HashToken("email-code"),
+            Email = subject.User.DefaultEmail!,
+            NormalizedEmail = SqlOSAdminService.NormalizeEmail(subject.User.DefaultEmail!),
+            UserId = subject.User.Id,
+            RequestedOrganizationId = subject.Organization.Id,
+            CreatedAt = now,
+            LastSentAt = now,
+            ExpiresAt = now.AddMinutes(10)
+        };
+        var phoneChallenge = new SqlOSPhoneOtpChallenge
+        {
+            Id = $"phc_{Guid.NewGuid():N}",
+            PhoneNumberHash = harness.Crypto.HashToken("+15555550199"),
+            PhoneNumberEncrypted = "protected",
+            MaskedPhoneNumber = "+1******0199",
+            UserId = subject.User.Id,
+            RequestedOrganizationId = subject.Organization.Id,
+            CreatedAt = now,
+            LastSentAt = now,
+            ExpiresAt = now.AddMinutes(10)
+        };
+        harness.Context.Set<SqlOSDeviceAuthorization>().Add(pendingDevice);
+        harness.Context.Set<SqlOSEmailOtpChallenge>().Add(emailChallenge);
+        harness.Context.Set<SqlOSPhoneOtpChallenge>().Add(phoneChallenge);
+        await harness.Context.SaveChangesAsync();
         var resetToken = await harness.Auth.CreatePasswordResetTokenAsync(
             new SqlOSForgotPasswordRequest(subject.User.DefaultEmail!));
 
@@ -290,9 +365,29 @@ public sealed class SqlOSAuthLifecycleTests
         (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", authPageCookie)).Should().BeNull();
         (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == tokens.SessionId))
             .RevocationReason.Should().Be("password_reset");
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.CodeHash == harness.Crypto.HashToken(pendingCode))).ConsumedAt.Should().NotBeNull();
+        (await harness.Crypto.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, pendingMfaToken))
+            .Should().BeNull();
+        pendingDevice.Status.Should().Be(SqlOSDeviceAuthorizationService.DeniedStatus);
+        pendingDevice.DeniedAt.Should().NotBeNull();
+        emailChallenge.InvalidatedReason.Should().Be("password_reset");
+        phoneChallenge.InvalidatedReason.Should().Be("password_reset");
         var refresh = async () => await harness.Auth.RefreshAsync(
             new SqlOSRefreshRequest(tokens.RefreshToken, subject.Organization.Id));
         await refresh.Should().ThrowAsync<InvalidOperationException>();
+        var codeExchange = async () => await harness.Authorization.ExchangeAuthorizationCodeAsync(
+            new SqlOSTokenRequest(
+                "authorization_code",
+                pendingCode,
+                authorizationRequest.RedirectUri,
+                subject.Client.ClientId,
+                verifier,
+                RefreshToken: null,
+                Resource: null),
+            new DefaultHttpContext());
+        await codeExchange.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Authorization code is no longer valid.");
     }
 
     [TestMethod]

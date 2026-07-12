@@ -1,10 +1,12 @@
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
 
@@ -178,6 +180,111 @@ public sealed class AuthServiceIntegrationTests
                 .AnyAsync(x => x.EventType == "auth.lifecycle.denied" && x.UserId == lifecycleUserId))
                 .Should().BeTrue();
         }
+    }
+
+    [TestMethod]
+    public async Task LogoutAll_RevokesPendingAuthorizationArtifactsAcrossDbContexts()
+    {
+        const string verifier = "sql-logout-verifier-123456789012345678901234";
+        string userId;
+        string organizationId;
+        string pendingCode;
+        string pendingMfaToken;
+        string deviceAuthorizationId;
+        string clientId;
+        var email = $"pending-artifact-{Guid.NewGuid():N}@example.com";
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var signup = await issuance.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Pending Artifact SQL",
+                    email,
+                    "P@ssword123!",
+                    $"Pending Artifact {Guid.NewGuid():N}",
+                    "test-client",
+                    null),
+                new DefaultHttpContext());
+            var user = await issuance.Context.Set<SqlOSUser>()
+                .SingleAsync(x => x.DefaultEmail == email);
+            userId = user.Id;
+            organizationId = signup.Tokens!.OrganizationId!;
+            var client = await issuance.Context.Set<SqlOSClientApplication>()
+                .SingleAsync(x => x.ClientId == "test-client");
+            clientId = client.ClientId;
+            var authorizationRequest = new SqlOSAuthorizationRequest
+            {
+                Id = $"req_{Guid.NewGuid():N}",
+                ClientApplicationId = client.Id,
+                ClientApplication = client,
+                RedirectUri = "https://client.example.test/callback",
+                State = "pending-artifact-state",
+                Scope = "openid",
+                CodeChallenge = issuance.Crypto.CreatePkceCodeChallenge(verifier),
+                CodeChallengeMethod = "S256",
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+            };
+            issuance.Context.Set<SqlOSAuthorizationRequest>().Add(authorizationRequest);
+            await issuance.Context.SaveChangesAsync();
+            var redirect = await issuance.Authorization.IssueAuthorizationRedirectAsync(
+                authorizationRequest,
+                user,
+                organizationId,
+                "password",
+                new DefaultHttpContext());
+            pendingCode = QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString();
+            pendingMfaToken = await issuance.Crypto.CreateTemporaryTokenAsync(
+                SqlOSAuthService.MfaChallengePurpose,
+                userId,
+                client.Id,
+                organizationId,
+                new { Flow = "client" },
+                TimeSpan.FromMinutes(5));
+            deviceAuthorizationId = $"dev_{Guid.NewGuid():N}";
+            var now = DateTime.UtcNow;
+            issuance.Context.Set<SqlOSDeviceAuthorization>().Add(new SqlOSDeviceAuthorization
+            {
+                Id = deviceAuthorizationId,
+                DeviceCodeHash = issuance.Crypto.HashToken($"device-{Guid.NewGuid():N}"),
+                UserCodeHash = issuance.Crypto.HashToken($"code-{Guid.NewGuid():N}"),
+                UserCode = "PENDING2",
+                ClientApplicationId = client.Id,
+                Status = SqlOSDeviceAuthorizationService.ApprovedStatus,
+                ApprovedUserId = userId,
+                ApprovedOrganizationId = organizationId,
+                AuthenticationMethod = "password",
+                CreatedAt = now,
+                ApprovedAt = now,
+                ExpiresAt = now.AddMinutes(10)
+            });
+            await issuance.Context.SaveChangesAsync();
+        }
+
+        await using (var revocation = BuildIsolatedLifecycleStack())
+        {
+            await revocation.Auth.LogoutAllAsync(userId);
+        }
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        var exchange = async () => await verification.Authorization.ExchangeAuthorizationCodeAsync(
+            new SqlOSTokenRequest(
+                "authorization_code",
+                pendingCode,
+                "https://client.example.test/callback",
+                clientId,
+                verifier,
+                RefreshToken: null,
+                Resource: null),
+            new DefaultHttpContext());
+        await exchange.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Authorization code is no longer valid.");
+        (await verification.Crypto.FindTemporaryTokenAsync(
+            SqlOSAuthService.MfaChallengePurpose,
+            pendingMfaToken)).Should().BeNull();
+        var deviceAuthorization = await verification.Context.Set<SqlOSDeviceAuthorization>()
+            .SingleAsync(x => x.Id == deviceAuthorizationId);
+        deviceAuthorization.Status.Should().Be(SqlOSDeviceAuthorizationService.DeniedStatus);
+        deviceAuthorization.DeniedAt.Should().NotBeNull();
     }
 
     [TestMethod]
@@ -365,19 +472,29 @@ public sealed class AuthServiceIntegrationTests
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
         var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
         var authPage = new SqlOSAuthPageSessionService(context, crypto, settings);
-        return new IsolatedLifecycleStack(context, crypto, auth, authPage);
+        var authorization = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            auth,
+            crypto,
+            settings,
+            authPage,
+            options);
+        return new IsolatedLifecycleStack(context, crypto, auth, authPage, authorization);
     }
 
     private sealed class IsolatedLifecycleStack(
         TestSqlOSDbContext context,
         SqlOSCryptoService crypto,
         SqlOSAuthService auth,
-        SqlOSAuthPageSessionService authPage) : IAsyncDisposable
+        SqlOSAuthPageSessionService authPage,
+        SqlOSAuthorizationServerService authorization) : IAsyncDisposable
     {
         public TestSqlOSDbContext Context { get; } = context;
         public SqlOSCryptoService Crypto { get; } = crypto;
         public SqlOSAuthService Auth { get; } = auth;
         public SqlOSAuthPageSessionService AuthPage { get; } = authPage;
+        public SqlOSAuthorizationServerService Authorization { get; } = authorization;
 
         public ValueTask DisposeAsync() => Context.DisposeAsync();
     }

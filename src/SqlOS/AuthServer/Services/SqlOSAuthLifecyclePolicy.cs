@@ -9,6 +9,15 @@ internal static class SqlOSAuthLifecyclePolicy
 {
     internal const string DeniedEventType = "auth.lifecycle.denied";
     internal const string AuthPageSessionPurpose = "auth_page_session";
+    private static readonly string[] SessionIssuanceTemporaryTokenPurposes =
+    [
+        AuthPageSessionPurpose,
+        "auth_code",
+        "auth_page_pending",
+        "mfa_challenge",
+        "oidc_browser_code",
+        "pending_auth"
+    ];
 
     internal static async Task<SqlOSAuthLifecycleDecision> EvaluateAsync(
         ISqlOSAuthServerDbContext context,
@@ -16,35 +25,45 @@ internal static class SqlOSAuthLifecyclePolicy
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
-        var userIsActive = await context.Set<SqlOSUser>()
+        if (string.IsNullOrWhiteSpace(organizationId))
+        {
+            var userIsActive = await context.Set<SqlOSUser>()
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == userId && x.IsActive, cancellationToken);
+            return userIsActive
+                ? SqlOSAuthLifecycleDecision.Active
+                : SqlOSAuthLifecycleDecision.Denied("user_inactive");
+        }
+
+        // Keep the user, organization, and membership decision in one SQL
+        // statement. Besides reducing round trips, this prevents a decision
+        // from being assembled from lifecycle states observed at three
+        // different points during concurrent offboarding.
+        var snapshot = await context.Set<SqlOSUser>()
             .AsNoTracking()
-            .AnyAsync(x => x.Id == userId && x.IsActive, cancellationToken);
-        if (!userIsActive)
+            .Where(x => x.Id == userId)
+            .Select(user => new
+            {
+                UserIsActive = user.IsActive,
+                OrganizationIsActive = context.Set<SqlOSOrganization>()
+                    .Any(organization => organization.Id == organizationId && organization.IsActive),
+                MembershipIsActive = context.Set<SqlOSMembership>()
+                    .Any(membership => membership.UserId == userId
+                        && membership.OrganizationId == organizationId
+                        && membership.IsActive)
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (snapshot == null || !snapshot.UserIsActive)
         {
             return SqlOSAuthLifecycleDecision.Denied("user_inactive");
         }
 
-        if (string.IsNullOrWhiteSpace(organizationId))
-        {
-            return SqlOSAuthLifecycleDecision.Active;
-        }
-
-        var organizationIsActive = await context.Set<SqlOSOrganization>()
-            .AsNoTracking()
-            .AnyAsync(x => x.Id == organizationId && x.IsActive, cancellationToken);
-        if (!organizationIsActive)
+        if (!snapshot.OrganizationIsActive)
         {
             return SqlOSAuthLifecycleDecision.Denied("organization_inactive");
         }
 
-        var membershipIsActive = await context.Set<SqlOSMembership>()
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.UserId == userId
-                    && x.OrganizationId == organizationId
-                    && x.IsActive,
-                cancellationToken);
-        return membershipIsActive
+        return snapshot.MembershipIsActive
             ? SqlOSAuthLifecycleDecision.Active
             : SqlOSAuthLifecycleDecision.Denied("membership_inactive");
     }
@@ -76,7 +95,7 @@ internal static class SqlOSAuthLifecyclePolicy
         });
     }
 
-    internal static async Task<SqlOSAuthLifecycleRevocationResult> RevokeAsync(
+    internal static async Task RevokeAsync(
         ISqlOSAuthServerDbContext context,
         string? userId,
         string? organizationId,
@@ -109,19 +128,76 @@ internal static class SqlOSAuthLifecyclePolicy
                 .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
                 .ToListAsync(cancellationToken);
 
-        var authPageSessionsQuery = context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == AuthPageSessionPurpose && x.ConsumedAt == null);
+        var temporaryTokensQuery = context.Set<SqlOSTemporaryToken>()
+            .Where(x => SessionIssuanceTemporaryTokenPurposes.Contains(x.Purpose)
+                && x.ConsumedAt == null);
         if (!string.IsNullOrWhiteSpace(userId))
         {
-            authPageSessionsQuery = authPageSessionsQuery.Where(x => x.UserId == userId);
+            temporaryTokensQuery = temporaryTokensQuery.Where(x => x.UserId == userId);
         }
 
         if (!string.IsNullOrWhiteSpace(organizationId))
         {
-            authPageSessionsQuery = authPageSessionsQuery.Where(x => x.OrganizationId == organizationId);
+            temporaryTokensQuery = temporaryTokensQuery.Where(x => x.OrganizationId == organizationId);
         }
 
-        var authPageSessions = await authPageSessionsQuery.ToListAsync(cancellationToken);
+        var temporaryTokens = await temporaryTokensQuery.ToListAsync(cancellationToken);
+
+        var authorizationCodesQuery = context.Set<SqlOSAuthorizationCode>()
+            .Where(x => x.ConsumedAt == null);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            authorizationCodesQuery = authorizationCodesQuery.Where(x => x.UserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            authorizationCodesQuery = authorizationCodesQuery.Where(x => x.OrganizationId == organizationId);
+        }
+
+        var authorizationCodes = await authorizationCodesQuery.ToListAsync(cancellationToken);
+
+        var deviceAuthorizationsQuery = context.Set<SqlOSDeviceAuthorization>()
+            .Where(x => x.ConsumedAt == null && x.Status == SqlOSDeviceAuthorizationService.ApprovedStatus);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            deviceAuthorizationsQuery = deviceAuthorizationsQuery.Where(x => x.ApprovedUserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            deviceAuthorizationsQuery = deviceAuthorizationsQuery.Where(x => x.ApprovedOrganizationId == organizationId);
+        }
+
+        var deviceAuthorizations = await deviceAuthorizationsQuery.ToListAsync(cancellationToken);
+
+        var emailOtpChallengesQuery = context.Set<SqlOSEmailOtpChallenge>()
+            .Where(x => x.ConsumedAt == null && x.InvalidatedAt == null);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            emailOtpChallengesQuery = emailOtpChallengesQuery.Where(x => x.UserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            emailOtpChallengesQuery = emailOtpChallengesQuery.Where(x => x.RequestedOrganizationId == organizationId);
+        }
+
+        var emailOtpChallenges = await emailOtpChallengesQuery.ToListAsync(cancellationToken);
+
+        var phoneOtpChallengesQuery = context.Set<SqlOSPhoneOtpChallenge>()
+            .Where(x => x.ConsumedAt == null && x.InvalidatedAt == null);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            phoneOtpChallengesQuery = phoneOtpChallengesQuery.Where(x => x.UserId == userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            phoneOtpChallengesQuery = phoneOtpChallengesQuery.Where(x => x.RequestedOrganizationId == organizationId);
+        }
+
+        var phoneOtpChallenges = await phoneOtpChallengesQuery.ToListAsync(cancellationToken);
 
         foreach (var session in sessions)
         {
@@ -134,18 +210,36 @@ internal static class SqlOSAuthLifecyclePolicy
             refreshToken.RevokedAt = now;
         }
 
-        foreach (var authPageSession in authPageSessions)
+        foreach (var temporaryToken in temporaryTokens)
         {
-            authPageSession.ConsumedAt = now;
+            temporaryToken.ConsumedAt = now;
         }
 
-        return new SqlOSAuthLifecycleRevocationResult(
-            sessions.Count,
-            refreshTokens.Count,
-            authPageSessions.Count);
+        foreach (var authorizationCode in authorizationCodes)
+        {
+            authorizationCode.ConsumedAt = now;
+        }
+
+        foreach (var deviceAuthorization in deviceAuthorizations)
+        {
+            deviceAuthorization.Status = SqlOSDeviceAuthorizationService.DeniedStatus;
+            deviceAuthorization.DeniedAt = now;
+        }
+
+        foreach (var emailOtpChallenge in emailOtpChallenges)
+        {
+            emailOtpChallenge.InvalidatedAt = now;
+            emailOtpChallenge.InvalidatedReason = reason;
+        }
+
+        foreach (var phoneOtpChallenge in phoneOtpChallenges)
+        {
+            phoneOtpChallenge.InvalidatedAt = now;
+            phoneOtpChallenge.InvalidatedReason = reason;
+        }
     }
 
-    internal static Task<SqlOSAuthLifecycleRevocationResult> RevokeForDenialAsync(
+    internal static Task RevokeForDenialAsync(
         ISqlOSAuthServerDbContext context,
         string? userId,
         string? organizationId,
@@ -204,8 +298,3 @@ internal sealed record SqlOSAuthLifecycleDecision(bool IsActive, string? Reason)
 
     internal static SqlOSAuthLifecycleDecision Denied(string reason) => new(false, reason);
 }
-
-internal sealed record SqlOSAuthLifecycleRevocationResult(
-    int SessionCount,
-    int RefreshTokenCount,
-    int AuthPageSessionCount);
