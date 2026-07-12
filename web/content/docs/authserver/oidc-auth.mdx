@@ -76,6 +76,21 @@ Frontend                    Backend                     Provider
    │◄── tokens ───────────────│                            │
 ```
 
+## Identity claim trust model
+
+SqlOS treats the validated ID token as the identity anchor. The standard `sub` claim must be present in that signed token. When a connection uses UserInfo, SqlOS accepts the UserInfo response only when its `sub` exactly matches the ID-token `sub` using ordinal comparison; a missing or different subject rejects the login before any UserInfo claim is used.
+
+Email and `email_verified` are resolved as one provenance-bound pair:
+
+- a subject-bound UserInfo email and its UserInfo verification claim are used together when UserInfo supplies the configured email claim;
+- otherwise the signed ID-token email and its ID-token verification claim are used together;
+- a verification flag from one response can never validate an email from another response;
+- automatic linking to an existing SqlOS account requires that same authenticated claim set to mark the email as verified.
+
+The provider callback is not an identity-claim source. Callback parameters cannot replace `sub`, email, or email verification. Apple's first-authorization `user` object is the only callback profile hint SqlOS reads, and only its bounded, sanitized first and last names may contribute to the display name.
+
+GitHub remains a separate OAuth profile flow: SqlOS uses GitHub's stable numeric user id plus the verified primary address returned by GitHub's email API. It does not mix GitHub profile fields into the OIDC claim pipeline.
+
 ### Backend code (from the example API)
 
 ```csharp

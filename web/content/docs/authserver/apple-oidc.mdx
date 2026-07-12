@@ -33,4 +33,14 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
 ```
 
+## Callback claim handling
+
+Apple can include a `user` form field only on the first authorization. SqlOS treats that browser-posted object as an optional display-name hint, never as identity evidence:
+
+- `sub`, email, and `email_verified` come from the signed, validated Apple ID token;
+- any email or subject in the callback `user` JSON is ignored;
+- only bounded, sanitized `name.firstName` and `name.lastName` values can fill a missing display name.
+
+Persist the display name after first login if your application needs it later. Apple may not send the callback `user` object again, while the signed identity remains stable through the ID token.
+
 See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
