@@ -673,8 +673,9 @@ from request host or forwarded-host headers.
 
 Configure an app-owned reset page on the server with `AuthServer.PasswordReset.BuildResetUrl`. The
 callback receives a `ClientId` only for an active first-party client resolved by SqlOS. Its output is
-validated as an absolute HTTP or HTTPS URL without user information, and link-generation failures
-invalidate the token without changing the enumeration-safe public response.
+validated as an absolute HTTPS URL without user information; loopback HTTP is accepted only for local
+development. Link-generation failures invalidate the token without changing the enumeration-safe
+public response.
 
 Public routes:
 

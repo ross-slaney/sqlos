@@ -13,7 +13,8 @@ public sealed class SqlOSPasswordResetOptions
     public string Subject { get; set; } = "Reset your {applicationName} password";
     /// <summary>
     /// Builds the reset URL from trusted server-side configuration. The returned value must be an
-    /// absolute HTTP or HTTPS URL without user information. <see cref="SqlOSPasswordResetUrlContext.ClientId"/>
+    /// absolute HTTPS URL (or loopback HTTP URL for development) without user information.
+    /// <see cref="SqlOSPasswordResetUrlContext.ClientId"/>
     /// is populated only for active first-party clients resolved by SqlOS.
     /// </summary>
     public Func<SqlOSPasswordResetUrlContext, string>? BuildResetUrl { get; set; }

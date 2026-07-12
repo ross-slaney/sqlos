@@ -1948,12 +1948,13 @@ public sealed class SqlOSAuthService
             || trimmed.Any(char.IsControl)
             || trimmed.Contains('\\', StringComparison.Ordinal)
             || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || uri == null
             || (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+                && (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) || !uri.IsLoopback))
             || string.IsNullOrWhiteSpace(uri.Host)
             || !string.IsNullOrEmpty(uri.UserInfo))
         {
-            throw new InvalidOperationException("The configured password reset URL must be an absolute HTTP or HTTPS URL without user information.");
+            throw new InvalidOperationException("The configured password reset URL must be an absolute HTTPS URL (or loopback HTTP URL) without user information.");
         }
 
         return trimmed;

@@ -796,6 +796,9 @@ public sealed class SqlOSAuthServiceTests
     [DataRow("javascript:alert(1)")]
     [DataRow("https://trusted.example@attacker.example/reset")]
     [DataRow("https://trusted.example\\@attacker.example/reset")]
+    [DataRow("http://attacker.example/reset")]
+    [DataRow("https:%2f%2fattacker.example/reset")]
+    [DataRow("https://trusted.example%2f@attacker.example/reset")]
     [DataRow("https://trusted.example/reset\r\nBcc: victim@example.com")]
     public async Task PasswordResetEmail_UnsafeConfiguredUrl_FailsClosedAndInvalidatesToken(string unsafeUrl)
     {
@@ -812,7 +815,7 @@ public sealed class SqlOSAuthServiceTests
             new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!));
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*configured password reset URL must be an absolute HTTP or HTTPS URL without user information*");
+            .WithMessage("*configured password reset URL must be an absolute HTTPS URL (or loopback HTTP URL) without user information*");
         harness.EmailSender.Messages.Should().BeEmpty();
         (await harness.Context.Set<SqlOSTemporaryToken>()
                 .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
@@ -820,6 +823,26 @@ public sealed class SqlOSAuthServiceTests
         (await harness.Context.Set<SqlOSAuditEvent>()
                 .CountAsync(audit => audit.EventType == "password_reset.email_send_failed" && audit.UserId == user.Id))
             .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_LoopbackHttpConfiguredUrl_IsAllowedForDevelopment()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = context =>
+                $"http://localhost:3000/reset?token={Uri.EscapeDataString(context.Token)}";
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Loopback Reset",
+            "loopback-reset@example.com",
+            "OldPassword123!"));
+
+        await harness.Auth.SendPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!));
+
+        harness.EmailSender.Messages.Should().ContainSingle()
+            .Which.TextBody.Should().Contain("http://localhost:3000/reset?token=");
     }
 
     [TestMethod]
