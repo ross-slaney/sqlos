@@ -520,20 +520,93 @@ public sealed class SqlOSCryptoService
                 return null;
             }
 
-            var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
-            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow)
+            var now = DateTime.UtcNow;
+            var session = await _context.Set<SqlOSSession>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= now)
             {
                 return null;
             }
 
-            session.LastSeenAt = DateTime.UtcNow;
+            var userId = principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (string.IsNullOrWhiteSpace(userId)
+                || !string.Equals(userId, session.UserId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var organizationId = principal.FindFirstValue("org_id");
+            var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+                _context,
+                session.UserId,
+                organizationId,
+                cancellationToken);
+            if (session.IdleExpiresAt <= now || !lifecycle.IsActive)
+            {
+                var denial = session.IdleExpiresAt <= now
+                    ? SqlOSAuthLifecycleDecision.Denied("session_idle_expired")
+                    : lifecycle;
+                SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+                    _context,
+                    GenerateId("aud"),
+                    "access_token_validation",
+                    denial,
+                    session.UserId,
+                    organizationId,
+                    session.Id);
+
+                if (session.IdleExpiresAt <= now)
+                {
+                    var trackedSession = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
+                        ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
+                    await SqlOSAuthLifecyclePolicy.RevokeSessionAsync(
+                        _context,
+                        trackedSession,
+                        "session_idle_expired",
+                        now,
+                        cancellationToken);
+                }
+                else
+                {
+                    await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+                        _context,
+                        session.UserId,
+                        organizationId,
+                        lifecycle,
+                        now,
+                        cancellationToken);
+                }
+
+                await _context.SaveChangesAsync(cancellationToken);
+                return null;
+            }
+
+            var idleTimeoutMinutes = await _context.Set<SqlOSSettings>()
+                .AsNoTracking()
+                .Where(x => x.Id == "default")
+                .Select(x => (int?)x.SessionIdleTimeoutMinutes)
+                .FirstOrDefaultAsync(cancellationToken);
+            var idleTimeout = idleTimeoutMinutes is > 0
+                ? TimeSpan.FromMinutes(idleTimeoutMinutes.Value)
+                : _options.SessionIdleTimeout;
+            var nextIdleExpiry = now.Add(idleTimeout);
+            if (nextIdleExpiry > session.AbsoluteExpiresAt)
+            {
+                nextIdleExpiry = session.AbsoluteExpiresAt;
+            }
+
+            var sessionToUpdate = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
+                ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
+            sessionToUpdate.LastSeenAt = now;
+            sessionToUpdate.IdleExpiresAt = nextIdleExpiry;
             if (!string.IsNullOrWhiteSpace(session.ClientApplicationId))
             {
                 var client = await _context.Set<SqlOSClientApplication>()
                     .FirstOrDefaultAsync(x => x.Id == session.ClientApplicationId, cancellationToken);
                 if (client != null)
                 {
-                    client.LastSeenAt = DateTime.UtcNow;
+                    client.LastSeenAt = now;
                 }
             }
             await _context.SaveChangesAsync(cancellationToken);
@@ -541,8 +614,8 @@ public sealed class SqlOSCryptoService
             return new SqlOSValidatedToken(
                 principal,
                 session.Id,
-                principal.FindFirstValue(JwtRegisteredClaimNames.Sub),
-                principal.FindFirstValue("org_id"),
+                userId,
+                organizationId,
                 principal.FindFirstValue("client_id"),
                 principal.FindFirstValue("aud"));
         }

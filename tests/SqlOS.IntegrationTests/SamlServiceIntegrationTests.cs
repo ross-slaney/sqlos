@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
@@ -21,6 +22,135 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SamlServiceIntegrationTests
 {
+    [TestMethod]
+    public async Task InactiveUser_OidcAndSamlLogin_IsRejected()
+    {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var oidc = new SqlOSOidcAuthService(
+            AspireFixture.SharedContext,
+            admin,
+            crypto,
+            new FakeOidcProviderHttpClientFactory(),
+            NullLogger<SqlOSOidcAuthService>.Instance);
+        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var email = $"inactive-federated-{Guid.NewGuid():N}@example.com";
+        var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Inactive Federated User",
+            email,
+            "P@ssword123!"));
+
+        var oidcClient = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            $"oidc-inactive-{Guid.NewGuid():N}"[..22],
+            "Inactive OIDC Client",
+            "sqlos-tests",
+            ["https://client.example.local/callback/google"]));
+        var oidcConnection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            $"Google inactive {Guid.NewGuid():N}",
+            "google-client",
+            "google-secret",
+            ["https://client.example.local/callback/google"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+        var oidcRequest = new SqlOSCompleteOidcAuthorizationRequest(
+            oidcConnection.Id,
+            oidcClient.ClientId,
+            "https://client.example.local/callback/google",
+            $"success:{email}:nonce-inactive-federated",
+            "verifier",
+            "nonce-inactive-federated",
+            null);
+        (await oidc.CompleteAuthorizationAsync(oidcRequest)).UserId.Should().Be(user.Id);
+
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"Inactive SAML {Guid.NewGuid():N}",
+            null));
+        var samlClient = await CreateSamlClientAsync(admin, "inactive-user");
+        using var rsa = RSA.Create(2048);
+        var certificateRequest = new CertificateRequest(
+            "CN=SqlOSInactiveUserSamlIdP",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        var certificate = certificateRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+        var samlConnection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organization.Id,
+            "Inactive User SSO",
+            "urn:inactive-user:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            true,
+            "email",
+            "first_name",
+            "last_name"));
+        var firstSamlFlow = await StartSamlRequestAsync(saml, samlConnection.Id, samlClient.ClientId);
+        var firstSamlResponse = BuildSignedSamlResponse(
+            certificate,
+            "urn:inactive-user:idp",
+            email,
+            "Inactive",
+            "User",
+            firstSamlFlow);
+        (await saml.HandleAcsAsync(
+            samlConnection.Id,
+            firstSamlResponse,
+            firstSamlFlow.RelayState,
+            default)).Should().Contain("code=");
+
+        await using (var offboardingContext = new TestSqlOSDbContext(
+            new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(AspireFixture.SqlConnectionString)
+                .Options))
+        {
+            var offboardedUser = await offboardingContext.Set<SqlOSUser>()
+                .SingleAsync(x => x.Id == user.Id);
+            offboardedUser.IsActive = false;
+            await offboardingContext.SaveChangesAsync();
+        }
+
+        var oidcAction = async () => await oidc.CompleteAuthorizationAsync(oidcRequest);
+        await oidcAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Social sign-in could not be completed.");
+
+        var secondSamlFlow = await StartSamlRequestAsync(saml, samlConnection.Id, samlClient.ClientId);
+        var secondSamlResponse = BuildSignedSamlResponse(
+            certificate,
+            "urn:inactive-user:idp",
+            email,
+            "Inactive",
+            "User",
+            secondSamlFlow);
+        var samlAction = async () => await saml.HandleAcsAsync(
+            samlConnection.Id,
+            secondSamlResponse,
+            secondSamlFlow.RelayState,
+            default);
+        await samlAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .CountAsync(x => x.UserId == user.Id
+                && (x.OidcConnectionId == oidcConnection.Id || x.SsoConnectionId == samlConnection.Id)))
+            .Should().Be(2, "inactive callbacks must not create replacement identities");
+    }
+
     [TestMethod]
     public async Task SignedSamlResponse_ProducesExchangeableAuthCode()
     {

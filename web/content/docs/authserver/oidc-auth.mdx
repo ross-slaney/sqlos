@@ -7,6 +7,8 @@ section: authserver
 
 SqlOS supports social login via OpenID Connect providers and GitHub OAuth. Users click a provider button, authenticate with the provider, and are linked or created in SqlOS.
 
+Provider authentication does not override the local account lifecycle. If a provider subject or verified email maps to an existing inactive SqlOS user, the callback fails with a generic social-sign-in error, does not create a replacement identity link, and records the internal lifecycle reason in the audit log. Re-enable the existing SqlOS user explicitly before allowing another provider login.
+
 ## Supported providers
 
 | Provider | Key | Notes |

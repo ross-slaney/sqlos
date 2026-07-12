@@ -152,7 +152,9 @@ When `RequireSsoForExistingMembers` is enabled, a user who already belongs to th
 
 When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create the missing user or organization membership when no existing organization member matches the SAML email. Keep this disabled when access should be invitation- or admin-managed.
 
-Activation only enables the SSO connection and HRD behavior. It does not revoke active sessions. Use the separate session revocation action when an admin intentionally wants existing matching-domain sessions to sign in again through SSO.
+JIT provisioning never reactivates an existing inactive membership, and SAML callbacks reject inactive users and inactive organizations. This preserves offboarding even when the IdP still sends a valid assertion for a previously linked subject. Re-enable the user or membership through an explicit trusted workflow before allowing another SAML login.
+
+Activation only enables the SSO connection and HRD behavior. It does not revoke active sessions. Use the separate session revocation action when an admin intentionally wants existing matching-domain sessions to sign in again through SSO. That action invalidates matching-domain OAuth and hosted AuthPage sessions for the organization.
 
 ## Headless setup state machine
 

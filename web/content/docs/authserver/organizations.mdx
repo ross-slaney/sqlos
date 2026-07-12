@@ -85,3 +85,7 @@ var tokens = result.Tokens
 ## Organization switching
 
 Users can switch organizations without re-authenticating by passing a different `organizationId` during [token refresh](/docs/authserver/sessions-and-tokens).
+
+## Deactivation
+
+An inactive organization is excluded from login selection and cannot receive new authorization codes, sessions, or tokens. Deactivation through `UpdateOrganizationAsync` also revokes active organization-bound OAuth sessions, refresh tokens, and hosted AuthPage sessions. If lifecycle state is changed directly through the shared `DbContext`, the next refresh, AuthPage reuse, authorization-code/session issuance, or stateful access-token validation rejects the organization and makes the relevant session artifacts unusable.

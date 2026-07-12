@@ -625,6 +625,19 @@ public sealed class SqlOSSamlService
         string organizationId,
         CancellationToken cancellationToken)
     {
+        var organizationIsActive = await _context.Set<SqlOSOrganization>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == organizationId && x.IsActive, cancellationToken);
+        if (!organizationIsActive)
+        {
+            await RecordFederatedLifecycleDenialAsync(
+                SqlOSAuthLifecycleDecision.Denied("organization_inactive"),
+                userId: null,
+                organizationId: organizationId,
+                cancellationToken: cancellationToken);
+            return null;
+        }
+
         var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
             .FirstOrDefaultAsync(x => x.SsoConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
         SqlOSUser? user = externalIdentity == null
@@ -634,8 +647,23 @@ public sealed class SqlOSSamlService
 
         if (user != null)
         {
-            var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
-            if (!hasMembership)
+            if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
+            {
+                return null;
+            }
+
+            var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
+            if (membership is { IsActive: false })
+            {
+                await RecordFederatedLifecycleDenialAsync(
+                    SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
+                    user.Id,
+                    organizationId,
+                    cancellationToken);
+                return null;
+            }
+
+            if (membership == null)
             {
                 if (!connection.AutoProvisionUsers)
                 {
@@ -652,8 +680,23 @@ public sealed class SqlOSSamlService
             if (existingEmail != null)
             {
                 user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
-                var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
-                if (hasMembership)
+                if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
+                {
+                    return null;
+                }
+
+                var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
+                if (membership is { IsActive: false })
+                {
+                    await RecordFederatedLifecycleDenialAsync(
+                        SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
+                        user.Id,
+                        organizationId,
+                        cancellationToken);
+                    return null;
+                }
+
+                if (membership != null)
                 {
                     if (!connection.AutoLinkByEmail || !existingEmail.IsVerified)
                     {
@@ -731,12 +774,55 @@ public sealed class SqlOSSamlService
         return user;
     }
 
-    private async Task<bool> UserHasActiveMembershipAsync(
+    private async Task<SqlOSMembership?> FindMembershipAsync(
         string userId,
         string organizationId,
         CancellationToken cancellationToken)
         => await _context.Set<SqlOSMembership>()
-            .AnyAsync(x => x.UserId == userId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, cancellationToken);
+
+    private async Task<bool> IsActiveFederatedUserAsync(
+        string userId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId: null,
+            cancellationToken: cancellationToken);
+        if (lifecycle.IsActive)
+        {
+            return true;
+        }
+
+        await RecordFederatedLifecycleDenialAsync(lifecycle, userId, organizationId, cancellationToken);
+        return false;
+    }
+
+    private async Task RecordFederatedLifecycleDenialAsync(
+        SqlOSAuthLifecycleDecision lifecycle,
+        string? userId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId,
+            organizationId,
+            lifecycle,
+            DateTime.UtcNow,
+            cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            "saml_callback",
+            lifecycle,
+            userId,
+            organizationId);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
 
     private async Task EnsureMembershipAsync(
         string organizationId,
@@ -747,8 +833,11 @@ public sealed class SqlOSSamlService
             .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
         if (existing != null)
         {
-            existing.IsActive = true;
-            existing.Role = "member";
+            if (!existing.IsActive)
+            {
+                throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
+            }
+
             return;
         }
 

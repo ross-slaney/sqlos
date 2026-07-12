@@ -17,6 +17,114 @@ namespace SqlOS.Tests;
 public sealed class SqlOSOidcAuthServiceTests
 {
     [TestMethod]
+    public async Task CompleteAuthorization_InactiveMappedUser_IsRejectedWithoutIdentityReuse()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            ["https://app.example.local/callback/google"]));
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            "Google",
+            "google-client",
+            "google-secret",
+            ["https://app.example.local/callback/google"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+        var request = new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/google",
+            "success:inactive-map@example.com:nonce-inactive",
+            "verifier",
+            "nonce-inactive",
+            null);
+        var first = await oidc.CompleteAuthorizationAsync(request);
+        var user = await context.Set<SqlOSUser>().SingleAsync(x => x.Id == first.UserId);
+        user.IsActive = false;
+        await context.SaveChangesAsync();
+
+        var action = async () => await oidc.CompleteAuthorizationAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Social sign-in could not be completed.");
+        (await context.Set<SqlOSExternalIdentity>().CountAsync()).Should().Be(1);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x =>
+            x.EventType == "auth.lifecycle.denied"
+            && x.UserId == user.Id
+            && x.DataJson!.Contains("user_inactive"))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_InactiveEmailMatchedUser_IsNotAutoLinked()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            ["https://app.example.local/callback/google"]));
+        var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Inactive Existing",
+            "inactive-link@example.com",
+            null));
+        user.IsActive = false;
+        await context.SaveChangesAsync();
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            "Google",
+            "google-client",
+            "google-secret",
+            ["https://app.example.local/callback/google"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+        var action = async () => await oidc.CompleteAuthorizationAsync(
+            new SqlOSCompleteOidcAuthorizationRequest(
+                connection.Id,
+                "example-web",
+                "https://app.example.local/callback/google",
+                "success:inactive-link@example.com:nonce-inactive-link",
+                "verifier",
+                "nonce-inactive-link",
+                null));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Social sign-in could not be completed.");
+        (await context.Set<SqlOSExternalIdentity>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task StartAuthorization_RequiresExactCallbackAndValidS256Challenge()
     {
         using var context = CreateContext();
