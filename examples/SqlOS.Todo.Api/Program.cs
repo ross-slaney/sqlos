@@ -203,6 +203,19 @@ builder.AddSqlOS<TodoSampleDbContext>(
 
         auth.SeedClient(client =>
         {
+            client.ClientId = "example-aspnet";
+            client.Name = "Example ASP.NET Core Client";
+            client.Description = "Razor Pages public PKCE client with a server-owned application session.";
+            client.Audience = sampleConfig.Resource;
+            client.RedirectUris = ["http://localhost:5090/signin-sqlos"];
+            client.AllowedScopes = sampleConfig.AllowedScopes;
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.IsFirstParty = true;
+        });
+
+        auth.SeedClient(client =>
+        {
             client.ClientId = sampleConfig.EmcyClientId;
             client.Name = "Todo Emcy MCP";
             client.Description = "Local downstream client for the Emcy-hosted MCP Todo demo.";

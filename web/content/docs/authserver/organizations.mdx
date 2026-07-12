@@ -27,19 +27,22 @@ var org = await adminService.CreateOrganizationAsync(
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/organizations \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme Corp", "slug": "acme", "primaryDomain": "acme.com"}'
 ```
+
+The Admin API requires an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `name` | Yes | Display name |
 | `slug` | No | URL-friendly identifier, auto-generated if omitted |
-| `primaryDomain` | No | Email domain for SSO routing (e.g., `acme.com`) |
+| `primaryDomain` | No | Organization domain metadata (e.g., `acme.com`); it does not enable SSO by itself |
 
 ## Primary domain
 
-When you set a primary domain, AuthServer uses it for [home realm discovery](/docs/authserver/home-realm-discovery). Users with matching email domains are automatically routed to SSO instead of password login.
+Setting `primaryDomain` alone does not route anyone to SSO. Home realm discovery routes a domain only when the organization also has a complete, enabled SAML connection and the domain satisfies the connection's enrollment policy. Verified delegated domains are preferred when configured. See [Home Realm Discovery](/docs/authserver/home-realm-discovery) and [SAML SSO](/docs/authserver/saml-sso).
 
 ## Create a membership
 
@@ -55,7 +58,7 @@ var membership = await adminService.CreateMembershipAsync(
 
 ## Multi-org login
 
-When a user belongs to multiple organizations and logs in without specifying one, AuthServer returns a `RequiresOrganizationSelection` response with the list of available organizations. Your app presents the list and calls `SelectOrganizationAsync` to complete login.
+When a user belongs to multiple organizations and logs in without specifying one, AuthServer returns a `RequiresOrganizationSelection` response with the list of available organizations. Present that list and call `SelectOrganizationForLoginAsync`. Organization selection can lead to MFA, so branch on the returned state before assuming tokens exist.
 
 ```csharp
 var result = await authService.LoginWithPasswordAsync(
@@ -64,11 +67,25 @@ var result = await authService.LoginWithPasswordAsync(
 
 if (result.RequiresOrganizationSelection)
 {
-    // result.Organizations contains the options
-    // result.PendingAuthToken is used to complete selection
+    result = await authService.SelectOrganizationForLoginAsync(
+        new SqlOSSelectOrganizationRequest(
+            PendingAuthToken: result.PendingAuthToken!,
+            OrganizationId: selectedOrganizationId),
+        httpContext,
+        ct);
 }
+
+if (result.RequiresMfa)
+    return RenderMfaStep(result);
+
+var tokens = result.Tokens
+    ?? throw new InvalidOperationException("Login returned no next state.");
 ```
 
 ## Organization switching
 
 Users can switch organizations without re-authenticating by passing a different `organizationId` during [token refresh](/docs/authserver/sessions-and-tokens).
+
+## Deactivation
+
+An inactive organization is excluded from login selection and cannot receive new authorization codes, sessions, or tokens. Deactivation through `UpdateOrganizationAsync` also revokes active organization-bound OAuth sessions, refresh tokens, and hosted AuthPage sessions. If lifecycle state is changed directly through the shared `DbContext`, the next refresh, AuthPage reuse, authorization-code/session issuance, or stateful access-token validation rejects the organization and makes the relevant session artifacts unusable.

@@ -403,6 +403,7 @@ public sealed class SqlOSAdminService
         var organization = await _context.Set<SqlOSOrganization>()
             .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
             ?? throw new InvalidOperationException("Organization not found.");
+        var isDeactivating = organization.IsActive && !request.IsActive;
 
         var slug = string.IsNullOrWhiteSpace(request.Slug) ? Slugify(request.Name) : Slugify(request.Slug);
         var slugExists = await _context.Set<SqlOSOrganization>()
@@ -416,6 +417,17 @@ public sealed class SqlOSAdminService
         organization.Slug = slug;
         organization.PrimaryDomain = NormalizeDomain(request.PrimaryDomain);
         organization.IsActive = request.IsActive;
+
+        if (isDeactivating)
+        {
+            await SqlOSAuthLifecyclePolicy.RevokeAsync(
+                _context,
+                userId: null,
+                organizationId: organization.Id,
+                reason: "organization_deactivated",
+                now: DateTime.UtcNow,
+                cancellationToken: cancellationToken);
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
         return organization;
@@ -751,7 +763,11 @@ public sealed class SqlOSAdminService
 
     public async Task<List<SqlOSOrganizationOption>> GetUserOrganizationsAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSMembership>()
-            .Where(x => x.UserId == userId && x.IsActive)
+            .AsNoTracking()
+            .Where(x => x.UserId == userId
+                && x.IsActive
+                && x.User!.IsActive
+                && x.Organization!.IsActive)
             .Include(x => x.Organization)
             .Select(x => new SqlOSOrganizationOption(
                 x.OrganizationId,
@@ -761,8 +777,11 @@ public sealed class SqlOSAdminService
             .ToListAsync(cancellationToken);
 
     public async Task<bool> UserHasMembershipAsync(string userId, string organizationId, CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSMembership>()
-            .AnyAsync(x => x.UserId == userId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
+        => (await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId,
+            cancellationToken)).IsActive;
 
     public async Task<object> GetDashboardSummaryAsync(CancellationToken cancellationToken = default)
     {
@@ -1412,7 +1431,7 @@ public sealed class SqlOSAdminService
         var memberships = await _context.Set<SqlOSMembership>()
             .AsNoTracking()
             .Include(x => x.Organization)
-            .Where(x => x.UserId == userId && x.IsActive)
+            .Where(x => x.UserId == userId && x.IsActive && x.Organization!.IsActive)
             .OrderBy(x => x.Organization!.Name)
             .ToListAsync(cancellationToken);
         var clients = await _context.Set<SqlOSClientApplication>()
@@ -2139,8 +2158,8 @@ public sealed class SqlOSAdminService
             .Select(value => value?.Trim())
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => ReplaceConnectionIdPlaceholder(value!, connectionId))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
             .ToList()
         ?? [];
 
@@ -2502,7 +2521,7 @@ public sealed class SqlOSAdminService
 
         redirectUris = redirectUris
             .Select(NormalizeRedirectUri)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (redirectUris.Count == 0)
@@ -2796,7 +2815,7 @@ public sealed class SqlOSAdminService
         var normalizedRedirectUris = (redirectUris ?? [])
             .Where(static uri => !string.IsNullOrWhiteSpace(uri))
             .Select(static uri => uri.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (normalizedRedirectUris.Count == 0 && !allowDeviceAuthorization)

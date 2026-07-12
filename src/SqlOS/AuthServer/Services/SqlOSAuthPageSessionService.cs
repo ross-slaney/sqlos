@@ -31,13 +31,41 @@ public sealed class SqlOSAuthPageSessionService
             return null;
         }
 
-        var token = await _cryptoService.FindTemporaryTokenAsync("auth_page_session", rawToken, cancellationToken);
+        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose, rawToken, cancellationToken);
         if (token?.UserId == null)
         {
             return null;
         }
 
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            token.UserId,
+            token.OrganizationId,
+            cancellationToken);
+        if (!lifecycle.IsActive)
+        {
+            var now = DateTime.UtcNow;
+            await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+                _context,
+                token.UserId,
+                token.OrganizationId,
+                lifecycle,
+                now,
+                cancellationToken);
+            token.ConsumedAt = now;
+            SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+                _context,
+                _cryptoService.GenerateId("aud"),
+                "auth_page_session_reuse",
+                lifecycle,
+                token.UserId,
+                token.OrganizationId);
+            await _context.SaveChangesAsync(cancellationToken);
+            return null;
+        }
+
         var user = await _context.Set<SqlOSUser>()
+            .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == token.UserId && x.IsActive, cancellationToken);
         if (user == null)
         {
@@ -59,9 +87,34 @@ public sealed class SqlOSAuthPageSessionService
         string authenticationMethod,
         CancellationToken cancellationToken = default)
     {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            user.Id,
+            organizationId,
+            cancellationToken);
+        if (!lifecycle.IsActive)
+        {
+            await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+                _context,
+                user.Id,
+                organizationId,
+                lifecycle,
+                DateTime.UtcNow,
+                cancellationToken);
+            SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+                _context,
+                _cryptoService.GenerateId("aud"),
+                "auth_page_session_issue",
+                lifecycle,
+                user.Id,
+                organizationId);
+            await _context.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException("Authentication session is no longer active.");
+        }
+
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
         var rawToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "auth_page_session",
+            SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose,
             user.Id,
             null,
             organizationId,
@@ -85,7 +138,7 @@ public sealed class SqlOSAuthPageSessionService
         var rawToken = httpContext.Request.Cookies[CookieName];
         if (!string.IsNullOrWhiteSpace(rawToken))
         {
-            await _cryptoService.ConsumeTemporaryTokenAsync("auth_page_session", rawToken, cancellationToken);
+            await _cryptoService.ConsumeTemporaryTokenAsync(SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose, rawToken, cancellationToken);
         }
 
         httpContext.Response.Cookies.Delete(CookieName, new CookieOptions

@@ -9,6 +9,10 @@ section: fga
 
 This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
 
+<Callout type="warning" title="Authentication comes first">
+  The filter authorizes a subject ID; it does not authenticate the request. Validate a bearer token for the API's exact audience before the endpoint runs, then use the validated token's user ID as the FGA subject.
+</Callout>
+
 ## Basic usage
 
 ```csharp
@@ -54,9 +58,15 @@ var result = await executor.ExecuteAsync(
 From the retail example app:
 
 ```csharp
-using System.IdentityModel.Tokens.Jwt;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
 
-app.MapGet("/api/chains", async (
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapGet("/chains", async (
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
     ISpecificationExecutor executor,
@@ -64,7 +74,7 @@ app.MapGet("/api/chains", async (
     string? search, int? pageSize, string? cursor,
     string? sortBy, string? sortDir) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 

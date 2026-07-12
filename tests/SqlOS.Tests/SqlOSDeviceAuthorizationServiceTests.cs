@@ -174,7 +174,7 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
             authOptions.SeedCliClient("other-cli", "Other CLI", "https://api.example.com/todos", "openid");
 
             var options = Options.Create(authOptions);
-            var crypto = new SqlOSCryptoService(context, options);
+            var crypto = TestCryptoService.Create(context, options);
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender();
             var settings = new SqlOSSettingsService(context, options, emailSender);

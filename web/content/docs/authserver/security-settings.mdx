@@ -1,43 +1,78 @@
 ---
 title: "Security Settings"
-description: "Configure session lifetimes and token expiration."
+description: "Configure refresh, session, signing-key, and replay lifetimes."
 order: 19
 section: authserver
 ---
 
-Security settings control how long sessions and tokens remain valid.
+Security settings control refresh-token lifetime, session renewal, refresh replay behavior, and signing-key rotation. Access-token lifetime remains a startup option because it changes JWT generation directly.
 
-## Configuration
+## Choose an administration path
 
-**Dashboard**: Auth Server > Security
+- **Dashboard:** open **Auth Server > Security** for operator changes.
+- **Trusted backend:** inject `SqlOSSettingsService` for deployment/setup automation.
+- **Dashboard HTTP API:** use `/sqlos/admin/auth/api/settings/security` only with an authorized dashboard operator session. It is an implementation API for the bundled dashboard, not an unauthenticated management endpoint.
 
-**Admin API**:
+## Current defaults
+
+| Setting | Default | What it controls |
+| --- | --- | --- |
+| Refresh token lifetime | 30 days | Maximum expiry assigned to a refresh token |
+| Session idle timeout | 7 days | Refresh fails when no successful refresh has extended the idle deadline |
+| Session absolute lifetime | 30 days | Hard session deadline that activity cannot move |
+| Refresh-token grace window | 30 seconds | Near-concurrent reuse receives the cached access token and a fresh sibling refresh token instead of replay revocation |
+| Signing-key rotation interval | 90 days | Age at which the active signing key should rotate |
+| Signing-key validation grace | 7 days | Retired-key validation overlap |
+| Retired-key cleanup | 30 days | Retention before old retired keys are deleted |
+
+Idle timeout is enforced on refresh, not on every already-issued access token. Session-aware access-token validation checks session existence, revocation, and absolute expiry; the JWT's own `exp` remains the access token's time boundary.
+
+## Update through a trusted backend
+
+`SqlOSSettingsService` is scoped and operator-trusted. Authorize the caller before exposing any wrapper endpoint:
+
+```csharp
+var updated = await settingsService.UpdateSecuritySettingsAsync(
+    new SqlOSUpdateSecuritySettingsRequest(
+        RefreshTokenLifetimeMinutes: 43200,
+        SessionIdleTimeoutMinutes: 10080,
+        SessionAbsoluteLifetimeMinutes: 43200,
+        SigningKeyRotationIntervalDays: 90,
+        SigningKeyGraceWindowDays: 7,
+        SigningKeyRetiredCleanupDays: 30,
+        RefreshTokenGraceWindowSeconds: 30),
+    ct);
+```
+
+All minute/day values must be positive. Signing-key validation grace must be shorter than the rotation interval. Refresh grace can be `0` to disable it, but cannot exceed the configured access-token lifetime.
+
+## Dashboard API payload
+
+The following assumes the operator cookie jar created by [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls); a bare `curl` request is unauthorized.
 
 ```bash
-# Get current settings
-curl http://localhost:5062/sqlos/admin/auth/api/settings/security
+curl http://localhost:5062/sqlos/admin/auth/api/settings/security \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 
-# Update settings
 curl -X PUT http://localhost:5062/sqlos/admin/auth/api/settings/security \
-  -H "Content-Type: application/json" \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  -H 'Content-Type: application/json' \
   -d '{
-    "refreshTokenLifetimeMinutes": 10080,
-    "sessionIdleTimeoutMinutes": 1440,
-    "sessionAbsoluteLifetimeMinutes": 43200
+    "refreshTokenLifetimeMinutes": 43200,
+    "sessionIdleTimeoutMinutes": 10080,
+    "sessionAbsoluteLifetimeMinutes": 43200,
+    "signingKeyRotationIntervalDays": 90,
+    "signingKeyGraceWindowDays": 7,
+    "signingKeyRetiredCleanupDays": 30,
+    "refreshTokenGraceWindowSeconds": 30
   }'
 ```
 
-## Settings
+In password dashboard mode, the session cookie is created by `POST /sqlos/dashboard-auth/login`; in callback mode, your host authorization callback establishes the trusted operator boundary. Prefer the dashboard UI or injected service over scripting a browser cookie when durable automation is required.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| Refresh token lifetime | 7 days | How long a refresh token is valid |
-| Session idle timeout | 1 day | Session expires after inactivity |
-| Session absolute lifetime | 30 days | Hard expiration regardless of activity |
+## Access-token lifetime
 
-## Access token lifetime
-
-The access token lifetime is configured separately in startup code since it affects JWT generation:
+Configure access-token lifetime at startup. The default is 10 minutes:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
@@ -46,13 +81,17 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-## Reading settings in code
+Keep access tokens short when resource servers use JWKS-only validation because those services cannot see immediate SqlOS session revocation. See [Token Validation](/docs/authserver/token-validation#jwks-for-external-validation).
+
+## Read resolved settings
 
 ```csharp
 var settings = await settingsService.GetResolvedSecuritySettingsAsync(ct);
 
-// settings.RefreshTokenLifetime    → TimeSpan
-// settings.SessionIdleTimeout      → TimeSpan
-// settings.SessionAbsoluteLifetime → TimeSpan
-// settings.RefreshTokenGraceWindow → TimeSpan
+// settings.RefreshTokenLifetime    -> TimeSpan
+// settings.SessionIdleTimeout      -> TimeSpan
+// settings.SessionAbsoluteLifetime -> TimeSpan
+// settings.RefreshTokenGraceWindow -> TimeSpan
 ```
+
+Signing-key timing is available separately through `GetKeyRotationSettingsAsync`. Review [Production Readiness](/docs/guides/production-readiness) before changing key retention or session policy in a rolling deployment.

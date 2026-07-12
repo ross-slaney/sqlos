@@ -70,9 +70,13 @@ Your UI calls these SqlOS endpoints:
 | `POST /sqlos/auth/headless/password/login` | Submit email + password |
 | `POST /sqlos/auth/headless/email-otp/start` | Send an existing-user email code |
 | `POST /sqlos/auth/headless/email-otp/verify` | Verify an existing-user email code |
+| `POST /sqlos/auth/headless/phone-otp/start` | Send an existing-user phone code through Twilio Verify |
+| `POST /sqlos/auth/headless/phone-otp/verify` | Verify an existing-user phone code |
 | `POST /sqlos/auth/headless/signup` | Create account with optional custom fields |
 | `POST /sqlos/auth/headless/signup/email-otp/start` | Send a new-user signup code |
 | `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify signup code and complete authorization |
+| `POST /sqlos/auth/headless/signup/phone-otp/start` | Send a new-user phone signup code |
+| `POST /sqlos/auth/headless/signup/phone-otp/verify` | Verify phone signup and continue authorization |
 | `POST /sqlos/auth/headless/invitations/resolve` | Resolve an invitation token before starting OAuth |
 | `POST /sqlos/auth/headless/invitations/signup` | Create an invited passwordless account and accept the invite |
 | `POST /sqlos/auth/headless/device/resolve` | Resolve a CLI device user code |
@@ -84,13 +88,15 @@ Your UI calls these SqlOS endpoints:
 | `POST /sqlos/auth/headless/mfa/totp/enroll/verify` | Verify forced TOTP enrollment and continue authorization |
 | `POST /sqlos/auth/headless/provider/start` | Start OIDC or SSO flow |
 
+Phone-code routes require both a configured Twilio runtime and `phone_otp` in the effective AuthPage credential list. See [Phone OTP with Twilio Verify](/docs/authserver/phone-otp) for configuration, request contracts, rate limits, and test adapters.
+
 ## CLI device flow
 
 When a CLI sends the user to `/sqlos/auth/device?user_code=...`, SqlOS resolves the device request and creates a normal headless authorization request bound to that device authorization. Your app receives the same `request` id shape used by login, signup, OTP, SSO, and organization selection.
 
 The lowest-friction pattern is:
 
-1. Load `/headless/requests/{requestId}` and render your normal auth UI. The view may be `device`, `login`, `email-otp`, `password`, `organization`, or `device-approve`.
+1. Load `/headless/requests/{requestId}` and render your normal auth UI. The view may be `device`, `login`, `email-otp`, `phone-otp`, `password`, `organization`, or `device-approve`.
 2. Let the existing headless login/signup/OTP/SSO handlers complete the request. Do not carry the user code through your credential forms.
 3. When the returned view is `device-approve`, show the CLI client/resource/scope from `deviceAuthorization`.
 4. Approve or deny with `/headless/device/approve` or `/headless/device/deny`, passing the `requestId`. You may pass `userCode` instead for manual-entry UIs, but request-bound approval is preferred.
@@ -172,6 +178,12 @@ Headless MFA uses the same result contract as every other step.
 When `viewModel.view` is `mfa`, render an input for a 6-digit authenticator code or a recovery code. Post it to `/headless/mfa/verify` with `requestId`, `mfaToken`, and `code`.
 
 When `viewModel.view` is `mfa-enroll`, render authenticator setup. The view model includes `totpEnrollment` with `qrCodeDataUrl`, `secret`, `provisioningUri`, `enrollmentToken`, and `expiresAt`. Post the verification code to `/headless/mfa/totp/enroll/verify`.
+
+Keep `requestId`, `mfaToken`, and `enrollmentToken` from the same view model
+together. They are transaction-bound and cannot be substituted across users,
+clients, organizations, or parallel authorization requests. A normal `mfa`
+view never permits starting enrollment; first-factor completion by itself is
+not authorization to add or replace an authenticator.
 
 If your headless app does not render these views, required-MFA users will authenticate their primary credential and then stop at an unhandled state.
 

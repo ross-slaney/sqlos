@@ -143,19 +143,30 @@ public sealed class ExampleAppDbContext(DbContextOptions<ExampleAppDbContext> op
 }
 
 function asAuditLogRecordProgram(snippet) {
-  return `using SqlOS.AuditLogs;
+  return `using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using SqlOS.AuditLogs;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+var apiAudience = "https://api.example.com";
 
 ${snippet}
 
-public sealed record ShareDocumentRequest(
-    string? OrganizationId,
-    string? UserId,
-    string? UserDisplayName,
-    string? DocumentName,
-    string? Role);
+public sealed class WorkspaceDbContext : DbContext
+{
+    public DbSet<WorkspaceDocument> Documents => Set<WorkspaceDocument>();
+}
+
+public sealed class WorkspaceDocument
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string SharedRole { get; set; } = string.Empty;
+}
 `;
 }
 

@@ -211,6 +211,120 @@ public sealed class OidcAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task OidcCallback_ValidAttackerTokenAndVictimCallbackEmail_DoesNotLinkVictim_InSql()
+    {
+        await ResetOidcStateAsync();
+
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
+        var suffix = Guid.NewGuid().ToString("N");
+        var victimEmail = $"victim-{suffix}@example.com";
+        var attackerEmail = $"attacker-{suffix}@example.com";
+        var callbackUri = $"https://app.example.local/callback/apple-{suffix}";
+        var client = await EnsureClientAsync(admin, $"example-web-apple-attack-{suffix}");
+        var victim = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Victim", victimEmail, null));
+        var connection = await CreateAppleConnectionAsync(admin, callbackUri);
+        var astralName = string.Concat(Enumerable.Repeat("😀", 150));
+
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            client.ClientId,
+            callbackUri,
+            $"success:{attackerEmail}:nonce-apple",
+            "verifier",
+            "nonce-apple",
+            $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"{astralName}\",\"lastName\":\"Account\"}}}}"));
+
+        result.UserId.Should().NotBe(victim.Id);
+        result.Email.Should().Be(attackerEmail);
+        result.DisplayName.Length.Should().BeLessThanOrEqualTo(200);
+        char.IsHighSurrogate(result.DisplayName[^1]).Should().BeFalse();
+        var identity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .SingleAsync(x => x.OidcConnectionId == connection.Id);
+        identity.UserId.Should().Be(result.UserId);
+        identity.Subject.Should().Be($"apple-{attackerEmail}");
+        identity.Email.Should().Be(attackerEmail);
+        (await AspireFixture.SharedContext.Set<SqlOSUser>().SingleAsync(x => x.Id == result.UserId))
+            .DisplayName.Should().Be(result.DisplayName);
+    }
+
+    [TestMethod]
+    public async Task OidcUserInfo_SubMismatch_IsRejectedAndAudited_InSql()
+    {
+        await ResetOidcStateAsync();
+
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
+        var suffix = Guid.NewGuid().ToString("N");
+        var email = $"mismatch-{suffix}@example.com";
+        var callbackUri = $"https://app.example.local/callback/google-{suffix}";
+        var client = await EnsureClientAsync(admin, $"example-web-google-mismatch-{suffix}");
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+
+        var action = () => oidc.CompleteAuthorizationAsync(
+            new SqlOSCompleteOidcAuthorizationRequest(
+                connection.Id,
+                client.ClientId,
+                callbackUri,
+                $"userinfo-sub-mismatch:{email}:nonce-google",
+                "verifier",
+                "nonce-google",
+                null),
+            "203.0.113.154");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login could not be completed.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .CountAsync(x => x.OidcConnectionId == connection.Id)).Should().Be(0);
+        var audit = await AspireFixture.SharedContext.Set<SqlOSAuditEvent>()
+            .Where(x => x.EventType == "user.login.oidc.claim_mismatch" && x.ActorId == connection.Id)
+            .OrderByDescending(x => x.OccurredAt)
+            .FirstAsync();
+        audit.IpAddress.Should().Be("203.0.113.154");
+        audit.MetadataJson.Should().Contain("userinfo_subject_mismatch");
+        audit.MetadataJson.Should().Contain($"google-{email}");
+        audit.MetadataJson.Should().Contain($"mismatched-google-{email}");
+    }
+
+    [TestMethod]
+    public async Task OidcEmailVerification_CannotBeCombinedAcrossClaimSources_InSql()
+    {
+        await ResetOidcStateAsync();
+
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var oidc = new SqlOSOidcAuthService(AspireFixture.SharedContext, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
+        var suffix = Guid.NewGuid().ToString("N");
+        var victimEmail = $"split-victim-{suffix}@example.com";
+        var attackerEmail = $"split-attacker-{suffix}@example.com";
+        var callbackUri = $"https://app.example.local/callback/google-split-{suffix}";
+        var client = await EnsureClientAsync(admin, $"example-web-google-split-{suffix}");
+        var victim = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Split Victim", victimEmail, null));
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+
+        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            client.ClientId,
+            callbackUri,
+            $"split-claims:{attackerEmail}:{victimEmail}:nonce-google",
+            "verifier",
+            "nonce-google",
+            null));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login could not be completed.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .CountAsync(x => x.OidcConnectionId == connection.Id)).Should().Be(0);
+        (await AspireFixture.SharedContext.Set<SqlOSUser>()
+            .SingleAsync(x => x.Id == victim.Id)).DefaultEmail.Should().Be(victimEmail);
+    }
+
+    [TestMethod]
     public async Task AppleAndCustomOidcConnections_Work_WithSharedRuntime()
     {
         await ResetOidcStateAsync();
@@ -304,6 +418,51 @@ public sealed class OidcAuthIntegrationTests
 
         return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"]));
     }
+
+    private static Task<SqlOSOidcConnection> CreateGoogleConnectionAsync(SqlOSAdminService admin, string callbackUri)
+        => admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            "Google",
+            "google-client",
+            "google-secret",
+            [callbackUri],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+    private static Task<SqlOSOidcConnection> CreateAppleConnectionAsync(SqlOSAdminService admin, string callbackUri)
+        => admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Apple,
+            "Apple",
+            "com.example.service",
+            null,
+            [callbackUri],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "TEAM123",
+            "KEY123",
+            TestApplePrivateKeyPem.Value));
 
     private static async Task ResetOidcStateAsync()
     {

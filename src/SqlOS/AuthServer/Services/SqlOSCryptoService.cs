@@ -1,10 +1,12 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Data;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SqlOS.AuthServer.Configuration;
@@ -22,10 +24,24 @@ public sealed class SqlOSCryptoService
     private readonly PasswordHasher<object> _passwordHasher = new();
     private readonly IDataProtector? _secretProtector;
     private readonly ITimeLimitedDataProtector? _refreshTokenResponseProtector;
+    private readonly ISqlOSSigningKeyCustody _signingKeyCustody;
 
     public SqlOSCryptoService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
+        IDataProtectionProvider? dataProtectionProvider = null)
+        : this(
+            context,
+            options,
+            new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider),
+            dataProtectionProvider)
+    {
+    }
+
+    internal SqlOSCryptoService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        ISqlOSSigningKeyCustody signingKeyCustody,
         IDataProtectionProvider? dataProtectionProvider = null)
     {
         _context = context;
@@ -34,6 +50,7 @@ public sealed class SqlOSCryptoService
         _refreshTokenResponseProtector = dataProtectionProvider?
             .CreateProtector("SqlOS.AuthServer.RefreshTokenResponse.v1")
             .ToTimeLimitedDataProtector();
+        _signingKeyCustody = signingKeyCustody;
     }
 
     public string HashPassword(string password) => _passwordHasher.HashPassword(new object(), password);
@@ -86,7 +103,7 @@ public sealed class SqlOSCryptoService
     /// Protection is unavailable and embeds a cryptographic expiry in the
     /// protected payload.
     /// </summary>
-    public string ProtectRefreshTokenResponse(string responseJson, TimeSpan lifetime)
+    internal string ProtectRefreshTokenResponse(string responseJson, TimeSpan lifetime)
     {
         if (string.IsNullOrWhiteSpace(responseJson))
         {
@@ -113,7 +130,7 @@ public sealed class SqlOSCryptoService
     /// Data Protection payloads are deliberately rejected so a database row
     /// can never opt out of the purpose-bound, time-limited protection.
     /// </summary>
-    public string UnprotectRefreshTokenResponse(string protectedResponse)
+    internal string UnprotectRefreshTokenResponse(string protectedResponse)
     {
         if (string.IsNullOrWhiteSpace(protectedResponse)
             || !protectedResponse.StartsWith("dpt:", StringComparison.Ordinal))
@@ -160,7 +177,25 @@ public sealed class SqlOSCryptoService
     }
 
     public string CreatePkceCodeChallenge(string codeVerifier)
-        => Base64UrlEncoder.Encode(SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)));
+    {
+        if (!IsValidPkceCodeVerifier(codeVerifier))
+        {
+            throw new InvalidOperationException(
+                "PKCE code verifier must be 43 to 128 RFC 7636 unreserved characters.");
+        }
+
+        return Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)));
+    }
+
+    internal bool IsValidPkceCodeVerifier(string? codeVerifier)
+        => codeVerifier is { Length: >= 43 and <= 128 }
+            && codeVerifier.All(IsPkceUnreservedCharacter);
+
+    internal bool IsValidS256PkceCodeChallenge(string? codeChallenge)
+        // SHA-256 always produces 32 bytes, whose unpadded base64url
+        // representation is exactly 43 characters.
+        => codeChallenge is { Length: 43 }
+            && codeChallenge.All(IsBase64UrlCharacter);
 
     public bool VerifyPkceCodeVerifier(string codeVerifier, string codeChallenge, string codeChallengeMethod)
     {
@@ -169,9 +204,26 @@ public sealed class SqlOSCryptoService
             throw new InvalidOperationException("Only S256 PKCE code challenges are supported.");
         }
 
+        if (!IsValidPkceCodeVerifier(codeVerifier)
+            || !IsValidS256PkceCodeChallenge(codeChallenge))
+        {
+            return false;
+        }
+
         var computed = CreatePkceCodeChallenge(codeVerifier);
         return string.Equals(computed, codeChallenge, StringComparison.Ordinal);
     }
+
+    private static bool IsPkceUnreservedCharacter(char value)
+        => IsAsciiAlphaNumeric(value) || value is '-' or '.' or '_' or '~';
+
+    private static bool IsBase64UrlCharacter(char value)
+        => IsAsciiAlphaNumeric(value) || value is '-' or '_';
+
+    private static bool IsAsciiAlphaNumeric(char value)
+        => value is >= 'A' and <= 'Z'
+            or >= 'a' and <= 'z'
+            or >= '0' and <= '9';
 
     public async Task<string> CreateTemporaryTokenAsync(
         string purpose,
@@ -239,70 +291,138 @@ public sealed class SqlOSCryptoService
     public T? DeserializePayload<T>(SqlOSTemporaryToken token)
         => string.IsNullOrWhiteSpace(token.PayloadJson) ? default : JsonSerializer.Deserialize<T>(token.PayloadJson);
 
-    public async Task<SqlOSSigningKey> EnsureActiveSigningKeyAsync(CancellationToken cancellationToken = default)
+    public Task<SqlOSSigningKey> EnsureActiveSigningKeyAsync(CancellationToken cancellationToken = default)
+        => EnsureActiveSigningKeyCoreAsync(validateExistingCustody: true, cancellationToken);
+
+    private async Task<SqlOSSigningKey> EnsureActiveSigningKeyCoreAsync(
+        bool validateExistingCustody,
+        CancellationToken cancellationToken)
     {
-        var activeKey = await _context.Set<SqlOSSigningKey>()
-            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
-        if (activeKey != null)
+        var observedKeys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        var observedActiveKeys = observedKeys.Where(static key => key.IsActive).ToList();
+        if (observedActiveKeys.Count > 1)
         {
-            await ProtectSigningKeyAtRestIfNeededAsync(activeKey, cancellationToken);
-            return activeKey;
+            throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing to issue tokens until signing-key state is repaired.");
         }
 
-        using var rsa = RSA.Create(2048);
-        activeKey = new SqlOSSigningKey
+        if (observedActiveKeys.Count == 1)
         {
-            Id = GenerateId("key"),
-            Kid = GenerateOpaqueToken(16),
-            PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
-            ActivatedAt = DateTime.UtcNow,
-            IsActive = true
-        };
-        _context.Set<SqlOSSigningKey>().Add(activeKey);
-        await _context.SaveChangesAsync(cancellationToken);
-        return activeKey;
+            if (validateExistingCustody)
+            {
+                await ValidateCustodyCanSignAsync(observedActiveKeys[0], cancellationToken);
+            }
+
+            return observedActiveKeys[0];
+        }
+
+        return await CreateActiveSigningKeyUnderLockAsync(validateExistingCustody, cancellationToken);
     }
 
-    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(TimeSpan? graceWindow = null, CancellationToken cancellationToken = default)
+    private async Task<SqlOSSigningKey> CreateActiveSigningKeyUnderLockAsync(
+        bool validateExistingCustody,
+        CancellationToken cancellationToken)
     {
-        var cutoff = DateTime.UtcNow.Add(-(graceWindow ?? TimeSpan.FromDays(7)));
-        return await _context.Set<SqlOSSigningKey>()
-            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
-            .ToListAsync(cancellationToken);
+        await using var transaction = await BeginSigningKeyTransactionAsync(cancellationToken);
+        SqlOSSigningKey? createdKey = null;
+        try
+        {
+            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+            var activeKeys = keys.Where(static key => key.IsActive).ToList();
+            if (activeKeys.Count > 1)
+            {
+                throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing to issue tokens until signing-key state is repaired.");
+            }
+
+            if (activeKeys.Count == 1)
+            {
+                if (validateExistingCustody)
+                {
+                    await ValidateCustodyCanSignAsync(activeKeys[0], cancellationToken);
+                }
+                await CommitAsync(transaction, cancellationToken);
+                return activeKeys[0];
+            }
+
+            createdKey = await CreateSigningKeyAsync(keys, cancellationToken);
+            _context.Set<SqlOSSigningKey>().Add(createdKey);
+            await _context.SaveChangesAsync(cancellationToken);
+            await CommitAsync(transaction, cancellationToken);
+            return createdKey;
+        }
+        catch
+        {
+            if (createdKey != null)
+            {
+                await TryDeleteCreatedKeyAsync(createdKey);
+            }
+
+            throw;
+        }
+    }
+
+    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(CancellationToken cancellationToken = default)
+    {
+        var graceWindow = await ResolveSigningKeyGraceWindowAsync(cancellationToken);
+        var cutoff = DateTime.UtcNow.Subtract(graceWindow);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        return keys
+            .Where(key => key.IsActive || key.RetiredAt >= cutoff)
+            .ToList();
     }
 
     public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
     {
+        await using var transaction = await BeginSigningKeyTransactionAsync(cancellationToken);
         var now = DateTime.UtcNow;
+        SqlOSSigningKey? newKey = null;
 
-        var activeKey = await _context.Set<SqlOSSigningKey>()
-            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
-        if (activeKey != null)
+        try
         {
-            activeKey.IsActive = false;
-            activeKey.RetiredAt = now;
+            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+            var activeKeys = keys.Where(static key => key.IsActive).ToList();
+            if (activeKeys.Count > 1)
+            {
+                throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing rotation until signing-key state is repaired.");
+            }
+
+            if (activeKeys.Count == 1)
+            {
+                await ValidateCustodyCanSignAsync(activeKeys[0], cancellationToken);
+            }
+
+            newKey = await CreateSigningKeyAsync(keys, cancellationToken);
+            if (activeKeys.Count == 1)
+            {
+                activeKeys[0].IsActive = false;
+                activeKeys[0].RetiredAt = now;
+            }
+
+            _context.Set<SqlOSSigningKey>().Add(newKey);
+            await _context.SaveChangesAsync(cancellationToken);
+            await CommitAsync(transaction, cancellationToken);
+            return newKey;
         }
-
-        using var rsa = RSA.Create(2048);
-        var newKey = new SqlOSSigningKey
+        catch
         {
-            Id = GenerateId("key"),
-            Kid = GenerateOpaqueToken(16),
-            PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
-            ActivatedAt = now,
-            IsActive = true
-        };
-        _context.Set<SqlOSSigningKey>().Add(newKey);
-        await _context.SaveChangesAsync(cancellationToken);
-        return newKey;
+            if (newKey != null)
+            {
+                await TryDeleteCreatedKeyAsync(newKey);
+            }
+
+            throw;
+        }
     }
 
     public async Task<bool> ShouldRotateSigningKeyAsync(TimeSpan rotationInterval, CancellationToken cancellationToken = default)
     {
-        var activeKey = await _context.Set<SqlOSSigningKey>()
-            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        var activeKeys = keys.Where(static key => key.IsActive).ToList();
+        if (activeKeys.Count > 1)
+        {
+            throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing rotation checks until signing-key state is repaired.");
+        }
+
+        var activeKey = activeKeys.SingleOrDefault();
         if (activeKey == null)
             return true;
         return DateTime.UtcNow - activeKey.ActivatedAt >= rotationInterval;
@@ -311,20 +431,28 @@ public sealed class SqlOSCryptoService
     public async Task<int> CleanupRetiredSigningKeysAsync(TimeSpan retiredCleanupWindow, CancellationToken cancellationToken = default)
     {
         var cutoff = DateTime.UtcNow.Add(-retiredCleanupWindow);
-        var expired = await _context.Set<SqlOSSigningKey>()
-            .Where(x => !x.IsActive && x.RetiredAt != null && x.RetiredAt < cutoff)
-            .ToListAsync(cancellationToken);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        var expired = keys
+            .Where(key => !key.IsActive && key.RetiredAt < cutoff)
+            .ToList();
         if (expired.Count == 0)
             return 0;
+
+        foreach (var key in expired)
+        {
+            await _signingKeyCustody.DeleteKeyAsync(ToDescriptor(key), cancellationToken);
+        }
+
         _context.Set<SqlOSSigningKey>().RemoveRange(expired);
         await _context.SaveChangesAsync(cancellationToken);
         return expired.Count;
     }
 
     public async Task<List<SqlOSSigningKey>> ListSigningKeysAsync(CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSSigningKey>()
-            .OrderByDescending(x => x.ActivatedAt)
-            .ToListAsync(cancellationToken);
+    {
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        return keys.OrderByDescending(key => key.ActivatedAt).ToList();
+    }
 
     public async Task<string> CreateAccessTokenAsync(
         SqlOSUser user,
@@ -333,92 +461,51 @@ public sealed class SqlOSCryptoService
         string? organizationId,
         CancellationToken cancellationToken = default)
     {
-        var key = await EnsureActiveSigningKeyAsync(cancellationToken);
-        var signingMaterial = await GetSigningMaterialAsync(key, cancellationToken);
-        using var rsa = RSA.Create();
-        rsa.ImportFromPem(signingMaterial.PrivateKeyPem);
-        var signingKey = new RsaSecurityKey(rsa.ExportParameters(true)) { KeyId = signingMaterial.Key.Kid };
-
+        var key = await EnsureActiveSigningKeyCoreAsync(validateExistingCustody: false, cancellationToken);
         var now = DateTime.UtcNow;
-        var claims = new List<Claim>
+        var authenticationMethods = SqlOSMfaPolicyService
+            .SplitAuthenticationMethods(session.AuthenticationMethod ?? "password")
+            .ToArray();
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id),
-            new("sid", session.Id),
-            new("client_id", client.ClientId)
+            [JwtRegisteredClaimNames.Iss] = _options.Issuer,
+            [JwtRegisteredClaimNames.Sub] = user.Id,
+            [JwtRegisteredClaimNames.Aud] = string.IsNullOrWhiteSpace(session.EffectiveAudience)
+                ? client.Audience
+                : session.EffectiveAudience,
+            [JwtRegisteredClaimNames.Nbf] = EpochTime.GetIntDate(now),
+            [JwtRegisteredClaimNames.Iat] = EpochTime.GetIntDate(now),
+            [JwtRegisteredClaimNames.Exp] = EpochTime.GetIntDate(now.Add(_options.AccessTokenLifetime)),
+            ["sid"] = session.Id,
+            ["client_id"] = client.ClientId,
+            ["amr"] = authenticationMethods
         };
-
-        foreach (var method in SqlOSMfaPolicyService.SplitAuthenticationMethods(session.AuthenticationMethod ?? "password"))
-        {
-            claims.Add(new Claim("amr", method));
-        }
 
         if (!string.IsNullOrWhiteSpace(user.DefaultEmail))
         {
-            claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.DefaultEmail));
+            payload[JwtRegisteredClaimNames.Email] = user.DefaultEmail;
         }
 
         if (!string.IsNullOrWhiteSpace(organizationId))
         {
-            claims.Add(new Claim("org_id", organizationId));
+            payload["org_id"] = organizationId;
         }
 
-        var audience = string.IsNullOrWhiteSpace(session.EffectiveAudience)
-            ? client.Audience
-            : session.EffectiveAudience;
-        var token = new JwtSecurityToken(
-            issuer: _options.Issuer,
-            audience: audience,
-            claims: claims,
-            notBefore: now,
-            expires: now.Add(_options.AccessTokenLifetime),
-            signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256));
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    private async Task<(SqlOSSigningKey Key, string PrivateKeyPem)> GetSigningMaterialAsync(
-        SqlOSSigningKey key,
-        CancellationToken cancellationToken)
-    {
-        try
+        var header = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            return (key, UnprotectSecret(key.PrivateKeyPem));
-        }
-        catch (InvalidOperationException) when (key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
-        {
-            var replacement = await ReplaceUnreadableActiveSigningKeyAsync(key, cancellationToken);
-            return (replacement, UnprotectSecret(replacement.PrivateKeyPem));
-        }
-    }
-
-    private async Task<SqlOSSigningKey> ReplaceUnreadableActiveSigningKeyAsync(
-        SqlOSSigningKey unreadableKey,
-        CancellationToken cancellationToken)
-    {
-        var activeKey = await _context.Set<SqlOSSigningKey>()
-            .FirstOrDefaultAsync(x => x.Id == unreadableKey.Id && x.IsActive, cancellationToken);
-        if (activeKey == null)
-        {
-            return await EnsureActiveSigningKeyAsync(cancellationToken);
-        }
-
-        var now = DateTime.UtcNow;
-        activeKey.IsActive = false;
-        activeKey.RetiredAt = now;
-
-        using var rsa = RSA.Create(2048);
-        var replacement = new SqlOSSigningKey
-        {
-            Id = GenerateId("key"),
-            Kid = GenerateOpaqueToken(16),
-            PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
-            PrivateKeyPem = ProtectSigningPrivateKey(rsa.ExportPkcs8PrivateKeyPem()),
-            ActivatedAt = now,
-            IsActive = true
+            [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
+            [JwtHeaderParameterNames.Typ] = "JWT",
+            [JwtHeaderParameterNames.Kid] = key.Kid
         };
-        _context.Set<SqlOSSigningKey>().Add(replacement);
-        await _context.SaveChangesAsync(cancellationToken);
-        return replacement;
+        var encodedHeader = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(header));
+        var encodedPayload = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(payload));
+        var signingInput = $"{encodedHeader}.{encodedPayload}";
+        var signature = await _signingKeyCustody.SignAsync(
+            ToDescriptor(key),
+            Encoding.ASCII.GetBytes(signingInput),
+            cancellationToken);
+        VerifySignature(key, Encoding.ASCII.GetBytes(signingInput), signature);
+        return $"{signingInput}.{Base64UrlEncoder.Encode(signature)}";
     }
 
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
@@ -451,7 +538,6 @@ public sealed class SqlOSCryptoService
             return null;
         }
 
-        var securityKeys = keys.Select(ToSecurityKey).ToList();
         var handler = new JwtSecurityTokenHandler
         {
             MapInboundClaims = false
@@ -459,6 +545,23 @@ public sealed class SqlOSCryptoService
 
         try
         {
+            var jwt = handler.ReadJwtToken(rawToken);
+            if (!string.Equals(jwt.Header.Alg, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal)
+                || !string.Equals(jwt.Header.Typ, "JWT", StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(jwt.Header.Kid))
+            {
+                return null;
+            }
+
+            var matchingKeys = keys
+                .Where(key => string.Equals(key.Kid, jwt.Header.Kid, StringComparison.Ordinal)
+                    && string.Equals(key.Algorithm, jwt.Header.Alg, StringComparison.Ordinal))
+                .ToList();
+            if (matchingKeys.Count != 1)
+            {
+                return null;
+            }
+
             var principal = handler.ValidateToken(rawToken, new TokenValidationParameters
             {
                 ValidateIssuer = true,
@@ -466,7 +569,10 @@ public sealed class SqlOSCryptoService
                 ValidateAudience = validateAudience,
                 ValidAudience = validateAudience ? expectedAudience : null,
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKeys = securityKeys,
+                IssuerSigningKey = ToSecurityKey(matchingKeys[0]),
+                ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+                ValidTypes = ["JWT"],
+                RequireSignedTokens = true,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromMinutes(1)
             }, out _);
@@ -477,20 +583,93 @@ public sealed class SqlOSCryptoService
                 return null;
             }
 
-            var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
-            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow)
+            var now = DateTime.UtcNow;
+            var session = await _context.Set<SqlOSSession>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+            if (session == null || session.RevokedAt != null || session.AbsoluteExpiresAt <= now)
             {
                 return null;
             }
 
-            session.LastSeenAt = DateTime.UtcNow;
+            var userId = principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+            if (string.IsNullOrWhiteSpace(userId)
+                || !string.Equals(userId, session.UserId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var organizationId = principal.FindFirstValue("org_id");
+            var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+                _context,
+                session.UserId,
+                organizationId,
+                cancellationToken);
+            if (session.IdleExpiresAt <= now || !lifecycle.IsActive)
+            {
+                var denial = session.IdleExpiresAt <= now
+                    ? SqlOSAuthLifecycleDecision.Denied("session_idle_expired")
+                    : lifecycle;
+                SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+                    _context,
+                    GenerateId("aud"),
+                    "access_token_validation",
+                    denial,
+                    session.UserId,
+                    organizationId,
+                    session.Id);
+
+                if (session.IdleExpiresAt <= now)
+                {
+                    var trackedSession = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
+                        ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
+                    await SqlOSAuthLifecyclePolicy.RevokeSessionAsync(
+                        _context,
+                        trackedSession,
+                        "session_idle_expired",
+                        now,
+                        cancellationToken);
+                }
+                else
+                {
+                    await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+                        _context,
+                        session.UserId,
+                        organizationId,
+                        lifecycle,
+                        now,
+                        cancellationToken);
+                }
+
+                await _context.SaveChangesAsync(cancellationToken);
+                return null;
+            }
+
+            var idleTimeoutMinutes = await _context.Set<SqlOSSettings>()
+                .AsNoTracking()
+                .Where(x => x.Id == "default")
+                .Select(x => (int?)x.SessionIdleTimeoutMinutes)
+                .FirstOrDefaultAsync(cancellationToken);
+            var idleTimeout = idleTimeoutMinutes is > 0
+                ? TimeSpan.FromMinutes(idleTimeoutMinutes.Value)
+                : _options.SessionIdleTimeout;
+            var nextIdleExpiry = now.Add(idleTimeout);
+            if (nextIdleExpiry > session.AbsoluteExpiresAt)
+            {
+                nextIdleExpiry = session.AbsoluteExpiresAt;
+            }
+
+            var sessionToUpdate = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
+                ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
+            sessionToUpdate.LastSeenAt = now;
+            sessionToUpdate.IdleExpiresAt = nextIdleExpiry;
             if (!string.IsNullOrWhiteSpace(session.ClientApplicationId))
             {
                 var client = await _context.Set<SqlOSClientApplication>()
                     .FirstOrDefaultAsync(x => x.Id == session.ClientApplicationId, cancellationToken);
                 if (client != null)
                 {
-                    client.LastSeenAt = DateTime.UtcNow;
+                    client.LastSeenAt = now;
                 }
             }
             await _context.SaveChangesAsync(cancellationToken);
@@ -498,8 +677,8 @@ public sealed class SqlOSCryptoService
             return new SqlOSValidatedToken(
                 principal,
                 session.Id,
-                principal.FindFirstValue(JwtRegisteredClaimNames.Sub),
-                principal.FindFirstValue("org_id"),
+                userId,
+                organizationId,
                 principal.FindFirstValue("client_id"),
                 principal.FindFirstValue("aud"));
         }
@@ -538,27 +717,274 @@ public sealed class SqlOSCryptoService
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
     }
 
-    private async Task ProtectSigningKeyAtRestIfNeededAsync(SqlOSSigningKey key, CancellationToken cancellationToken)
+    private async Task<SqlOSSigningKey> CreateSigningKeyAsync(
+        IReadOnlyCollection<SqlOSSigningKey> existingKeys,
+        CancellationToken cancellationToken)
     {
-        if (!_options.ProtectSigningKeysWithDataProtection
-            || string.IsNullOrWhiteSpace(key.PrivateKeyPem)
-            || key.PrivateKeyPem.StartsWith("dp:", StringComparison.Ordinal))
+        var kid = GenerateOpaqueToken(16);
+        var created = await _signingKeyCustody.CreateKeyAsync(
+            kid,
+            SecurityAlgorithms.RsaSha256,
+            cancellationToken);
+        var key = new SqlOSSigningKey
         {
-            return;
+            Id = GenerateId("key"),
+            Kid = kid,
+            Algorithm = created.Algorithm,
+            PublicKeyPem = created.PublicKeyPem,
+            CustodyProvider = _signingKeyCustody.ProviderId,
+            KeyReference = created.KeyReference,
+            ActivatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        var reusedReference = existingKeys.FirstOrDefault(existing =>
+            string.Equals(existing.KeyReference, key.KeyReference, StringComparison.Ordinal));
+        if (reusedReference != null)
+        {
+            throw BuildReusedSigningKeyException(key, reusedReference);
         }
 
-        var protectedPrivateKey = ProtectSigningPrivateKey(key.PrivateKeyPem);
-        if (string.Equals(protectedPrivateKey, key.PrivateKeyPem, StringComparison.Ordinal))
+        try
         {
-            return;
+            ValidateStoredSigningKeyRow(key);
+            await ValidateCustodyCanSignAsync(key, cancellationToken);
+        }
+        catch
+        {
+            await TryDeleteCreatedKeyAsync(key);
+            throw;
         }
 
-        key.PrivateKeyPem = protectedPrivateKey;
-        await _context.SaveChangesAsync(cancellationToken);
+        var reusedPublicKey = existingKeys.FirstOrDefault(existing =>
+            PublicKeysMatch(existing.PublicKeyPem, key.PublicKeyPem));
+        if (reusedPublicKey != null)
+        {
+            throw BuildReusedSigningKeyException(key, reusedPublicKey);
+        }
+
+        return key;
     }
 
-    private string ProtectSigningPrivateKey(string privateKeyPem)
-        => _options.ProtectSigningKeysWithDataProtection
-            ? ProtectSecret(privateKeyPem)
-            : privateKeyPem;
+    private void ValidateStoredSigningKeyRows(IEnumerable<SqlOSSigningKey> keys)
+    {
+        var rows = keys.ToList();
+        foreach (var key in rows)
+        {
+            ValidateStoredSigningKeyRow(key);
+        }
+
+        for (var firstIndex = 0; firstIndex < rows.Count; firstIndex++)
+        {
+            for (var secondIndex = firstIndex + 1; secondIndex < rows.Count; secondIndex++)
+            {
+                var first = rows[firstIndex];
+                var second = rows[secondIndex];
+                if (string.Equals(first.KeyReference, second.KeyReference, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Signing keys '{first.Kid}' and '{second.Kid}' share a custody reference. " +
+                        "Refusing ambiguous provider ownership.");
+                }
+
+                if (PublicKeysMatch(first.PublicKeyPem, second.PublicKeyPem))
+                {
+                    throw new InvalidOperationException(
+                        $"Signing keys '{first.Kid}' and '{second.Kid}' share the same canonical RSA public key. " +
+                        "Refusing ambiguous provider ownership.");
+                }
+            }
+        }
+    }
+
+    private void ValidateStoredSigningKeyRow(SqlOSSigningKey key)
+    {
+        if (ContainsPrivateKeyPem(key.KeyReference) || ContainsPrivateKeyPem(key.PublicKeyPem))
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' contains plaintext private key material in the application database. " +
+                "SqlOS refuses to start or publish this key. Remove legacy signing-key rows and provision keys through configured custody.");
+        }
+
+        if (string.IsNullOrWhiteSpace(key.Kid)
+            || string.IsNullOrWhiteSpace(key.PublicKeyPem)
+            || string.IsNullOrWhiteSpace(key.KeyReference)
+            || string.IsNullOrWhiteSpace(key.CustodyProvider))
+        {
+            throw new InvalidOperationException("A SqlOS signing-key row has incomplete custody metadata.");
+        }
+
+        if (key.IsActive && key.RetiredAt != null)
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' is active but has a retirement timestamp. Refusing inconsistent signing-key lifecycle state.");
+        }
+
+        if (!key.IsActive && key.RetiredAt == null)
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' is inactive but has no retirement timestamp. Refusing inconsistent signing-key lifecycle state.");
+        }
+
+        if (!string.Equals(key.Algorithm, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Signing key '{key.Kid}' uses unsupported algorithm '{key.Algorithm}'. SqlOS requires RS256.");
+        }
+
+        if (!string.Equals(key.CustodyProvider, _signingKeyCustody.ProviderId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' is bound to custody provider '{key.CustodyProvider}', but '{_signingKeyCustody.ProviderId}' is configured.");
+        }
+
+        try
+        {
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(key.PublicKeyPem);
+            if (rsa.KeySize < 2048)
+            {
+                throw new InvalidOperationException($"Signing key '{key.Kid}' is smaller than 2048 bits.");
+            }
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        {
+            throw new InvalidOperationException($"Signing key '{key.Kid}' does not contain a valid RSA public key.", ex);
+        }
+    }
+
+    private async Task ValidateCustodyCanSignAsync(SqlOSSigningKey key, CancellationToken cancellationToken)
+    {
+        var challenge = RandomNumberGenerator.GetBytes(32);
+        var signature = await _signingKeyCustody.SignAsync(ToDescriptor(key), challenge, cancellationToken);
+        VerifySignature(key, challenge, signature);
+    }
+
+    private static void VerifySignature(SqlOSSigningKey key, ReadOnlySpan<byte> signingInput, ReadOnlySpan<byte> signature)
+    {
+        using var rsa = RSA.Create();
+        rsa.ImportFromPem(key.PublicKeyPem);
+        if (!rsa.VerifyData(signingInput, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+        {
+            throw new InvalidOperationException(
+                $"Signing custody provider '{key.CustodyProvider}' produced a signature that does not match key '{key.Kid}'.");
+        }
+    }
+
+    private static bool PublicKeysMatch(string firstPublicKeyPem, string secondPublicKeyPem)
+    {
+        using var first = RSA.Create();
+        first.ImportFromPem(firstPublicKeyPem);
+        using var second = RSA.Create();
+        second.ImportFromPem(secondPublicKeyPem);
+        var firstFingerprint = SHA256.HashData(first.ExportSubjectPublicKeyInfo());
+        var secondFingerprint = SHA256.HashData(second.ExportSubjectPublicKeyInfo());
+        return CryptographicOperations.FixedTimeEquals(firstFingerprint, secondFingerprint);
+    }
+
+    private static InvalidOperationException BuildReusedSigningKeyException(
+        SqlOSSigningKey createdKey,
+        SqlOSSigningKey existingKey)
+        => new(
+            $"Signing custody provider '{createdKey.CustodyProvider}' reused existing key material from '{existingKey.Kid}' while creating '{createdKey.Kid}'. " +
+            "Refusing rotation without deleting the ambiguous provider reference.");
+
+    private static SqlOSSigningKeyDescriptor ToDescriptor(SqlOSSigningKey key)
+        => new(key.Kid, key.Algorithm, key.PublicKeyPem, key.KeyReference, key.CustodyProvider);
+
+    private static bool ContainsPrivateKeyPem(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && (value.Contains("-----BEGIN PRIVATE KEY-----", StringComparison.Ordinal)
+                || value.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal)
+                || value.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal));
+
+    private async Task<List<SqlOSSigningKey>> LoadAndValidateSigningKeysAsync(CancellationToken cancellationToken)
+    {
+        var keys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
+        ValidateStoredSigningKeyRows(keys);
+        return keys;
+    }
+
+    private async Task<TimeSpan> ResolveSigningKeyGraceWindowAsync(CancellationToken cancellationToken)
+    {
+        var persistedGraceDays = await _context.Set<SqlOSSettings>()
+            .AsNoTracking()
+            .Where(settings => settings.Id == "default")
+            .Select(settings => (int?)settings.SigningKeyGraceWindowDays)
+            .SingleOrDefaultAsync(cancellationToken);
+        var graceDays = persistedGraceDays ?? _options.DefaultSigningKeyGraceWindowDays;
+        if (graceDays <= 0)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key grace configuration is invalid. SigningKeyGraceWindowDays must be positive.");
+        }
+
+        try
+        {
+            return TimeSpan.FromDays(graceDays);
+        }
+        catch (OverflowException ex)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key grace configuration exceeds the supported duration.",
+                ex);
+        }
+    }
+
+    private async Task<IDbContextTransaction?> BeginSigningKeyTransactionAsync(CancellationToken cancellationToken)
+    {
+        if (!_context.Database.IsRelational())
+        {
+            return null;
+        }
+
+        var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        try
+        {
+            if (string.Equals(
+                _context.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.SqlServer",
+                StringComparison.Ordinal))
+            {
+                await _context.Database.ExecuteSqlRawAsync(
+                    """
+                    DECLARE @result int;
+                    EXEC @result = sys.sp_getapplock
+                        @Resource = 'SqlOS.SigningKeys',
+                        @LockMode = 'Exclusive',
+                        @LockOwner = 'Transaction',
+                        @LockTimeout = 30000;
+                    IF @result < 0
+                        THROW 51000, 'SqlOS could not acquire the signing-key custody lock.', 1;
+                    """,
+                    cancellationToken);
+            }
+
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task CommitAsync(IDbContextTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction != null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+    }
+
+    private async Task TryDeleteCreatedKeyAsync(SqlOSSigningKey key)
+    {
+        try
+        {
+            await _signingKeyCustody.DeleteKeyAsync(ToDescriptor(key), CancellationToken.None);
+        }
+        catch
+        {
+            // Preserve the original persistence/custody exception. External providers should surface
+            // orphaned-key cleanup through their own operational telemetry.
+        }
+    }
 }

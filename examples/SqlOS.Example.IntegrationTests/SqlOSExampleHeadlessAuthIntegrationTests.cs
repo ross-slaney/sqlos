@@ -32,7 +32,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
 
         var email = $"headless-{Guid.NewGuid():N}@example.com";
         const string password = "P@ssword123!";
-        const string verifier = "headless-test-verifier-123456789";
+        const string verifier = "headless-test-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -120,7 +120,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
             AllowAutoRedirect = false
         });
 
-        const string verifier = "silent-test-verifier-123456789";
+        const string verifier = "silent-test-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -159,7 +159,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         });
 
         var email = $"silent-{Guid.NewGuid():N}@example.com";
-        const string firstVerifier = "headless-session-verifier-123456789";
+        const string firstVerifier = "headless-session-verifier-123456789-rfc7636-secure";
         var firstChallenge = CreateCodeChallenge(firstVerifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -198,7 +198,7 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
         signupJson.RootElement.GetProperty("type").GetString().Should().Be("redirect");
 
-        const string secondVerifier = "prompt-none-verifier-987654321";
+        const string secondVerifier = "prompt-none-verifier-987654321-rfc7636-secure";
         var secondChallenge = CreateCodeChallenge(secondVerifier);
         var silentAuthorize = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
         {

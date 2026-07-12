@@ -435,7 +435,8 @@ public sealed class SqlOSSigningKey
     public string Kid { get; set; } = string.Empty;
     public string Algorithm { get; set; } = "RS256";
     public string PublicKeyPem { get; set; } = string.Empty;
-    public string PrivateKeyPem { get; set; } = string.Empty;
+    public string CustodyProvider { get; set; } = string.Empty;
+    public string KeyReference { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public DateTime ActivatedAt { get; set; }
     public DateTime? RetiredAt { get; set; }
