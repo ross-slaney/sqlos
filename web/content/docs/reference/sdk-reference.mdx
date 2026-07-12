@@ -268,9 +268,8 @@ The public reset-email method is enumeration-safe: it returns the same public sh
 
 ```csharp
 var reset = await authService.RequestPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(
+    new SqlOSForgotPasswordRequest(
         Email: email,
-        ResetUrlTemplate: "https://app.example.com/reset?token={token}",
         ClientId: clientId),
     httpContext,
     ct);

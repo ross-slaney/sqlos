@@ -731,15 +731,23 @@ Create a one-time password reset token and send the built-in password reset emai
 
 ```csharp
 var result = await authService.RequestPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(
+    new SqlOSForgotPasswordRequest(
         Email: request.Email,
-        ResetUrlTemplate: "https://app.example.com/reset-password?token={token}",
         ClientId: "web"),
     httpContext,
     ct);
 ```
 
-Use `ResetUrlTemplate: null` to link to SqlOS' hosted reset form at `/sqlos/auth/password/reset?token=...`.
+Public callers cannot provide a reset URL or origin. By default the email links to SqlOS' hosted form
+at `{AuthServer.PublicOrigin}{AuthServer.BasePath}/password/reset?token=...`. When `PublicOrigin` is
+omitted, SqlOS derives the origin from the validated `Issuer`; it never derives password-reset links
+from request host or forwarded-host headers.
+
+Configure an app-owned reset page on the server with `AuthServer.PasswordReset.BuildResetUrl`. The
+callback receives a `ClientId` only for an active first-party client resolved by SqlOS. Its output is
+validated as an absolute HTTPS URL without user information; loopback HTTP is accepted only for local
+development. Link-generation failures invalidate the token without changing the enumeration-safe
+public response.
 
 Public routes:
 
@@ -793,7 +801,7 @@ var result = await authService.SendPasswordResetEmailAsync(
 | Name | Type | Description |
 |------|------|-------------|
 | `request.Email` | `string` | The user's email address. |
-| `request.ResetUrlTemplate` | `string?` | Optional reset URL template. If it includes `{token}`, SqlOS replaces it with the escaped reset token. |
+| `request.ResetUrlTemplate` | `string?` | Optional trusted server-side reset URL template. If it includes `{token}`, SqlOS replaces it with the escaped reset token. The generated URL is validated before delivery. This field is not accepted by public reset endpoints. |
 | `request.ClientId` | `string?` | Optional client/application key used for rate limiting and audit context. |
 
 **Returns**
