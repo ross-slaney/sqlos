@@ -959,15 +959,6 @@ public sealed class SqlOSAuthService
         SqlOSForgotPasswordRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-        => await RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(request.Email, ClientId: request.ClientId),
-            httpContext,
-            cancellationToken);
-
-    public async Task<SqlOSPasswordResetRequestResult> RequestPasswordResetEmailAsync(
-        SqlOSSendPasswordResetEmailRequest request,
-        HttpContext? httpContext = null,
-        CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
         var trimmedEmail = NormalizeEmailInput(request.Email);
@@ -1039,8 +1030,9 @@ public sealed class SqlOSAuthService
         {
             await SendPasswordResetEmailToEligibleUserAsync(
                 email,
-                request.ResetUrlTemplate,
+                trustedResetUrlTemplate: null,
                 client?.Id,
+                client?.IsFirstParty == true ? client.ClientId : null,
                 httpContext,
                 cancellationToken);
         }
@@ -1070,7 +1062,13 @@ public sealed class SqlOSAuthService
         }
 
         var client = await TryResolveClientApplicationAsync(request.ClientId, cancellationToken);
-        return await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, client?.Id, httpContext, cancellationToken);
+        return await SendPasswordResetEmailToEligibleUserAsync(
+            email,
+            request.ResetUrlTemplate,
+            client?.Id,
+            client?.IsFirstParty == true ? client.ClientId : null,
+            httpContext,
+            cancellationToken);
     }
 
     public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailForUserAsync(
@@ -1106,7 +1104,13 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password reset is unavailable for this account.");
         }
 
-        var result = await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, clientApplicationId: null, httpContext, cancellationToken);
+        var result = await SendPasswordResetEmailToEligibleUserAsync(
+            email,
+            request.ResetUrlTemplate,
+            clientApplicationId: null,
+            clientId: null,
+            httpContext,
+            cancellationToken);
         await RecordPasswordResetAuditAsync(
             "password_reset.admin_email_sent",
             "admin",
@@ -1121,23 +1125,29 @@ public sealed class SqlOSAuthService
 
     private async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailToEligibleUserAsync(
         SqlOSUserEmail email,
-        string? resetUrlTemplate,
+        string? trustedResetUrlTemplate,
         string? clientApplicationId,
+        string? clientId,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        var (token, expiresAt) = await CreatePasswordResetTokenForEmailAsync(email, clientApplicationId, cancellationToken);
-        var context = await BuildPasswordResetMessageContextAsync(
-            email.Email,
-            MaskEmail(email.Email),
-            token,
-            expiresAt,
-            resetUrlTemplate,
-            httpContext,
-            cancellationToken);
+        var maskedEmail = MaskEmail(email.Email);
+        string? token = null;
 
         try
         {
+            var tokenResult = await CreatePasswordResetTokenForEmailAsync(email, clientApplicationId, cancellationToken);
+            token = tokenResult.Token;
+            var expiresAt = tokenResult.ExpiresAt;
+            var context = await BuildPasswordResetMessageContextAsync(
+                email.Email,
+                maskedEmail,
+                token,
+                expiresAt,
+                trustedResetUrlTemplate,
+                clientId,
+                cancellationToken);
+
             if (_passwordResetOptions.BuildMessage != null)
             {
                 var authEmailSender = _authEmailSender
@@ -1207,13 +1217,16 @@ public sealed class SqlOSAuthService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+            if (token != null)
+            {
+                await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+            }
             await RecordPasswordResetAuditAsync(
                 "password_reset.email_send_failed",
                 "system",
                 null,
                 email.UserId,
-                context.MaskedEmail,
+                maskedEmail,
                 GetIp(httpContext),
                 new { error = ex.Message },
                 cancellationToken);
@@ -1642,22 +1655,28 @@ public sealed class SqlOSAuthService
             refreshToken.ExpiresAt);
     }
 
-    private string BuildPasswordResetUrl(string token, string? resetUrlTemplate, HttpContext? httpContext)
+    private string BuildPasswordResetUrl(string token, string? trustedResetUrlTemplate)
     {
         var escapedToken = Uri.EscapeDataString(token);
-        if (!string.IsNullOrWhiteSpace(resetUrlTemplate))
+        if (!string.IsNullOrWhiteSpace(trustedResetUrlTemplate))
         {
-            var template = resetUrlTemplate.Trim();
+            var template = trustedResetUrlTemplate.Trim();
             if (template.Contains("{token}", StringComparison.Ordinal))
             {
+                ValidatePasswordResetTemplate(template);
                 return template.Replace("{token}", escapedToken, StringComparison.Ordinal);
             }
 
-            var separator = template.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-            return $"{template}{separator}token={escapedToken}";
+            var templateUri = new Uri(ValidatePasswordResetUrl(template), UriKind.Absolute);
+            var builder = new UriBuilder(templateUri);
+            var query = builder.Query.TrimStart('?');
+            builder.Query = string.IsNullOrEmpty(query)
+                ? $"token={escapedToken}"
+                : $"{query}&token={escapedToken}";
+            return builder.Uri.AbsoluteUri;
         }
 
-        return $"{GetPublicOrigin(httpContext)}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
+        return $"{GetTrustedPublicOrigin()}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
     }
 
     private async Task<SqlOSPasswordResetMessageContext> BuildPasswordResetMessageContextAsync(
@@ -1665,8 +1684,8 @@ public sealed class SqlOSAuthService
         string maskedEmail,
         string token,
         DateTime expiresAt,
-        string? resetUrlTemplate,
-        HttpContext? httpContext,
+        string? trustedResetUrlTemplate,
+        string? clientId,
         CancellationToken cancellationToken)
     {
         var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
@@ -1682,8 +1701,9 @@ public sealed class SqlOSAuthService
                 maskedEmail,
                 expiresAt,
                 _passwordResetOptions.TokenLifetime,
-                httpContext))
-            ?? BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
+                clientId))
+            ?? BuildPasswordResetUrl(token, trustedResetUrlTemplate);
+        resetUrl = ValidateGeneratedPasswordResetUrl(resetUrl, token);
 
         return new SqlOSPasswordResetMessageContext(
             applicationName,
@@ -1906,21 +1926,60 @@ public sealed class SqlOSAuthService
             now.Add(_passwordResetOptions.TokenLifetime),
             nextAllowedSendAt ?? now.Add(_passwordResetOptions.ResendCooldown));
 
-    private string GetPublicOrigin(HttpContext? httpContext)
+    private string GetTrustedPublicOrigin()
     {
         if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
         {
             return _options.PublicOrigin.TrimEnd('/');
         }
 
-        if (httpContext != null)
+        if (!Uri.TryCreate(_options.Issuer, UriKind.Absolute, out var issuer))
         {
-            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
+            throw new InvalidOperationException("AuthServer.Issuer must be an absolute URI before password reset links can be generated.");
         }
 
-        return _options.Issuer.TrimEnd('/').EndsWith(_options.BasePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-            ? _options.Issuer.TrimEnd('/')[..^_options.BasePath.TrimEnd('/').Length]
-            : _options.Issuer.TrimEnd('/');
+        return issuer.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
+
+    private static string ValidatePasswordResetUrl(string? resetUrl)
+    {
+        var trimmed = resetUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed)
+            || trimmed.Any(char.IsControl)
+            || trimmed.Contains('\\', StringComparison.Ordinal)
+            || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw new InvalidOperationException("The configured password reset URL must be an absolute HTTP or HTTPS URL without user information.");
+        }
+
+        return trimmed;
+    }
+
+    private static void ValidatePasswordResetTemplate(string template)
+    {
+        const string marker = "sqlos-password-reset-token-marker";
+        var probe = template.Replace("{token}", marker, StringComparison.Ordinal);
+        var probeUri = new Uri(ValidatePasswordResetUrl(probe), UriKind.Absolute);
+        if (probeUri.GetLeftPart(UriPartial.Authority).Contains(marker, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The password reset token placeholder cannot appear in the URL authority.");
+        }
+    }
+
+    private static string ValidateGeneratedPasswordResetUrl(string? resetUrl, string token)
+    {
+        var validated = ValidatePasswordResetUrl(resetUrl);
+        var uri = new Uri(validated, UriKind.Absolute);
+        if (uri.GetLeftPart(UriPartial.Authority).Contains(token, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The password reset token cannot appear in the URL authority.");
+        }
+
+        return validated;
     }
 
     private static string MaskEmail(string email)

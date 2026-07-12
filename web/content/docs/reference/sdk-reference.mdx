@@ -160,9 +160,8 @@ Always pass the expected audience for a protected API. `ValidateAccessTokenWitho
 
 ```csharp
 var reset = await authService.RequestPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(
+    new SqlOSForgotPasswordRequest(
         Email: email,
-        ResetUrlTemplate: "https://app.example.com/reset?token={token}",
         ClientId: clientId),
     httpContext,
     ct);

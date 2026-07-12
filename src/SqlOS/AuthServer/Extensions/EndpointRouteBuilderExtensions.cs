@@ -311,10 +311,9 @@ public static class EndpointRouteBuilderExtensions
             try
             {
                 await authService.RequestPasswordResetEmailAsync(
-                    new SqlOSSendPasswordResetEmailRequest(
+                    new SqlOSForgotPasswordRequest(
                         email,
-                        ResetUrlTemplate: null,
-                        ClientId: authorizationRequest?.ClientApplication?.ClientId),
+                        authorizationRequest?.ClientApplication?.ClientId),
                     context,
                     cancellationToken);
 
@@ -2432,9 +2431,8 @@ public static class EndpointRouteBuilderExtensions
                     ? null
                     : await authorizationServerService.TryGetActiveAuthorizationRequestAsync(request.RequestId, cancellationToken);
                 return Results.Ok(await authService.RequestPasswordResetEmailAsync(
-                    new SqlOSSendPasswordResetEmailRequest(
+                    new SqlOSForgotPasswordRequest(
                         request.Email,
-                        request.ResetUrlTemplate,
                         authorizationRequest?.ClientApplication?.ClientId),
                     context,
                     cancellationToken));
@@ -2973,7 +2971,7 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 
-        auth.MapPost("/password/reset-email", async (SqlOSSendPasswordResetEmailRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapPost("/password/reset-email", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 
         auth.MapGet("/password/reset", (HttpContext context) =>
