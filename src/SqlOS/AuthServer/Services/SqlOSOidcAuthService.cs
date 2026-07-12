@@ -18,7 +18,7 @@ public sealed class SqlOSOidcAuthService
 {
     private const string PublicClaimValidationFailure = "The social login could not be completed.";
     private const int MaxAppleCallbackPayloadBytes = 4096;
-    private const int MaxAppleNamePartRunes = 100;
+    private const int MaxUserDisplayNameChars = 200;
     private static readonly IReadOnlyList<string> DefaultOidcScopes = ["openid", "email", "profile"];
     private static readonly IReadOnlyList<string> DefaultAppleScopes = ["name", "email"];
     private static readonly IReadOnlyList<string> DefaultGitHubScopes = ["read:user", "user:email"];
@@ -558,6 +558,8 @@ public sealed class SqlOSOidcAuthService
             displayName = email ?? subject;
         }
 
+        displayName = TruncateUtf16(displayName!, MaxUserDisplayNameChars);
+
         // Auto-linking is deliberately secure-by-default for every OIDC provider: only the
         // verification claim from the same authenticated claim set as the email can authorize it.
         var canAutoLinkByEmail = !string.IsNullOrWhiteSpace(email) && emailVerified;
@@ -1017,7 +1019,6 @@ public sealed class SqlOSOidcAuthService
         }
 
         var builder = new StringBuilder();
-        var appendedRunes = 0;
         var pendingWhitespace = false;
         foreach (var rune in value.Normalize(NormalizationForm.FormC).EnumerateRunes())
         {
@@ -1041,20 +1042,40 @@ public sealed class SqlOSOidcAuthService
 
             if (pendingWhitespace)
             {
+                if (builder.Length + 1 + rune.Utf16SequenceLength > MaxUserDisplayNameChars)
+                {
+                    break;
+                }
+
                 builder.Append(' ');
                 pendingWhitespace = false;
             }
-
-            builder.Append(rune.ToString());
-            appendedRunes++;
-            if (appendedRunes >= MaxAppleNamePartRunes)
+            else if (builder.Length + rune.Utf16SequenceLength > MaxUserDisplayNameChars)
             {
                 break;
             }
+
+            builder.Append(rune.ToString());
         }
 
         var sanitized = builder.ToString().Trim();
         return sanitized.Length == 0 ? null : sanitized;
+    }
+
+    private static string TruncateUtf16(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+
+        return value[..length].TrimEnd();
     }
 
     private static Dictionary<string, string> FlattenJson(JsonElement element)

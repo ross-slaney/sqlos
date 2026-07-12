@@ -126,6 +126,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         var victimEmail = $"apple-victim-{suffix}@example.com";
         await CreateUserAsync(victimEmail, "Apple Victim", null);
         var connectionId = await UpsertAppleConnectionAsync();
+        var astralName = string.Concat(Enumerable.Repeat("😀", 150));
 
         var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
         {
@@ -144,7 +145,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
             {
                 ["code"] = $"success:{attackerEmail}:{nonce}",
                 ["state"] = state,
-                ["user"] = $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"Attacker\",\"lastName\":\"Account\"}}}}"
+                ["user"] = $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"{astralName}\",\"lastName\":\"Account\"}}}}"
             }));
         callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var handoff = ExtractQueryValue(callbackResponse.Headers.Location!, "handoff");
@@ -154,6 +155,9 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         completeResponse.EnsureSuccessStatusCode();
         var completeJson = JsonDocument.Parse(await completeResponse.Content.ReadAsStringAsync());
         completeJson.RootElement.GetProperty("user").GetProperty("email").GetString().Should().Be(attackerEmail);
+        var displayName = completeJson.RootElement.GetProperty("user").GetProperty("displayName").GetString()!;
+        displayName.Length.Should().BeLessThanOrEqualTo(200);
+        char.IsHighSurrogate(displayName[^1]).Should().BeFalse();
     }
 
     [TestMethod]

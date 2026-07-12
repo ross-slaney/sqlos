@@ -226,6 +226,7 @@ public sealed class OidcAuthIntegrationTests
         var client = await EnsureClientAsync(admin, $"example-web-apple-attack-{suffix}");
         var victim = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Victim", victimEmail, null));
         var connection = await CreateAppleConnectionAsync(admin, callbackUri);
+        var astralName = string.Concat(Enumerable.Repeat("😀", 150));
 
         var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
             connection.Id,
@@ -234,15 +235,19 @@ public sealed class OidcAuthIntegrationTests
             $"success:{attackerEmail}:nonce-apple",
             "verifier",
             "nonce-apple",
-            $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"Attacker\",\"lastName\":\"Account\"}}}}"));
+            $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"{astralName}\",\"lastName\":\"Account\"}}}}"));
 
         result.UserId.Should().NotBe(victim.Id);
         result.Email.Should().Be(attackerEmail);
+        result.DisplayName.Length.Should().BeLessThanOrEqualTo(200);
+        char.IsHighSurrogate(result.DisplayName[^1]).Should().BeFalse();
         var identity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
             .SingleAsync(x => x.OidcConnectionId == connection.Id);
         identity.UserId.Should().Be(result.UserId);
         identity.Subject.Should().Be($"apple-{attackerEmail}");
         identity.Email.Should().Be(attackerEmail);
+        (await AspireFixture.SharedContext.Set<SqlOSUser>().SingleAsync(x => x.Id == result.UserId))
+            .DisplayName.Should().Be(result.DisplayName);
     }
 
     [TestMethod]

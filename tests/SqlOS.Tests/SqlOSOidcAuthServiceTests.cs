@@ -267,7 +267,7 @@ public sealed class SqlOSOidcAuthServiceTests
 
         await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", [callbackUri]));
         var connection = await CreateAppleConnectionAsync(admin, callbackUri);
-        var longName = new string('A', 140);
+        var longName = string.Concat(Enumerable.Repeat("😀", 150));
 
         var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
             connection.Id,
@@ -281,7 +281,8 @@ public sealed class SqlOSOidcAuthServiceTests
         result.Email.Should().Be("signed-apple@example.com");
         result.DisplayName.Should().StartWith("Admin Jane ");
         result.DisplayName.Should().NotContain("<").And.NotContain(">").And.NotContain("\0").And.NotContain("\n");
-        result.DisplayName.Length.Should().BeLessThanOrEqualTo(201);
+        result.DisplayName.Length.Should().BeLessThanOrEqualTo(200);
+        char.IsHighSurrogate(result.DisplayName[^1]).Should().BeFalse();
         (await context.Set<SqlOSExternalIdentity>().SingleAsync()).Subject.Should().Be("apple-signed-apple@example.com");
     }
 
