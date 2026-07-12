@@ -115,7 +115,11 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
-        if (client.RequirePkce)
+        var isPublicClient = string.Equals(
+            client.TokenEndpointAuthMethod,
+            "none",
+            StringComparison.Ordinal);
+        if (client.RequirePkce || isPublicClient)
         {
             if (string.IsNullOrWhiteSpace(input.CodeChallenge))
             {

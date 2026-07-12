@@ -110,7 +110,14 @@ public sealed class SqlOSSsoAuthorizationService
         }
 
         authorizationCode.ConsumedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization code is no longer valid.", ex);
+        }
 
         return await _authService.CreateSessionTokensForUserAsync(
             authorizationCode.User!,

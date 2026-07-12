@@ -77,6 +77,53 @@ public sealed class SamlServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task LegacyTemporaryRelayState_CannotReachSamlCodeIssuance()
+    {
+        var (crypto, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"Legacy Relay {Guid.NewGuid():N}",
+            null));
+        var client = await CreateSamlClientAsync(admin, "legacy-relay");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=LegacyRelayIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id,
+            "Legacy Relay SSO",
+            "urn:legacy-relay:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            true,
+            false,
+            "email",
+            "first_name",
+            "last_name"));
+        var relayState = await crypto.CreateTemporaryTokenAsync(
+            "sso_request",
+            null,
+            client.Id,
+            org.Id,
+            new { clientId = client.ClientId, redirectUri = "https://client.example.local/callback" });
+
+        var action = async () => await saml.HandleAcsAsync(
+            connection.Id,
+            "legacy-saml-response",
+            relayState,
+            new DefaultHttpContext());
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML authorization request is invalid or expired.");
+
+        (await AspireFixture.SharedContext.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.ClientApplicationId == client.Id)).Should().Be(0);
+        (await AspireFixture.SharedContext.Set<SqlOSSession>()
+            .CountAsync(x => x.ClientApplicationId == client.Id)).Should().Be(0);
+        var storedRelay = await crypto.FindTemporaryTokenAsync("sso_request", relayState);
+        storedRelay.Should().NotBeNull();
+        storedRelay!.ConsumedAt.Should().BeNull(
+            "the retired temporary-token path must not even consume the legacy relay state");
+    }
+
+    [TestMethod]
     public async Task PkceSamlAuthorizationFlow_CanExchangeCode()
     {
         var options = Options.Create(AspireFixture.Options);
@@ -165,7 +212,14 @@ public sealed class SamlServiceIntegrationTests
         await missingVerifier.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("PKCE verification failed.");
 
-        var wrongVerifier = async () => await ssoAuth.ExchangeCodeAsync(
+        await using var attackerContext = CreateIsolatedContext();
+        var attackerSso = BuildSsoAuthorizationService(attackerContext);
+        var storedCode = await attackerContext.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.CodeHash == crypto.HashToken(code!));
+        var sessionsBeforeAttack = await attackerContext.Set<SqlOSSession>()
+            .CountAsync(x => x.UserId == storedCode.UserId
+                && x.ClientApplicationId == storedCode.ClientApplicationId);
+        var wrongVerifier = async () => await attackerSso.ExchangeCodeAsync(
             new SqlOSPkceExchangeRequest(
                 code!,
                 client.ClientId,
@@ -174,6 +228,12 @@ public sealed class SamlServiceIntegrationTests
             new DefaultHttpContext());
         await wrongVerifier.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("PKCE verification failed.");
+        storedCode.ConsumedAt.Should().BeNull();
+        (await attackerContext.Set<SqlOSSession>()
+            .CountAsync(x => x.UserId == storedCode.UserId
+                && x.ClientApplicationId == storedCode.ClientApplicationId))
+            .Should().Be(sessionsBeforeAttack,
+                "an intercepted code with the wrong verifier cannot create a session");
 
         var wrongRedirect = async () => await ssoAuth.ExchangeCodeAsync(
             new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://attacker.example.test/callback", codeVerifier),
@@ -181,18 +241,31 @@ public sealed class SamlServiceIntegrationTests
         await wrongRedirect.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Redirect URI does not match the authorization request.");
 
-        var tokens = await ssoAuth.ExchangeCodeAsync(
+        await using var legitimateContext = CreateIsolatedContext();
+        var legitimateSso = BuildSsoAuthorizationService(legitimateContext);
+        var tokens = await legitimateSso.ExchangeCodeAsync(
             new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://client.example.local/auth/callback", codeVerifier),
             new DefaultHttpContext());
 
         tokens.OrganizationId.Should().Be(org.Id);
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
 
-        var interceptedReplay = async () => await ssoAuth.ExchangeCodeAsync(
+        await using var replayContext = CreateIsolatedContext();
+        var replaySso = BuildSsoAuthorizationService(replayContext);
+        var interceptedReplay = async () => await replaySso.ExchangeCodeAsync(
             new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://client.example.local/auth/callback", codeVerifier),
             new DefaultHttpContext());
         await interceptedReplay.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Authorization code is no longer valid.");
+
+        await using var verifyContext = CreateIsolatedContext();
+        var verifiedCode = await verifyContext.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.CodeHash == crypto.HashToken(code!));
+        verifiedCode.ConsumedAt.Should().NotBeNull();
+        (await verifyContext.Set<SqlOSSession>()
+            .CountAsync(x => x.UserId == verifiedCode.UserId
+                && x.ClientApplicationId == verifiedCode.ClientApplicationId))
+            .Should().Be(sessionsBeforeAttack + 1);
     }
 
     [TestMethod]
@@ -631,6 +704,28 @@ public sealed class SamlServiceIntegrationTests
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
         return (crypto, admin, saml);
+    }
+
+    private static TestSqlOSDbContext CreateIsolatedContext()
+    {
+        var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(AspireFixture.SqlConnectionString)
+            .Options;
+        return new TestSqlOSDbContext(dbOptions);
+    }
+
+    private static SqlOSSsoAuthorizationService BuildSsoAuthorizationService(TestSqlOSDbContext context)
+    {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var saml = new SqlOSSamlService(context, options, admin, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var discovery = new SqlOSHomeRealmDiscoveryService(context);
+        return new SqlOSSsoAuthorizationService(context, admin, crypto, discovery, saml, auth);
     }
 
     private static async Task<SqlOSClientApplication> CreateSamlClientAsync(SqlOSAdminService admin, string prefix)

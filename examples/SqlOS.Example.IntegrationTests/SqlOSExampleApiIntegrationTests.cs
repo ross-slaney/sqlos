@@ -272,6 +272,9 @@ public sealed class SqlOSExampleApiIntegrationTests
             "/sqlos/auth/token/exchange",
             new { code, clientId = "example-web" });
         retiredExchangeResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+        var retiredLoginResponse = await ExampleApiFixture.Client.GetAsync(
+            $"/sqlos/auth/saml/login/{connectionId}?requestToken=legacy-request-token");
+        retiredLoginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
 
         var missingVerifierResponse = await ExampleApiFixture.Client.PostAsync(
             "/sqlos/auth/token",
