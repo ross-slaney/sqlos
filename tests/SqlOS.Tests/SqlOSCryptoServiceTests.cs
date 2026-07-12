@@ -658,9 +658,27 @@ public sealed class SqlOSCryptoServiceTests
             AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1),
             EffectiveAudience = client.Audience
         };
+        var organization = new SqlOSOrganization
+        {
+            Id = "org_test",
+            Slug = "test",
+            Name = "Test Organization",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        var membership = new SqlOSMembership
+        {
+            OrganizationId = organization.Id,
+            UserId = user.Id,
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
         context.Set<SqlOSUser>().Add(user);
         context.Set<SqlOSClientApplication>().Add(client);
         context.Set<SqlOSSession>().Add(session);
+        context.Set<SqlOSOrganization>().Add(organization);
+        context.Set<SqlOSMembership>().Add(membership);
         await context.SaveChangesAsync();
         return (user, session, client);
     }
