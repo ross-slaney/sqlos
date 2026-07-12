@@ -41,6 +41,7 @@ dotnet add package SqlOS --version 3.16.0
 Use `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare one application with `UseSingleApplication`:
 
 ```csharp
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using SqlOS;
 using SqlOS.Configuration;
@@ -56,6 +57,14 @@ const string publicOrigin = "http://localhost:5050";
 var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
     ?? throw new InvalidOperationException(
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
+var signingKeyRingPath = builder.Configuration[
+    "SqlOS:SigningKeyCustody:DataProtectionKeyRingPath"]
+    ?? throw new InvalidOperationException(
+        "Configure a durable Data Protection key-ring path outside the application database.");
+
+builder.Services.AddDataProtection()
+    .SetApplicationName("Acme.Identity")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
 
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
@@ -63,6 +72,8 @@ builder.AddSqlOS<AppDbContext>(
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+        options.AuthServer.ConfigureSigningKeyCustody(custody =>
+            custody.DataProtectionKeyRingIsPersistedAndShared = true);
 
         options.UseSingleApplication("Acme", app =>
         {
@@ -87,7 +98,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback.
+The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback. The Data Protection ring must be durable, protected, outside the application database, and shared across token-issuing replicas; high-risk deployments can inject KMS, Vault, or HSM signing custody instead.
 
 Run the host on the origin used above:
 
@@ -103,7 +114,7 @@ Then verify:
 
 SqlOS initializes and upgrades its own tables when the host starts. Your EF migrations continue to own only your application tables.
 
-[Complete add-to-app quickstart](https://sqlos.dev/docs/quickstarts/add-to-app)
+[Complete add-to-app quickstart](https://sqlos.dev/docs/quickstarts/add-to-app) · [Signing-key custody](https://sqlos.dev/docs/authserver/signing-key-custody)
 
 ## Protect an API
 

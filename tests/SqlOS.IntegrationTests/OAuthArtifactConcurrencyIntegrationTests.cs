@@ -420,6 +420,7 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
 
     private static ServiceStack BuildStack(TestSqlOSDbContext context, SqlOSAuthServerOptions optionsValue)
     {
+        optionsValue.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(context, options, crypto);

@@ -42,6 +42,7 @@ public static class AspireFixture
         var databaseName = $"SqlOSTest_{Guid.NewGuid():N}"[..30];
         SqlConnectionString = baseConnectionString.Replace("Database=sqlos-test", $"Database={databaseName}");
         Options = new SqlOSAuthServerOptions { Issuer = "https://tests/sqlos/auth", BasePath = "/sqlos/auth" };
+        Options.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
         Options.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         FgaOptions = new SqlOSFgaOptions();
 

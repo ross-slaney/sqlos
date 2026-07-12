@@ -1,0 +1,144 @@
+using System.Security.Cryptography;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using SqlOS.AuthServer.Configuration;
+using SqlOS.AuthServer.Interfaces;
+
+namespace SqlOS.AuthServer.Services;
+
+/// <summary>
+/// Built-in signing-key custody backed by a dedicated ASP.NET Core Data Protection purpose.
+/// Private PKCS#8 material exists only transiently in process memory and is persisted solely as a
+/// Data Protection ciphertext in the SqlOS signing-key row.
+/// </summary>
+public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCustody
+{
+    public const string DataProtectionProviderId = "aspnet-data-protection:v1";
+    private const string KeyReferencePrefix = "sqlos-dp-signing:v1:";
+    private readonly IDataProtectionProvider? _dataProtectionProvider;
+    private readonly SqlOSSigningKeyCustodyOptions _options;
+
+    public SqlOSDataProtectionSigningKeyCustody(
+        IOptions<SqlOSAuthServerOptions> options,
+        IDataProtectionProvider? dataProtectionProvider = null)
+    {
+        _options = options.Value.SigningKeyCustody;
+        _dataProtectionProvider = dataProtectionProvider;
+    }
+
+    public string ProviderId => DataProtectionProviderId;
+
+    public Task<SqlOSSigningKeyCreationResult> CreateKeyAsync(
+        string kid,
+        string algorithm,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RequireReady();
+        RequireKid(kid);
+        RequireRs256(algorithm);
+
+        using var rsa = RSA.Create(3072);
+        var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
+        var keyReference = $"{KeyReferencePrefix}{CreateKeyProtector(kid).Protect(privateKeyPem)}";
+        return Task.FromResult(new SqlOSSigningKeyCreationResult(
+            SecurityAlgorithms.RsaSha256,
+            rsa.ExportRSAPublicKeyPem(),
+            keyReference));
+    }
+
+    public Task<byte[]> SignAsync(
+        SqlOSSigningKeyDescriptor key,
+        ReadOnlyMemory<byte> signingInput,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RequireReady();
+        RequireDescriptor(key);
+
+        try
+        {
+            var privateKeyPem = CreateKeyProtector(key.Kid)
+                .Unprotect(key.KeyReference[KeyReferencePrefix.Length..]);
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(privateKeyPem);
+            return Task.FromResult(rsa.SignData(
+                signingInput.Span,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1));
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or FormatException)
+        {
+            throw new InvalidOperationException(
+                "The active SqlOS signing key cannot be opened by this application instance. " +
+                "Refusing to rotate or issue tokens. Verify that every instance uses the same persisted Data Protection key ring.",
+                ex);
+        }
+    }
+
+    public Task DeleteKeyAsync(
+        SqlOSSigningKeyDescriptor key,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RequireDescriptor(key);
+        return Task.CompletedTask;
+    }
+
+    private void RequireReady()
+    {
+        if (_dataProtectionProvider == null)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key custody requires an ASP.NET Core Data Protection provider or a custom ISqlOSSigningKeyCustody implementation.");
+        }
+
+        if (!_options.DataProtectionKeyRingIsPersistedAndShared)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key custody is not configured. Persist the ASP.NET Core Data Protection key ring outside the application database, " +
+                "share it across every application instance, then set AuthServer.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared to true; " +
+                "or register a custom ISqlOSSigningKeyCustody provider.");
+        }
+    }
+
+    private IDataProtector CreateKeyProtector(string kid)
+        => _dataProtectionProvider!
+            .CreateProtector("SqlOS.AuthServer.SigningKeys.v1")
+            .CreateProtector(kid);
+
+    private void RequireDescriptor(SqlOSSigningKeyDescriptor key)
+    {
+        RequireKid(key.Kid);
+
+        if (!string.Equals(key.CustodyProvider, ProviderId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' belongs to custody provider '{key.CustodyProvider}', not '{ProviderId}'.");
+        }
+
+        RequireRs256(key.Algorithm);
+        if (!key.KeyReference.StartsWith(KeyReferencePrefix, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' does not contain a valid Data Protection custody reference.");
+        }
+    }
+
+    private static void RequireRs256(string algorithm)
+    {
+        if (!string.Equals(algorithm, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SqlOS Data Protection signing-key custody supports RS256 only.");
+        }
+    }
+
+    private static void RequireKid(string kid)
+    {
+        if (string.IsNullOrWhiteSpace(kid))
+        {
+            throw new InvalidOperationException("A signing-key custody descriptor must include a key ID.");
+        }
+    }
+}

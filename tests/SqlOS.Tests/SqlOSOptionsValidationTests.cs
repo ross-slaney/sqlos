@@ -101,6 +101,21 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenSigningKeyCleanupIsShorterThanJwksGrace()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.DefaultSigningKeyGraceWindowDays = 7;
+            options.AuthServer.DefaultSigningKeyRetiredCleanupDays = 6;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*DefaultSigningKeyRetiredCleanupDays must be at least DefaultSigningKeyGraceWindowDays*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_RegistersTransactionalEmailService()
     {
         var services = new ServiceCollection();

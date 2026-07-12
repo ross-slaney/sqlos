@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,24 @@ using SqlOS.Todo.Api.Models;
 using SqlOS.Todo.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var configuredSigningKeyRingPath =
+    builder.Configuration["SqlOS:SigningKeyCustody:DataProtectionKeyRingPath"];
+if (!builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(configuredSigningKeyRingPath))
+{
+    throw new InvalidOperationException(
+        "Configure SqlOS:SigningKeyCustody:DataProtectionKeyRingPath with a durable, protected, shared path before running the Todo sample outside Development.");
+}
+
+var signingKeyRingPath = configuredSigningKeyRingPath
+    ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SqlOS",
+        "TodoApi",
+        "data-protection-keys");
+builder.Services.AddDataProtection()
+    .SetApplicationName("SqlOS.Todo.Api")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
 
 builder.Services.Configure<TodoSampleOptions>(builder.Configuration.GetSection("TodoSample"));
 
@@ -130,6 +149,8 @@ builder.AddSqlOS<TodoSampleDbContext>(
         auth.PublicOrigin = publicOrigin;
         auth.DefaultAudience = sampleConfig.Resource;
         auth.EnableLocalPasswordAuth = passwordAuthEnabled;
+        auth.ConfigureSigningKeyCustody(custody =>
+            custody.DataProtectionKeyRingIsPersistedAndShared = true);
         options.ConfigureEmail(email =>
         {
             email.AzureCommunicationServicesConnectionString = emailConnectionString;

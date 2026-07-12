@@ -398,8 +398,12 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSSigningKeys", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.Kid).IsUnique();
+            entity.HasIndex(x => x.IsActive)
+                .IsUnique()
+                .HasFilter("[IsActive] = 1");
             entity.Property(x => x.Kid).HasMaxLength(120);
             entity.Property(x => x.Algorithm).HasMaxLength(20);
+            entity.Property(x => x.CustodyProvider).HasMaxLength(120);
         });
 
         modelBuilder.Entity<SqlOSTemporaryToken>(entity =>

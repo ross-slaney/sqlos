@@ -540,7 +540,7 @@ public sealed class SqlOSSsoPortalServiceTests
             };
             configure?.Invoke(authOptions);
             var options = Options.Create(authOptions);
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var dns = new FakeDomainDnsVerifier();
             var domains = new SqlOSOrganizationDomainService(context, options, crypto, admin, dns);

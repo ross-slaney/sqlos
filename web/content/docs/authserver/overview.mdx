@@ -19,7 +19,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 <Callout type="info" title="Recommended reading order">
   1. [Dashboard](/docs/authserver/dashboard-overview) → [Organizations](/docs/authserver/organizations) → [Hosted vs headless](/docs/authserver/hosted-vs-headless)
   2. [Password login](/docs/authserver/password-login) or [Email OTP](/docs/authserver/email-otp) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso)
-  3. Security policy: [MFA and TOTP](/docs/authserver/mfa-totp) and [Security Settings](/docs/authserver/security-settings)
+  3. Security boundary: [Signing-Key Custody](/docs/authserver/signing-key-custody), [MFA and TOTP](/docs/authserver/mfa-totp), and [Security Settings](/docs/authserver/security-settings)
   4. One app: [Single-Application Setup](/docs/authserver/single-application)
   5. Advanced: [Clients](/docs/authserver/clients), [Application Access](/docs/authserver/application-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
 </Callout>
@@ -41,7 +41,15 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 ## Setup
 
 ```csharp
-builder.AddSqlOS<AppDbContext>();
+builder.Services.AddDataProtection()
+    .SetApplicationName("Acme.Identity")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureSigningKeyCustody(custody =>
+        custody.DataProtectionKeyRingIsPersistedAndShared = true);
+});
 
 var app = builder.Build();
 app.MapSqlOS();
@@ -85,9 +93,9 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 
 ## Signing keys and protected secrets
 
-SqlOS stores JWT signing keys in your application database. Private signing key PEMs are protected with `SqlOSCryptoService.ProtectSecret` when ASP.NET Data Protection is available, and legacy plaintext rows are upgraded the next time the active key is loaded.
+SqlOS stores JWT public keys, custody-provider IDs, and opaque key references in your application database. It refuses plaintext private-key rows. The built-in provider encrypts private key material with ASP.NET Core Data Protection under a purpose bound to the key ID; a custom `ISqlOSSigningKeyCustody` can keep signing operations in KMS, Vault, or an HSM.
 
-Production deployments should configure a durable Data Protection key ring outside the application database. If Data Protection keys are lost, existing protected signing keys and other protected secrets cannot be unprotected.
+AuthServer startup fails until custody is explicitly configured. With Data Protection, persist the key ring outside the application database, protect it at rest, and share it across all token-issuing instances. If the ring is missing, SqlOS fails closed without silently rotating the active key. See [Signing-Key Custody](/docs/authserver/signing-key-custody).
 
 ## Hosted and headless
 
@@ -103,7 +111,7 @@ Production deployments should configure a durable Data Protection key ring outsi
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Signing-Key Custody](/docs/authserver/signing-key-custody) · [Email OTP](/docs/authserver/email-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 

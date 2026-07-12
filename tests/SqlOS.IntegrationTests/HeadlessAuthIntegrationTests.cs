@@ -743,9 +743,10 @@ public sealed class HeadlessAuthIntegrationTests
         });
         configureHeadless?.Invoke(optionsValue.Headless);
         configureOptions?.Invoke(optionsValue);
+        optionsValue.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
 
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);

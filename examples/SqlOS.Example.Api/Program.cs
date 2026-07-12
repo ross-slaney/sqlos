@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using SqlOS.Example.Api.Configuration;
@@ -17,6 +18,24 @@ using SqlOS.Extensions;
 using SqlOS.Example.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var configuredSigningKeyRingPath =
+    builder.Configuration["SqlOS:SigningKeyCustody:DataProtectionKeyRingPath"];
+if (!builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(configuredSigningKeyRingPath))
+{
+    throw new InvalidOperationException(
+        "Configure SqlOS:SigningKeyCustody:DataProtectionKeyRingPath with a durable, protected, shared path before running the example outside Development.");
+}
+
+var signingKeyRingPath = configuredSigningKeyRingPath
+    ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SqlOS",
+        "ExampleApi",
+        "data-protection-keys");
+builder.Services.AddDataProtection()
+    .SetApplicationName("SqlOS.Example.Api")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
 
 builder.Services.Configure<ExampleWebOptions>(builder.Configuration.GetSection("ExampleFrontend"));
 
@@ -78,6 +97,8 @@ builder.AddSqlOS<ExampleAppDbContext>(
         auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
         auth.DefaultSigningKeyRotationIntervalDays = 90;
         auth.DefaultSigningKeyGraceWindowDays = 7;
+        auth.ConfigureSigningKeyCustody(custody =>
+            custody.DataProtectionKeyRingIsPersistedAndShared = true);
         options.ConfigureEmail(email =>
         {
             email.AzureCommunicationServicesConnectionString = emailConnectionString;

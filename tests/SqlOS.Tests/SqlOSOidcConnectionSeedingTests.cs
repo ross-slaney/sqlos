@@ -295,7 +295,7 @@ public sealed class SqlOSOidcConnectionSeedingTests
         SqlOSAuthServerOptions optionsValue)
     {
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+        var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(context, options, crypto);
         var oidc = new SqlOSOidcAuthService(
             context,

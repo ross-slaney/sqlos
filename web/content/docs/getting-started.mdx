@@ -43,12 +43,18 @@ For a typical .NET B2B SaaS product, start with:
 The core registration is intentionally small:
 
 ```csharp
+builder.Services.AddDataProtection()
+    .SetApplicationName("Acme.Identity")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
+
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+        options.AuthServer.ConfigureSigningKeyCustody(custody =>
+            custody.DataProtectionKeyRingIsPersistedAndShared = true);
 
         options.UseSingleApplication("Acme", app =>
         {
@@ -64,7 +70,7 @@ builder.AddSqlOS<AppDbContext>(
 `UseSingleApplication` creates one first-party PKCE client, a callback at `{Origin}/auth/callback`, standard OpenID scopes, and matching AuthPage branding. Advanced public-client registration and resource indicators remain off until you opt in.
 
 <Callout type="warning" title="Configuration is explicit">
-  `AddSqlOS` does not automatically bind an `SqlOS` configuration section. Read values from `builder.Configuration`, your secret store, or environment variables and assign them in the options callback as shown above.
+  `AddSqlOS` does not automatically bind an `SqlOS` configuration section. Read values from `builder.Configuration`, your secret store, or environment variables and assign them in the options callback as shown above. The signing-key flag is an attestation: only set it after Data Protection uses durable, protected storage outside the application database and shared by every token-issuing instance. See [Signing-Key Custody](/docs/authserver/signing-key-custody).
 </Callout>
 
 ## Add capabilities in this order
@@ -86,7 +92,7 @@ builder.AddSqlOS<AppDbContext>(
 
 ## What starts automatically
 
-When the host starts, SqlOS initializes and upgrades its own tables, signing keys, settings, and startup seeds. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
+When the host starts, SqlOS initializes and upgrades its own tables, verifies signing-key custody, creates a custodied key when none exists, and applies settings and startup seeds. Startup fails closed if custody is unavailable. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
 
 Default paths:
 

@@ -1,12 +1,17 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
@@ -17,99 +22,48 @@ namespace SqlOS.IntegrationTests;
 public sealed class AuthServerSigningKeyResilienceIntegrationTests
 {
     [TestMethod]
-    public async Task AuthorizationCodeExchange_WithUnreadablePersistedSigningKey_RotatesAndIssuesTokens()
+    public async Task AuthorizationCodeExchange_SharedKeyRing_MultiInstanceUsesSameCustodiedKey()
     {
         TestSqlOSDbContext? setupContext = null;
         string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("shared");
 
         try
         {
-            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyResilience");
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSSharedKeyRing");
             connectionString = setupContext.Database.GetConnectionString();
             connectionString.Should().NotBeNullOrWhiteSpace();
-
-            var clientId = $"key-resilience-{Guid.NewGuid():N}"[..30];
+            var clientId = $"shared-ring-{Guid.NewGuid():N}"[..30];
             var redirectUri = $"https://client.example.test/{clientId}/callback";
-            var setupOptions = CreateOptions(clientId, redirectUri, protectSigningKeys: true);
-            var setupStack = BuildStack(
-                setupContext,
-                setupOptions,
-                new EphemeralDataProtectionProvider());
-
-            await setupStack.Admin.UpsertSeededClientsAsync();
-            var protectedKey = await setupStack.Crypto.EnsureActiveSigningKeyAsync();
-            protectedKey.PrivateKeyPem.Should().StartWith("dp:");
-
-            var user = await setupStack.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
-                "Key Resilience User",
-                $"key-resilience-{Guid.NewGuid():N}@example.com",
-                "P@ssword123!"));
-            var organization = await setupStack.Admin.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest($"Key Resilience {Guid.NewGuid():N}", null));
-            await setupStack.Admin.CreateMembershipAsync(
-                organization.Id,
-                new SqlOSCreateMembershipRequest(user.Id, "owner"));
-
-            var codeVerifier = setupStack.Crypto.GenerateOpaqueToken();
-            var authorizationRequest = await setupStack.AuthorizationServer.CreateAuthorizationRequestAsync(
-                new SqlOSAuthorizeRequestInput(
-                    "code",
-                    clientId,
-                    redirectUri,
-                    "key-resilience-state",
-                    "openid profile email offline_access",
-                    setupStack.Crypto.CreatePkceCodeChallenge(codeVerifier),
-                    "S256",
-                    null,
-                    user.DefaultEmail,
-                    null,
-                    null,
-                    "hosted",
-                    null));
-
-            var redirect = await setupStack.AuthorizationServer.IssueAuthorizationRedirectAsync(
-                authorizationRequest,
-                user,
-                organization.Id,
-                "email_otp",
-                CreateHttpContext());
-            var code = QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString();
-            code.Should().NotBeNullOrWhiteSpace();
+            var options = CreateOptions(clientId, redirectUri);
+            var setupStack = BuildStack(setupContext, options, CreateFileSystemProvider(keyRingPath));
+            var flow = await PrepareAuthorizationCodeAsync(setupStack, clientId, redirectUri);
+            var signingKey = await setupContext.Set<SqlOSSigningKey>().SingleAsync(key => key.IsActive);
+            signingKey.KeyReference.Should().StartWith("sqlos-dp-signing:v1:");
+            signingKey.KeyReference.Should().NotContain("PRIVATE KEY");
 
             await setupContext.DisposeAsync();
             setupContext = null;
-
             await using var replacementContext = CreateContext(connectionString!);
             var replacementStack = BuildStack(
                 replacementContext,
-                CreateOptions(clientId, redirectUri, protectSigningKeys: false),
-                new EphemeralDataProtectionProvider());
+                options,
+                CreateFileSystemProvider(keyRingPath));
 
-            var tokenResult = await replacementStack.AuthorizationServer.ExchangeAuthorizationCodeAsync(
-                new SqlOSTokenRequest(
-                    "authorization_code",
-                    code,
-                    redirectUri,
-                    clientId,
-                    codeVerifier,
-                    null,
-                    null),
-                CreateHttpContext());
+            var tokenResult = await ExchangeAuthorizationCodeAsync(
+                replacementStack,
+                flow.Code,
+                flow.CodeVerifier,
+                clientId,
+                redirectUri);
 
             tokenResult.Tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
-            tokenResult.Tokens.RefreshToken.Should().NotBeNullOrWhiteSpace();
-            tokenResult.Tokens.OrganizationId.Should().Be(organization.Id);
-
-            var retiredKey = await replacementContext.Set<SqlOSSigningKey>()
-                .SingleAsync(x => x.Id == protectedKey.Id);
-            retiredKey.IsActive.Should().BeFalse();
-            retiredKey.RetiredAt.Should().NotBeNull();
-
-            var activeKey = await replacementContext.Set<SqlOSSigningKey>()
-                .SingleAsync(x => x.IsActive);
-            activeKey.Id.Should().NotBe(protectedKey.Id);
-            activeKey.PrivateKeyPem.Should().Contain("BEGIN PRIVATE KEY");
-            activeKey.PrivateKeyPem.Should().NotStartWith("dp:");
+            tokenResult.Tokens.OrganizationId.Should().Be(flow.OrganizationId);
+            var activeKeys = await replacementContext.Set<SqlOSSigningKey>().Where(key => key.IsActive).ToListAsync();
+            activeKeys.Should().ContainSingle().Which.Id.Should().Be(signingKey.Id);
+            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(tokenResult.Tokens.AccessToken);
+            jwt.Header.Kid.Should().Be(signingKey.Kid);
+            jwt.Header.Alg.Should().Be(SecurityAlgorithms.RsaSha256);
         }
         finally
         {
@@ -117,104 +71,55 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             {
                 await setupContext.DisposeAsync();
             }
-
-            if (!string.IsNullOrWhiteSpace(connectionString))
-            {
-                await using var cleanupContext = CreateContext(connectionString);
-                await cleanupContext.Database.EnsureDeletedAsync();
-            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
         }
     }
 
     [TestMethod]
-    public async Task AuthorizationCodeExchange_DefaultSigningKeyStorage_SurvivesReplacementInstance()
+    public async Task AuthorizationCodeExchange_LostKeyRing_FailsClosedWithoutSilentRotation()
     {
         TestSqlOSDbContext? setupContext = null;
         string? connectionString = null;
+        var originalKeyRingPath = CreateKeyRingDirectory("original");
+        var replacementKeyRingPath = CreateKeyRingDirectory("replacement");
 
         try
         {
-            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSDefaultKey");
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSLostKeyRing");
             connectionString = setupContext.Database.GetConnectionString();
-            connectionString.Should().NotBeNullOrWhiteSpace();
-
-            var clientId = $"default-key-{Guid.NewGuid():N}"[..30];
+            var clientId = $"lost-ring-{Guid.NewGuid():N}"[..30];
             var redirectUri = $"https://client.example.test/{clientId}/callback";
-            var options = CreateOptions(clientId, redirectUri, protectSigningKeys: false);
+            var options = CreateOptions(clientId, redirectUri);
             var setupStack = BuildStack(
                 setupContext,
                 options,
-                new EphemeralDataProtectionProvider());
-
-            await setupStack.Admin.UpsertSeededClientsAsync();
-            var signingKey = await setupStack.Crypto.EnsureActiveSigningKeyAsync();
-            signingKey.PrivateKeyPem.Should().Contain("BEGIN PRIVATE KEY");
-            signingKey.PrivateKeyPem.Should().NotStartWith("dp:");
-
-            var user = await setupStack.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
-                "Default Key User",
-                $"default-key-{Guid.NewGuid():N}@example.com",
-                "P@ssword123!"));
-            var organization = await setupStack.Admin.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest($"Default Key {Guid.NewGuid():N}", null));
-            await setupStack.Admin.CreateMembershipAsync(
-                organization.Id,
-                new SqlOSCreateMembershipRequest(user.Id, "member"));
-
-            var codeVerifier = setupStack.Crypto.GenerateOpaqueToken();
-            var authorizationRequest = await setupStack.AuthorizationServer.CreateAuthorizationRequestAsync(
-                new SqlOSAuthorizeRequestInput(
-                    "code",
-                    clientId,
-                    redirectUri,
-                    "default-key-state",
-                    "openid profile email offline_access",
-                    setupStack.Crypto.CreatePkceCodeChallenge(codeVerifier),
-                    "S256",
-                    null,
-                    user.DefaultEmail,
-                    null,
-                    null,
-                    "hosted",
-                    null));
-
-            var redirect = await setupStack.AuthorizationServer.IssueAuthorizationRedirectAsync(
-                authorizationRequest,
-                user,
-                organization.Id,
-                "password",
-                CreateHttpContext());
-            var code = QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString();
-            code.Should().NotBeNullOrWhiteSpace();
+                CreateFileSystemProvider(originalKeyRingPath));
+            var flow = await PrepareAuthorizationCodeAsync(setupStack, clientId, redirectUri);
+            var originalKey = await setupContext.Set<SqlOSSigningKey>().SingleAsync(key => key.IsActive);
 
             await setupContext.DisposeAsync();
             setupContext = null;
-
             await using var replacementContext = CreateContext(connectionString!);
             var replacementStack = BuildStack(
                 replacementContext,
-                CreateOptions(clientId, redirectUri, protectSigningKeys: false),
-                new EphemeralDataProtectionProvider());
+                options,
+                CreateFileSystemProvider(replacementKeyRingPath));
 
-            var tokenResult = await replacementStack.AuthorizationServer.ExchangeAuthorizationCodeAsync(
-                new SqlOSTokenRequest(
-                    "authorization_code",
-                    code,
-                    redirectUri,
-                    clientId,
-                    codeVerifier,
-                    null,
-                    null),
-                CreateHttpContext());
+            var act = async () => await ExchangeAuthorizationCodeAsync(
+                replacementStack,
+                flow.Code,
+                flow.CodeVerifier,
+                clientId,
+                redirectUri);
 
-            tokenResult.Tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
-            tokenResult.Tokens.RefreshToken.Should().NotBeNullOrWhiteSpace();
-
-            var activeKeys = await replacementContext.Set<SqlOSSigningKey>()
-                .Where(x => x.IsActive)
-                .ToListAsync();
-            activeKeys.Should().ContainSingle();
-            activeKeys[0].Id.Should().Be(signingKey.Id);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*Refusing to rotate or issue tokens*");
+            var keys = await replacementContext.Set<SqlOSSigningKey>().ToListAsync();
+            keys.Should().ContainSingle();
+            keys[0].Id.Should().Be(originalKey.Id);
+            keys[0].IsActive.Should().BeTrue();
+            keys[0].RetiredAt.Should().BeNull();
         }
         finally
         {
@@ -222,27 +127,218 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             {
                 await setupContext.DisposeAsync();
             }
-
-            if (!string.IsNullOrWhiteSpace(connectionString))
-            {
-                await using var cleanupContext = CreateContext(connectionString);
-                await cleanupContext.Database.EnsureDeletedAsync();
-            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(originalKeyRingPath);
+            DeleteKeyRingDirectory(replacementKeyRingPath);
         }
     }
 
-    private static SqlOSAuthServerOptions CreateOptions(
-        string clientId,
-        string redirectUri,
-        bool protectSigningKeys)
+    [TestMethod]
+    public async Task EnsureAndRotateSigningKey_MultipleSqlInstances_MaintainsSingleActiveKey()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("concurrent");
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSMultiKey");
+            connectionString = setupContext.Database.GetConnectionString();
+            await setupContext.DisposeAsync();
+            setupContext = null;
+            var options = CreateOptions("multi-instance", "https://client.example.test/multi/callback");
+
+            await using (var firstContext = CreateContext(connectionString!))
+            await using (var secondContext = CreateContext(connectionString!))
+            {
+                var first = BuildStack(firstContext, options, CreateFileSystemProvider(keyRingPath));
+                var second = BuildStack(secondContext, options, CreateFileSystemProvider(keyRingPath));
+                var ensured = await Task.WhenAll(
+                    first.Crypto.EnsureActiveSigningKeyAsync(),
+                    second.Crypto.EnsureActiveSigningKeyAsync());
+                ensured.Select(key => key.Id).Distinct().Should().ContainSingle();
+            }
+
+            await using (var firstRotationContext = CreateContext(connectionString!))
+            {
+                var first = BuildStack(firstRotationContext, options, CreateFileSystemProvider(keyRingPath));
+                await first.Crypto.RotateSigningKeyAsync();
+            }
+
+            await using (var secondRotationContext = CreateContext(connectionString!))
+            {
+                var second = BuildStack(secondRotationContext, options, CreateFileSystemProvider(keyRingPath));
+                var observed = await second.Crypto.EnsureActiveSigningKeyAsync();
+                var rotated = await second.Crypto.RotateSigningKeyAsync();
+                rotated.Id.Should().NotBe(observed.Id);
+            }
+
+            await using var verifyContext = CreateContext(connectionString!);
+            var allKeys = await verifyContext.Set<SqlOSSigningKey>().OrderBy(key => key.ActivatedAt).ToListAsync();
+            allKeys.Should().HaveCount(3);
+            allKeys.Count(key => key.IsActive).Should().Be(1);
+            allKeys.Where(key => !key.IsActive).Should().OnlyContain(key => key.RetiredAt != null);
+            allKeys.Should().OnlyContain(key => !key.KeyReference.Contains("PRIVATE KEY", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task StartupSigningKeyGate_ExistingPlaintextSqlRow_IsRejected()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSPlaintextKey");
+            connectionString = context.Database.GetConnectionString();
+            using var rsa = RSA.Create(2048);
+            context.Set<SqlOSSigningKey>().Add(new SqlOSSigningKey
+            {
+                Id = "key_existing_plaintext",
+                Kid = "existing-plaintext-kid",
+                Algorithm = SecurityAlgorithms.RsaSha256,
+                PublicKeyPem = rsa.ExportRSAPublicKeyPem(),
+                CustodyProvider = "legacy-unprotected",
+                KeyReference = rsa.ExportPkcs8PrivateKeyPem(),
+                IsActive = true,
+                ActivatedAt = DateTime.UtcNow
+            });
+            await context.SaveChangesAsync();
+            var stack = BuildStack(
+                context,
+                CreateOptions("plaintext-client", "https://client.example.test/plaintext/callback"),
+                new EphemeralDataProtectionProvider());
+
+            var act = async () => await stack.Crypto.EnsureActiveSigningKeyAsync();
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*contains plaintext private key material*");
+            (await context.Set<SqlOSSigningKey>().CountAsync()).Should().Be(1);
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
+    [TestMethod]
+    public async Task DbCompromiseSimulation_SqlRowCannotMintTokenAcceptedByLiveValidator()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSDbCompromise");
+            connectionString = context.Database.GetConnectionString();
+            var options = CreateOptions("db-compromise", "https://client.example.test/db/callback");
+            var provider = new EphemeralDataProtectionProvider();
+            var stack = BuildStack(context, options, provider);
+            var principal = await SeedTokenContextAsync(context, stack, "db-compromise");
+            var legitimateToken = await stack.Crypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                principal.OrganizationId);
+            (await stack.Crypto.ValidateAccessTokenAsync(legitimateToken, principal.Client.Audience)).Should().NotBeNull();
+
+            await using var attackerReadContext = CreateContext(connectionString!);
+            var stolenRow = await attackerReadContext.Set<SqlOSSigningKey>().AsNoTracking().SingleAsync();
+            stolenRow.KeyReference.Should().NotContain("PRIVATE KEY");
+            var attackerCustody = new SqlOSDataProtectionSigningKeyCustody(
+                Options.Create(options),
+                new EphemeralDataProtectionProvider());
+            var signAct = async () => await attackerCustody.SignAsync(ToDescriptor(stolenRow), "forge"u8.ToArray());
+            await signAct.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*cannot be opened by this application instance*");
+
+            using var attackerRsa = RSA.Create(2048);
+            var forged = CreateForgedToken(
+                attackerRsa,
+                stolenRow.Kid,
+                options.Issuer,
+                principal.User.Id,
+                principal.Session.Id,
+                principal.Client);
+            (await stack.Crypto.ValidateAccessTokenAsync(forged, principal.Client.Audience)).Should().BeNull();
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
+    [TestMethod]
+    public async Task RotationGraceAndCleanup_SqlJwksRetainsThenRemovesRetiredKey()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyGrace");
+            connectionString = context.Database.GetConnectionString();
+            var options = CreateOptions("key-grace", "https://client.example.test/grace/callback");
+            var stack = BuildStack(context, options, new EphemeralDataProtectionProvider());
+            var principal = await SeedTokenContextAsync(context, stack, "key-grace");
+            var oldToken = await stack.Crypto.CreateAccessTokenAsync(principal.User, principal.Session, principal.Client, null);
+            var oldKey = await context.Set<SqlOSSigningKey>().SingleAsync(key => key.IsActive);
+
+            var newKey = await stack.Crypto.RotateSigningKeyAsync();
+            var newToken = await stack.Crypto.CreateAccessTokenAsync(principal.User, principal.Session, principal.Client, null);
+
+            (await stack.Crypto.ValidateAccessTokenAsync(oldToken, principal.Client.Audience)).Should().NotBeNull();
+            (await stack.Crypto.ValidateAccessTokenAsync(newToken, principal.Client.Audience)).Should().NotBeNull();
+            var graceJwks = System.Text.Json.JsonSerializer.Serialize(
+                stack.Crypto.GetJwksDocument(await stack.Crypto.GetValidationSigningKeysAsync()));
+            graceJwks.Should().Contain(oldKey.Kid).And.Contain(newKey.Kid);
+
+            oldKey.RetiredAt = DateTime.UtcNow.AddDays(-8);
+            await context.SaveChangesAsync();
+            (await stack.Crypto.ValidateAccessTokenAsync(oldToken, principal.Client.Audience)).Should().BeNull();
+            (await stack.Crypto.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(7))).Should().Be(1);
+            var cleanedJwks = System.Text.Json.JsonSerializer.Serialize(
+                stack.Crypto.GetJwksDocument(await stack.Crypto.GetValidationSigningKeysAsync()));
+            cleanedJwks.Should().NotContain(oldKey.Kid).And.Contain(newKey.Kid);
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
+    private static SqlOSAuthServerOptions CreateOptions(string clientId, string redirectUri)
     {
         var options = new SqlOSAuthServerOptions
         {
             Issuer = AspireFixture.Options.Issuer,
             BasePath = AspireFixture.Options.BasePath,
-            ProtectSigningKeysWithDataProtection = protectSigningKeys
+            DefaultSigningKeyGraceWindowDays = 7
         };
-        options.SeedBrowserClient(clientId, $"Key Resilience Client {clientId}", redirectUri);
+        options.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
+        options.SeedBrowserClient(clientId, $"Key Custody Client {clientId}", redirectUri);
         options.SeedAuthPage(page =>
         {
             page.EnabledCredentialTypes = ["password", "email_otp"];
@@ -275,12 +371,151 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         return new ServiceStack(crypto, admin, authorizationServer);
     }
 
-    private static TestSqlOSDbContext CreateContext(string connectionString)
+    private static async Task<AuthorizationCodeFlow> PrepareAuthorizationCodeAsync(
+        ServiceStack stack,
+        string clientId,
+        string redirectUri)
     {
-        var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(connectionString)
-            .Options;
-        return new TestSqlOSDbContext(dbOptions);
+        await stack.Admin.UpsertSeededClientsAsync();
+        await stack.Crypto.EnsureActiveSigningKeyAsync();
+        var user = await stack.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Key Custody User",
+            $"key-custody-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var organization = await stack.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Key Custody {Guid.NewGuid():N}", null));
+        await stack.Admin.CreateMembershipAsync(
+            organization.Id,
+            new SqlOSCreateMembershipRequest(user.Id, "owner"));
+        var codeVerifier = stack.Crypto.GenerateOpaqueToken();
+        var request = await stack.AuthorizationServer.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                clientId,
+                redirectUri,
+                "key-custody-state",
+                "openid profile email offline_access",
+                stack.Crypto.CreatePkceCodeChallenge(codeVerifier),
+                "S256",
+                null,
+                user.DefaultEmail,
+                null,
+                null,
+                "hosted",
+                null));
+        var redirect = await stack.AuthorizationServer.IssueAuthorizationRedirectAsync(
+            request,
+            user,
+            organization.Id,
+            "password",
+            CreateHttpContext());
+        return new AuthorizationCodeFlow(
+            QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString(),
+            codeVerifier,
+            organization.Id);
+    }
+
+    private static Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(
+        ServiceStack stack,
+        string code,
+        string codeVerifier,
+        string clientId,
+        string redirectUri)
+        => stack.AuthorizationServer.ExchangeAuthorizationCodeAsync(
+            new SqlOSTokenRequest(
+                "authorization_code",
+                code,
+                redirectUri,
+                clientId,
+                codeVerifier,
+                null,
+                null),
+            CreateHttpContext());
+
+    private static async Task<TokenPrincipal> SeedTokenContextAsync(
+        TestSqlOSDbContext context,
+        ServiceStack stack,
+        string suffix)
+    {
+        await stack.Admin.UpsertSeededClientsAsync();
+        var user = await stack.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            $"Token User {suffix}",
+            $"token-{suffix}-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var organization = await stack.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest($"Token Org {suffix} {Guid.NewGuid():N}", null));
+        await stack.Admin.CreateMembershipAsync(
+            organization.Id,
+            new SqlOSCreateMembershipRequest(user.Id, "owner"));
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync(app => app.ClientId == suffix);
+        var session = new SqlOSSession
+        {
+            Id = stack.Crypto.GenerateId("ses"),
+            UserId = user.Id,
+            ClientApplicationId = client.Id,
+            OrganizationId = organization.Id,
+            AuthenticationMethod = "password mfa",
+            EffectiveAudience = client.Audience,
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+            IdleExpiresAt = DateTime.UtcNow.AddHours(1),
+            AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+        context.Set<SqlOSSession>().Add(session);
+        await context.SaveChangesAsync();
+        return new TokenPrincipal(user, session, client, organization.Id);
+    }
+
+    private static string CreateForgedToken(
+        RSA attackerRsa,
+        string kid,
+        string issuer,
+        string userId,
+        string sessionId,
+        SqlOSClientApplication client)
+    {
+        var token = new JwtSecurityToken(
+            issuer,
+            client.Audience,
+            [
+                new Claim(JwtRegisteredClaimNames.Sub, userId),
+                new Claim("sid", sessionId),
+                new Claim("client_id", client.ClientId)
+            ],
+            DateTime.UtcNow.AddMinutes(-1),
+            DateTime.UtcNow.AddMinutes(10),
+            new SigningCredentials(
+                new RsaSecurityKey(attackerRsa) { KeyId = kid },
+                SecurityAlgorithms.RsaSha256));
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static SqlOSSigningKeyDescriptor ToDescriptor(SqlOSSigningKey key)
+        => new(key.Kid, key.Algorithm, key.PublicKeyPem, key.KeyReference, key.CustodyProvider);
+
+    private static TestSqlOSDbContext CreateContext(string connectionString)
+        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options);
+
+    private static string CreateKeyRingDirectory(string suffix)
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            $"sqlos-signing-key-tests-{suffix}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static IDataProtectionProvider CreateFileSystemProvider(string keyRingPath)
+        => DataProtectionProvider.Create(
+            new DirectoryInfo(keyRingPath),
+            builder => builder.SetApplicationName("SqlOS.IntegrationTests.SigningKeyCustody"));
+
+    private static void DeleteKeyRingDirectory(string keyRingPath)
+    {
+        if (Directory.Exists(keyRingPath))
+        {
+            Directory.Delete(keyRingPath, recursive: true);
+        }
     }
 
     private static DefaultHttpContext CreateHttpContext()
@@ -288,12 +523,29 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         var context = new DefaultHttpContext();
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("auth.example.test");
-        context.Request.Headers.UserAgent = "SqlOS signing-key resilience integration test";
+        context.Request.Headers.UserAgent = "SqlOS signing-key custody integration test";
         return context;
+    }
+
+    private static async Task DeleteDatabaseAsync(string? connectionString)
+    {
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            await using var cleanup = CreateContext(connectionString);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
     }
 
     private sealed record ServiceStack(
         SqlOSCryptoService Crypto,
         SqlOSAdminService Admin,
         SqlOSAuthorizationServerService AuthorizationServer);
+
+    private sealed record AuthorizationCodeFlow(string Code, string CodeVerifier, string OrganizationId);
+
+    private sealed record TokenPrincipal(
+        SqlOSUser User,
+        SqlOSSession Session,
+        SqlOSClientApplication Client,
+        string OrganizationId);
 }

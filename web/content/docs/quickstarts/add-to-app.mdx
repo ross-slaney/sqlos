@@ -44,6 +44,7 @@ For a new project, store local values with user secrets:
 dotnet user-secrets init
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=Acme;User Id=sa;Password=<your-password>;Encrypt=True;TrustServerCertificate=True"
 dotnet user-secrets set "SqlOS:Dashboard:Password" "<a-long-random-password>"
+dotnet user-secrets set "SqlOS:SigningKeyCustody:DataProtectionKeyRingPath" "<durable-local-path-outside-the-repository>"
 ```
 
 The database must already exist. SqlOS creates and upgrades its own tables inside it.
@@ -53,6 +54,7 @@ The database must already exist. SqlOS creates and upgrades its own tables insid
 Replace `Program.cs` with:
 
 ```csharp
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using SqlOS;
 using SqlOS.Configuration;
@@ -68,6 +70,14 @@ const string publicOrigin = "http://localhost:5050";
 var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
     ?? throw new InvalidOperationException(
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
+var signingKeyRingPath = builder.Configuration[
+    "SqlOS:SigningKeyCustody:DataProtectionKeyRingPath"]
+    ?? throw new InvalidOperationException(
+        "Configure a durable Data Protection key-ring path outside the application database.");
+
+builder.Services.AddDataProtection()
+    .SetApplicationName("Acme.Identity")
+    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
 
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
@@ -75,6 +85,8 @@ builder.AddSqlOS<AppDbContext>(
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+        options.AuthServer.ConfigureSigningKeyCustody(custody =>
+            custody.DataProtectionKeyRingIsPersistedAndShared = true);
 
         options.UseSingleApplication("Acme", app =>
         {
@@ -115,7 +127,7 @@ Use the same origin declared in the code:
 dotnet run --urls http://localhost:5050
 ```
 
-On the first start, SqlOS creates or upgrades its schema, creates a signing key, writes default settings, and reconciles the `acme-web` application seed.
+On the first start, SqlOS creates or upgrades its schema, creates a signing key protected by the configured custody boundary, writes default settings, and reconciles the `acme-web` application seed.
 
 ## Verify
 
@@ -154,6 +166,10 @@ SqlOS initializes tables, not the SQL Server database itself. Create the databas
 
 Confirm the configuration key is available to this process and that the options callback assigns it. User secrets apply only to the project in which they were initialized.
 
+### Signing-key custody is not configured
+
+The key-ring path must survive process restarts and must not be the application database or a source-controlled directory. Every token-issuing replica must use the same protected storage and `SetApplicationName` value. Do not set `DataProtectionKeyRingIsPersistedAndShared` merely to bypass the startup check.
+
 ### Redirect mismatch
 
 The requested callback must exactly equal the seeded URI, including scheme, host, port, and path. Change `publicOrigin` and `RedirectPath` together.
@@ -167,7 +183,7 @@ Single-application mode will not overwrite an unrelated manual client. Pick a di
 - Replace the local origin with the externally reachable HTTPS origin.
 - Read the connection string and dashboard password from your deployment secret store.
 - Restrict `/sqlos` and `/sqlos/admin` at the network or identity-aware proxy layer; the built-in password is a baseline, not the only control for a public admin endpoint.
-- Persist and share ASP.NET Core Data Protection keys across replicas before enabling features that protect durable secrets with Data Protection.
+- Persist, protect, back up, and share ASP.NET Core Data Protection keys across replicas, or register KMS, Vault, or HSM custody. See [Signing-Key Custody](/docs/authserver/signing-key-custody).
 - Run SqlOS bootstrap before application migrations if your application schema has foreign keys to SqlOS-owned tables.
 
 ## Next steps
