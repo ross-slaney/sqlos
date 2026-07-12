@@ -492,12 +492,19 @@ public sealed class SqlOSSsoPortalService
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        // Refresh-based organization switching keeps the session's original
+        // organization as its default. Consumed refresh rows are therefore the
+        // durable lineage proving that this session also issued tokens for the
+        // SSO organization and must be included in its cutoff.
         var sessions = eligibleUserIds.Count == 0
             ? []
             : await _context.Set<SqlOSSession>()
-                .Where(x => x.OrganizationId == session.OrganizationId
-                    && x.RevokedAt == null
-                    && eligibleUserIds.Contains(x.UserId))
+                .Where(x => x.RevokedAt == null
+                    && eligibleUserIds.Contains(x.UserId)
+                    && (x.OrganizationId == session.OrganizationId
+                        || _context.Set<SqlOSRefreshToken>().Any(refreshToken =>
+                            refreshToken.SessionId == x.Id
+                            && refreshToken.ReplacementOrganizationId == session.OrganizationId)))
                 .ToListAsync(cancellationToken);
 
         var sessionIds = sessions.Select(x => x.Id).ToList();

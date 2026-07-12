@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
@@ -288,6 +289,141 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task SsoOrganizationRevocation_AfterRefreshOrganizationSwitch_RevokesFamilyAcrossDbContexts()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        string portalSessionId;
+        string switchedSessionId;
+        string clientAudience;
+        string sourceOrganizationId;
+        string targetOrganizationId;
+        SqlOSTokenResponse switchedTargetTokens;
+        SqlOSTokenResponse unrelatedSourceTokens;
+
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var sourceOrganization = await issuance.Admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest($"SQL Switch Source {suffix}", null));
+            var targetOrganization = await issuance.Admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest($"SQL Switch Target {suffix}", null));
+            sourceOrganizationId = sourceOrganization.Id;
+            targetOrganizationId = targetOrganization.Id;
+
+            var portalResult = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(targetOrganization.Id),
+                new DefaultHttpContext());
+            portalSessionId = portalResult.Id;
+            var connection = await issuance.Context.Set<SqlOSSsoConnection>()
+                .SingleAsync(x => x.OrganizationId == targetOrganization.Id);
+            connection.IsEnabled = true;
+            connection.IdentityProviderEntityId = $"urn:sql-switch:{suffix}";
+            connection.SingleSignOnUrl = "https://idp.sql-switch.test/sso";
+            connection.X509CertificatePem = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
+            issuance.Context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+            {
+                Id = issuance.Crypto.GenerateId("dom"),
+                OrganizationId = targetOrganization.Id,
+                Domain = $"{suffix}.sql-switch.test",
+                Status = SqlOSOrganizationDomainStatuses.Active,
+                VerificationToken = "verified",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                VerifiedAt = DateTime.UtcNow
+            });
+
+            var switchedUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "SQL Switched User",
+                $"switched@{suffix}.sql-switch.test",
+                "P@ssword123!"));
+            var unrelatedUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "SQL Unrelated User",
+                $"unrelated@{suffix}.sql-switch.test",
+                "P@ssword123!"));
+            var verifiedEmails = await issuance.Context.Set<SqlOSUserEmail>()
+                .Where(x => x.UserId == switchedUser.Id || x.UserId == unrelatedUser.Id)
+                .ToListAsync();
+            foreach (var email in verifiedEmails)
+            {
+                email.IsVerified = true;
+                email.VerifiedAt = DateTime.UtcNow;
+            }
+
+            await issuance.Admin.CreateMembershipAsync(
+                sourceOrganization.Id,
+                new SqlOSCreateMembershipRequest(switchedUser.Id, "member"));
+            await issuance.Admin.CreateMembershipAsync(
+                targetOrganization.Id,
+                new SqlOSCreateMembershipRequest(switchedUser.Id, "member"));
+            await issuance.Admin.CreateMembershipAsync(
+                sourceOrganization.Id,
+                new SqlOSCreateMembershipRequest(unrelatedUser.Id, "member"));
+            var client = await issuance.Context.Set<SqlOSClientApplication>()
+                .SingleAsync(x => x.ClientId == "test-client");
+            clientAudience = client.Audience;
+
+            var switchedSourceTokens = await issuance.Auth.CreateSessionTokensForUserAsync(
+                switchedUser,
+                client,
+                sourceOrganization.Id,
+                "password",
+                "SQL lifecycle integration",
+                "203.0.113.50");
+            switchedTargetTokens = await issuance.Auth.RefreshAsync(
+                new SqlOSRefreshRequest(switchedSourceTokens.RefreshToken, targetOrganization.Id));
+            switchedSessionId = switchedTargetTokens.SessionId;
+            unrelatedSourceTokens = await issuance.Auth.CreateSessionTokensForUserAsync(
+                unrelatedUser,
+                client,
+                sourceOrganization.Id,
+                "password",
+                "SQL lifecycle integration",
+                "203.0.113.51");
+
+            (await issuance.Context.Set<SqlOSSession>()
+                .SingleAsync(x => x.Id == switchedSessionId))
+                .OrganizationId.Should().Be(sourceOrganization.Id);
+            (await issuance.Context.Set<SqlOSRefreshToken>()
+                .AnyAsync(x => x.SessionId == switchedSessionId
+                    && x.ReplacementOrganizationId == targetOrganization.Id)).Should().BeTrue();
+            await issuance.Context.SaveChangesAsync();
+        }
+
+        await using (var revocation = BuildIsolatedLifecycleStack())
+        {
+            var portalSession = await revocation.Context.Set<SqlOSSsoPortalSession>()
+                .SingleAsync(x => x.Id == portalSessionId);
+            var result = await revocation.Portal.RevokeOrganizationSessionsAsync(
+                portalSession,
+                new SqlOSSsoPortalRevokeOrganizationSessionsRequest(true),
+                new DefaultHttpContext());
+
+            result.RevokedSessions.Should().Be(1);
+            var switchedSession = await revocation.Context.Set<SqlOSSession>()
+                .SingleAsync(x => x.Id == switchedSessionId);
+            switchedSession.RevocationReason.Should().Be("sso_required");
+            (await revocation.Context.Set<SqlOSRefreshToken>()
+                .Where(x => x.SessionId == switchedSessionId)
+                .AllAsync(x => x.RevokedAt != null)).Should().BeTrue();
+        }
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        (await verification.Auth.ValidateAccessTokenAsync(
+            switchedTargetTokens.AccessToken,
+            clientAudience)).Should().BeNull();
+        var switchedRefresh = async () => await verification.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(switchedTargetTokens.RefreshToken, targetOrganizationId));
+        await switchedRefresh.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token is no longer valid.");
+
+        (await verification.Auth.ValidateAccessTokenAsync(
+            unrelatedSourceTokens.AccessToken,
+            clientAudience)).Should().NotBeNull();
+        var unrelatedRefresh = await verification.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(unrelatedSourceTokens.RefreshToken, sourceOrganizationId));
+        unrelatedRefresh.OrganizationId.Should().Be(sourceOrganizationId);
+    }
+
+    [TestMethod]
     public async Task Signup_Refresh_Logout_RoundTrips()
     {
         var auth = BuildAuthService();
@@ -480,23 +616,43 @@ public sealed class AuthServiceIntegrationTests
             settings,
             authPage,
             options);
-        return new IsolatedLifecycleStack(context, crypto, auth, authPage, authorization);
+        var domains = new SqlOSOrganizationDomainService(
+            context,
+            options,
+            crypto,
+            admin,
+            new RejectingDomainDnsVerifier());
+        var portal = new SqlOSSsoPortalService(context, options, crypto, admin, domains);
+        return new IsolatedLifecycleStack(context, crypto, admin, auth, authPage, authorization, portal);
     }
 
     private sealed class IsolatedLifecycleStack(
         TestSqlOSDbContext context,
         SqlOSCryptoService crypto,
+        SqlOSAdminService admin,
         SqlOSAuthService auth,
         SqlOSAuthPageSessionService authPage,
-        SqlOSAuthorizationServerService authorization) : IAsyncDisposable
+        SqlOSAuthorizationServerService authorization,
+        SqlOSSsoPortalService portal) : IAsyncDisposable
     {
         public TestSqlOSDbContext Context { get; } = context;
         public SqlOSCryptoService Crypto { get; } = crypto;
+        public SqlOSAdminService Admin { get; } = admin;
         public SqlOSAuthService Auth { get; } = auth;
         public SqlOSAuthPageSessionService AuthPage { get; } = authPage;
         public SqlOSAuthorizationServerService Authorization { get; } = authorization;
+        public SqlOSSsoPortalService Portal { get; } = portal;
 
         public ValueTask DisposeAsync() => Context.DisposeAsync();
+    }
+
+    private sealed class RejectingDomainDnsVerifier : ISqlOSDomainDnsVerifier
+    {
+        public Task<bool> HasTxtRecordValueAsync(
+            string recordName,
+            string expectedValue,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
     }
 
     [TestMethod]

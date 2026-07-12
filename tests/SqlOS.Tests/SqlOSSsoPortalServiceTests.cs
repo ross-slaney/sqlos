@@ -364,6 +364,100 @@ public sealed class SqlOSSsoPortalServiceTests
     }
 
     [TestMethod]
+    public async Task RevokeOrganizationSessionsAsync_RevokesSessionThatRefreshedIntoOrganization()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var sourceOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Refresh Source Org", null));
+        var targetOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Refresh Target Org", null));
+        var created = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(targetOrganization.Id),
+            harness.Http);
+        var portalSession = await harness.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == created.Id);
+        var connection = await harness.Context.Set<SqlOSSsoConnection>()
+            .SingleAsync(x => x.OrganizationId == targetOrganization.Id);
+        connection.IsEnabled = true;
+        connection.IdentityProviderEntityId = "urn:refresh-switch:idp";
+        connection.SingleSignOnUrl = "https://idp.refresh-switch.test/sso";
+        connection.X509CertificatePem = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
+        harness.Context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+        {
+            Id = $"dom_{Guid.NewGuid():N}"[..28],
+            OrganizationId = targetOrganization.Id,
+            Domain = "refresh-switch.test",
+            Status = SqlOSOrganizationDomainStatuses.Active,
+            VerificationToken = "verified",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            VerifiedAt = DateTime.UtcNow
+        });
+
+        var switchedUser = await CreateVerifiedUserAsync(
+            harness,
+            "Switched User",
+            "switched@refresh-switch.test");
+        var unrelatedUser = await CreateVerifiedUserAsync(
+            harness,
+            "Unrelated Source User",
+            "unrelated@refresh-switch.test");
+        await harness.Admin.CreateMembershipAsync(
+            sourceOrganization.Id,
+            new SqlOSCreateMembershipRequest(switchedUser.Id, "member"));
+        await harness.Admin.CreateMembershipAsync(
+            targetOrganization.Id,
+            new SqlOSCreateMembershipRequest(switchedUser.Id, "member"));
+        await harness.Admin.CreateMembershipAsync(
+            sourceOrganization.Id,
+            new SqlOSCreateMembershipRequest(unrelatedUser.Id, "member"));
+        var client = await harness.Context.Set<SqlOSClientApplication>()
+            .SingleAsync(x => x.ClientId == "sso-switch-client");
+        var switchedSourceTokens = await harness.Auth.CreateSessionTokensForUserAsync(
+            switchedUser,
+            client,
+            sourceOrganization.Id,
+            "password",
+            "SqlOSSsoPortalServiceTests",
+            "203.0.113.40");
+        var switchedTargetTokens = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(switchedSourceTokens.RefreshToken, targetOrganization.Id));
+        var unrelatedSourceTokens = await harness.Auth.CreateSessionTokensForUserAsync(
+            unrelatedUser,
+            client,
+            sourceOrganization.Id,
+            "password",
+            "SqlOSSsoPortalServiceTests",
+            "203.0.113.41");
+
+        (await harness.Context.Set<SqlOSSession>()
+            .SingleAsync(x => x.Id == switchedTargetTokens.SessionId))
+            .OrganizationId.Should().Be(sourceOrganization.Id);
+        (await harness.Context.Set<SqlOSRefreshToken>()
+            .AnyAsync(x => x.SessionId == switchedTargetTokens.SessionId
+                && x.ReplacementOrganizationId == targetOrganization.Id)).Should().BeTrue();
+
+        var result = await harness.Portal.RevokeOrganizationSessionsAsync(
+            portalSession,
+            new SqlOSSsoPortalRevokeOrganizationSessionsRequest(true),
+            harness.Http);
+
+        result.RevokedSessions.Should().Be(1);
+        (await harness.Auth.ValidateAccessTokenAsync(switchedTargetTokens.AccessToken, client.Audience))
+            .Should().BeNull();
+        var switchedRefresh = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(switchedTargetTokens.RefreshToken, targetOrganization.Id));
+        await switchedRefresh.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token is no longer valid.");
+
+        (await harness.Auth.ValidateAccessTokenAsync(unrelatedSourceTokens.AccessToken, client.Audience))
+            .Should().NotBeNull();
+        var unrelatedRefresh = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(unrelatedSourceTokens.RefreshToken, sourceOrganization.Id));
+        unrelatedRefresh.OrganizationId.Should().Be(sourceOrganization.Id);
+    }
+
+    [TestMethod]
     public async Task GetSetupActionAsync_ReturnsHeadlessSetupViewModel()
     {
         using var harness = await PortalHarness.CreateAsync();
@@ -547,6 +641,7 @@ public sealed class SqlOSSsoPortalServiceTests
         public required TestSqlOSInMemoryDbContext Context { get; init; }
         public required SqlOSCryptoService Crypto { get; init; }
         public required SqlOSAdminService Admin { get; init; }
+        public required SqlOSAuthService Auth { get; init; }
         public required SqlOSOrganizationDomainService Domains { get; init; }
         public required FakeDomainDnsVerifier Dns { get; init; }
         public required SqlOSSsoPortalService Portal { get; init; }
@@ -563,21 +658,32 @@ public sealed class SqlOSSsoPortalServiceTests
                 PublicOrigin = "https://auth.example.test",
                 Issuer = "https://auth.example.test/sqlos/auth"
             };
+            authOptions.SeedBrowserClient(
+                "sso-switch-client",
+                "SSO Switch Client",
+                "https://client.example.test/callback");
             configure?.Invoke(authOptions);
             var options = Options.Create(authOptions);
             var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
+            var emailSender = new TestAuthEmailSender { IsConfigured = true };
+            var settings = new SqlOSSettingsService(context, options, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
             var dns = new FakeDomainDnsVerifier();
             var domains = new SqlOSOrganizationDomainService(context, options, crypto, admin, dns);
             var portal = new SqlOSSsoPortalService(context, options, crypto, admin, domains);
 
             await crypto.EnsureActiveSigningKeyAsync();
+            await admin.UpsertSeededClientsAsync();
+            await settings.EnsureDefaultSettingsAsync();
 
             return new PortalHarness
             {
                 Context = context,
                 Crypto = crypto,
                 Admin = admin,
+                Auth = auth,
                 Domains = domains,
                 Dns = dns,
                 Portal = portal,
