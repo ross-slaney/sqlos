@@ -52,10 +52,24 @@ const referenceContents = referenceFiles
   .map((name) => fs.readFileSync(path.join(referenceRoot, name), "utf8"))
   .join("\n");
 const index = fs.readFileSync(path.join(referenceRoot, "index.mdx"), "utf8");
+const repositoryReadme = read("README.md");
+const addToAppQuickstart = read("web/content/docs/quickstarts/add-to-app.mdx");
 
 if (packageVersion && !index.includes(`SqlOS ${packageVersion}`)) {
   errors.push(
     `web/content/docs/reference/index.mdx: expected current package marker 'SqlOS ${packageVersion}'.`,
+  );
+}
+
+if (packageVersion && !repositoryReadme.includes(`--version ${packageVersion}`)) {
+  errors.push(
+    `README.md: expected package install command for SqlOS ${packageVersion}.`,
+  );
+}
+
+if (packageVersion && !addToAppQuickstart.includes(`--version ${packageVersion}`)) {
+  errors.push(
+    `web/content/docs/quickstarts/add-to-app.mdx: expected package install command for SqlOS ${packageVersion}.`,
   );
 }
 
@@ -111,6 +125,46 @@ const requiredSourceContracts = [
     /public async Task<SqlOSLoginResult> VerifyPhoneOtpAsync/,
     "SqlOSAuthService.VerifyPhoneOtpAsync",
   ],
+  [
+    "examples/SqlOS.Example.AspNetCoreWeb/Program.cs",
+    /\.AddOAuth\("SqlOS", options =>[\s\S]*options\.UsePkce = true;[\s\S]*options\.SaveTokens = true;/,
+    "ASP.NET Core OAuth + PKCE example",
+  ],
+  [
+    "examples/SqlOS.Todo.Api/Program.cs",
+    /ClientId = "example-aspnet"[\s\S]*http:\/\/localhost:5090\/signin-sqlos/,
+    "Todo ASP.NET Core public client registration",
+  ],
+  [
+    "examples/SqlOS.Example.Tests/AspNetCoreWebSessionTests.cs",
+    /ExpiringAccessToken_RotatesRefreshToken_RenewsTicket_AndCallsApi/,
+    "ASP.NET Core session refresh regression test",
+  ],
+  [
+    "examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj",
+    /<UserSecretsId>sqlos-todo-apphost<\/UserSecretsId>/,
+    "Todo AppHost user-secrets support",
+  ],
+  [
+    "src/SqlOS/AuthServer/Services/SqlOSAuthorizationServerService.cs",
+    /input\.State\.Length > 2048/,
+    "OAuth state length validation",
+  ],
+  [
+    "src/SqlOS/Hosting/SqlOSPipelineStartupFilter.cs",
+    /app\.UseForwardedHeaders\(\);[\s\S]*UseMiddleware<RootDashboardMiddleware>/,
+    "trusted forwarded headers before dashboard middleware",
+  ],
+  [
+    "src/SqlOS/AuthServer/Services/SqlOSCimdClientService.cs",
+    /EnforceTrustedHost\(clientIdUri\);/,
+    "CIMD pre-fetch host allowlist",
+  ],
+  [
+    "src/SqlOS/Extensions/ServiceCollectionExtensions.cs",
+    /AddHttpClient\(nameof\(SqlOSCimdClientService\)\)[\s\S]*AllowAutoRedirect = false/,
+    "CIMD redirect-disabled HTTP client",
+  ],
 ];
 
 for (const [relativePath, pattern, contractName] of requiredSourceContracts) {
@@ -119,6 +173,19 @@ for (const [relativePath, pattern, contractName] of requiredSourceContracts) {
     pattern,
     `${relativePath}: documented contract '${contractName}' was not found. Update the reference docs with the source change.`,
     errors,
+  );
+}
+
+const oauthStateMigration = read("src/SqlOS/AuthServer/Schema/027_OAuthStateLength.sql");
+const widenedStateColumns = oauthStateMigration.match(
+  /ALTER COLUMN \[State\] NVARCHAR\(2048\) NOT NULL;/g,
+);
+const stateWideningGuards = oauthStateMigration.match(
+  /COL_LENGTH\('[^']+', 'State'\) < 4096/g,
+);
+if (widenedStateColumns?.length !== 2 || stateWideningGuards?.length !== 2) {
+  errors.push(
+    "src/SqlOS/AuthServer/Schema/027_OAuthStateLength.sql: both OAuth state columns must widen for ASP.NET Core protected state without narrowing larger operator hotfixes.",
   );
 }
 

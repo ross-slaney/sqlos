@@ -1,31 +1,31 @@
 ---
 title: "Run the Todo sample"
-description: "See SqlOS hosted login and authorized EF Core queries before changing an application."
+description: "Prove hosted login, an ASP.NET Core session, token validation, and authorized EF queries in one local stack."
 order: 0
 section: quickstarts
 ---
 
 <Banner
   eyebrow="Quickstart"
-  title="Get working proof in one command"
+  title="Get working .NET proof in one command"
   href="#run"
   actionLabel="Run the sample"
 >
-  The Todo sample is the fastest way to evaluate SqlOS. Aspire starts SQL Server and the .NET API; the sample already includes hosted auth, a PKCE client, token validation, and FGA-filtered data.
+  Aspire starts SQL Server, the SqlOS-enabled Todo API, and a Razor Pages client. Password signup works without an email, SMS, or external identity provider.
 </Banner>
 
 ## Goal
 
-Create an account, receive a SqlOS access token, create Todo rows, and see authorization resources in the embedded dashboard without editing code.
+Create an account through the SqlOS hosted AuthPage, return to a secure ASP.NET Core cookie session, call a protected API, and inspect the corresponding SqlOS session. The companion Todo browser UI also demonstrates FGA-filtered EF Core data.
 
 ## Prerequisites
 
 - the SqlOS repository checked out locally;
 - .NET 9 SDK;
 - Docker running with enough memory for SQL Server;
-- ports `1435` and `5080` available.
+- ports `1435`, `5080`, `5090`, `18890`, and `18891` available.
 
-This quickstart uses the source at **SqlOS 3.16.0**. It does not require an external identity provider or email service; password signup is enabled by default.
+This quickstart uses the source at **SqlOS 3.17.0**. Local password authentication is the default, so the first run does not require Azure Communication Services, Twilio, or an OIDC provider.
 
 ## Run
 
@@ -35,46 +35,60 @@ From the repository root:
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
-Wait for the SQL Server resource and `todo-api` to report healthy, then open:
+Use the authenticated Aspire dashboard URL printed in the terminal. Its configured listener is:
 
 ```text
-http://localhost:5080/
+https://localhost:18890
 ```
 
-The AppHost uses a persistent SQL Server container and passes the database connection string to the API. SqlOS initializes its schema, signing key, OAuth client, and FGA seed data when the API starts.
+Wait for SQL Server to become healthy and for `todo-api` and `aspnet-web` to show **Running**. Aspire keeps the logs and resource endpoints together, which is the fastest place to diagnose a failed first start.
 
-## Verify
+The AppHost uses a persistent SQL Server container on port `1435` and passes the database connection string to the API. SqlOS initializes its schema, signing key, OAuth clients, and FGA seed data when `todo-api` starts.
 
-1. Select the hosted sign-up action in the Todo app.
-2. Create a password account.
-3. Complete the redirect back to the Todo app.
-4. Create two Todo items and mark one complete.
-5. Refresh the page. Both rows should remain visible.
-6. Open `http://localhost:5080/sqlos/admin/fga/resources`.
-7. Confirm the resource tree contains a tenant resource for your user and child Todo resources.
+## Verify the all-.NET login
 
-Useful endpoints:
+1. Open `http://localhost:5090`.
+2. Select **Sign in with SqlOS**.
+3. Create a password account and organization, or sign in to an existing one.
+4. Confirm the browser returns to the Razor Pages app.
+5. Inspect the identity card and the `200` response from `GET /api/me`.
+6. Select **Sign out and revoke**.
+
+![Hosted SqlOS password sign-in used by the Todo sample](/docs/auth-password-step.png)
+
+That proves the complete chain: ASP.NET Core challenge and PKCE, SqlOS hosted login, authorization-code exchange, application cookie, exact-audience bearer validation, and revoking logout.
+
+## Explore Todo authorization
+
+Open `http://localhost:5080` for the companion browser client. Sign in, create two Todo items, mark one complete, and refresh. The API stores each Todo as an FGA resource and filters the EF Core list query for the current subject.
+
+Open `http://localhost:5080/sqlos/admin/fga/resources` to inspect the tenant and Todo resource tree. The same dashboard exposes grants, roles, permissions, sessions, applications, and the Access Tester.
+
+## Useful endpoints
 
 | URL | What it proves |
 | --- | --- |
-| `http://localhost:5080/sample/config` | Issuer, audience, client, and enabled sample features |
+| Authenticated URL printed by Aspire (`https://localhost:18890`) | Aspire health, endpoints, logs, and traces for the Todo stack |
+| `http://localhost:5090` | Razor Pages client with framework-owned PKCE and cookie session |
+| `http://localhost:5080` | Todo browser UI and hosted-auth entry point |
+| `http://localhost:5080/sample/config` | Issuer, audience, clients, scopes, and optional feature flags |
 | `http://localhost:5080/sqlos/auth/.well-known/oauth-authorization-server` | OAuth server metadata |
 | `http://localhost:5080/.well-known/oauth-protected-resource` | Protected-resource metadata |
-| `http://localhost:5080/swagger` | Sample API endpoints |
-| `http://localhost:5080/sqlos` | Embedded dashboard |
+| `http://localhost:5080/swagger` | Sample API operations |
+| `http://localhost:5080/sqlos` | Embedded SqlOS dashboard |
 
 ## What the sample demonstrates
 
-The normal flow is intentionally visible:
+The stack contains two first-party browser clients for different learning goals:
 
-1. The browser starts an authorization-code flow with PKCE.
-2. SqlOS renders the hosted login and signup pages.
-3. SqlOS redirects to the sample callback with a one-time code.
-4. The sample exchanges the code and calls `/api/todos` with a bearer token.
-5. `RequireSqlOSAccessToken` validates the Todo audience.
-6. `GetAuthorizationFilterAsync<TodoItem>` adds the authorization predicate to the EF Core query.
+| Client | Callback | Purpose |
+| --- | --- | --- |
+| `example-aspnet` | `http://localhost:5090/signin-sqlos` | Server-rendered .NET login, application cookie, `/api/me`, and revocation |
+| `todo-web` | `http://localhost:5080/callback.html` | Todo CRUD and FGA-filtered EF Core queries |
 
-The sample also contains CLI, CIMD, DCR, Email OTP, and SMS OTP examples. Those are optional paths, not prerequisites for your first application.
+Both clients are public, require PKCE, and receive access tokens for `http://localhost:5080/api/todos`.
+
+The API also contains CLI device flow, CIMD, DCR, email OTP, and SMS OTP examples. Those are optional paths, not prerequisites for the provider-free password flow.
 
 ## Common failures
 
@@ -82,29 +96,39 @@ The sample also contains CLI, CIMD, DCR, Email OTP, and SMS OTP examples. Those 
 
 Confirm Docker is running and port `1435` is free. On Apple silicon, the SQL Server image runs through the platform setting in the AppHost and may take longer on first start.
 
-### Port 5080 is already in use
+### The Aspire dashboard certificate is not trusted
 
-Stop the process using the port before restarting. The sample OAuth issuer and callback are intentionally fixed to `http://localhost:5080`, so changing only the ASP.NET port will produce redirect or issuer mismatches.
+Trust the local development certificate with `dotnet dev-certs https --trust`, or use the dashboard URL printed by the AppHost process and accept the local browser warning deliberately.
+
+### Port 5080 or 5090 is already in use
+
+Stop the conflicting process before restarting. The issuer, audience, and callbacks use these documented origins; changing only one port produces an issuer, audience, or redirect mismatch.
+
+### Login does not return to the Razor app
+
+Start the challenge at `http://localhost:5090` rather than opening a hosted-auth URL directly. The seeded callback must remain exactly `http://localhost:5090/signin-sqlos`.
 
 ### Old sample data behaves differently
 
-The AppHost uses a persistent data volume. If you previously ran an older schema or FGA model, use a clean development volume before diagnosing current behavior. Do not remove a volume that contains data you need.
+The AppHost uses a persistent data volume. If you previously ran an older schema or seed model, let current startup migrations finish. Use a clean development volume only when intentionally discarding obsolete local data.
 
-### Direct login does not return to Todo
+### Email-code sign-in is missing
 
-Start sign-in from `http://localhost:5080/`. Opening the hosted login URL directly does not create the Todo app's complete PKCE transaction.
+That is expected in the provider-free default. Password signup is enabled when no OTP provider is selected. Configure email OTP only if you want to evaluate delivery; see [Todo sample details](/docs/authserver/todo-sample#optional-email-otp).
 
 ## Production notes
 
 The Todo project is an evaluation sample, not a production deployment template. In production:
 
 - use HTTPS and a stable public origin;
-- protect `/sqlos` with password mode plus a private network, VPN, identity-aware proxy, or equivalent admin control;
-- store database credentials, dashboard credentials, provider secrets, and Data Protection keys outside source control;
-- create application-specific resource types and permission names instead of reusing the Todo model.
+- use `CookieSecurePolicy.Always` and persist Data Protection keys across replicas;
+- protect `/sqlos` and `/sqlos/admin/*` with a private network, VPN, identity-aware proxy, or equivalent admin control while keeping `/sqlos/auth/*` reachable by users;
+- store database credentials, dashboard credentials, provider secrets, and key rings outside source control;
+- create application-specific resource types and permissions instead of reusing the Todo model.
 
 ## Next steps
 
+- [Understand the ASP.NET Core login](/docs/quickstarts/aspnet-core-login)
 - [Add SqlOS to one application](/docs/quickstarts/add-to-app)
 - [Protect an API](/docs/quickstarts/protect-api)
 - [Authorize EF Core queries](/docs/quickstarts/ef-authorization)

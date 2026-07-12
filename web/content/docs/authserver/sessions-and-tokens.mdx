@@ -42,7 +42,7 @@ var orgId = validated.OrganizationId;
 | Field | Description |
 | --- | --- |
 | `UserId` | Authenticated user |
-| `SessionId` | Active session |
+| `SessionId` | Persisted session referenced by the token |
 | `ClientId` | OAuth client that initiated login |
 | `OrganizationId` | Scoped organization (nullable) |
 | `Principal` | `ClaimsPrincipal` with all JWT claims |
@@ -55,16 +55,18 @@ External services can validate SqlOS-issued JWTs using the public key at:
 GET /sqlos/auth/.well-known/jwks.json
 ```
 
+JWKS-only validation cannot see the persisted SqlOS session. It accepts a signed, correctly issued token until its JWT expiry even if the session was logged out in the meantime. Use the SDK/middleware validator—or an application-owned trusted introspection/session check—when immediate revocation is required.
+
 ## Refresh tokens
 
-Refresh tokens are opaque and rotated on every use. Each refresh consumes the old token and issues a new one.
+Refresh tokens are opaque and rotated on successful refresh. Each refresh consumes the old token and issues a new pair.
 
 ```csharp
 var tokens = await authService.RefreshAsync(
     new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 ```
 
-**Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
+**Grace and replay detection**: The default 30-second refresh grace returns the same cached access token plus a fresh sibling refresh token in the same family and with the same expiry for a near-concurrent retry. Reuse outside the configured grace behavior revokes the entire token family and the session. Set `RefreshTokenGraceWindowSeconds` deliberately for your client concurrency model.
 
 **Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
 
@@ -102,7 +104,7 @@ Configured via the dashboard (Auth Server > Security) or the admin API:
 | Setting | Description |
 | --- | --- |
 | Refresh token lifetime | How long a refresh token is valid |
-| Session idle timeout | Session expires after this period of inactivity |
+| Session idle timeout | Refresh is rejected when no successful refresh has extended the session within this period |
 | Session absolute lifetime | Hard expiration regardless of activity |
 
 ```json
@@ -121,6 +123,8 @@ builder.AddSqlOS<AppDbContext>(options =>
     options.AuthServer.AccessTokenLifetime = TimeSpan.FromMinutes(15);
 });
 ```
+
+Idle timeout does not retroactively shorten a JWT that has already been issued. Session-aware access-token validation rejects a missing, revoked, or absolutely expired session; the access token's own `exp` remains its time boundary. Idle expiry is enforced on refresh, and a successful refresh extends the idle deadline without moving the absolute deadline.
 
 ## Viewing active sessions
 

@@ -21,7 +21,7 @@ Do **not** start here if you are just wiring your own first-party web app. Seed 
 
 ## Turn it on
 
-`CIMD` is enabled by default, but the helper below makes the intent obvious and also turns on resource indicators for portable-client flows:
+`CIMD` is enabled in the raw multi-client defaults; `UseSingleApplication` disables it. The helper below opts a single-application host back into portable-client behavior and also turns on resource indicators:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
@@ -40,7 +40,18 @@ builder.AddSqlOS<AppDbContext>(options =>
 {
     options.AuthServer.ClientRegistration.Cimd.Enabled = true;
     options.AuthServer.ClientRegistration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
+    options.AuthServer.ClientRegistration.Cimd.TrustedHosts.Add("clients.example.com");
 });
+```
+
+<Callout type="warning" title="CIMD performs a server-side fetch">
+  When `TrustedHosts` is empty, any syntactically valid HTTPS client-ID URL with a non-root path is eligible for an outbound metadata request. In production, disable CIMD when portable clients are unnecessary. Otherwise, configure `TrustedHosts` as a pre-fetch allowlist and apply outbound DNS/IP controls that prevent access to loopback, link-local, metadata-service, and private network targets. SqlOS's named CIMD client does not follow HTTP redirects.
+</Callout>
+
+Disable it explicitly when the host accepts only seeded or dashboard-managed clients:
+
+```csharp
+options.AuthServer.ClientRegistration.Cimd.Enabled = false;
 ```
 
 ## What SqlOS validates
@@ -62,7 +73,7 @@ SqlOS also:
 
 ## Trust policy
 
-Use trust rules when you want more than the defaults.
+`TrustedHosts` is checked before the network request. Use `TrustPolicy` when you also need to inspect parsed metadata after retrieval:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
