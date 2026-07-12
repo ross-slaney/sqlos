@@ -913,6 +913,38 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task PasswordResetEmail_RequestCancellationAfterTokenCreation_InvalidatesToken()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = _ =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(cancellation.Token);
+            };
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Cancelled Reset",
+            "cancelled-reset@example.com",
+            "OldPassword123!"));
+
+        var act = async () => await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
+            CreatePasswordHttpContext("203.0.113.102"),
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.EventType == "password_reset.email_send_failed" && audit.UserId == user.Id))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task PasswordResetEmail_Request_UnknownEmail_ReturnsGenericSuccessAndDoesNotSend()
     {
         using var harness = await PasswordResetHarness.CreateAsync();

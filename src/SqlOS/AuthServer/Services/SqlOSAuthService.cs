@@ -1215,11 +1215,14 @@ public sealed class SqlOSAuthService
                 result.SanitizedError,
                 $"Password reset email queued for {context.MaskedEmail}.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             if (token != null)
             {
-                await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+                // Once the reset token has been persisted, cleanup must not inherit request
+                // cancellation. A disconnected caller must not be able to strand a live token
+                // between link generation and delivery.
+                await InvalidateActivePasswordResetTokensAsync(email.UserId, CancellationToken.None);
             }
             await RecordPasswordResetAuditAsync(
                 "password_reset.email_send_failed",
@@ -1229,7 +1232,7 @@ public sealed class SqlOSAuthService
                 maskedEmail,
                 GetIp(httpContext),
                 new { error = ex.Message },
-                cancellationToken);
+                CancellationToken.None);
             throw;
         }
     }
