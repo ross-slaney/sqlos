@@ -75,6 +75,8 @@ public sealed class SqlOSCryptoServiceTests
         second.Id.Should().Be(first.Id);
         first.CustodyProvider.Should().Be(SqlOSDataProtectionSigningKeyCustody.DataProtectionProviderId);
         first.KeyReference.Should().StartWith("sqlos-dp-signing:v1:");
+        Base64UrlEncoder.DecodeBytes(first.KeyReference["sqlos-dp-signing:v1:".Length..])
+            .Should().NotBeEmpty();
         first.KeyReference.Should().NotContain("BEGIN PRIVATE KEY");
         first.PublicKeyPem.Should().Contain("BEGIN RSA PUBLIC KEY");
     }
@@ -103,6 +105,32 @@ public sealed class SqlOSCryptoServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*contains plaintext private key material*");
         context.Set<SqlOSSigningKey>().Should().ContainSingle();
+    }
+
+    [TestMethod]
+    public async Task EnsureActiveSigningKey_AmbiguousPublicKeyPem_FailsWithClearCustodyError()
+    {
+        using var context = CreateContext();
+        using var rsa = RSA.Create(2048);
+        var publicKeyPem = rsa.ExportRSAPublicKeyPem();
+        context.Set<SqlOSSigningKey>().Add(new SqlOSSigningKey
+        {
+            Id = "key_ambiguous_public",
+            Kid = "ambiguous-public-kid",
+            Algorithm = SecurityAlgorithms.RsaSha256,
+            PublicKeyPem = $"{publicKeyPem}\n{publicKeyPem}",
+            CustodyProvider = SqlOSDataProtectionSigningKeyCustody.DataProtectionProviderId,
+            KeyReference = "sqlos-dp-signing:v1:not-used",
+            IsActive = true,
+            ActivatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+
+        var act = async () => await service.EnsureActiveSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not contain a valid RSA public key*");
     }
 
     [TestMethod]
@@ -240,6 +268,72 @@ public sealed class SqlOSCryptoServiceTests
             .WithMessage("*produced a signature that does not match*");
         context.Set<SqlOSSigningKey>().Should().BeEmpty();
         custody.DeleteCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task RotateSigningKey_ProviderReusesExistingReference_FailsWithoutDeletingLiveKey()
+    {
+        using var context = CreateContext();
+        using var custody = new TestExternalSigningKeyCustody();
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            signingKeyCustody: custody);
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        await service.EnsureActiveSigningKeyAsync();
+        custody.ReuseExistingKeyReference = true;
+
+        var act = async () => await service.RotateSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reused existing key material*");
+        custody.DeleteCount.Should().Be(0);
+        context.Set<SqlOSSigningKey>().Should().ContainSingle(key => key.IsActive);
+        var token = await service.CreateAccessTokenAsync(user, session, client, null);
+        (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task RotateSigningKey_ProviderReusesReferenceWithDifferentPublicKey_DoesNotDeleteLiveKey()
+    {
+        using var context = CreateContext();
+        using var custody = new TestExternalSigningKeyCustody();
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            signingKeyCustody: custody);
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        await service.EnsureActiveSigningKeyAsync();
+        custody.ReuseExistingKeyReference = true;
+        custody.ReturnDifferentPublicKeyForReusedReference = true;
+
+        var act = async () => await service.RotateSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reused existing key material*");
+        custody.DeleteCount.Should().Be(0);
+        var token = await service.CreateAccessTokenAsync(user, session, client, null);
+        (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task RotateSigningKey_ProviderAliasesExistingPublicKey_FailsWithoutDeletingEitherReference()
+    {
+        using var context = CreateContext();
+        using var custody = new TestExternalSigningKeyCustody();
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            signingKeyCustody: custody);
+        await service.EnsureActiveSigningKeyAsync();
+        custody.AliasExistingPublicKey = true;
+
+        var act = async () => await service.RotateSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reused existing key material*");
+        custody.DeleteCount.Should().Be(0);
+        context.Set<SqlOSSigningKey>().Should().ContainSingle(key => key.IsActive);
     }
 
     [TestMethod]
@@ -435,6 +529,9 @@ public sealed class SqlOSCryptoServiceTests
         public int SignCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool ReturnMismatchedSignature { get; set; }
+        public bool ReuseExistingKeyReference { get; set; }
+        public bool ReturnDifferentPublicKeyForReusedReference { get; set; }
+        public bool AliasExistingPublicKey { get; set; }
 
         public Task<SqlOSSigningKeyCreationResult> CreateKeyAsync(
             string kid,
@@ -443,6 +540,33 @@ public sealed class SqlOSCryptoServiceTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             algorithm.Should().Be(SecurityAlgorithms.RsaSha256);
+
+            if (_keys.FirstOrDefault() is { Key: not null } existing
+                && (ReuseExistingKeyReference || AliasExistingPublicKey))
+            {
+                if (ReuseExistingKeyReference)
+                {
+                    var publicKeyPem = existing.Value.ExportRSAPublicKeyPem();
+                    if (ReturnDifferentPublicKeyForReusedReference)
+                    {
+                        using var differentKey = RSA.Create(2048);
+                        publicKeyPem = differentKey.ExportRSAPublicKeyPem();
+                    }
+
+                    return Task.FromResult(new SqlOSSigningKeyCreationResult(
+                        algorithm,
+                        publicKeyPem,
+                        existing.Key));
+                }
+
+                var aliasReference = $"fake-kms:v1:alias:{kid}";
+                _keys[aliasReference] = existing.Value;
+                return Task.FromResult(new SqlOSSigningKeyCreationResult(
+                    algorithm,
+                    existing.Value.ExportRSAPublicKeyPem(),
+                    aliasReference));
+            }
+
             var rsa = RSA.Create(2048);
             var keyReference = $"fake-kms:v1:{kid}";
             _keys[keyReference] = rsa;
@@ -493,9 +617,13 @@ public sealed class SqlOSCryptoServiceTests
 
         public void Dispose()
         {
+            var disposed = new HashSet<RSA>(ReferenceEqualityComparer.Instance);
             foreach (var rsa in _keys.Values)
             {
-                rsa.Dispose();
+                if (disposed.Add(rsa))
+                {
+                    rsa.Dispose();
+                }
             }
             _keys.Clear();
         }

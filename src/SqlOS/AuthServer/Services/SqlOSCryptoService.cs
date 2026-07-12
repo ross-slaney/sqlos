@@ -236,7 +236,7 @@ public sealed class SqlOSCryptoService
                 return activeKeys[0];
             }
 
-            createdKey = await CreateSigningKeyAsync(cancellationToken);
+            createdKey = await CreateSigningKeyAsync(keys, cancellationToken);
             _context.Set<SqlOSSigningKey>().Add(createdKey);
             await _context.SaveChangesAsync(cancellationToken);
             await CommitAsync(transaction, cancellationToken);
@@ -284,7 +284,7 @@ public sealed class SqlOSCryptoService
                 await ValidateCustodyCanSignAsync(activeKeys[0], cancellationToken);
             }
 
-            newKey = await CreateSigningKeyAsync(cancellationToken);
+            newKey = await CreateSigningKeyAsync(keys, cancellationToken);
             if (activeKeys.Count == 1)
             {
                 activeKeys[0].IsActive = false;
@@ -531,7 +531,9 @@ public sealed class SqlOSCryptoService
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
     }
 
-    private async Task<SqlOSSigningKey> CreateSigningKeyAsync(CancellationToken cancellationToken)
+    private async Task<SqlOSSigningKey> CreateSigningKeyAsync(
+        IReadOnlyCollection<SqlOSSigningKey> existingKeys,
+        CancellationToken cancellationToken)
     {
         var kid = GenerateOpaqueToken(16);
         var created = await _signingKeyCustody.CreateKeyAsync(
@@ -549,17 +551,32 @@ public sealed class SqlOSCryptoService
             ActivatedAt = DateTime.UtcNow,
             IsActive = true
         };
+        var reusedReference = existingKeys.FirstOrDefault(existing =>
+            string.Equals(existing.KeyReference, key.KeyReference, StringComparison.Ordinal));
+        if (reusedReference != null)
+        {
+            throw BuildReusedSigningKeyException(key, reusedReference);
+        }
+
         try
         {
             ValidateStoredSigningKeyRow(key);
             await ValidateCustodyCanSignAsync(key, cancellationToken);
-            return key;
         }
         catch
         {
             await TryDeleteCreatedKeyAsync(key);
             throw;
         }
+
+        var reusedPublicKey = existingKeys.FirstOrDefault(existing =>
+            PublicKeysMatch(existing.PublicKeyPem, key.PublicKeyPem));
+        if (reusedPublicKey != null)
+        {
+            throw BuildReusedSigningKeyException(key, reusedPublicKey);
+        }
+
+        return key;
     }
 
     private void ValidateStoredSigningKeyRows(IEnumerable<SqlOSSigningKey> keys)
@@ -607,7 +624,7 @@ public sealed class SqlOSCryptoService
                 throw new InvalidOperationException($"Signing key '{key.Kid}' is smaller than 2048 bits.");
             }
         }
-        catch (CryptographicException ex)
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
         {
             throw new InvalidOperationException($"Signing key '{key.Kid}' does not contain a valid RSA public key.", ex);
         }
@@ -630,6 +647,24 @@ public sealed class SqlOSCryptoService
                 $"Signing custody provider '{key.CustodyProvider}' produced a signature that does not match key '{key.Kid}'.");
         }
     }
+
+    private static bool PublicKeysMatch(string firstPublicKeyPem, string secondPublicKeyPem)
+    {
+        using var first = RSA.Create();
+        first.ImportFromPem(firstPublicKeyPem);
+        using var second = RSA.Create();
+        second.ImportFromPem(secondPublicKeyPem);
+        var firstFingerprint = SHA256.HashData(first.ExportSubjectPublicKeyInfo());
+        var secondFingerprint = SHA256.HashData(second.ExportSubjectPublicKeyInfo());
+        return CryptographicOperations.FixedTimeEquals(firstFingerprint, secondFingerprint);
+    }
+
+    private static InvalidOperationException BuildReusedSigningKeyException(
+        SqlOSSigningKey createdKey,
+        SqlOSSigningKey existingKey)
+        => new(
+            $"Signing custody provider '{createdKey.CustodyProvider}' reused existing key material from '{existingKey.Kid}' while creating '{createdKey.Kid}'. " +
+            "Refusing rotation without deleting the ambiguous provider reference.");
 
     private static SqlOSSigningKeyDescriptor ToDescriptor(SqlOSSigningKey key)
         => new(key.Kid, key.Algorithm, key.PublicKeyPem, key.KeyReference, key.CustodyProvider);

@@ -40,12 +40,20 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
         RequireRs256(algorithm);
 
         using var rsa = RSA.Create(3072);
-        var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
-        var keyReference = $"{KeyReferencePrefix}{CreateKeyProtector(kid).Protect(privateKeyPem)}";
-        return Task.FromResult(new SqlOSSigningKeyCreationResult(
-            SecurityAlgorithms.RsaSha256,
-            rsa.ExportRSAPublicKeyPem(),
-            keyReference));
+        var privateKeyBytes = rsa.ExportPkcs8PrivateKey();
+        try
+        {
+            var protectedKeyBytes = CreateKeyProtector(kid).Protect(privateKeyBytes);
+            var keyReference = $"{KeyReferencePrefix}{Base64UrlEncoder.Encode(protectedKeyBytes)}";
+            return Task.FromResult(new SqlOSSigningKeyCreationResult(
+                SecurityAlgorithms.RsaSha256,
+                rsa.ExportRSAPublicKeyPem(),
+                keyReference));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(privateKeyBytes);
+        }
     }
 
     public Task<byte[]> SignAsync(
@@ -57,12 +65,19 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
         RequireReady();
         RequireDescriptor(key);
 
+        byte[]? privateKeyBytes = null;
         try
         {
-            var privateKeyPem = CreateKeyProtector(key.Kid)
-                .Unprotect(key.KeyReference[KeyReferencePrefix.Length..]);
+            var protectedKeyBytes = Base64UrlEncoder.DecodeBytes(
+                key.KeyReference[KeyReferencePrefix.Length..]);
+            privateKeyBytes = CreateKeyProtector(key.Kid).Unprotect(protectedKeyBytes);
             using var rsa = RSA.Create();
-            rsa.ImportFromPem(privateKeyPem);
+            rsa.ImportPkcs8PrivateKey(privateKeyBytes, out var bytesRead);
+            if (bytesRead != privateKeyBytes.Length)
+            {
+                throw new CryptographicException("The signing-key payload contains trailing data.");
+            }
+
             return Task.FromResult(rsa.SignData(
                 signingInput.Span,
                 HashAlgorithmName.SHA256,
@@ -74,6 +89,13 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
                 "The active SqlOS signing key cannot be opened by this application instance. " +
                 "Refusing to rotate or issue tokens. Verify that every instance uses the same persisted Data Protection key ring.",
                 ex);
+        }
+        finally
+        {
+            if (privateKeyBytes != null)
+            {
+                CryptographicOperations.ZeroMemory(privateKeyBytes);
+            }
         }
     }
 
