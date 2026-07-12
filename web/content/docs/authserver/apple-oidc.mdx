@@ -41,4 +41,16 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/en
   -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
 
+## Callback claim handling
+
+Apple can include a `user` form field only on the first authorization. SqlOS treats that browser-posted object as an optional display-name hint, never as identity evidence:
+
+- `sub`, email, and `email_verified` come from the signed, validated Apple ID token;
+- any email or subject in the callback `user` JSON is ignored;
+- only bounded, sanitized `name.firstName` and `name.lastName` values can fill a missing display name.
+
+Persist the display name after first login if your application needs it later. Apple may not send the callback `user` object again, while the signed identity remains stable through the ID token.
+
+See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
+
 The `.p8` file and the dashboard cookie jar both contain sensitive material. Keep them out of source control and shell history, and delete temporary copies after use. See [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls), Apple's [web authorization documentation](https://developer.apple.com/documentation/signinwithapplerestapi/request-an-authorization-to-the-sign-in-with-apple-server), and [OIDC Social Login](/docs/authserver/oidc-auth).

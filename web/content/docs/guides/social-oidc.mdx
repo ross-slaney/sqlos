@@ -107,6 +107,10 @@ auth.SeedOidcConnection(oidc =>
   - Add the same SqlOS-owned callback URI to the provider (Entra, Google, GitHub, etc.). The dashboard shows the callback after the first boot.
 </Callout>
 
+<Callout type="info" title="Secure account linking">
+  SqlOS anchors OIDC identities in the signed ID token, binds UserInfo to the exact same `sub`, and keeps each email paired with the verification claim from the same authenticated response. Unsigned callback fields never control account lookup or linking; Apple's callback object can provide sanitized display-name fields only.
+</Callout>
+
 ## Test
 
 1. Start your app's OAuth login flow at `/sqlos/auth/authorize` (normally through your framework's OAuth middleware).
