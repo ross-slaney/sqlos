@@ -146,7 +146,7 @@ Compare the token's `aud` claim with `ExpectedAudience`. Audience matching is ex
 
 ### The bearer token is valid but revoked
 
-Validation also checks the persisted session and client state. Signing out all sessions, revoking the session, disabling the client, or removing application access can invalidate an otherwise well-formed JWT.
+Validation also checks the persisted session. Signing out all sessions, revoking the session, or disabling the client—which revokes its sessions—can invalidate an otherwise well-formed JWT. Removing an application assignment blocks new authorization and refresh, but it does not revoke an already-issued access token; revoke the relevant sessions for immediate database-backed rejection.
 
 ### `GetSqlOSValidatedToken()` is null
 

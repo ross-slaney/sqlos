@@ -1,0 +1,285 @@
+---
+title: "OAuth for MCP clients"
+description: "Protect an MCP server with discovery, PKCE, portable client metadata, and a resource-bound audience."
+order: 9
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Issue an access token for one MCP resource"
+  href="/docs/authserver/mcp-resource-indicators-and-audience"
+  actionLabel="Resource indicators"
+>
+  Publish protected-resource metadata, discover a portable public client, and require the MCP server's exact URL in the token audience.
+</Banner>
+
+![Taskrail MCP OAuth discovery, authorization, and resource-bound token flow](/docs/guides-mcp-oauth.svg)
+
+This guide builds **Taskrail**, a fictional MCP server at `https://mcp.taskrail.test`. A portable client identifies itself with a metadata document, completes authorization code with PKCE, and receives a SqlOS access token whose `aud` is exactly the Taskrail MCP resource.
+
+<Callout type="info" title="Use the simpler client path when you can">
+  If you own both the client and server, preregister a public PKCE client with `SeedClient` first. Use CIMD only when a stable HTTPS client identity must work across multiple authorization-server deployments.
+</Callout>
+
+## Protocol map
+
+```text
+MCP client
+  ├─ GET https://mcp.taskrail.test/.well-known/oauth-protected-resource
+  ├─ GET https://auth.taskrail.test/sqlos/auth/.well-known/oauth-authorization-server
+  ├─ GET https://client.taskrail.test/oauth-client.json       (CIMD)
+  ├─ GET https://auth.taskrail.test/sqlos/auth/authorize       (state + PKCE + resource)
+  ├─ POST https://auth.taskrail.test/sqlos/auth/token          (code + verifier + resource)
+  └─ POST https://mcp.taskrail.test/mcp                        (Bearer access token)
+```
+
+There are three independently verified identities:
+
+- the **authorization server** signs and issues the token;
+- the **client metadata URL** identifies the public client and its callbacks;
+- the **resource URL** becomes the exact token audience accepted by the MCP server.
+
+## 1. Configure the authorization server
+
+This is an advanced multi-client setup. Do not combine it with `UseSingleApplication`, which disables CIMD and resource indicators.
+
+```csharp
+const string publicOrigin = "https://auth.taskrail.test";
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+    auth.PublicOrigin = publicOrigin;
+    auth.Issuer = $"{publicOrigin}/sqlos/auth";
+
+    auth.EnablePortableMcpClients(registration =>
+    {
+        registration.Cimd.TrustedHosts.Add("client.taskrail.test");
+        registration.Cimd.HttpTimeout = TimeSpan.FromSeconds(5);
+        registration.Cimd.MaxMetadataBytes = 32 * 1024;
+        registration.Cimd.DefaultCacheTtl = TimeSpan.FromHours(12);
+    });
+});
+```
+
+`EnablePortableMcpClients` enables CIMD and resource indicators and disables DCR. The discovery document advertises CIMD support, the `resource` parameter, `S256`, and public clients with `token_endpoint_auth_method=none`.
+
+<Callout type="warning" title="The CIMD allowlist is not an egress firewall">
+  In the current runtime, `TrustedHosts` and `TrustPolicy` decide whether fetched metadata is accepted, but they are evaluated after the outbound request. Enforce DNS/IP and redirect-safe HTTPS egress at the network or `HttpClient` layer so the identity host cannot reach loopback, link-local, private, or metadata-service addresses. If you cannot enforce that boundary, use a preregistered client instead of CIMD.
+</Callout>
+
+## 2. Publish protected-resource metadata
+
+The MCP server owns this document. It tells a client which resource string to request and which issuer can authorize it:
+
+```csharp
+using System.Text.Json;
+
+const string resource = "https://mcp.taskrail.test";
+const string issuer = "https://auth.taskrail.test/sqlos/auth";
+const string resourceMetadata =
+    "https://mcp.taskrail.test/.well-known/oauth-protected-resource";
+
+app.MapGet("/.well-known/oauth-protected-resource", () =>
+{
+    var document = new Dictionary<string, object?>
+    {
+        ["resource"] = resource,
+        ["authorization_servers"] = new[] { issuer },
+        ["scopes_supported"] = new[]
+        {
+            "openid", "profile", "offline_access", "tasks.read", "tasks.write"
+        },
+        ["bearer_methods_supported"] = new[] { "header" },
+        ["resource_documentation"] = "https://docs.taskrail.test/mcp"
+    };
+
+    return Results.Text(JsonSerializer.Serialize(document), "application/json");
+});
+```
+
+An unauthenticated MCP request should receive a bearer challenge that points back to this URL. `RequireSqlOSAccessToken` adds it for the protected route group:
+
+```csharp
+var mcp = app.MapGroup("/mcp")
+    .RequireSqlOSAccessToken(validation =>
+    {
+        validation.ExpectedAudience = resource;
+        validation.Realm = "Taskrail MCP";
+        validation.ResourceMetadataUrl = resourceMetadata;
+    });
+```
+
+## 3. Publish the portable client document
+
+The client hosts this JSON at its stable HTTPS `client_id`:
+
+```json
+{
+  "client_id": "https://client.taskrail.test/oauth-client.json",
+  "client_name": "Taskrail Desktop",
+  "description": "Portable public MCP client",
+  "redirect_uris": ["https://client.taskrail.test/oauth/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "openid profile offline_access tasks.read tasks.write",
+  "client_uri": "https://client.taskrail.test"
+}
+```
+
+The document URL and `client_id` value must match exactly. SqlOS also requires HTTPS with a non-root path, at least one redirect URI, authorization code, response type `code`, and no token-endpoint client secret.
+
+Serve the file as JSON with conservative caching. Changing redirect URIs, auth method, grant types, or response types causes SqlOS to revoke active sessions when it refreshes the cached metadata.
+
+## 4. Start authorization with state and PKCE
+
+The client generates a cryptographically random `state` and PKCE verifier, then hashes the verifier with `S256`:
+
+```text
+GET https://auth.taskrail.test/sqlos/auth/authorize?
+  response_type=code&
+  client_id=https%3A%2F%2Fclient.taskrail.test%2Foauth-client.json&
+  redirect_uri=https%3A%2F%2Fclient.taskrail.test%2Foauth%2Fcallback&
+  scope=openid%20profile%20offline_access%20tasks.read%20tasks.write&
+  state=<random-state>&
+  code_challenge=<s256-challenge>&
+  code_challenge_method=S256&
+  resource=https%3A%2F%2Fmcp.taskrail.test
+```
+
+After sign-in and authorization, validate `state` at the exact registered callback before reading the authorization code. Public clients have no client secret; PKCE binds the code exchange to the process that started it. SqlOS does not currently present a per-user OAuth consent screen for CIMD scopes; `TrustedHosts`/`TrustPolicy` are operator admission controls, and FGA or app policy remains the authorization boundary.
+
+## 5. Exchange the code for the same resource
+
+Repeat the same client ID, redirect URI, and resource at the token endpoint:
+
+```text
+POST https://auth.taskrail.test/sqlos/auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&client_id=https%3A%2F%2Fclient.taskrail.test%2Foauth-client.json
+&redirect_uri=https%3A%2F%2Fclient.taskrail.test%2Foauth%2Fcallback
+&code=<authorization-code>
+&code_verifier=<original-verifier>
+&resource=https%3A%2F%2Fmcp.taskrail.test
+```
+
+The token response returns `access_token`, `refresh_token`, `token_type`, `expires_in`, and `scope`. The JWT access token contains the SqlOS identity/session claims and:
+
+```json
+{
+  "iss": "https://auth.taskrail.test/sqlos/auth",
+  "aud": "https://mcp.taskrail.test",
+  "client_id": "https://client.taskrail.test/oauth-client.json"
+}
+```
+
+Requested scopes are returned by the token endpoint but are not currently emitted as a JWT `scope` claim. Do not authorize an MCP tool from requested scope alone.
+
+## 6. Authorize each MCP operation
+
+Audience validation proves that the token was minted for Taskrail. It does not grant access to every tool or task. Resolve the actor from the validated token, then apply FGA or app policy:
+
+```csharp
+mcp.MapPost("/", async (
+    HttpContext http,
+    McpRequest request,
+    ISqlOSFgaAuthService fga,
+    CancellationToken ct) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    var userId = token?.UserId;
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+    var organizationId = token!.OrganizationId;
+
+    McpAuthorizationTarget? target;
+    switch (request.Method)
+    {
+        case "initialize":
+        case "notifications/initialized":
+        case "ping":
+            target = new McpAuthorizationTarget(null, null);
+            break;
+
+        case "tools/list" when organizationId is not null:
+            target = new McpAuthorizationTarget(
+                "TASK_READ",
+                $"workspace::{organizationId}");
+            break;
+
+        case "tools/call":
+            var toolCall = dispatcher.ParseToolCall(request);
+            target = toolCall.Name switch
+            {
+                "tasks.list" when organizationId is not null =>
+                    new McpAuthorizationTarget(
+                        "TASK_READ",
+                        $"workspace::{organizationId}"),
+                "tasks.update" =>
+                    new McpAuthorizationTarget(
+                        "TASK_WRITE",
+                        await taskResources.ResolveResourceIdAsync(toolCall, ct)),
+                _ => null
+            };
+            break;
+
+        default:
+            target = null;
+            break;
+    }
+
+    // Default-deny methods, tools, resources, and prompts not enumerated above.
+    if (target is null)
+        return Results.Forbid();
+
+    if (target.Permission is not null && target.ResourceId is not null)
+    {
+        var decision = await fga.CheckAccessAsync(
+            userId,
+            target.Permission,
+            target.ResourceId);
+
+        if (!decision.Allowed)
+            return Results.Forbid();
+    }
+
+    return await dispatcher.DispatchAsync(request, userId, ct);
+});
+
+public sealed record McpAuthorizationTarget(
+    string? Permission,
+    string? ResourceId);
+```
+
+Never accept a user or subject ID from MCP arguments as the acting identity. Derive it from `GetSqlOSValidatedToken()`. Enumerate every supported `tools/*`, `resources/*`, and `prompts/*` operation in the policy, resolve protected targets from validated arguments on the server, and keep the default branch denied.
+
+## Security boundaries to test
+
+- The MCP server rejects a token whose `aud` names another API.
+- The token request repeats the exact, case-sensitive `resource` from authorization.
+- A valid Taskrail token without the FGA permission receives `403`.
+- The callback rejects a missing or mismatched `state`.
+- Metadata that changes its `client_id` or callback is rejected.
+- CIMD egress cannot reach private, loopback, link-local, or cloud metadata addresses and cannot escape through redirects.
+- Refresh preserves the original resource binding.
+- The resource server returns a `resource_metadata` bearer challenge without leaking account or assignment details.
+
+<Callout type="warning" title="Resource indicators bind; they do not allowlist">
+  Authorization-code processing currently accepts a non-empty resource and binds the resulting token to it. The MCP server's exact `ExpectedAudience` is therefore the enforcement boundary. Do not describe the client's configured audience as an authorization-code resource allowlist.
+</Callout>
+
+## Expected outcome
+
+Taskrail clients can discover the authorization server, identify a portable public client, complete PKCE, and call the MCP endpoint with a token accepted only by `https://mcp.taskrail.test`. Tool access still requires an explicit authorization decision.
+
+## Next steps
+
+- [Client ID metadata documents](/docs/authserver/client-id-metadata-documents)
+- [MCP resource indicators and audience](/docs/authserver/mcp-resource-indicators-and-audience)
+- [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)
+- [Protect an API](/docs/quickstarts/protect-api)
+- [Token validation](/docs/authserver/token-validation)

@@ -85,6 +85,10 @@ That is the right place for:
 - deny lists
 - environment-specific trust decisions
 
+<Callout type="warning" title="Trust policy is not an egress boundary">
+  In the current runtime, `TrustedHosts` and `TrustPolicy` determine whether fetched metadata is accepted, but they run after the outbound request. Constrain DNS/IP destinations and redirects at the network or `HttpClient` layer so CIMD cannot reach loopback, link-local, private, or cloud metadata-service addresses. Use a preregistered client when that egress boundary is unavailable.
+</Callout>
+
 ## Dashboard behavior
 
 `CIMD` clients appear in the normal client list with source and cache details.
