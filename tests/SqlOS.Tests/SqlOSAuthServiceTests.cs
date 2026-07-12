@@ -1625,6 +1625,65 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task RefreshTokenResponseProtection_AfterCryptographicExpiry_CannotBeUnprotected()
+    {
+        using var context = CreateContext();
+        var crypto = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            new EphemeralDataProtectionProvider());
+        var protectedResponse = crypto.ProtectRefreshTokenResponse(
+            "{\"accessToken\":\"access\",\"refreshToken\":\"refresh\"}",
+            TimeSpan.FromMilliseconds(20));
+
+        await Task.Delay(100);
+
+        var act = () => crypto.UnprotectRefreshTokenResponse(protectedResponse);
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*invalid or its retry window has expired*");
+    }
+
+    [TestMethod]
+    public async Task Refresh_CrossFamilyProtectedResponseSwap_RevokesOnlyTargetFamily()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var sourceInitial = await harness.SignUpAsync("swap-source");
+        var targetInitial = await harness.SignUpAsync("swap-target");
+        var sourceWinner = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(sourceInitial.RefreshToken, sourceInitial.OrganizationId));
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(targetInitial.RefreshToken, targetInitial.OrganizationId));
+
+        var sourceParent = await harness.Context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session)
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(sourceInitial.RefreshToken));
+        var targetParent = await harness.Context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session)
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(targetInitial.RefreshToken));
+        targetParent.ReplacementTokenResponse = sourceParent.ReplacementTokenResponse;
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(targetInitial.RefreshToken, targetInitial.OrganizationId));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
+
+        var targetSession = await harness.Context.Set<SqlOSSession>()
+            .SingleAsync(x => x.Id == targetParent.SessionId);
+        targetSession.RevocationReason.Should().Be("refresh_token_response_invalid");
+        (await harness.Context.Set<SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == targetParent.FamilyId)
+            .ToListAsync()).Should().OnlyContain(x => x.RevokedAt != null);
+
+        var sourceSession = await harness.Context.Set<SqlOSSession>()
+            .SingleAsync(x => x.Id == sourceParent.SessionId);
+        sourceSession.RevokedAt.Should().BeNull();
+        var sourceAdvanced = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(sourceWinner.RefreshToken, sourceWinner.OrganizationId));
+        sourceAdvanced.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
     public async Task Refresh_GraceWindow_ResponseExpiryMatchesCachedJwt()
     {
         // Issue #19 review fix #1: the AccessTokenExpiresAt in the grace

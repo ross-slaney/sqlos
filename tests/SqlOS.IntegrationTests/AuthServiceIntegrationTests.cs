@@ -177,10 +177,48 @@ public sealed class AuthServiceIntegrationTests
         public void Dispose() => _context.Dispose();
     }
 
+    private sealed class IsolatedAuthorizationServer : IDisposable
+    {
+        public SqlOSAuthorizationServerService Service { get; }
+        private readonly TestSqlOSDbContext _context;
+
+        public IsolatedAuthorizationServer(
+            SqlOSAuthorizationServerService service,
+            TestSqlOSDbContext context)
+        {
+            Service = service;
+            _context = context;
+        }
+
+        public void Dispose() => _context.Dispose();
+    }
+
     private static IsolatedAuthService BuildIsolatedAuthService()
     {
         var (svc, ctx) = BuildIsolatedServiceTuple();
         return new IsolatedAuthService(svc, ctx);
+    }
+
+    private static IsolatedAuthorizationServer BuildIsolatedAuthorizationServer()
+    {
+        var context = BuildIsolatedContext();
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var authorization = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            auth,
+            crypto,
+            settings,
+            authPageSession,
+            options);
+        return new IsolatedAuthorizationServer(authorization, context);
     }
 
     private static TestSqlOSDbContext BuildIsolatedContext()
@@ -274,6 +312,62 @@ public sealed class AuthServiceIntegrationTests
         family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
         family.Single(x => x.ConsumedAt == null).TokenHash.Should().Be(
             crypto.HashToken(winner.RefreshToken));
+    }
+
+    [TestMethod]
+    public async Task OAuthTokenEndpoint_RefreshRaceAcrossInstances_ReturnsSamePairAndOneHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "OAuthTokenEndpointRaceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Endpoint Race",
+            $"endpoint-race-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Endpoint Race Corp",
+            "test-client",
+            null), http);
+
+        using var instanceA = BuildIsolatedAuthorizationServer();
+        using var instanceB = BuildIsolatedAuthorizationServer();
+        var request = new SqlOSTokenRequest(
+            SqlOSOAuthGrantTypes.RefreshToken,
+            null,
+            null,
+            null,
+            null,
+            signup.Tokens!.RefreshToken,
+            null);
+
+        var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var taskA = Task.Run(async () =>
+        {
+            await ready.Task;
+            return await instanceA.Service.ExchangeAuthorizationCodeAsync(request, new DefaultHttpContext());
+        });
+        var taskB = Task.Run(async () =>
+        {
+            await ready.Task;
+            return await instanceB.Service.ExchangeAuthorizationCodeAsync(request, new DefaultHttpContext());
+        });
+        ready.SetResult(true);
+
+        var results = await Task.WhenAll(taskA, taskB);
+        results[0].Tokens.AccessToken.Should().Be(results[1].Tokens.AccessToken);
+        results[0].Tokens.RefreshToken.Should().Be(results[1].Tokens.RefreshToken);
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+        family.Should().HaveCount(2);
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
     }
 
     [TestMethod]
