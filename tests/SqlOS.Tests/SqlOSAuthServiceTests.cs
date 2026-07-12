@@ -1302,6 +1302,49 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task Refresh_GraceWindow_RejectsRevokedSessionBeforeReleasingCachedPair()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("revoked-session");
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session)
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        original.Session!.RevokedAt = DateTime.UtcNow;
+        original.Session.RevocationReason = "security_event";
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Session is no longer active.");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindow_RejectsExpiredSessionBeforeReleasingCachedPair()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("expired-session");
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session)
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        original.Session!.AbsoluteExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Session is no longer active.");
+    }
+
+    [TestMethod]
     public async Task Refresh_GraceWindowManyRetries_LeavesOneActiveReplacement()
     {
         var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);

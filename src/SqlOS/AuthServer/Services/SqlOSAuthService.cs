@@ -660,10 +660,7 @@ public sealed class SqlOSAuthService
             return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
         }
 
-        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow || session.IdleExpiresAt <= DateTime.UtcNow)
-        {
-            throw new InvalidOperationException("Session is no longer active.");
-        }
+        EnsureSessionIsActive(session);
 
         if (_options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource))
         {
@@ -777,6 +774,21 @@ public sealed class SqlOSAuthService
                 .FirstOrDefaultAsync(x => x.Id == refreshToken.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Refresh token vanished after concurrency conflict.");
 
+            if (fresh.RevokedAt != null || fresh.ExpiresAt <= DateTime.UtcNow)
+            {
+                throw new InvalidOperationException("Refresh token is no longer valid.");
+            }
+
+            // A concurrency conflict can now also mean replay detection
+            // revoked the session while this request was rotating a live
+            // descendant. In that case the parent was not consumed by a
+            // winning rotation, so it must never enter the grace path.
+            EnsureSessionIsActive(fresh.Session!);
+            if (fresh.ConsumedAt == null)
+            {
+                throw new InvalidOperationException("Refresh token rotation could not be completed.");
+            }
+
             return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
         }
 
@@ -803,6 +815,12 @@ public sealed class SqlOSAuthService
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        // Consumed-token retries bypass the normal rotation path, so the
+        // session lifecycle must be checked here before protected response
+        // material is read or released. Token-row revocation is not a
+        // substitute for the session security boundary.
+        EnsureSessionIsActive(session);
+
         var graceWindow = securitySettings.RefreshTokenGraceWindow;
         var withinGraceWindow = graceWindow > TimeSpan.Zero
             && refreshToken.ConsumedAt!.Value.Add(graceWindow) > DateTime.UtcNow
@@ -2252,23 +2270,102 @@ public sealed class SqlOSAuthService
 
     private async Task RevokeRefreshTokenFamilyAsync(string sessionId, string familyId, string reason, CancellationToken cancellationToken)
     {
+        var revokedAt = DateTime.UtcNow;
+
+        if (SupportsDatabaseTransactions())
+        {
+            // Replay revocation must win against a concurrent rotation on a
+            // different app instance. Revoking the session first takes the
+            // lifecycle lock observed by RefreshAsync's concurrency token;
+            // the family update then covers every descendant visible in the
+            // same transaction, including one committed just before it.
+            IDbContextTransaction? transaction = null;
+            try
+            {
+                if (_context.Database.CurrentTransaction == null)
+                {
+                    transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                await _context.Set<SqlOSSession>()
+                    .Where(x => x.Id == sessionId && x.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, revokedAt)
+                        .SetProperty(x => x.RevocationReason, reason), cancellationToken);
+
+                await _context.Set<SqlOSRefreshToken>()
+                    .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, x => x.RevokedAt ?? revokedAt)
+                        .SetProperty(x => x.ReplacementTokenResponse, (string?)null)
+                        .SetProperty(x => x.ReplacementOrganizationId, (string?)null)
+                        .SetProperty(x => x.ReplacementAccessTokenExpiresAt, (DateTime?)null), cancellationToken);
+
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (transaction != null)
+                {
+                    await transaction.DisposeAsync();
+                }
+            }
+
+            // ExecuteUpdate intentionally bypasses tracked state. Nothing in
+            // this failed grant may subsequently flush a stale active token
+            // or cached response back to the database.
+            if (_context is DbContext dbContext)
+            {
+                dbContext.ChangeTracker.Clear();
+            }
+
+            return;
+        }
+
+        // The in-memory provider used by unit tests has no transactions or
+        // server-side ExecuteUpdate support, so retain an equivalent tracked
+        // implementation for that provider.
         var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
         if (session != null && session.RevokedAt == null)
         {
-            session.RevokedAt = DateTime.UtcNow;
+            session.RevokedAt = revokedAt;
             session.RevocationReason = reason;
         }
 
         var refreshTokens = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId && x.RevokedAt == null)
+            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
             .ToListAsync(cancellationToken);
 
         foreach (var token in refreshTokens)
         {
-            token.RevokedAt = DateTime.UtcNow;
+            token.RevokedAt ??= revokedAt;
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void EnsureSessionIsActive(SqlOSSession session)
+    {
+        var now = DateTime.UtcNow;
+        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= now || session.IdleExpiresAt <= now)
+        {
+            throw new InvalidOperationException("Session is no longer active.");
+        }
     }
 
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);

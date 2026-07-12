@@ -1,7 +1,9 @@
 using System.Text;
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
@@ -152,11 +154,16 @@ public sealed class AuthServiceIntegrationTests
     /// at the shared SQL Server. Used to genuinely race two instances
     /// without sharing change-tracker state.
     /// </summary>
-    private static (SqlOSAuthService Service, TestSqlOSDbContext Context) BuildIsolatedServiceTuple()
+    private static (SqlOSAuthService Service, TestSqlOSDbContext Context) BuildIsolatedServiceTuple(
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IInterceptor? interceptor = null)
     {
-        var ctx = BuildIsolatedContext();
+        var ctx = BuildIsolatedContext(interceptor);
         var options = Microsoft.Extensions.Options.Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(ctx, options, AspireFixture.DataProtectionProvider);
+        var crypto = new SqlOSCryptoService(
+            ctx,
+            options,
+            dataProtectionProvider ?? AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(ctx, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(ctx, options, emailSender);
@@ -193,9 +200,11 @@ public sealed class AuthServiceIntegrationTests
         public void Dispose() => _context.Dispose();
     }
 
-    private static IsolatedAuthService BuildIsolatedAuthService()
+    private static IsolatedAuthService BuildIsolatedAuthService(
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IInterceptor? interceptor = null)
     {
-        var (svc, ctx) = BuildIsolatedServiceTuple();
+        var (svc, ctx) = BuildIsolatedServiceTuple(dataProtectionProvider, interceptor);
         return new IsolatedAuthService(svc, ctx);
     }
 
@@ -221,11 +230,16 @@ public sealed class AuthServiceIntegrationTests
         return new IsolatedAuthorizationServer(authorization, context);
     }
 
-    private static TestSqlOSDbContext BuildIsolatedContext()
+    private static TestSqlOSDbContext BuildIsolatedContext(IInterceptor? interceptor = null)
     {
-        var dbOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(AspireFixture.SqlConnectionString)
-            .Options;
+        var builder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(AspireFixture.SqlConnectionString);
+        if (interceptor != null)
+        {
+            builder.AddInterceptors(interceptor);
+        }
+
+        var dbOptions = builder.Options;
         return new TestSqlOSDbContext(dbOptions);
     }
 
@@ -368,6 +382,155 @@ public sealed class AuthServiceIntegrationTests
             .ToListAsync();
         family.Should().HaveCount(2);
         family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+    }
+
+    [TestMethod]
+    public async Task Refresh_LostDataProtectionKeyRing_RevokesSessionAndEntireFamily()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "LostDataProtectionKeyTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Lost Key",
+            $"lost-key-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Lost Key Corp",
+            "test-client",
+            null), http);
+
+        await bootstrapAuth.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens!.RefreshToken,
+            signup.Tokens.OrganizationId));
+
+        // A new ephemeral provider models an instance that cannot read the
+        // original key ring after key loss or a bad deployment. The grant
+        // must fail closed and revoke the complete lineage.
+        using var isolated = BuildIsolatedAuthService(new EphemeralDataProtectionProvider());
+        var act = async () => await isolated.Service.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens.RefreshToken,
+            signup.Tokens.OrganizationId));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+        var session = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+            .SingleAsync(x => x.Id == original.SessionId);
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        session.RevokedAt.Should().NotBeNull();
+        session.RevocationReason.Should().Be("refresh_token_response_invalid");
+        family.Should().OnlyContain(x => x.RevokedAt != null);
+        family.Should().OnlyContain(x => x.ReplacementTokenResponse == null);
+    }
+
+    [TestMethod]
+    public async Task Refresh_ReplayRevocationRacingLegitimateDescendant_LeavesNoActiveHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "ReplayRotationRaceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Replay Race",
+            $"replay-race-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Replay Race Corp",
+            "test-client",
+            null), http);
+
+        var r1 = await bootstrapAuth.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens!.RefreshToken,
+            signup.Tokens.OrganizationId));
+
+        // Force R0 outside grace while R1 remains the legitimate live head.
+        await using (var setupContext = BuildIsolatedContext())
+        {
+            var crypto = new SqlOSCryptoService(
+                setupContext,
+                Options.Create(AspireFixture.Options),
+                AspireFixture.DataProtectionProvider);
+            var r0 = await setupContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+            r0.ConsumedAt = DateTime.UtcNow.AddMinutes(-1);
+            await setupContext.SaveChangesAsync();
+        }
+
+        var pause = new PauseRefreshRotationInterceptor();
+        using var legitimate = BuildIsolatedAuthService(interceptor: pause);
+        using var replay = BuildIsolatedAuthService();
+
+        var legitimateGrant = legitimate.Service.RefreshAsync(
+            new SqlOSRefreshRequest(r1.RefreshToken, r1.OrganizationId));
+        await pause.RotationReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var replayAct = async () => await replay.Service.RefreshAsync(
+            new SqlOSRefreshRequest(signup.Tokens.RefreshToken, signup.Tokens.OrganizationId));
+        await replayAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
+
+        pause.ReleaseRotation.TrySetResult(true);
+        var legitimateAct = async () => await legitimateGrant;
+        await legitimateAct.Should().ThrowAsync<InvalidOperationException>();
+
+        await using var verifyContext = BuildIsolatedContext();
+        var verifyCrypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == verifyCrypto.HashToken(signup.Tokens.RefreshToken));
+        var session = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+            .SingleAsync(x => x.Id == original.SessionId);
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        session.RevokedAt.Should().NotBeNull();
+        session.RevocationReason.Should().Be("refresh_token_reuse");
+        family.Should().HaveCount(2, "the rejected legitimate rotation must roll back R2");
+        family.Should().OnlyContain(x => x.RevokedAt != null);
+        family.Should().NotContain(x => x.ConsumedAt == null && x.RevokedAt == null);
+    }
+
+    private sealed class PauseRefreshRotationInterceptor : SaveChangesInterceptor
+    {
+        private int _hasPaused;
+
+        public TaskCompletionSource<bool> RotationReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseRotation { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var context = eventData.Context;
+            var isRefreshRotation = context != null
+                && context.ChangeTracker.Entries<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                    .Any(entry => entry.State == EntityState.Added)
+                && context.ChangeTracker.Entries<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                    .Any(entry => entry.State == EntityState.Modified
+                        && entry.Property(x => x.ConsumedAt).IsModified
+                        && entry.Entity.ConsumedAt != null);
+
+            if (isRefreshRotation && Interlocked.Exchange(ref _hasPaused, 1) == 0)
+            {
+                RotationReached.TrySetResult(true);
+                await ReleaseRotation.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
+        }
     }
 
     [TestMethod]
