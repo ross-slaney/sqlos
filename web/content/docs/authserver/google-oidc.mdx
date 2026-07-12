@@ -46,7 +46,7 @@ Create the OIDC connection in SqlOS first, then copy the dashboard callback URI 
    - Display name: shown on the login button
    - Client ID and client secret from Google
 3. Save, then update Google's redirect URIs with the exact callback shown by the dashboard.
-4. **Enable** the connection.
+4. Confirm the connection is enabled. Newly created API/dashboard connections are enabled by default; the toggle is useful after an operator disables one.
 
 Default scopes when left empty: `openid`, `email`, `profile`.
 
@@ -54,18 +54,27 @@ Default scopes when left empty: `openid`, `email`, `profile`.
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "google",
     "displayName": "Google",
     "clientId": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "clientSecret": "YOUR_CLIENT_SECRET"
+    "clientSecret": "YOUR_CLIENT_SECRET",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
 
+The create operation enables the connection. Use the following endpoint only to re-enable a connection that was disabled:
+
 ```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+See [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls) before using any admin `curl` example.
 
 ## Test
 

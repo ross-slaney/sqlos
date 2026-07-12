@@ -42,6 +42,8 @@ public sealed class SqlOSCimdClientService
             return null;
         }
 
+        EnforceTrustedHost(clientIdUri);
+
         if (existingClient != null && (!existingClient.IsActive || existingClient.DisabledAt != null))
         {
             throw new InvalidOperationException($"Client '{clientId}' is inactive.");
@@ -155,12 +157,6 @@ public sealed class SqlOSCimdClientService
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        if (_options.ClientRegistration.Cimd.TrustedHosts.Count > 0
-            && !_options.ClientRegistration.Cimd.TrustedHosts.Contains(clientIdUri.Host, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Client metadata host '{clientIdUri.Host}' is not trusted.");
-        }
-
         var trustPolicy = _options.ClientRegistration.Cimd.TrustPolicy;
         if (trustPolicy == null)
         {
@@ -182,6 +178,18 @@ public sealed class SqlOSCimdClientService
         if (!decision.Allowed)
         {
             throw new InvalidOperationException(decision.Reason ?? $"Client metadata host '{clientIdUri.Host}' was rejected by trust policy.");
+        }
+    }
+
+    private void EnforceTrustedHost(Uri clientIdUri)
+    {
+        if (_options.ClientRegistration.Cimd.TrustedHosts.Count > 0
+            && !_options.ClientRegistration.Cimd.TrustedHosts.Contains(
+                clientIdUri.Host,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Client metadata host '{clientIdUri.Host}' is not trusted.");
         }
     }
 

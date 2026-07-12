@@ -10,11 +10,11 @@ order: 0
   href="/docs/quickstarts/run-todo"
   actionLabel="Run the sample"
 >
-  Start with a working Todo app or embed one hosted auth server with `UseSingleApplication`. Authentication, API protection, and EF authorization are separate milestones.
+  Start with a working Todo app or embed one hosted auth server with `UseSingleApplication`. Then complete a native ASP.NET Core login before adding API and row authorization.
 </Banner>
 
 <Callout type="info" title="Supported stack">
-  - **SqlOS 3.16.0**
+  - **SqlOS 3.17.0**
   - **.NET 9** (`net9.0`)
   - **EF Core 9**
   - **SQL Server**
@@ -25,6 +25,8 @@ order: 0
 <CardGrid cols={2}>
   <Card title="I want to see it work" description="Run the Todo sample with SQL Server, hosted login, and FGA already wired." href="/docs/quickstarts/run-todo" />
   <Card title="I want it in my app" description="Install the package and declare one application with UseSingleApplication." href="/docs/quickstarts/add-to-app" />
+  <Card title="I need a .NET login" description="Use ASP.NET Core OAuth, PKCE, a secure cookie, and revoking logout." href="/docs/quickstarts/aspnet-core-login" />
+  <Card title="I want working source" description="Compare the runnable .NET, browser, mobile, and CLI examples." href="/docs/examples" />
 </CardGrid>
 
 Running the sample is the fastest evaluation. Adding SqlOS to your application is the canonical integration path. Do not begin with SAML, headless auth, FGA modeling, CIMD, or DCR unless one of those is already a product requirement.
@@ -49,7 +51,6 @@ builder.AddSqlOS<AppDbContext>(
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
-
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;
@@ -73,6 +74,9 @@ builder.AddSqlOS<AppDbContext>(
   <Step title="Run or embed SqlOS">
     Complete [Run the Todo sample](/docs/quickstarts/run-todo) or [Add SqlOS to an app](/docs/quickstarts/add-to-app).
   </Step>
+  <Step title="Complete the ASP.NET Core login">
+    Let the framework own PKCE, correlation state, the callback, and your application cookie with [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login).
+  </Step>
   <Step title="Protect application endpoints">
     Validate bearer tokens for one exact audience with [Protect an API](/docs/quickstarts/protect-api).
   </Step>
@@ -86,7 +90,7 @@ builder.AddSqlOS<AppDbContext>(
 
 ## What starts automatically
 
-When the host starts, SqlOS initializes and upgrades its own tables, signing keys, settings, and startup seeds. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
+When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
 
 Default paths:
 
@@ -106,4 +110,4 @@ Default paths:
   <Card title="Record audit events" description="Capture application and SqlOS governance events." href="/docs/guides/audit-logs" />
 </CardGrid>
 
-For the complete task directory, see [Guides](/docs/guides/index). Use the reference section after you know which service or endpoint you need.
+For the complete task directory, see [Guides](/docs/guides/index). Use [Example applications](/docs/examples) when you want a complete source path instead of an isolated integration step, and use the reference section after you know which service or endpoint you need.

@@ -13,13 +13,13 @@ Application access answers a different question than OAuth audience.
 | Audience / resource | What API or resource is the token for? |
 | Application assignment | Who is allowed to use this app? |
 
-Two apps can mint tokens for the same API audience. Assignments decide whether a user acting in an organization may use a specific app.
+Two apps can mint tokens for the same API audience. Assignments decide whether a principal may use a specific app, with organization context applied when one is selected.
 
 ## Access modes
 
 | Mode | Behavior |
 | --- | --- |
-| `all_organizations` | Any authenticated user and active organization context can use the app. This is the migration and single-app default. |
+| `all_organizations` | Any authenticated user can use the app; organization context is optional. This is the migration and single-app default. Explicit deny assignments still win. |
 | `selected_organizations` | Only directly assigned organizations can use the app. |
 | `selected_users_groups_roles` | Explicit user, FGA user group, organization role, service account, or agent assignments are required. |
 | `internal_only` | Explicit assignments are required. Use this for trusted/internal apps until richer internal-user policy exists. |
@@ -33,6 +33,7 @@ Set an application access mode:
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/access-mode \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{ "accessMode": "selected_organizations" }'
 ```
@@ -41,6 +42,7 @@ Assign an organization:
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/assignments \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "principalType": "organization",
@@ -84,14 +86,17 @@ Assign an organization role:
 Explain a decision:
 
 ```bash
-curl "http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/access/check?organizationId=org_123&userId=usr_123"
+curl -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  "http://localhost:5062/sqlos/admin/auth/api/applications/{applicationId}/access/check?organizationId=org_123&userId=usr_123"
 ```
 
 The response includes `allowed`, `decision`, `accessMode`, `source`, `assignmentId`, and `reason`. It is intended for admin support and debugging, not public login pages.
 
+These endpoints require an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
+
 ## Enforcement
 
-SqlOS checks application access when a concrete user and organization context is known:
+SqlOS checks application access when a concrete application and authenticated principal context are known, including organization context when one is selected:
 
 - hosted authorization before issuing an auth code
 - headless authorization before issuing an auth code

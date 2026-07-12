@@ -445,7 +445,7 @@ public sealed class SqlOSOidcAuthServiceTests
     private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(TestSqlOSInMemoryDbContext context)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+        var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(context, options, crypto);
         var oidc = new SqlOSOidcAuthService(context, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
         return (admin, oidc);

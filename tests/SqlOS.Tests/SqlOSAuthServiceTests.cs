@@ -32,7 +32,7 @@ public sealed class SqlOSAuthServiceTests
         var authOptions = new SqlOSAuthServerOptions();
         authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         var options = Options.Create(authOptions);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -1162,7 +1162,7 @@ public sealed class SqlOSAuthServiceTests
         authOptions.SeedAuthPage(page => page.EnabledCredentialTypes = ["email_otp"]);
         var options = Options.Create(authOptions);
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -1880,7 +1880,7 @@ public sealed class SqlOSAuthServiceTests
 
             var options = Microsoft.Extensions.Options.Options.Create(authOptions);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -1942,7 +1942,7 @@ public sealed class SqlOSAuthServiceTests
 
             var options = Options.Create(authOptions);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -2006,7 +2006,7 @@ public sealed class SqlOSAuthServiceTests
 
             // Inject a real ephemeral data protection provider so the
             // ReplacementAccessToken cache is encrypted at rest as in production.
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);

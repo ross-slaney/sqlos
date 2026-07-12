@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Consumer integration test architecture</title>
+  <desc id="desc">A test client drives the real application entry point against SQL Server while provider adapters are replaced with deterministic fakes and negative authorization outcomes are asserted.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0f172a"/><stop offset="1" stop-color="#164e63"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-opacity=".3"/></filter>
+    <style>.eyebrow{font:700 15px system-ui,sans-serif;letter-spacing:2px;fill:#67e8f9}.title{font:750 43px system-ui,sans-serif;fill:#fff}.sub{font:400 20px system-ui,sans-serif;fill:#cbd5e1}.nodeTitle{font:750 21px system-ui,sans-serif;fill:#0f172a}.nodeSub{font:500 15px system-ui,sans-serif;fill:#64748b}.assert{font:700 15px system-ui,sans-serif;fill:#ccfbf1}.status{font:800 16px system-ui,sans-serif;fill:#047857}</style>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <text x="64" y="75" class="eyebrow">TEST YOUR INTEGRATION</text>
+  <text x="64" y="124" class="title">Drive your real Program.cs through HTTP.</text>
+  <text x="64" y="160" class="sub">Fresh SQL state and deliberate failures prove the boundaries your application owns.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="230" width="240" height="188" rx="24" fill="#fff"/>
+    <rect x="370" y="206" width="350" height="236" rx="24" fill="#fff"/>
+    <rect x="786" y="230" width="206" height="188" rx="24" fill="#fff"/>
+    <rect x="1058" y="230" width="158" height="188" rx="24" fill="#fff"/>
+  </g>
+  <text x="96" y="280" class="nodeTitle">Test client</text>
+  <text x="96" y="317" class="nodeSub">hosted OAuth + PKCE</text>
+  <text x="96" y="345" class="nodeSub">protected API calls</text>
+  <text x="96" y="373" class="nodeSub">logout + replay</text>
+
+  <text x="408" y="258" class="nodeTitle">WebApplicationFactory</text>
+  <text x="408" y="294" class="nodeSub">your actual ASP.NET Core entry point</text>
+  <rect x="408" y="326" width="274" height="66" rx="16" fill="#ecfeff"/>
+  <text x="545" y="354" text-anchor="middle" class="nodeSub">AddSqlOS + MapSqlOS</text>
+  <text x="545" y="378" text-anchor="middle" class="nodeSub">application middleware + endpoints</text>
+
+  <text x="818" y="280" class="nodeTitle">Real SQL Server</text>
+  <text x="818" y="317" class="nodeSub">fresh database</text>
+  <text x="818" y="345" class="nodeSub">schema + TVFs</text>
+  <rect x="818" y="367" width="142" height="34" rx="10" fill="#d1fae5"/><text x="889" y="389" text-anchor="middle" class="status">isolated</text>
+
+  <text x="1083" y="280" class="nodeTitle">Fakes</text>
+  <text x="1083" y="317" class="nodeSub">email</text>
+  <text x="1083" y="345" class="nodeSub">OIDC</text>
+  <text x="1083" y="373" class="nodeSub">SMS</text>
+
+  <path d="M304 324h66M720 324h66M992 324h66" stroke="#67e8f9" stroke-width="7" stroke-linecap="round"/>
+  <path d="m359 314 11 10-11 10M775 314l11 10-11 10M1047 314l11 10-11 10" fill="none" stroke="#67e8f9" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="64" y="506" class="eyebrow">ASSERT THE FAILURES TOO</text>
+  <g>
+    <rect x="64" y="535" width="210" height="60" rx="18" fill="#fff" fill-opacity=".07" stroke="#67e8f9" stroke-opacity=".33"/><text x="169" y="572" text-anchor="middle" class="assert">wrong audience → 401</text>
+    <rect x="292" y="535" width="210" height="60" rx="18" fill="#fff" fill-opacity=".07" stroke="#67e8f9" stroke-opacity=".33"/><text x="397" y="572" text-anchor="middle" class="assert">revoked session → 401</text>
+    <rect x="520" y="535" width="210" height="60" rx="18" fill="#fff" fill-opacity=".07" stroke="#67e8f9" stroke-opacity=".33"/><text x="625" y="572" text-anchor="middle" class="assert">missing grant → 403</text>
+    <rect x="748" y="535" width="210" height="60" rx="18" fill="#fff" fill-opacity=".07" stroke="#67e8f9" stroke-opacity=".33"/><text x="853" y="572" text-anchor="middle" class="assert">tenant leak → empty</text>
+    <rect x="976" y="535" width="240" height="60" rx="18" fill="#fff" fill-opacity=".07" stroke="#67e8f9" stroke-opacity=".33"/><text x="1096" y="572" text-anchor="middle" class="assert">expired code → rejected</text>
+  </g>
+  <text x="640" y="656" text-anchor="middle" class="sub">A happy-path login proves reachability. Negative cases prove security.</text>
+</svg>
