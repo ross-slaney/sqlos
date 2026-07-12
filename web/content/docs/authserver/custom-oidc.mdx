@@ -11,13 +11,18 @@ For providers that publish a `.well-known/openid-configuration` endpoint (Okta, 
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "custom",
     "displayName": "Okta",
     "clientId": "YOUR_CLIENT_ID",
     "clientSecret": "YOUR_CLIENT_SECRET",
-    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration"
+    "useDiscovery": true,
+    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
 
@@ -29,16 +34,23 @@ For providers without a discovery endpoint:
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "custom",
     "displayName": "Custom Provider",
     "clientId": "YOUR_CLIENT_ID",
     "clientSecret": "YOUR_CLIENT_SECRET",
+    "useDiscovery": false,
+    "issuer": "https://provider.com",
     "authorizationEndpoint": "https://provider.com/authorize",
     "tokenEndpoint": "https://provider.com/token",
-    "userinfoEndpoint": "https://provider.com/userinfo"
+    "userinfoEndpoint": "https://provider.com/userinfo",
+    "jwksUri": "https://provider.com/.well-known/jwks.json",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
 
-Enable and set the callback URI as with any other provider. See [OIDC Social Login](/docs/authserver/oidc-auth) for the complete auth flow.
+Both create operations enable the connection. The callback URI must exactly match a redirect URI registered with the provider. For manual mode, `issuer`, `authorizationEndpoint`, `tokenEndpoint`, and `jwksUri` are required; include `userinfoEndpoint` when the provider exposes one. See [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls) and [OIDC Social Login](/docs/authserver/oidc-auth).

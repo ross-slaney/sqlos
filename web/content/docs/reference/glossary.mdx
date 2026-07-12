@@ -1,0 +1,328 @@
+---
+title: "Glossary"
+description: "Plain-English definitions for the identity, OAuth, SAML, FGA, and ASP.NET Core terms used throughout SqlOS."
+order: 15
+section: reference
+---
+
+<Banner
+  eyebrow="Reference"
+  title="SqlOS terms, translated"
+  href="/docs/getting-started"
+  actionLabel="Getting Started"
+>
+  Use this page when identity protocol language and application authorization language start to overlap. Each definition explains what the term means in SqlOS and points to the implementation guide that uses it.
+</Banner>
+
+## The mental model
+
+SqlOS combines three related systems in one ASP.NET Core host:
+
+| Layer | Main nouns | Question it answers |
+| --- | --- | --- |
+| Identity | user, organization, membership, credential, session | Who signed in, and in which tenant context? |
+| OAuth | client, authorization request, code, access token, issuer, audience | Which application obtained a token, and which API is it for? |
+| FGA | subject, resource, role, permission, grant | What may this user, agent, group, or service account do to this application data? |
+
+The normal path is:
+
+```text
+client starts OAuth
+  -> SqlOS authenticates a user
+  -> SqlOS creates a session in an organization context
+  -> client exchanges a one-time code for an audience-bound access token
+  -> API validates the token and resolves its subject
+  -> FGA filters rows or checks a permission using grants
+```
+
+<Callout type="warning" title="Resource has two meanings">
+  An **OAuth protected resource** is an API identified by a token audience. An **FGA resource** is an application object such as `organization::acme`, `project::42`, or `todo::...`. The token gets a caller into the correct API; FGA decides which objects inside that API the caller can access.
+</Callout>
+
+## A
+
+### ACS (Assertion Consumer Service)
+
+The SAML endpoint where an identity provider posts a signed SAML response. For a SqlOS connection it is under `/sqlos/auth/saml/acs/{connectionId}` by default. The ACS validates the response and returns the user to the pending OAuth flow; it is not your application's OAuth redirect URI. See [SAML SSO](/docs/authserver/saml-sso).
+
+### Access token
+
+A short-lived, RS256-signed JWT that a client sends as `Authorization: Bearer ...` to a protected API. SqlOS access tokens include claims such as `sub` (user), `sid` (session), `client_id`, optional `org_id`, issuer, audience, and expiry. SqlOS session-aware validation also checks that the persisted session exists and is not revoked or absolutely expired. Idle expiry is enforced during refresh rather than every still-live access-token validation. See [Sessions and Tokens](/docs/authserver/sessions-and-tokens) and [Token Validation](/docs/authserver/token-validation).
+
+### Agent
+
+An FGA subject type for an automated actor, including an application agent or AI agent. An agent can receive grants directly or inherit them through a group. It is not an AuthServer human user and does not become authenticated merely because an FGA row exists. See [Subject Types](/docs/fga/subject-types).
+
+### Application access
+
+Policy that decides whether a user or principal may use a **client application** at all. It is enforced during authorization, provider callbacks, device approval, and refresh. This is separate from FGA, which decides what the caller can do to resources after entering the application. See [Application Access](/docs/authserver/application-access).
+
+### Audience (`aud`)
+
+The identifier of the API an access token is intended for. A resource server must validate an exact expected audience; accepting a correctly signed token for a different API is an authorization bug. SqlOS can take the audience from a seeded client's configuration or from an OAuth `resource` indicator. See [Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience).
+
+### AuthPage
+
+SqlOS's login interaction layer. **Hosted AuthPage** renders the built-in sign-in, signup, OTP, MFA, invitation, and organization-selection pages. **Headless AuthPage** keeps the same server-owned authorization state and actions but lets your frontend render the UI. It is not a separate OAuth implementation. See [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
+
+### Authorization code
+
+A short-lived, opaque, one-time value returned to a client's registered redirect URI after successful authorization. The client exchanges it at `/sqlos/auth/token`. The code remains bound to the authorization request's client, redirect URI, PKCE challenge, and resource/audience context; it is not an access token. See the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
+
+### Authorization server
+
+The component that authenticates users, obtains authorization, and issues tokens to clients. In an embedded SqlOS host its default base path is `/sqlos/auth`; its public identity is the configured issuer URL. The authorization server is distinct from the API that consumes its access tokens, even when both run in one ASP.NET Core process. See [AuthServer Overview](/docs/authserver/overview).
+
+## B
+
+### Bootstrap
+
+SqlOS startup work that creates or upgrades its owned schema, ensures signing keys and settings, reconciles configured seeds, creates FGA functions, and removes selected expired artifacts. `AddSqlOS` registers this as a hosted service, so it is different from `MapSqlOS`, which maps HTTP endpoints. See [Schema ownership](/docs/guides/configuration#schema-ownership) and [Production Readiness](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance).
+
+## C
+
+### Callback URI
+
+A URL that receives control from an external provider or protocol. SqlOS has provider callbacks such as OIDC and SAML ACS endpoints. Your client application separately has an OAuth **redirect URI** that receives SqlOS's authorization code. Registering one does not register the other.
+
+### CIMD (Client ID Metadata Document)
+
+A portable public-client mode in which the OAuth `client_id` is a stable HTTPS URL. SqlOS fetches JSON metadata from that URL, validates it, and caches the client's name and redirect URIs. Use it for clients meant to work across many SqlOS deployments; use a seeded client for a first-party application. See [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents).
+
+### Claim
+
+A named value in a token or `ClaimsPrincipal`. Common SqlOS access-token claims include `sub`, `sid`, `client_id`, `org_id`, `email`, and `amr`. A claim describes authenticated/token context; it does not automatically create an FGA grant. See [Token Validation](/docs/authserver/token-validation#token-claims).
+
+### Client / client application
+
+The application that requests authorization and receives tokens: for example, a Razor Pages web app, SPA, native app, or CLI. It is identified by `client_id` and has allowed redirect URIs, scopes, credential/flow settings, and an audience. A client is not the user and is not the protected API. See [Clients](/docs/authserver/clients).
+
+### Client secret
+
+A credential a confidential OAuth client can keep server-side. Browser, native, and CLI applications cannot safely retain one and should be public clients using PKCE. SqlOS's first-party browser/client helpers create public clients; external OIDC provider connections may still require a provider-issued client secret that SqlOS stores using Data Protection.
+
+### Credential
+
+Evidence used to authenticate a user, such as a password, Email OTP, phone OTP, external OIDC identity, or SAML assertion. Credentials establish identity; roles and grants establish application authorization. See [Users](/docs/authserver/users-and-credentials).
+
+## D
+
+### DCR (Dynamic Client Registration)
+
+An OAuth compatibility mode that lets a client register at runtime instead of being seeded or created by an operator. SqlOS implements a registration endpoint with policy and rate-limit controls; it does not implement the RFC 7592 client-management endpoint. Prefer preregistration for owned apps and CIMD for portable public clients. See [Dynamic Client Registration](/docs/authserver/dynamic-client-registration) and [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr).
+
+### Data Protection
+
+ASP.NET Core's cross-platform, key-ring-based cryptographic system for protecting application data. SqlOS uses it automatically for JWT signing-key custody, dashboard session cookies, and persisted secrets such as OIDC credentials, TOTP secrets, protected phone values, and calendar tokens. Production replicas must share a durable key ring unless the application supplies external signing-key custody. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
+
+### Device Authorization Grant (device flow)
+
+An OAuth flow for a CLI, terminal, TV, or input-constrained device. The CLI receives a device code and user code, the user approves the request in a browser, and the CLI polls the token endpoint until approval. The device code is a temporary credential and should never be logged. See [CLI OAuth](/docs/authserver/cli-oauth).
+
+### Discovery document
+
+Machine-readable authorization-server metadata at `/sqlos/auth/.well-known/oauth-authorization-server`. It publishes the issuer and protocol endpoints so clients do not hard-code every URL. Discovery is public by design and should expose the external HTTPS origin in production. See [HTTP Protocol API](/docs/reference/api-reference#oauth-discovery-and-keys).
+
+## F
+
+### FGA (fine-grained authorization)
+
+SqlOS's authorization model for deciding whether a subject has a permission on a resource. It combines subjects, hierarchical resources, roles, permissions, and grants, and can push list authorization into SQL Server through EF Core. FGA is optional and separate from authentication. See [FGA Overview](/docs/fga/overview).
+
+### FGA resource
+
+An application object represented in the authorization hierarchy: an organization, workspace, project, store, Todo item, and so on. Each resource has a type and usually a parent; grants on a parent can apply to descendants. Entity-backed resources implement `ISqlOSResourceEntity`. See [Creating Resources](/docs/fga/creating-resources) and [Resource Hierarchy](/docs/fga/resource-hierarchy).
+
+## G
+
+### Grant
+
+The assignment “subject has role on resource,” optionally with a time window. For example, `user::jane` has `project_editor` on `project::42`. The role's permissions and the resource hierarchy determine effective access. SqlOS grant helpers require the subject to exist; they do not silently provision it. See [Grants](/docs/fga/grants).
+
+### Group
+
+An FGA subject that contains other subjects. A user or agent can inherit a group's grants. An AuthServer organization membership does not automatically mean the same thing as FGA group membership. See [Subject Types](/docs/fga/subject-types#groups).
+
+## H
+
+### Headless auth
+
+A mode where your frontend owns the visual experience while SqlOS owns authorization requests, credential verification, OAuth redirects, sessions, provider callbacks, and security transitions. “Headless” does not mean “call the token endpoint with a password.” See [Headless Auth How-To](/docs/authserver/headless-auth-how-to).
+
+### Hierarchical RBAC
+
+Role-based access control where grants can be attached to a resource tree and inherited by descendants. In SqlOS, roles bundle permissions, grants attach roles to subjects at a resource, and the FGA hierarchy determines where those permissions apply. See [Data Model](/docs/fga/core-concepts).
+
+### HRD (home realm discovery)
+
+The step that examines an email/domain and decides whether authentication should continue locally or redirect to an organization's enterprise SSO connection. HRD is a routing decision, not authentication by itself. See [Home Realm Discovery](/docs/authserver/home-realm-discovery).
+
+## I
+
+### Identity provider (IdP)
+
+The system that authenticates a user for an OIDC or SAML connection—such as Microsoft Entra ID, Okta, Google, or a customer's SAML service. SqlOS validates the provider response, links or provisions the identity according to policy, and then continues its own session/OAuth flow.
+
+### Issuer (`iss`)
+
+The stable public identifier of the SqlOS authorization server and the value placed in access tokens. With the default base path it is `{PublicOrigin}/sqlos/auth`. Resource servers must compare it exactly with their configured trusted issuer. It should never be a pod name or internal HTTP URL in production. See [Production Readiness](/docs/guides/production-readiness#1-make-the-public-url-explicit).
+
+### JIT provisioning
+
+“Just-in-time” creation or linking of a local SqlOS user/membership after a valid external identity response. SAML policies can allow or deny JIT behavior. Disabling JIT means an otherwise valid provider user may still be denied because no permitted local identity/membership exists. See [SAML SSO](/docs/authserver/saml-sso#enrollment-policy).
+
+### JWKS (JSON Web Key Set)
+
+A public document containing the keys resource servers use to validate SqlOS JWT signatures. The default endpoint is `/sqlos/auth/.well-known/jwks.json`. A JWKS contains public keys, never signing private keys. See [Sessions and Tokens](/docs/authserver/sessions-and-tokens#jwks-endpoint).
+
+## M
+
+### Membership
+
+The AuthServer relationship between a user and an organization, including the user's organization role/context. Membership answers “does this person belong to this tenant?” It does not by itself create an FGA subject or resource grant; bridge the identity into FGA explicitly when authorizing domain data. See [Memberships](/docs/authserver/memberships) and [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga).
+
+### MFA (multi-factor authentication)
+
+A policy requiring more than the primary sign-in method. SqlOS supports authenticator-app TOTP and recovery codes in hosted, headless, and direct service flows, with global and organization-aware policy. An `amr` claim records authentication methods used. See [MFA and TOTP](/docs/authserver/mfa-totp).
+
+### MCP (Model Context Protocol)
+
+A protocol used by AI applications to discover and invoke tools and resources. In SqlOS documentation, MCP is relevant to OAuth client portability and protected-resource discovery: CIMD, resource indicators, audience binding, and device flow. Those features secure a client/API relationship; they do not turn an arbitrary ASP.NET Core API into an MCP server. See [Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience).
+
+## N
+
+### Nonce
+
+A client-generated value used to correlate an OIDC authentication response and resist token replay/substitution. It is not interchangeable with OAuth `state`: `state` protects the client redirect/request relationship, while `nonce` is checked in the identity token/provider flow. Preserve and validate both when the flow uses both.
+
+## O
+
+### OAuth 2.0
+
+The authorization protocol clients use to obtain access tokens for APIs. In SqlOS this includes authorization code + PKCE, refresh tokens, and device authorization, plus discovery and optional client-registration modes. OAuth does not define your FGA roles or prove which application rows a user may access.
+
+### OIDC (OpenID Connect)
+
+An identity layer used by external login providers. In SqlOS docs, “OIDC connection” usually means SqlOS is the relying party/client of Google, Microsoft, Apple, or a custom provider: it validates the provider's ID token/user information and links an external identity. Your application-facing SqlOS session then uses SqlOS access and refresh tokens. See [OIDC Social Login](/docs/authserver/oidc-auth).
+
+### Organization
+
+The SqlOS AuthServer tenant boundary. Organizations have memberships, domains, SSO connections, policies, and application assignments. A selected organization can appear as `org_id` in the access token. Model a corresponding FGA resource when domain-data authorization should inherit from the tenant. See [Organizations](/docs/authserver/organizations).
+
+## P
+
+### Permission
+
+A stable action key for one FGA resource type, such as `workspace.read` or `inventory.edit`. Code checks permissions; roles bundle them. Prefer domain-language keys that remain stable even when UI labels change. See [Permissions](/docs/fga/permissions).
+
+### PKCE (Proof Key for Code Exchange)
+
+Protection for public OAuth clients. The client creates a random verifier, sends its S256 hash in the authorization request, and supplies the original verifier during code exchange. A stolen authorization code is useless without that verifier. Generate PKCE per authorization attempt; never reuse or log the verifier. See the [ASP.NET Core login quickstart](/docs/quickstarts/aspnet-core-login).
+
+### Protected resource
+
+An API that accepts access tokens. It validates issuer, signature, lifetime, and its exact audience, then applies application authorization. In MCP/resource-indicator flows it can publish `/.well-known/oauth-protected-resource` so clients discover the authorization server. See [Protect an API](/docs/quickstarts/protect-api).
+
+### Public client
+
+An OAuth client that cannot keep a secret, including browser JavaScript, native/mobile apps, CLIs, and distributed desktop software. Public clients use `token_endpoint_auth_method=none` and PKCE or device flow. “Public” describes secret custody, not whether anyone may use the application.
+
+## R
+
+### Recovery code
+
+A one-time backup credential used when a user cannot access the enrolled TOTP authenticator. Recovery codes must be displayed and stored as secrets, consumed once, and regenerated/revoked according to policy. See [MFA and TOTP](/docs/authserver/mfa-totp#device-changes-and-recovery).
+
+### Redirect URI
+
+The exact client URL to which SqlOS returns an authorization result. Scheme, host, port, path, and—where allowed—other components must match a registered value. The redirect receives an authorization code and `state`; it should not receive credentials or access tokens from the authorization endpoint.
+
+### Refresh token
+
+A long-lived opaque credential used to obtain a new access token without another interactive sign-in. SqlOS rotates refresh tokens and tracks a token family. Reuse outside the configured grace behavior can indicate theft and revoke the family/session. Store refresh tokens more carefully than access tokens and never put them in URLs or logs. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
+
+### Resource indicator (`resource`)
+
+An OAuth request parameter that names the protected resource for which the client wants a token. When enabled, SqlOS binds it through authorization code exchange and refresh so the resulting `aud` remains the intended API. It is not an FGA resource ID. See [Resource Indicators and Audience](/docs/authserver/mcp-resource-indicators-and-audience).
+
+### Role
+
+In FGA, a reusable bundle of permissions assigned through a grant. This is distinct from an organization membership's role string, although an application may deliberately map membership roles into FGA roles. See [Roles](/docs/fga/roles).
+
+## S
+
+### SAML
+
+An enterprise federation protocol where an identity provider sends a signed XML assertion to a service provider's ACS. SqlOS supports organization-scoped SAML connections and continues the result into its OAuth/session flow. SAML assertions are authentication inputs, not bearer access tokens for your API. See [SAML SSO](/docs/authserver/saml-sso).
+
+### Scope
+
+A string requested by an OAuth client and allowed by its registration, such as `openid`, `profile`, `email`, `offline_access`, or an application-defined scope. Scopes constrain what a client may request; FGA permissions decide what a subject can do to particular resources. Do not treat scope and permission as synonyms.
+
+### Service account
+
+An FGA subject type for service-to-service authorization, with application-managed credentials/API-key patterns. It can receive roles and grants without being a human AuthServer user. See [Subject Types](/docs/fga/subject-types).
+
+### SDK (.NET SDK)
+
+The application-facing C# types and DI services compiled into the `SqlOS` package, such as `SqlOSAuthService` and `ISqlOSFgaAuthService`. They are in-process APIs for the host application, not a generated remote HTTP client. Browser, CLI, mobile, and separately deployed applications normally use the OAuth/HTTP surface. See the [.NET SDK Map](/docs/reference/sdk-reference).
+
+### Service provider (SP)
+
+The SAML relying party that consumes assertions. SqlOS acts as the SP for a configured SAML connection: it publishes/uses an entity ID and ACS URL and validates the IdP response.
+
+### Session
+
+The persisted SqlOS record created after authentication. It connects the user, client, organization context, authentication methods, refresh-token family, idle/absolute lifetime, and revocation state. An access token's `sid` points to it, and SqlOS token validation rejects a revoked or absolutely expired session. See [Sessions and Tokens](/docs/authserver/sessions-and-tokens).
+
+### Signing key
+
+The RSA key pair SqlOS uses to sign access tokens. Public validation material appears in JWKS; SQL Server stores only an opaque protected reference to private material. Rotation retains retired public keys for a grace period so existing tokens can still validate. See [Production Readiness: Signing Keys](/docs/authserver/signing-key-custody).
+
+### SSO (single sign-on)
+
+Authentication through a shared enterprise identity provider rather than a separate local credential for every application. SqlOS supports SAML enterprise SSO and external OIDC/social identity connections; home realm discovery can route a user by organization domain.
+
+### State
+
+A client-generated value that correlates the authorization response with the browser request and protects against login CSRF/request substitution. ASP.NET Core OAuth handlers protect structured state automatically. The client must verify it on callback; it is not a session ID or PKCE verifier.
+
+### Subject
+
+The actor FGA authorizes: a user, agent, service account, or group. The access token's `sub` identifies the AuthServer user, but the corresponding FGA subject must be provisioned/resolved before grants and checks can use it. See [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga).
+
+## T
+
+### Tenant
+
+Generic SaaS language for an isolated customer/account boundary. In SqlOS AuthServer, the concrete tenant model is an **organization**. In FGA, applications commonly create an organization/root resource and place tenant-owned resources beneath it.
+
+### TOTP (time-based one-time password)
+
+The rotating numeric code generated by an authenticator app from a shared secret and the current time. SqlOS protects the persisted shared secret with Data Protection and can issue recovery codes. TOTP is an MFA factor; Email OTP and phone OTP are separate challenge types. See [MFA and TOTP](/docs/authserver/mfa-totp).
+
+### TVF (table-valued function)
+
+A SQL Server function that returns rows and can participate in a query. SqlOS FGA uses a TVF to evaluate hierarchical resource access inside SQL, allowing EF Core list filters to authorize before rows are materialized. See [List Filtering](/docs/fga/list-filter).
+
+## U
+
+### User
+
+The AuthServer record for a human identity. A user can have credentials, external identities, memberships, sessions, and invitations. A user is not automatically an FGA subject until the application provisions or resolves that bridge. See [Users](/docs/authserver/users-and-credentials).
+
+## If you remember only six distinctions
+
+1. **User vs client:** the user signs in; the client application requests the token.
+2. **Issuer vs audience:** the issuer minted the token; the audience is the API allowed to accept it.
+3. **Organization vs FGA resource:** the organization is identity/tenant context; its FGA resource anchors domain authorization.
+4. **Membership role vs FGA role:** membership establishes tenant relationship; grants and FGA roles establish resource permissions.
+5. **OAuth protected resource vs FGA resource:** one is an API; the other is an object inside the API.
+6. **Hosted vs headless:** the UI changes; SqlOS still owns the same protocol and security state.
+
+## Related reference
+
+- [.NET SDK Map](/docs/reference/sdk-reference)
+- [HTTP Protocol API](/docs/reference/api-reference)
+- [AuthServer API Reference](/docs/reference/authserver-api)
+- [FGA API Reference](/docs/reference/fga-api)

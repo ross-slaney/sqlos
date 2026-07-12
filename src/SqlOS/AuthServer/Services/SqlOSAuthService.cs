@@ -782,8 +782,9 @@ public sealed class SqlOSAuthService
     /// <summary>
     /// Handles a refresh request where the presented token has already been
     /// consumed. If the consumption happened recently AND a replacement
-    /// access token was cached, return the same cached token pair (grace
-    /// window). Otherwise, trigger replay detection and revoke the family.
+    /// access token was cached, return that access token plus a fresh sibling
+    /// refresh token in the same family (grace window). Otherwise, trigger
+    /// replay detection and revoke the family.
     /// </summary>
     private async Task<SqlOSTokenResponse> HandleConsumedRefreshTokenAsync(
         SqlOSRefreshToken refreshToken,

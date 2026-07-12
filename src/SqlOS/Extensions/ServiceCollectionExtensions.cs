@@ -44,6 +44,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
         services.AddHttpClient();
+        services.AddHttpClient(nameof(SqlOSCimdClientService))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            });
         services.AddHttpClient<ISqlOSDomainDnsVerifier, SqlOSDnsOverHttpsDomainVerifier>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

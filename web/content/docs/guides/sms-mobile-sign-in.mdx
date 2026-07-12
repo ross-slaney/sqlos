@@ -1,0 +1,269 @@
+---
+title: "SMS sign-in for mobile apps"
+description: "Build a passwordless native sign-in flow with phone codes, PKCE, and SqlOS headless auth."
+order: 2
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Add SMS sign-in to a mobile app"
+  href="/docs/reference/authserver-api#phone-otp-sign-in-and-signup"
+  actionLabel="Phone OTP reference"
+>
+  Use SqlOS native headless auth when a first-party iOS or Android app should own the phone-number and verification-code screens.
+</Banner>
+
+![Trailnote mobile example showing phone-number and one-time-code screens](/docs/guides-sms-mobile-sign-in.svg)
+
+This guide builds **Trailnote**, a fictional mobile app with a custom URI callback at `trailnote://auth/callback`. The app collects a phone number, asks SqlOS to send a short-lived code through Twilio Verify, verifies that code, and finishes a normal OAuth authorization-code flow with PKCE.
+
+<Callout type="warning" title="SMS is convenient, not phishing-resistant">
+  Phone codes are vulnerable to SIM swap, number reassignment, carrier delivery failures, and interception. SqlOS does not treat `phone_otp` as strong MFA by default. Require Authenticator MFA or another stronger method for privileged actions.
+</Callout>
+
+## Goal
+
+The native app owns two screens:
+
+1. **Phone number** → `TEXT MY CODE`
+2. **Verification code** → `SIGN IN`
+
+SqlOS owns the authorization request, phone normalization, provider delivery, challenge lifetime, rate limits, user/session creation, authorization code, and tokens.
+
+## 1. Configure Twilio Verify and phone OTP
+
+Create a **Twilio Verify Service** with SMS enabled. You need its `VA...` service SID plus the account SID and auth token. You do **not** need to buy a Programmable Messaging phone number; Twilio Verify manages the sender path.
+
+Keep all three values in server configuration:
+
+```bash
+SqlOS__PhoneOtp__Enabled=true
+SqlOS__PhoneOtp__TwilioAccountSid=<account-sid>
+SqlOS__PhoneOtp__TwilioAuthToken=<auth-token>
+SqlOS__PhoneOtp__TwilioVerifyServiceSid=<verify-service-sid>
+SqlOS__PhoneOtp__DefaultRegion=US
+```
+
+Enable phone OTP and keep the initial rollout geographically narrow:
+
+```csharp
+const string publicOrigin = "https://api.example.com";
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+    auth.PublicOrigin = publicOrigin;
+    auth.Issuer = $"{publicOrigin}/sqlos/auth";
+
+    auth.ConfigurePhoneOtp(phone =>
+    {
+        phone.Enabled = true;
+        phone.TwilioAccountSid = builder.Configuration["SqlOS:PhoneOtp:TwilioAccountSid"];
+        phone.TwilioAuthToken = builder.Configuration["SqlOS:PhoneOtp:TwilioAuthToken"];
+        phone.TwilioVerifyServiceSid = builder.Configuration["SqlOS:PhoneOtp:TwilioVerifyServiceSid"];
+        phone.DefaultRegion = "US";
+        phone.CountryAllowList = ["US", "CA"];
+        phone.MaxSendsPerPhone = 5;
+        phone.MaxSendsPerIp = 60;
+        phone.MaxSendsPerClient = 300;
+    });
+
+    auth.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["phone_otp"];
+        page.EnablePasswordSignup = false;
+    });
+});
+```
+
+Startup validation fails when phone OTP is enabled without a complete Twilio configuration.
+
+## 2. Register the native public client
+
+Native headless auth is deliberately opt-in. Register a first-party PKCE client, its exact deep link, and `allowNativeHeadlessAuth: true`:
+
+```csharp
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "trailnote-mobile";
+    client.Name = "Trailnote Mobile";
+    client.Audience = "https://api.example.com";
+    client.RedirectUris = ["trailnote://auth/callback"];
+    client.AllowedScopes = ["openid", "profile", "offline_access"];
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowNativeHeadlessAuth = true;
+});
+```
+
+Configure the same scheme in the mobile app. For an Expo app:
+
+```json
+{
+  "expo": {
+    "scheme": "trailnote"
+  }
+}
+```
+
+<Callout type="info" title="Why the explicit opt-in?">
+  `POST /sqlos/auth/headless/start` accepts only a first-party `public_pkce` client with PKCE required, an exact registered redirect URI, and native headless auth enabled.
+</Callout>
+
+## 3. Start a PKCE authorization request
+
+Generate an RFC 7636 verifier, its `S256` challenge, and a random `state` using a platform-supported cryptography library. Keep the verifier and state in secure temporary storage until the callback completes.
+
+```ts
+type HeadlessResult = {
+  type: "view" | "redirect";
+  redirectUrl?: string;
+  viewModel?: {
+    requestId?: string;
+    challengeToken?: string;
+    signupToken?: string;
+    error?: string;
+  };
+};
+
+const AUTH = "https://api.example.com/sqlos/auth";
+const CLIENT_ID = "trailnote-mobile";
+const REDIRECT_URI = "trailnote://auth/callback";
+
+async function post(path: string, body: unknown): Promise<HeadlessResult> {
+  const response = await fetch(`${AUTH}/headless${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+const started = await post("/start", {
+  responseType: "code",
+  clientId: CLIENT_ID,
+  redirectUri: REDIRECT_URI,
+  state,
+  scope: "openid profile offline_access",
+  codeChallenge,
+  codeChallengeMethod: "S256",
+  resource: "https://api.example.com",
+  view: "login",
+});
+
+const requestId = started.viewModel?.requestId;
+if (!requestId) throw new Error(started.viewModel?.error ?? "Could not start sign in.");
+```
+
+Do not replace PKCE or `state` with a client secret. Native apps are public clients and cannot safely hold one.
+
+## 4. Send the code
+
+Use E.164 at the API boundary. A phone input may display `(202) 555-0148`, but submit `+12025550148`.
+
+```ts
+const sent = await post("/phone-otp/start", {
+  requestId,
+  phoneNumber: "+12025550148",
+});
+
+const challengeToken = sent.viewModel?.challengeToken;
+if (!challengeToken) {
+  throw new Error(sent.viewModel?.error ?? "The code could not be sent.");
+}
+```
+
+Keep `challengeToken` in component state or secure temporary storage. SqlOS intentionally cannot reconstruct and return the raw token after a request reload.
+
+For a React Native input, let the OS offer phone and SMS-code affordances:
+
+```tsx
+<TextInput
+  accessibilityLabel="Mobile phone number"
+  autoComplete="tel"
+  keyboardType="phone-pad"
+  textContentType="telephoneNumber"
+/>
+
+<TextInput
+  accessibilityLabel="One-time verification code"
+  autoComplete="sms-otp"
+  keyboardType="number-pad"
+  textContentType="oneTimeCode"
+/>
+```
+
+## 5. Verify and exchange the authorization code
+
+```ts
+const verified = await post("/phone-otp/verify", {
+  requestId,
+  challengeToken,
+  code,
+});
+
+if (verified.type !== "redirect" || !verified.redirectUrl) {
+  throw new Error(verified.viewModel?.error ?? "The code was not accepted.");
+}
+
+const callback = new URL(verified.redirectUrl);
+if (callback.searchParams.get("state") !== state) {
+  throw new Error("The sign-in state did not match.");
+}
+
+const authorizationCode = callback.searchParams.get("code");
+if (!authorizationCode) throw new Error("No authorization code was returned.");
+
+const tokenResponse = await fetch(`${AUTH}/token`, {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  body: new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    code: authorizationCode,
+    code_verifier: verifier,
+    resource: "https://api.example.com",
+  }).toString(),
+});
+```
+
+Store the resulting refresh token in Keychain/Keystore-backed storage, not `AsyncStorage`. Clear the verifier, state, request id, and challenge token after the exchange.
+
+## 6. Add passwordless signup
+
+New users use the parallel signup endpoints:
+
+```text
+POST /sqlos/auth/headless/signup/phone-otp/start
+POST /sqlos/auth/headless/signup/phone-otp/verify
+```
+
+Signup start accepts `requestId`, `displayName`, `phoneNumber`, optional `organizationName`, and optional `customFields`. Preserve both the returned `signupToken` and `challengeToken` until verification.
+
+## Production checklist
+
+- Use HTTPS for the SqlOS host and exact registered deep links or universal/app links.
+- Keep Twilio credentials on the server only.
+- Enforce a country allow list and tune phone, account, IP, and client send limits.
+- Disable resend until `NextAllowedSendAt`; do not create parallel challenges from repeated taps.
+- Use generic public errors so unknown and known phone numbers are not distinguishable.
+- Mask phone numbers in UI, logs, analytics, and support tools.
+- Store refresh tokens in Keychain/Keystore-backed secure storage.
+- Add Authenticator MFA for administrators, owners, payments, recovery, or other high-risk actions.
+- Test number reassignment, lost-device recovery, account deletion, and support escalation before launch.
+
+## Expected outcome
+
+The mobile app presents its own phone and code screens while SqlOS owns the complete OAuth and OTP state machine. A successful code verification returns through the registered callback, exchanges with PKCE, and creates a normal SqlOS session without any password or client secret in the app.
+
+## Next steps
+
+- [Authenticator MFA](/docs/guides/mfa-totp)
+- [Headless Auth How-To](/docs/authserver/headless-auth-how-to)
+- [Phone OTP API reference](/docs/reference/authserver-api#phone-otp-sign-in-and-signup)
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens)

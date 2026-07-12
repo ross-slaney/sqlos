@@ -1,0 +1,241 @@
+---
+title: "Assign access across multiple apps"
+description: "Decide which organizations, roles, and users can enter each client application."
+order: 8
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Give each organization the right application surfaces"
+  href="/docs/authserver/application-access"
+  actionLabel="Application access"
+>
+  Register each app as its own OAuth client, then use application assignments to decide who may enter it.
+</Banner>
+
+![Atlas Suite organization assignments for a portal, mobile app, and operations console](/docs/guides-multi-app-access.svg)
+
+This guide builds **Atlas Suite**, a fictional B2B product with one identity host and three clients:
+
+- **Customer Portal** for every contracted organization;
+- **Field Mobile** for organizations that bought mobile access;
+- **Ops Console** for selected organization administrators.
+
+All three can call the same API. Client registration identifies the app, OAuth audience identifies the API, and application assignments identify who may use the app. These are separate controls.
+
+## Goal
+
+For the Northwind organization:
+
+| Person | Customer Portal | Field Mobile | Ops Console |
+| --- | --- | --- | --- |
+| Member | Allowed | Allowed | Denied |
+| Admin | Allowed | Allowed | Allowed |
+| Explicitly denied admin | Allowed | Allowed | Denied |
+
+The final row demonstrates deny precedence: a specific deny wins over organization, role, and default allows.
+
+## 1. Register a client per application
+
+Use one stable client ID and exact callback list per surface. This example gives all three tokens the same `https://api.atlas.test` audience while retaining separate application policy.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+    auth.PublicOrigin = "https://identity.atlas.test";
+    auth.Issuer = "https://identity.atlas.test/sqlos/auth";
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = "atlas-customer-portal";
+        client.Name = "Atlas Customer Portal";
+        client.Audience = "https://api.atlas.test";
+        client.RedirectUris = ["https://portal.atlas.test/auth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = "atlas-field-mobile";
+        client.Name = "Atlas Field Mobile";
+        client.Audience = "https://api.atlas.test";
+        client.RedirectUris = ["https://app.atlas.test/auth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+        client.AllowNativeHeadlessAuth = true;
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = "atlas-ops-console";
+        client.Name = "Atlas Ops Console";
+        client.Audience = "https://api.atlas.test";
+        client.RedirectUris = ["https://ops.atlas.test/auth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
+});
+```
+
+New seeded clients start in `all_organizations`. Startup reconciliation preserves an existing client's access mode, and client seed options do not currently contain assignments. Apply the restrictive policy explicitly after the clients exist.
+
+## 2. Choose the access mode
+
+Open **Auth Server > Clients**, select each app, and use its **Access** section. For Atlas Suite:
+
+| Client | Mode | Meaning |
+| --- | --- | --- |
+| `atlas-customer-portal` | `selected_organizations` | Contracted organizations only |
+| `atlas-field-mobile` | `selected_organizations` | Mobile-entitled organizations only |
+| `atlas-ops-console` | `selected_users_groups_roles` | Only explicit people, groups, or org roles |
+
+The same change is available from a trusted admin process:
+
+```csharp
+await admin.SetApplicationAccessModeAsync(
+    "atlas-customer-portal",
+    new SqlOSSetApplicationAccessModeRequest(
+        SqlOSApplicationAccessModes.SelectedOrganizations),
+    actorType: "deployment",
+    actorId: "atlas-access-v1",
+    cancellationToken: ct);
+```
+
+Run assignment automation as an idempotent, versioned deployment step. `AssignApplicationAsync` creates an assignment; it does not deduplicate repeated calls for you.
+
+## 3. Assign Northwind to the customer apps
+
+Create an organization allow assignment for both customer-facing clients:
+
+```csharp
+var northwindAccess = new SqlOSCreateApplicationAssignmentRequest(
+    PrincipalType: SqlOSApplicationAssignmentPrincipalTypes.Organization,
+    OrganizationId: "org_northwind",
+    Access: SqlOSApplicationAssignmentAccess.Allowed,
+    Reason: "Northwind enterprise subscription");
+
+await admin.AssignApplicationAsync(
+    "atlas-customer-portal",
+    northwindAccess,
+    actorType: "deployment",
+    actorId: "atlas-access-v1",
+    cancellationToken: ct);
+
+await admin.AssignApplicationAsync(
+    "atlas-field-mobile",
+    northwindAccess,
+    actorType: "deployment",
+    actorId: "atlas-access-v1",
+    cancellationToken: ct);
+```
+
+Organization assignments are the only assignment type to use with `selected_organizations`.
+
+## 4. Allow the exact organization role into Ops
+
+Role matching uses the active `SqlOSMembership.Role` value and is scoped to one organization. If your membership role is `admin`, assign exactly that key:
+
+```csharp
+await admin.AssignApplicationAsync(
+    "atlas-ops-console",
+    new SqlOSCreateApplicationAssignmentRequest(
+        PrincipalType: SqlOSApplicationAssignmentPrincipalTypes.Role,
+        OrganizationId: "org_northwind",
+        RoleKey: "admin",
+        Access: SqlOSApplicationAssignmentAccess.Allowed,
+        Reason: "Northwind administrators operate their workspace"),
+    actorType: "deployment",
+    actorId: "atlas-access-v1",
+    cancellationToken: ct);
+```
+
+You can also assign a single user, an FGA group, a service account, or an agent. Use the narrowest principal that matches the product rule.
+
+## 5. Add an exception with explicit deny
+
+An explicit deny is evaluated before every allow path, including `all_organizations`:
+
+```csharp
+await admin.AssignApplicationAsync(
+    "atlas-ops-console",
+    new SqlOSCreateApplicationAssignmentRequest(
+        PrincipalType: SqlOSApplicationAssignmentPrincipalTypes.User,
+        PrincipalId: "usr_alex",
+        Access: SqlOSApplicationAssignmentAccess.Denied,
+        Reason: "Operations access suspended during review"),
+    actorType: "security",
+    actorId: "case_2841",
+    cancellationToken: ct);
+```
+
+Do not use denies as a substitute for a clear allow model. They are best for bounded exceptions and incident response, with a reason and an owner.
+
+<Callout type="warning" title="User and group assignments are client-wide">
+  A user, group, service-account, or agent assignment matches its principal across the whole client; adding an `OrganizationId` does not scope that principal match. Organization-role assignments are the path for a rule such as “admins of Northwind.”
+</Callout>
+
+## 6. Explain decisions before rollout
+
+Check the matrix with the backend API:
+
+```csharp
+var member = await admin.CheckApplicationAccessAsync(
+    "atlas-ops-console",
+    userId: "usr_member",
+    organizationId: "org_northwind",
+    cancellationToken: ct);
+
+var administrator = await admin.CheckApplicationAccessAsync(
+    "atlas-ops-console",
+    userId: "usr_admin",
+    organizationId: "org_northwind",
+    cancellationToken: ct);
+```
+
+The result returns `Allowed`, `Decision`, `AccessMode`, `Source`, the matching assignment, and its reason. Treat this as an admin/support explanation surface; do not expose organization or assignment details from a public login page.
+
+Available-app views can use the trusted admin methods or routes for an organization or user:
+
+```text
+GET /sqlos/admin/auth/api/organizations/org_northwind/applications
+GET /sqlos/admin/auth/api/users/usr_admin/applications
+```
+
+## 7. Understand runtime enforcement
+
+SqlOS checks application access during hosted and headless authorization, social and SAML callbacks, Email OTP session issuance, device approval, refresh, and token creation. Public failures deliberately return only `Application access is not allowed.`
+
+Revoking an assignment prevents new authorization and refresh. An already-issued short-lived access token remains valid until expiry unless you also revoke the client's sessions or disable the client. Resource APIs must still validate the exact audience and perform FGA or business authorization for each operation.
+
+<Callout type="warning" title="Disabled is more than an access mode">
+  Setting `disabled` also deactivates the client and revokes its sessions. Changing to another mode later does not re-enable it; explicitly call `EnableClientAsync` or use the dashboard.
+</Callout>
+
+## Production checklist
+
+- Give every surface its own client ID and exact redirect URI list.
+- Start new multi-app clients restrictive; the seeded default is `all_organizations`.
+- Apply access configuration through the dashboard or a trusted, idempotent deployment command.
+- Test ordinary users, matching roles, missing org context, explicit denies, revoked assignments, and disabled clients.
+- Keep assignment checks separate from token audience validation and in-app FGA.
+- Keep access-check explanations behind admin authorization.
+- Revoke client sessions as well as assignments during an active incident.
+- Monitor `application.assignment.*` and `application.access.*_denied` audit events.
+
+## Expected outcome
+
+Northwind members can enter the portal and mobile app, only Northwind admins can enter Ops, and a specific security deny still wins. Every app shares identity without accidentally sharing availability policy.
+
+## Next steps
+
+- [Application access](/docs/authserver/application-access)
+- [Clients](/docs/authserver/clients)
+- [Protect an API](/docs/quickstarts/protect-api)
+- [Standalone identity server](/docs/guides/standalone-identity-server)
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens)

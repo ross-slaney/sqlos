@@ -7,6 +7,20 @@ section: fga
 
 For create, update, and delete operations, check authorization first with `CheckAccessAsync`, then mutate your EF entity. If the entity implements `ISqlOSResourceEntity` and the DbContext derives from `SqlOSDbContext<TContext>`, SqlOS keeps the backing FGA resource row synchronized when EF saves.
 
+FGA authorizes a subject but does not authenticate the caller. Protect the API route group for its exact audience, and derive the subject from the SqlOS-validated token:
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+```
+
+All endpoints below are mapped on that protected `api` group. Do not accept `subjectId` from a request body, route value, or unvalidated JWT claim.
+
 ## Create pattern
 
 1. Check permission on the parent resource.
@@ -15,14 +29,14 @@ For create, update, and delete operations, check authorization first with `Check
 4. Save the entity. SqlOS syncs the `SqlOSFgaResource` row in the same EF save.
 
 ```csharp
-app.MapPost("/api/workspaces", async (
+api.MapPost("/workspaces", async (
     CreateWorkspaceRequest request,
     AppDbContext db,
     ISqlOSFgaAuthService authService,
     HttpContext http,
     CancellationToken ct) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 
@@ -54,7 +68,7 @@ app.MapPost("/api/workspaces", async (
 ## Update pattern
 
 ```csharp
-app.MapPut("/api/workspaces/{id}", async (
+api.MapPut("/workspaces/{id}", async (
     Guid id,
     UpdateWorkspaceRequest request,
     AppDbContext db,
@@ -62,7 +76,7 @@ app.MapPut("/api/workspaces/{id}", async (
     HttpContext http,
     CancellationToken ct) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 
@@ -88,14 +102,14 @@ Because `ResourceName => Name`, the backing FGA resource display name updates wi
 ## Delete pattern
 
 ```csharp
-app.MapDelete("/api/workspaces/{id}", async (
+api.MapDelete("/workspaces/{id}", async (
     Guid id,
     AppDbContext db,
     ISqlOSFgaAuthService authService,
     HttpContext http,
     CancellationToken ct) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 

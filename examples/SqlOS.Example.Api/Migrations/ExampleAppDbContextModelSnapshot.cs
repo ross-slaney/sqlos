@@ -183,8 +183,8 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("State")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("UserId")
                         .IsRequired()
@@ -289,8 +289,8 @@ namespace SqlOS.Example.Api.Migrations
 
                     b.Property<string>("State")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("UiContextJson")
                         .HasColumnType("nvarchar(max)");
