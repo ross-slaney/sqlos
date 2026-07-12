@@ -114,7 +114,25 @@ public sealed class SqlOSCryptoService
     }
 
     public string CreatePkceCodeChallenge(string codeVerifier)
-        => Base64UrlEncoder.Encode(SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)));
+    {
+        if (!IsValidPkceCodeVerifier(codeVerifier))
+        {
+            throw new InvalidOperationException(
+                "PKCE code verifier must be 43 to 128 RFC 7636 unreserved characters.");
+        }
+
+        return Base64UrlEncoder.Encode(SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)));
+    }
+
+    internal bool IsValidPkceCodeVerifier(string? codeVerifier)
+        => codeVerifier is { Length: >= 43 and <= 128 }
+            && codeVerifier.All(IsPkceUnreservedCharacter);
+
+    internal bool IsValidS256PkceCodeChallenge(string? codeChallenge)
+        // SHA-256 always produces 32 bytes, whose unpadded base64url
+        // representation is exactly 43 characters.
+        => codeChallenge is { Length: 43 }
+            && codeChallenge.All(IsBase64UrlCharacter);
 
     public bool VerifyPkceCodeVerifier(string codeVerifier, string codeChallenge, string codeChallengeMethod)
     {
@@ -123,9 +141,26 @@ public sealed class SqlOSCryptoService
             throw new InvalidOperationException("Only S256 PKCE code challenges are supported.");
         }
 
+        if (!IsValidPkceCodeVerifier(codeVerifier)
+            || !IsValidS256PkceCodeChallenge(codeChallenge))
+        {
+            return false;
+        }
+
         var computed = CreatePkceCodeChallenge(codeVerifier);
         return string.Equals(computed, codeChallenge, StringComparison.Ordinal);
     }
+
+    private static bool IsPkceUnreservedCharacter(char value)
+        => IsAsciiAlphaNumeric(value) || value is '-' or '.' or '_' or '~';
+
+    private static bool IsBase64UrlCharacter(char value)
+        => IsAsciiAlphaNumeric(value) || value is '-' or '_';
+
+    private static bool IsAsciiAlphaNumeric(char value)
+        => value is >= 'A' and <= 'Z'
+            or >= 'a' and <= 'z'
+            or >= '0' and <= '9';
 
     public async Task<string> CreateTemporaryTokenAsync(
         string purpose,

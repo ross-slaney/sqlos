@@ -121,7 +121,11 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
-        if (client.RequirePkce)
+        var isPublicClient = string.Equals(
+            client.TokenEndpointAuthMethod,
+            "none",
+            StringComparison.Ordinal);
+        if (client.RequirePkce || isPublicClient)
         {
             if (string.IsNullOrWhiteSpace(input.CodeChallenge))
             {
@@ -131,6 +135,12 @@ public sealed class SqlOSAuthorizationServerService
             if (!string.Equals(input.CodeChallengeMethod, "S256", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Only S256 PKCE is supported.");
+            }
+
+            if (!_cryptoService.IsValidS256PkceCodeChallenge(input.CodeChallenge))
+            {
+                throw new InvalidOperationException(
+                    "PKCE code challenge must be a 43-character RFC 7636 S256 value.");
             }
         }
 
@@ -950,8 +960,8 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authorization code was not issued for this client.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.RedirectUri)
-            && !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(request.RedirectUri)
+            || !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Redirect URI does not match the authorization request.");
         }

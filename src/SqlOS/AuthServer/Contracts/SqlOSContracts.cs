@@ -99,10 +99,6 @@ public sealed record SqlOSRefreshRequest(
     string? OrganizationId,
     string? Resource = null);
 
-public sealed record SqlOSExchangeCodeRequest(
-    string Code,
-    string ClientId);
-
 public sealed record SqlOSForgotPasswordRequest(
     string Email,
     string? ClientId = null);
@@ -411,7 +407,13 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     string? ApplePrivateKeyPem = null,
     string? LogoDataUrl = null);
 
-public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
+public sealed record SqlOSAuthorizationUrlRequest(
+    string ConnectionId,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string CodeChallenge,
+    string CodeChallengeMethod = "S256");
 
 public sealed record SqlOSCreateWorkspaceRequest(string Name);
 

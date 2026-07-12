@@ -236,20 +236,25 @@ var invitation = await authService.CreateEmailInvitationAsync(
     ct);
 ```
 
-### Direct SAML handoff-code exchange
-
-`SqlOSAuthService.ExchangeCodeAsync` consumes the temporary `auth_code` produced by `SqlOSSamlService.CreateAuthorizationUrlAsync` and its request-token callback flow:
+### OAuth authorization-code exchange
 
 ```csharp
-var tokens = await authService.ExchangeCodeAsync(
-    new SqlOSExchangeCodeRequest(
+var result = await authorizationServer.ExchangeAuthorizationCodeAsync(
+    new SqlOSTokenRequest(
+        GrantType: "authorization_code",
         Code: code,
-        ClientId: clientId),
+        RedirectUri: redirectUri,
+        ClientId: clientId,
+        CodeVerifier: codeVerifier,
+        RefreshToken: null,
+        Resource: null),
     httpContext,
     ct);
+
+var tokens = result.Tokens;
 ```
 
-This is not the OAuth authorization-code + PKCE exchange. Standards-based clients must call form-encoded `POST /sqlos/auth/token`; custom SAML/OIDC PKCE orchestration uses `SqlOSSsoAuthorizationService` or `SqlOSOidcBrowserAuthService` with `SqlOSPkceExchangeRequest`.
+Authorization codes, including codes produced after SAML login, require S256 PKCE and the exact original registered redirect URI, including path case. Verifiers must contain 43–128 RFC 7636 unreserved characters; the S256 challenge is exactly 43 base64url characters. Public HTTP clients should post the equivalent form fields to `/sqlos/auth/token`.
 
 ### Resource-server token validation
 

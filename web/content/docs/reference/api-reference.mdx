@@ -304,11 +304,10 @@ For browser clients on a different origin, send credentialed requests so the reu
 | `POST` | `/sqlos/auth/oidc/authorization-url` | Create a provider authorization URL |
 | `GET` / `POST` | `/sqlos/auth/oidc/callback` | Complete the provider callback |
 | `POST` | `/sqlos/auth/oidc/exchange` | Exchange the SqlOS PKCE result |
-| `POST` | `/sqlos/auth/sso/authorization-url` | Create a SAML authorization URL |
-| `GET` | `/sqlos/auth/saml/login/{connectionId}` | Redirect to the organization IdP |
+| `POST` | `/sqlos/auth/sso/authorization-url` | Create a state- and S256 PKCE-bound SAML authorization request |
 | `POST` | `/sqlos/auth/saml/acs/{connectionId}` | SAML assertion consumer service |
 
-Prefer the hosted/headless flow abstractions over invoking callback routes manually.
+Prefer canonical `/sqlos/auth/authorize` plus `/sqlos/auth/token` over invoking callback routes manually. The SAML authorization helper requires `state`, `codeChallenge`, and `codeChallengeMethod: "S256"`; its code is exchanged only at the standard token endpoint with the exact redirect URI and verifier. The former `/token/exchange` and `/saml/login/{connectionId}` compatibility routes are not mapped.
 
 ## Dynamic client registration
 

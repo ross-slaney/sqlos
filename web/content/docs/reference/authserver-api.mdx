@@ -709,15 +709,20 @@ Resource servers must use `ValidateAccessTokenAsync(rawToken, expectedAudience, 
 
 ---
 
-### ExchangeCodeAsync
+### ExchangeAuthorizationCodeAsync
 
-Exchange an authorization code for tokens. Used in SSO callback flows.
+Exchange an OAuth authorization code for tokens through the canonical token service. SAML authorization codes use this same path.
 
 ```csharp
-var tokens = await authService.ExchangeCodeAsync(
-    new SqlOSExchangeCodeRequest(
+var result = await authorizationServer.ExchangeAuthorizationCodeAsync(
+    new SqlOSTokenRequest(
+        GrantType: "authorization_code",
         Code: code,
-        ClientId: "my-app"),
+        RedirectUri: "https://example.com/callback",
+        ClientId: "my-app",
+        CodeVerifier: codeVerifier,
+        RefreshToken: null,
+        Resource: null),
     httpContext);
 ```
 
@@ -727,11 +732,15 @@ var tokens = await authService.ExchangeCodeAsync(
 |------|------|-------------|
 | `request.Code` | `string` | The authorization code. |
 | `request.ClientId` | `string` | The client application ID. |
+| `request.RedirectUri` | `string` | Exact redirect URI from the authorization request. |
+| `request.CodeVerifier` | `string` | Verifier for the required S256 PKCE challenge; 43–128 RFC 7636 unreserved characters. |
 | `httpContext` | `HttpContext` | Current HTTP context. |
 
 **Returns**
 
-`Task<SqlOSTokenResponse>`
+`Task<SqlOSTokenEndpointResult>`
+
+The retired `/token/exchange` shortcut is not mapped. Public clients use form-encoded `/sqlos/auth/token` for password, OIDC, and SAML authorization-code exchanges.
 
 ---
 
@@ -1366,9 +1375,9 @@ return Results.Redirect(ssoResult.AuthorizationUrl);
 |------|------|-------------|
 | `request.Email` | `string` | User's email (determines the SSO connection via domain). |
 | `request.ClientId` | `string` | Client application ID. |
-| `request.RedirectUri` | `string` | Where to redirect after SSO. |
+| `request.RedirectUri` | `string` | Exact registered URI where SqlOS redirects after SSO; comparison is case-sensitive. |
 | `request.State` | `string` | CSRF state parameter. |
-| `request.CodeChallenge` | `string` | PKCE code challenge. |
+| `request.CodeChallenge` | `string` | S256 PKCE code challenge; exactly 43 base64url characters. |
 | `request.CodeChallengeMethod` | `string` | `"S256"`. |
 
 **Returns**
@@ -1404,8 +1413,8 @@ var tokens = await ssoService.ExchangeCodeAsync(
 |------|------|-------------|
 | `request.Code` | `string` | The authorization code. |
 | `request.ClientId` | `string` | Client application ID. |
-| `request.RedirectUri` | `string` | Must match the original redirect URI. |
-| `request.CodeVerifier` | `string` | The PKCE code verifier. |
+| `request.RedirectUri` | `string` | Must exactly match the original registered redirect URI, including path case. |
+| `request.CodeVerifier` | `string` | The 43–128 character RFC 7636 PKCE code verifier. |
 | `httpContext` | `HttpContext` | Current HTTP context. |
 
 **Returns**

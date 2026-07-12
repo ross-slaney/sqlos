@@ -232,6 +232,29 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsCimdRedirectPathCaseMismatch()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Exact Redirect MCP Client",
+              "redirect_uris": ["https://client.example.test/Auth/Callback"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/auth/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Redirect URI*not allowed*");
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_UsesMetadataChangesToFlagFreshConsent()
     {
         using var context = CreateContext();

@@ -92,7 +92,7 @@ public sealed class SqlOSClientResolutionService
         }
 
         var allowedRedirects = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson);
-        if (!allowedRedirects.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+        if (!allowedRedirects.Contains(redirectUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{client.ClientId}'.");
         }

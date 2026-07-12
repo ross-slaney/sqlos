@@ -324,7 +324,7 @@ public sealed class SqlOSApplicationAssignmentsTests
                 "https://client.example.test/callback",
                 _crypto.GenerateOpaqueToken(),
                 "openid offline_access",
-                _crypto.HashToken("verifier"),
+                _crypto.CreatePkceCodeChallenge(_crypto.GenerateOpaqueToken()),
                 "S256",
                 null,
                 null,

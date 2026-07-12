@@ -64,6 +64,31 @@ public sealed class SqlOSClientResolutionTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsRedirectPathCaseMismatch()
+    {
+        using var context = CreateContext();
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_exact_redirect",
+            ClientId = "exact-redirect-client",
+            Name = "Exact Redirect Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"https://client.example.test/Auth/Callback\"]",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var resolver = CreateResolver(context);
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "exact-redirect-client",
+            "https://client.example.test/auth/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Redirect URI*not allowed*");
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_Throws_ForInactiveClients()
     {
         using var context = CreateContext();

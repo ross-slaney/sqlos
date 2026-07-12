@@ -24,6 +24,7 @@ public sealed class SqlOSAuthServiceTests
 {
     private const string UnauthorizedOrganizationJoinMessage =
         "Joining an existing organization requires an invitation or approved join policy.";
+    private const string ValidPkceCodeChallenge = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     [TestMethod]
     public async Task LoginWithMultipleOrganizations_ReturnsPendingAuthToken()
@@ -119,7 +120,7 @@ public sealed class SqlOSAuthServiceTests
                 "https://client.example.test/callback",
                 "headless-mfa",
                 "openid profile email",
-                "challenge-headless-mfa",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 user.DefaultEmail,
@@ -189,7 +190,7 @@ public sealed class SqlOSAuthServiceTests
                 "https://client.example.test/callback",
                 "headless-mfa-challenge",
                 "openid profile email",
-                "challenge-headless-mfa-challenge",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 user.DefaultEmail,
@@ -2196,7 +2197,7 @@ public sealed class SqlOSAuthServiceTests
                 "https://client.example.test/callback",
                 state,
                 "openid profile email",
-                $"challenge-{state}",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 loginHint,
