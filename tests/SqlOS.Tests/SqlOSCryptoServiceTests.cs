@@ -35,7 +35,7 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
-    public async Task EnsureActiveSigningKey_DefaultConfiguration_FailsClosedEvenWhenDataProtectionExists()
+    public async Task EnsureActiveSigningKey_DefaultConfiguration_WorksWithoutCustodySetup()
     {
         using var context = CreateContext();
         var service = new SqlOSCryptoService(
@@ -43,18 +43,20 @@ public sealed class SqlOSCryptoServiceTests
             Options.Create(new SqlOSAuthServerOptions()),
             new EphemeralDataProtectionProvider());
 
-        var act = async () => await service.EnsureActiveSigningKeyAsync();
+        var key = await service.EnsureActiveSigningKeyAsync();
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*DataProtectionKeyRingIsPersistedAndShared*");
-        context.Set<SqlOSSigningKey>().Should().BeEmpty();
+        key.CustodyProvider.Should().Be(SqlOSDataProtectionSigningKeyCustody.DataProtectionProviderId);
+        key.KeyReference.Should().StartWith("sqlos-dp-signing:v1:");
+        context.Set<SqlOSSigningKey>().Should().ContainSingle();
     }
 
     [TestMethod]
     public async Task EnsureActiveSigningKey_WithoutDataProtectionProvider_FailsClosed()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(context, ConfiguredDataProtectionOptions());
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()));
 
         var act = async () => await service.EnsureActiveSigningKeyAsync();
 
@@ -79,6 +81,42 @@ public sealed class SqlOSCryptoServiceTests
             .Should().NotBeEmpty();
         first.KeyReference.Should().NotContain("BEGIN PRIVATE KEY");
         first.PublicKeyPem.Should().Contain("BEGIN RSA PUBLIC KEY");
+    }
+
+    [TestMethod]
+    public async Task DataProtectionCustody_SharedMachineDirectory_IsolatesDifferentApplications()
+    {
+        var keyRingPath = Path.Combine(
+            Path.GetTempPath(),
+            $"sqlos-app-isolation-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(keyRingPath);
+        try
+        {
+            var firstProvider = DataProtectionProvider.Create(
+                new DirectoryInfo(keyRingPath),
+                builder => builder.SetApplicationName("SqlOS.FirstApp"));
+            var secondProvider = DataProtectionProvider.Create(
+                new DirectoryInfo(keyRingPath),
+                builder => builder.SetApplicationName("SqlOS.SecondApp"));
+            var firstCustody = new SqlOSDataProtectionSigningKeyCustody(firstProvider);
+            var secondCustody = new SqlOSDataProtectionSigningKeyCustody(secondProvider);
+            var created = await firstCustody.CreateKeyAsync("shared-machine-kid", SecurityAlgorithms.RsaSha256);
+            var descriptor = new SqlOSSigningKeyDescriptor(
+                "shared-machine-kid",
+                created.Algorithm,
+                created.PublicKeyPem,
+                created.KeyReference,
+                firstCustody.ProviderId);
+
+            var act = async () => await secondCustody.SignAsync(descriptor, "signing-input"u8.ToArray());
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*cannot be opened by this application instance*");
+        }
+        finally
+        {
+            Directory.Delete(keyRingPath, recursive: true);
+        }
     }
 
     [TestMethod]
@@ -365,7 +403,6 @@ public sealed class SqlOSCryptoServiceTests
         var stolenRow = await context.Set<SqlOSSigningKey>().AsNoTracking().SingleAsync();
 
         var attackerCustody = new SqlOSDataProtectionSigningKeyCustody(
-            ConfiguredDataProtectionOptions(),
             new EphemeralDataProtectionProvider());
         var signAct = async () => await attackerCustody.SignAsync(
             ToDescriptor(stolenRow),
@@ -530,17 +567,10 @@ public sealed class SqlOSCryptoServiceTests
         return new TestSqlOSInMemoryDbContext(options);
     }
 
-    private static IOptions<SqlOSAuthServerOptions> ConfiguredDataProtectionOptions()
-    {
-        var options = new SqlOSAuthServerOptions();
-        options.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
-        return Options.Create(options);
-    }
-
     private static SqlOSCryptoService CreateDataProtectionService(
         TestSqlOSInMemoryDbContext context,
         IDataProtectionProvider provider)
-        => new(context, ConfiguredDataProtectionOptions(), provider);
+        => new(context, Options.Create(new SqlOSAuthServerOptions()), provider);
 
     private static async Task<(SqlOSUser User, SqlOSSession Session, SqlOSClientApplication Client)> SeedTokenContextAsync(
         TestSqlOSInMemoryDbContext context)

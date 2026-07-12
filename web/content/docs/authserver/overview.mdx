@@ -41,15 +41,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 ## Setup
 
 ```csharp
-builder.Services.AddDataProtection()
-    .SetApplicationName("Acme.Identity")
-    .PersistKeysToFileSystem(new DirectoryInfo(signingKeyRingPath));
-
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.ConfigureSigningKeyCustody(custody =>
-        custody.DataProtectionKeyRingIsPersistedAndShared = true);
-});
+builder.AddSqlOS<AppDbContext>();
 
 var app = builder.Build();
 app.MapSqlOS();
@@ -91,12 +83,6 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 | `SqlOSOidcAuthService` | Google, Microsoft, GitHub, Apple, and custom social login |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
 
-## Signing keys and protected secrets
-
-SqlOS stores JWT public keys, custody-provider IDs, and opaque key references in your application database. It refuses plaintext private-key rows. The built-in provider encrypts private key material with ASP.NET Core Data Protection under a purpose bound to the key ID; a custom `ISqlOSSigningKeyCustody` can keep signing operations in KMS, Vault, or an HSM.
-
-AuthServer startup fails until custody is explicitly configured. With Data Protection, persist the key ring outside the application database, protect it at rest, and share it across all token-issuing instances. If the ring is missing, SqlOS fails closed without silently rotating the active key. See [Signing-Key Custody](/docs/authserver/signing-key-custody).
-
 ## Hosted and headless
 
 <Accordion>
@@ -111,7 +97,7 @@ AuthServer startup fails until custody is explicitly configured. With Data Prote
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Signing-Key Custody](/docs/authserver/signing-key-custody) · [Email OTP](/docs/authserver/email-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 

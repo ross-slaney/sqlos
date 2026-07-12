@@ -1,143 +1,121 @@
 ---
-title: "Signing-Key Custody"
-description: "Keep JWT private keys outside the application database with Data Protection, KMS, Vault, or HSM custody."
+title: "Production Readiness: Signing Keys"
+description: "Understand SqlOS signing-key protection and choose local, shared, or external custody for production."
 order: 10
 section: authserver
 ---
 
-SqlOS signs access tokens with RS256. The database stores the public key, a stable custody-provider ID, and an opaque key reference. It does not store a plaintext private key.
+You do not need to configure signing-key storage while developing with SqlOS. `AddSqlOS` enables the built-in, cross-platform protection automatically.
 
-<Callout type="warning" title="Custody is required">
-  AuthServer startup fails closed until you configure the built-in Data Protection custody provider correctly or register `ISqlOSSigningKeyCustody`. SqlOS does not silently create a container-local key ring, replace an unreadable key, or rotate around a custody failure.
-</Callout>
+Review this page when preparing a production deployment, especially when deploying containers, replacing hosts, or running more than one token-issuing instance.
 
-## Choose a custody model
+## What a signing key is
 
-| Deployment | Recommended custody |
-| --- | --- |
-| Local development or a single trusted host | ASP.NET Core Data Protection with a durable key ring outside the application database |
-| Multiple application instances | A protected, shared Data Protection key ring with the same application name on every instance |
-| High-risk or regulated production | A KMS, Vault Transit backend, or HSM implementation of `ISqlOSSigningKeyCustody` that signs without exporting private key material |
+Every access token issued by SqlOS has a digital signature. APIs trust that signature as proof that the token really came from your SqlOS server and was not changed afterward.
 
-The built-in provider protects a 3072-bit RSA private key with a dedicated Data Protection purpose bound to the key's `kid`. The resulting ciphertext is the only private-key-related value written to the SqlOS database. The Data Protection key ring is therefore a separate security boundary and must not live in that database.
+The private signing key is therefore more powerful than a user password. Someone who steals it can mint convincing tokens for arbitrary users without completing login, MFA, or session checks. That is why storing the private key as plaintext beside normal application data is a P0 security issue: a read-only database leak becomes a complete token-issuer compromise.
 
-## Configure Data Protection custody
+SqlOS now stores only the public key, a provider identifier, and an opaque encrypted reference in SQL Server. The private key is never persisted there as plaintext.
 
-Configure Data Protection before `AddSqlOS`, then explicitly confirm that the ring is durable and shared wherever required:
+## What a Data Protection key ring is
+
+ASP.NET Core Data Protection is a cross-platform .NET facility for encrypting application secrets. A **key ring** is its small, automatically managed set of encryption keys.
+
+Think of it as the key to a lockbox:
+
+- the JWT private signing key is placed inside the lockbox;
+- the encrypted lockbox is stored in the SqlOS database;
+- the Data Protection key ring opens the lockbox when SqlOS needs to sign a token.
+
+It is not Azure Key Vault and does not make a network request. In the default development and single-host path, ASP.NET Core manages it locally for the application. ASP.NET Core's application discriminator isolates applications that use the same machine-level key directory, so one application cannot open another application's signing-key references.
+
+## Approach 1: automatic local custody
+
+This is the default and requires no signing-key code:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString));
+```
+
+ASP.NET Core selects its normal key repository for the current platform and host. Windows, Linux, and macOS use the same SqlOS code path. Separate applications are isolated, and an unreadable or lost key fails closed instead of silently replacing the active signing key.
+
+This is the intended experience for development, evaluation, and a normal single-host application. Do not add Azure or another key service merely to start using SqlOS.
+
+Before production, confirm that the host's Data Protection storage survives application restarts and machine replacement. An ephemeral container filesystem does not satisfy that requirement.
+
+## Approach 2: explicit durable or shared storage
+
+Use a durable filesystem path when the default host storage is ephemeral. Use the same protected path and application name for every replica when multiple instances issue tokens:
 
 ```csharp
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.EntityFrameworkCore;
-using SqlOS.Extensions;
 
-var keyRingPath = builder.Configuration[
-    "SqlOS:SigningKeyCustody:DataProtectionKeyRingPath"]
+var keyRingPath = builder.Configuration["SqlOS:DataProtection:KeyRingPath"]
     ?? throw new InvalidOperationException(
-        "Configure a durable signing-key Data Protection ring.");
+        "Configure durable Data Protection storage for this production deployment.");
 
 builder.Services.AddDataProtection()
     .SetApplicationName("Acme.Identity")
     .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
 
 builder.AddSqlOS<AppDbContext>(
-    db => db.UseSqlServer(connectionString),
-    options =>
-    {
-        options.AuthServer.ConfigureSigningKeyCustody(custody =>
-            custody.DataProtectionKeyRingIsPersistedAndShared = true);
-    });
+    db => db.UseSqlServer(connectionString));
 ```
 
-Only set `DataProtectionKeyRingIsPersistedAndShared` after the host has actually configured the boundary:
+The path can be a protected local volume for one host or a shared filesystem for replicas. It does not need to be a cloud key service.
 
-- store the ring outside the SqlOS application database and outside source control;
-- use storage that survives process, container, node, and deployment replacement;
-- share the same ring and `SetApplicationName` value across every instance that can issue tokens;
-- restrict read and write access to the application identity;
-- protect the ring at rest using the platform's supported key-encryption mechanism;
-- back up and restore the database and custody material as one recovery set.
+Production responsibilities:
 
-The flag is an explicit operator attestation. SqlOS cannot infer whether a provider's storage is durable, shared, encrypted, or correctly mounted.
+- keep the directory outside source control;
+- restrict access to the application identity;
+- use encrypted disks or the platform's key-at-rest protection;
+- preserve it across container and host replacement;
+- back it up and restore it together with the SqlOS database;
+- give every token-issuing replica the same ring and `SetApplicationName` value.
 
-## Use KMS, Vault, or an HSM
+## Approach 3: Azure Key Vault, KMS, Vault, or HSM
 
-Register a custom singleton before `AddSqlOS`; SqlOS preserves an existing registration:
+High-risk or regulated deployments can keep signing operations inside an external key system. This is optional and does not add an Azure dependency to SqlOS.
+
+Register the application-specific adapter before `AddSqlOS`:
 
 ```csharp
 using SqlOS.AuthServer.Interfaces;
 
-builder.Services.AddSingleton<ISqlOSSigningKeyCustody, AcmeKmsSigningKeyCustody>();
+builder.Services.AddSingleton<ISqlOSSigningKeyCustody,
+    AcmeAzureKeyVaultSigningKeyCustody>();
+
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString));
 ```
 
+The adapter implements `ISqlOSSigningKeyCustody` and can target Azure Key Vault, AWS KMS, Google Cloud KMS, HashiCorp Vault Transit, or an HSM. SqlOS preserves a pre-registered provider and verifies its signatures against the stored public key before accepting a new key or returning a token.
+
 An implementation must:
 
-- expose a stable, versioned `ProviderId`;
-- create an RSA key and return RS256, its RSA public PEM, and an opaque provider reference;
-- sign the exact JWT signing input with RSA PKCS#1 v1.5 and SHA-256;
-- bind the provider reference to the expected `kid` and key metadata;
-- fail when a key is missing, disabled, or belongs to another tenant or environment;
-- make `DeleteKeyAsync` idempotent, because provider deletion and the database update cannot be one atomic transaction;
-- never return or persist private key material through `SqlOSSigningKeyCreationResult`.
+- expose a stable, versioned provider ID;
+- create or reference an RSA key and return its public key plus an opaque reference;
+- sign the exact JWT signing input with RS256;
+- bind references to the expected key ID and deployment;
+- fail closed for missing, disabled, mismatched, or unavailable keys;
+- make deletion idempotent;
+- never return private key material to SqlOS.
 
-SqlOS verifies every provider-produced signature against the stored public key before it persists a new key and before it returns a token. A provider substitution or public/private mismatch fails closed.
+## Failure and recovery behavior
 
-## Startup and failure behavior
+SqlOS refuses token issuance when the active signing key cannot be opened. It does not silently create a replacement, because one replica rotating around a missing key can split the deployment and invalidate tokens unpredictably.
 
-Bootstrap refuses token issuance when it detects:
+Creation and rotation are serialized in SQL Server. SqlOS verifies provider signatures, keeps retired public keys in JWKS for the configured grace window, and prevents cleanup from deleting material still referenced by an active key.
 
-- no configured custody provider;
-- the built-in provider without the persisted/shared-ring attestation;
-- a plaintext private-key PEM in a signing-key row;
-- incomplete or unsupported key metadata;
-- a custody-provider ID mismatch;
-- an invalid or undersized RSA public key;
-- multiple active signing keys;
-- an unreadable reference, lost Data Protection ring, or invalid custody signature.
+Treat the database and the Data Protection key ring or external signing permission as one recovery set. Losing either one is an availability incident. Stealing both is a signing-key compromise.
 
-An unreadable active key remains active and blocks startup. SqlOS does not retire it and create a replacement, because doing so can split a multi-instance deployment and invalidate tokens unpredictably.
+## Repository verification
 
-## Rotation and JWKS
+The three approaches are covered by executable tests:
 
-Creation and rotation are serialized in SQL Server and reinforced by a filtered unique index that permits only one active key. During rotation:
+- automatic zero-configuration custody and same-machine application isolation in `SqlOSCryptoServiceTests`;
+- a complete authorization-code-with-PKCE exchange across two SQL-backed instances sharing a filesystem ring in `AuthServerSigningKeyResilienceIntegrationTests`;
+- external-provider issuance, provider substitution, signature mismatch, unavailable-key, rotation, and cleanup behavior using a realistic mock custody provider.
 
-1. SqlOS proves that the current custody provider can still sign with the active key.
-2. The provider creates the replacement key.
-3. SqlOS verifies the replacement signature against its public key.
-4. SQL retires the previous key and activates the replacement atomically.
-5. JWKS continues publishing the retired public key during the configured grace window.
-6. Cleanup removes expired rows and asks the provider to delete or schedule destruction of its private material.
-
-SqlOS requires the retired-key cleanup window to be at least as long as the JWKS grace window, so provider deletion cannot invalidate a key that resource servers are still expected to accept.
-
-The persisted `SigningKeyGraceWindowDays` security setting is authoritative for both JWKS publication and SqlOS's stateful access-token validator. Changing it cannot leave the internal validator trusting a retired key after JWKS has withdrawn that key.
-
-Signing-key rows also have a fail-closed lifecycle invariant: an active key has no retirement timestamp, while every inactive key has one. SqlOS rejects duplicate custody references and duplicate canonical RSA public keys across stored rows before signing or cleanup, preventing a corrupted retired row from redirecting provider deletion at the live key.
-
-The JWKS endpoint is:
-
-```text
-GET /sqlos/auth/.well-known/jwks.json
-```
-
-Resource servers should refresh JWKS when they encounter an unknown `kid` and retain normal cache bounds. SqlOS-issued access tokens require an exact `RS256` algorithm, `JWT` type, and matching `kid`.
-
-## Compromise and recovery boundaries
-
-A read-only database disclosure reveals public keys and opaque custody references but is not sufficient to mint an accepted SqlOS token. Database write access can still damage identity state or availability, so treat it as a serious application compromise.
-
-Access to the Data Protection key ring, KMS signing permission, Vault token, or HSM credentials is a signing-key compromise. Contain that custody access, replace the signing key under trusted control, review issued-token exposure for the access-token lifetime, and revoke affected sessions as appropriate. Do not solve a missing-ring event by enabling a new local ring on one replica; restore the shared custody boundary or perform an intentional full key replacement across the deployment.
-
-## Test the real boundary
-
-Production-like tests should cover:
-
-- a complete authorization-code-with-PKCE exchange across two instances sharing custody;
-- startup and token exchange with a missing or wrong ring;
-- concurrent first startup and rotation against the same SQL database;
-- a database-only attacker attempting to sign with stolen rows;
-- rotation, grace-window JWKS validation, and provider cleanup;
-- KMS/Vault disabled-key, wrong-key, timeout, and malformed-signature responses.
-
-The repository's `AuthServerSigningKeyResilienceIntegrationTests` exercise these protocol and SQL Server scenarios with an isolated database and realistic mock custody boundaries.
+The SQL integration suite also verifies lost-ring failure, concurrent startup and rotation, database-only compromise, JWKS grace behavior, and signing-key lifecycle invariants.

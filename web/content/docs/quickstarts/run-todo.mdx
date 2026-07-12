@@ -41,7 +41,7 @@ Wait for the SQL Server resource and `todo-api` to report healthy, then open:
 http://localhost:5080/
 ```
 
-The AppHost uses a persistent SQL Server container and passes the database connection string to the API. In Development, the API also persists its Data Protection key ring under the current user's local application-data directory, outside the SQL database. SqlOS initializes its schema, custodied signing key, OAuth client, and FGA seed data when the API starts.
+The AppHost uses a persistent SQL Server container and passes the database connection string to the API. SqlOS initializes its schema, protected signing key, OAuth client, and FGA seed data when the API starts.
 
 ## Verify
 
@@ -90,10 +90,6 @@ Stop the process using the port before restarting. The sample OAuth issuer and c
 
 The AppHost uses a persistent data volume. If you previously ran an older schema or FGA model, use a clean development volume before diagnosing current behavior. Do not remove a volume that contains data you need.
 
-### Signing-key custody fails at startup
-
-The development key ring must remain readable by the current user. Outside Development, configure `SqlOS:SigningKeyCustody:DataProtectionKeyRingPath` with a protected, durable path shared by every API instance; the sample deliberately refuses an implicit container-local ring.
-
 ### Direct login does not return to Todo
 
 Start sign-in from `http://localhost:5080/`. Opening the hosted login URL directly does not create the Todo app's complete PKCE transaction.
@@ -104,8 +100,8 @@ The Todo project is an evaluation sample, not a production deployment template. 
 
 - use HTTPS and a stable public origin;
 - protect `/sqlos` with password mode plus a private network, VPN, identity-aware proxy, or equivalent admin control;
-- store database credentials, dashboard credentials, provider secrets, and Data Protection keys outside source control;
-- use shared, durable, protected Data Protection storage or replace the built-in provider with KMS, Vault, or HSM custody;
+- store database credentials, dashboard credentials, and provider secrets outside source control;
+- complete the [production signing-key custody](/docs/authserver/signing-key-custody) review for containers or multiple replicas;
 - create application-specific resource types and permission names instead of reusing the Todo model.
 
 ## Next steps

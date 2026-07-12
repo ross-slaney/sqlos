@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 
 namespace SqlOS.AuthServer.Services;
@@ -17,13 +15,10 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
     public const string DataProtectionProviderId = "aspnet-data-protection:v1";
     private const string KeyReferencePrefix = "sqlos-dp-signing:v1:";
     private readonly IDataProtectionProvider? _dataProtectionProvider;
-    private readonly SqlOSSigningKeyCustodyOptions _options;
 
     public SqlOSDataProtectionSigningKeyCustody(
-        IOptions<SqlOSAuthServerOptions> options,
         IDataProtectionProvider? dataProtectionProvider = null)
     {
-        _options = options.Value.SigningKeyCustody;
         _dataProtectionProvider = dataProtectionProvider;
     }
 
@@ -114,14 +109,6 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
         {
             throw new InvalidOperationException(
                 "SqlOS signing-key custody requires an ASP.NET Core Data Protection provider or a custom ISqlOSSigningKeyCustody implementation.");
-        }
-
-        if (!_options.DataProtectionKeyRingIsPersistedAndShared)
-        {
-            throw new InvalidOperationException(
-                "SqlOS signing-key custody is not configured. Persist the ASP.NET Core Data Protection key ring outside the application database, " +
-                "share it across every application instance, then set AuthServer.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared to true; " +
-                "or register a custom ISqlOSSigningKeyCustody provider.");
         }
     }
 

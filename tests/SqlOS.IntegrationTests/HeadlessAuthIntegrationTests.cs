@@ -743,7 +743,6 @@ public sealed class HeadlessAuthIntegrationTests
         });
         configureHeadless?.Invoke(optionsValue.Headless);
         configureOptions?.Invoke(optionsValue);
-        optionsValue.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
 
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);

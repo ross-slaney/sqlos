@@ -35,7 +35,7 @@ public sealed class SqlOSCryptoService
         _options = options.Value;
         _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
         _signingKeyCustody = signingKeyCustody
-            ?? new SqlOSDataProtectionSigningKeyCustody(options, dataProtectionProvider);
+            ?? new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider);
     }
 
     public string HashPassword(string password) => _passwordHasher.HashPassword(new object(), password);

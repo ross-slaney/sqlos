@@ -271,7 +271,6 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             var stolenRow = await attackerReadContext.Set<SqlOSSigningKey>().AsNoTracking().SingleAsync();
             stolenRow.KeyReference.Should().NotContain("PRIVATE KEY");
             var attackerCustody = new SqlOSDataProtectionSigningKeyCustody(
-                Options.Create(options),
                 new EphemeralDataProtectionProvider());
             var signAct = async () => await attackerCustody.SignAsync(ToDescriptor(stolenRow), "forge"u8.ToArray());
             await signAct.Should().ThrowAsync<InvalidOperationException>()
@@ -508,7 +507,6 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             BasePath = AspireFixture.Options.BasePath,
             DefaultSigningKeyGraceWindowDays = 7
         };
-        options.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
         options.SeedBrowserClient(clientId, $"Key Custody Client {clientId}", redirectUri);
         options.SeedAuthPage(page =>
         {

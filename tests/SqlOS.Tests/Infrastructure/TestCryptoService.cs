@@ -13,10 +13,6 @@ internal static class TestCryptoService
         IOptions<SqlOSAuthServerOptions> options,
         IDataProtectionProvider? dataProtectionProvider = null)
     {
-        // Unit tests use an in-process key ring. Production startup deliberately requires
-        // an explicit persisted-and-shared key-ring attestation or another custody provider.
-        options.Value.SigningKeyCustody.DataProtectionKeyRingIsPersistedAndShared = true;
-
         return new SqlOSCryptoService(
             context,
             options,

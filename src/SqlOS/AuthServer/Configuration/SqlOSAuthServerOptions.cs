@@ -33,7 +33,6 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
-    public SqlOSSigningKeyCustodyOptions SigningKeyCustody { get; } = new();
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
@@ -268,12 +267,6 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigureMfa(Action<SqlOSMfaOptions> configure)
     {
         configure(Mfa);
-        return this;
-    }
-
-    public SqlOSAuthServerOptions ConfigureSigningKeyCustody(Action<SqlOSSigningKeyCustodyOptions> configure)
-    {
-        configure(SigningKeyCustody);
         return this;
     }
 
