@@ -1598,12 +1598,24 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("MFA challenge is not valid for direct authentication.");
+        }
+
+        if (payload.EnrollmentRequired)
+        {
+            throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        }
+
         var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, request.Code, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
-    public async Task<string> CreateMfaChallengeAsync(
+    internal async Task<string> CreateMfaChallengeAsync(
         SqlOSUser user,
         SqlOSClientApplication client,
         string? organizationId,

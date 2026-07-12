@@ -635,6 +635,118 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task MfaChallenge_EnrollmentRequired_CannotUseFactorAddedThroughAccountEnrollment()
+    {
+        var harness = await TestHarness.CreateAsync(configure: ConfigureRequiredMfa);
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Alternate Path MFA",
+            $"alternate-path-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var login = await LoginForRequiredMfaAsync(harness, user, "test-client");
+
+        var accountEnrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Account settings authenticator"));
+        var accountResult = await harness.Auth.VerifyTotpEnrollmentAsync(
+            new SqlOSTotpEnrollmentVerifyRequest(
+                accountEnrollment.EnrollmentToken,
+                harness.Totp.GenerateCodeForTesting(accountEnrollment.Secret)));
+        var authenticator = await harness.Context.Set<SqlOSUserAuthenticator>()
+            .SingleAsync(x => x.Id == accountEnrollment.AuthenticatorId);
+        var acceptedStep = authenticator.LastAcceptedTimeStep;
+        var recoveryHashes = await harness.Context.Set<SqlOSRecoveryCode>()
+            .Where(x => x.UserId == user.Id && x.RevokedAt == null)
+            .Select(x => x.CodeHash)
+            .ToArrayAsync();
+        var nextCode = harness.Totp.GenerateCodeForTesting(
+            accountEnrollment.Secret,
+            DateTimeOffset.UtcNow.AddSeconds(harness.Options.Mfa.Totp.PeriodSeconds));
+
+        var act = async () => await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(login.MfaToken!, nextCode),
+            CreatePasswordHttpContext("203.0.113.225"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        var recoveryAct = async () => await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(login.MfaToken!, accountResult.RecoveryCodes.First()),
+            CreatePasswordHttpContext("203.0.113.225"));
+        await recoveryAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        authenticator.LastAcceptedTimeStep.Should().Be(acceptedStep);
+        (await harness.Context.Set<SqlOSRecoveryCode>()
+            .Where(x => x.UserId == user.Id && x.RevokedAt == null)
+            .Select(x => x.CodeHash)
+            .ToArrayAsync()).Should().BeEquivalentTo(recoveryHashes);
+        (await harness.Context.Set<SqlOSRecoveryCode>()
+            .CountAsync(x => x.UserId == user.Id && x.ConsumedAt != null)).Should().Be(0);
+        accountResult.RecoveryCodes.Should().HaveCount(recoveryHashes.Length);
+        (await harness.Context.Set<SqlOSSession>().CountAsync()).Should().Be(0);
+        (await harness.Context.Set<SqlOSRefreshToken>().CountAsync()).Should().Be(0);
+        var challenge = await harness.Crypto.FindTemporaryTokenAsync(
+            SqlOSAuthService.MfaChallengePurpose,
+            login.MfaToken!);
+        challenge.Should().NotBeNull();
+        challenge!.ConsumedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task HostedMfaChallenge_EnrollmentRequired_CannotUseConcurrentAccountFactor()
+    {
+        var harness = await TestHarness.CreateAsync(configure: ConfigureRequiredMfa);
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Hosted Alternate Path MFA",
+            $"hosted-alternate-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var authorizationRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "hosted-alternate-mfa",
+            user.DefaultEmail!);
+        var authentication = await harness.Authorization.AuthenticatePasswordAsync(
+            user.DefaultEmail!,
+            "P@ssword123!",
+            httpContext: CreatePasswordHttpContext("203.0.113.226"),
+            clientKey: "test-client",
+            authorizationRequestId: authorizationRequest.Id,
+            surface: "hosted");
+        var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            authorizationRequest,
+            authentication.User,
+            authentication.AuthenticationMethod,
+            CreatePasswordHttpContext("203.0.113.226"));
+        completion.RequiresMfaEnrollment.Should().BeTrue();
+
+        var accountEnrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Concurrent account authenticator"));
+        await harness.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            accountEnrollment.EnrollmentToken,
+            harness.Totp.GenerateCodeForTesting(accountEnrollment.Secret)));
+        var authenticator = await harness.Context.Set<SqlOSUserAuthenticator>()
+            .SingleAsync(x => x.Id == accountEnrollment.AuthenticatorId);
+        var acceptedStep = authenticator.LastAcceptedTimeStep;
+        var nextCode = harness.Totp.GenerateCodeForTesting(
+            accountEnrollment.Secret,
+            DateTimeOffset.UtcNow.AddSeconds(harness.Options.Mfa.Totp.PeriodSeconds));
+
+        var act = async () => await harness.Authorization.CompleteMfaChallengeAsync(
+            completion.MfaToken!,
+            nextCode,
+            CreatePasswordHttpContext("203.0.113.226"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        authenticator.LastAcceptedTimeStep.Should().Be(acceptedStep);
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
+        var challenge = await harness.Crypto.FindTemporaryTokenAsync(
+            SqlOSAuthService.MfaChallengePurpose,
+            completion.MfaToken!);
+        challenge.Should().NotBeNull();
+        challenge!.ConsumedAt.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task RecoveryCode_CanSatisfyMfaOnlyOnce()
     {
         var harness = await TestHarness.CreateAsync();

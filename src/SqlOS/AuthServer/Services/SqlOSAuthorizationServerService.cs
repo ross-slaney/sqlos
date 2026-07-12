@@ -644,6 +644,20 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        if (!string.Equals(payload.Flow, "authorization", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
+        {
+            throw new InvalidOperationException("MFA challenge is not valid for hosted authorization.");
+        }
+
+        if (payload.EnrollmentRequired)
+        {
+            throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        }
+
+        await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
