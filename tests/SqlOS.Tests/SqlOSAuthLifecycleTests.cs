@@ -85,7 +85,7 @@ public sealed class SqlOSAuthLifecycleTests
             RedirectUri = "https://client.example.test/callback",
             State = "lifecycle-state",
             Scope = "openid profile",
-            CodeChallenge = harness.Crypto.CreatePkceCodeChallenge("verifier-lifecycle-verifier-lifecycle-123"),
+            CodeChallenge = harness.Crypto.CreatePkceCodeChallenge(new string('A', 43)),
             CodeChallengeMethod = "S256",
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddMinutes(5)
