@@ -1,0 +1,76 @@
+---
+title: "SqlOS 3.18: OAuth Security Hardening Without More Infrastructure"
+description: "SqlOS 3.18 hardens signing keys, OIDC, SAML, MFA, password reset, sessions, and refresh rotation while keeping the default .NET setup local and automatic."
+date: "2026-07-12"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "Security", "OIDC", "SAML", "SqlOS"]
+---
+
+SqlOS 3.18 is a security-focused release for the embedded OAuth and identity server.
+
+The important product constraint was not merely to close protocol gaps. SqlOS should remain the auth server a .NET team can add to its own application and SQL Server without first adopting a cloud key service or operating another identity product.
+
+That remains the default:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+    options.AuthServer.SeedBrowserClient(
+        "web",
+        "Web App",
+        "https://app.example.com/signin-oidc");
+});
+```
+
+There is no signing-key provider to select and no external key service to provision. SqlOS registers ASP.NET Core Data Protection, isolates its protected material by application, creates signing keys when needed, and stores only protected signing-key references in SQL Server.
+
+## What changed
+
+### Signing private keys are protected automatically
+
+JWT signing private material is no longer stored as an ordinary database secret. SqlOS generates and uses signing keys behind an internal custody boundary backed by ASP.NET Core Data Protection. A database-only compromise does not provide a usable private signing key.
+
+For one application instance on a durable machine, the default is automatic. Multiple replicas and ephemeral containers should share a durable Data Protection key ring; that is a production-readiness decision, not a requirement for local development.
+
+### Refresh retries keep one lineage
+
+The default 30-second refresh grace window now returns the same protected token response to near-concurrent retries. A retry cannot create a sibling refresh token or fork the family:
+
+```text
+R0 (consumed) -> R1 (only active replacement)
+```
+
+The cached response is purpose-bound, encrypted, and cryptographically time-limited. Reuse outside the grace window still revokes the family and session.
+
+### OIDC claims have one authenticated provenance
+
+SqlOS now requires the standard subject from the signed ID token. When UserInfo is used, its subject must exactly match the ID-token subject. Email and `email_verified` are accepted as a pair from one authenticated source, so a verification flag from one response cannot validate an email taken from another.
+
+Apple's first-login `user` form value is treated only as a bounded display-name hint. It is never identity evidence.
+
+### SAML authorization codes require PKCE
+
+SAML login now finishes through the normal OAuth authorization-code exchange. Every authorization code requires S256 PKCE and the exact registered redirect URI. The hosted SqlOS portal generates PKCE automatically; applications implementing the protocol directly must use an RFC 7636 verifier and challenge.
+
+### MFA enrollment stays bound to the login
+
+A successful first factor can no longer be reused to enroll a replacement authenticator outside the pending login. Required enrollment is bound to the same user, client, organization, authorization request, and challenge before tokens are issued.
+
+### Password-reset links come from trusted server configuration
+
+Default reset links are built from `PublicOrigin` or the configured issuer rather than request host headers. Applications with a custom reset page can opt into a server-side URL builder. Unknown users and delivery failures continue to use the same public response shape.
+
+### Lifecycle state is enforced at authentication boundaries
+
+Inactive users, organizations, and memberships are now rejected consistently during authorization, token creation, refresh, hosted-session reuse, OIDC and SAML callbacks, and stateful access-token validation. Public OAuth failures remain generic; the audit log retains the internal reason.
+
+Stateless JWT validation through JWKS still cannot observe a database revocation before token expiry. Use SqlOS's stateful validator when immediate lifecycle enforcement is required, or choose a short access-token lifetime for independently deployed JWKS-only resource servers.
+
+## Secure defaults remain quiet defaults
+
+Most applications should not add security plumbing for this release. The hosted flows create PKCE, signing-key protection is automatic, refresh retry protection is automatic, and lifecycle enforcement follows the data already managed by SqlOS.
+
+The operational exception is the same one faced by any ASP.NET Core application using Data Protection: replicas and replaceable containers need a durable shared key ring. SqlOS documents that in [Production Readiness](/docs/guides/production-readiness), alongside database backup and restore drills.
+
+The result is a materially stronger OAuth server without turning the first-run experience into an infrastructure project.
