@@ -87,7 +87,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback. SqlOS configures its signing-key protection automatically; production deployments can choose shared storage or an external key service during their readiness review.
+The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback. SqlOS configures its signing-key protection automatically; production replicas only need to share durable ASP.NET Core Data Protection storage during their readiness review.
 
 Run the host on the origin used above:
 

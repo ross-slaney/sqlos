@@ -1,11 +1,10 @@
 namespace SqlOS.AuthServer.Interfaces;
 
 /// <summary>
-/// Owns access-token signing private keys. Implementations may wrap ASP.NET Core Data Protection,
-/// Azure Key Vault, AWS KMS, Vault Transit, an HSM, or another service that can create RSA keys and
-/// produce RS256 signatures without exposing private key material to SqlOS.
+/// Internal boundary for access-token signing-key operations. Production uses the built-in
+/// ASP.NET Core Data Protection implementation; tests replace it to exercise failure behavior.
 /// </summary>
-public interface ISqlOSSigningKeyCustody
+internal interface ISqlOSSigningKeyCustody
 {
     /// <summary>A stable identifier persisted with every key and used to prevent provider substitution.</summary>
     string ProviderId { get; }
@@ -35,12 +34,12 @@ public interface ISqlOSSigningKeyCustody
         CancellationToken cancellationToken = default);
 }
 
-public sealed record SqlOSSigningKeyCreationResult(
+internal sealed record SqlOSSigningKeyCreationResult(
     string Algorithm,
     string PublicKeyPem,
     string KeyReference);
 
-public sealed record SqlOSSigningKeyDescriptor(
+internal sealed record SqlOSSigningKeyDescriptor(
     string Kid,
     string Algorithm,
     string PublicKeyPem,

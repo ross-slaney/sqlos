@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SqlOS.AuditLogs;
 using SqlOS.Configuration;
@@ -62,7 +61,6 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<SqlOSSchemaInitializer>();
         services.AddScoped<SqlOSBootstrapper>();
-        services.TryAddSingleton<ISqlOSSigningKeyCustody, SqlOSDataProtectionSigningKeyCustody>();
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<ISqlOSAuditLogService, SqlOSAuditLogService>();
         services.AddScoped<SqlOSSettingsService>();

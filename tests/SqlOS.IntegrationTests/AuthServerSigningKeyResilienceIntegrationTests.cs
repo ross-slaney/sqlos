@@ -451,7 +451,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyReferenceSubstitution");
             connectionString = context.Database.GetConnectionString();
             var options = CreateOptions("key-reference-substitution", "https://client.example.test/key-reference/callback");
-            using var custody = new TrackingExternalSigningKeyCustody();
+            using var custody = new TrackingTestSigningKeyCustody();
             var stack = BuildStack(context, options, custody);
             var principal = await SeedTokenContextAsync(context, stack, "key-reference-substitution");
             await stack.Crypto.CreateAccessTokenAsync(
@@ -535,6 +535,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         var crypto = new SqlOSCryptoService(
             context,
             options,
+            dataProtectionProvider: null,
             signingKeyCustody: signingKeyCustody);
         return BuildStack(context, options, crypto);
     }
@@ -739,7 +740,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         SqlOSClientApplication Client,
         string OrganizationId);
 
-    private sealed class TrackingExternalSigningKeyCustody : ISqlOSSigningKeyCustody, IDisposable
+    private sealed class TrackingTestSigningKeyCustody : ISqlOSSigningKeyCustody, IDisposable
     {
         private readonly Dictionary<string, RSA> _keys = new(StringComparer.Ordinal);
 

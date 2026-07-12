@@ -6,7 +6,6 @@ using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -14,7 +13,6 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
-using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -61,7 +59,7 @@ public sealed class SqlOSCryptoServiceTests
         var act = async () => await service.EnsureActiveSigningKeyAsync();
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*requires an ASP.NET Core Data Protection provider*");
+            .WithMessage("*requires the ASP.NET Core Data Protection services registered by AddSqlOS*");
         context.Set<SqlOSSigningKey>().Should().BeEmpty();
     }
 
@@ -251,10 +249,10 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
-    public async Task CreateAccessToken_InjectedExternalCustody_NeverPersistsPrivateMaterial()
+    public async Task CreateAccessToken_InternalCustodyBoundary_NeverPersistsPrivateMaterial()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -266,36 +264,35 @@ public sealed class SqlOSCryptoServiceTests
         var key = await context.Set<SqlOSSigningKey>().SingleAsync();
 
         key.CustodyProvider.Should().Be(custody.ProviderId);
-        key.KeyReference.Should().StartWith("fake-kms:v1:");
+        key.KeyReference.Should().StartWith("test-custody:v1:");
         key.KeyReference.Should().NotContain("PRIVATE KEY");
         (await service.ValidateAccessTokenAsync(rawToken, client.Audience)).Should().NotBeNull();
         custody.SignCount.Should().BeGreaterThan(0);
     }
 
     [TestMethod]
-    public void AddSqlOS_PreRegisteredExternalCustody_IsNotReplacedByBuiltInProvider()
+    public void PublicApi_DoesNotExposeSigningKeyCustodyProviderHooks()
     {
-        var services = new ServiceCollection();
-        var custody = new TestExternalSigningKeyCustody();
-        services.AddSingleton<ISqlOSSigningKeyCustody>(custody);
-
-        services.AddSqlOS<TestSqlOSInMemoryDbContext>();
-        using var serviceProvider = services.BuildServiceProvider();
-
-        serviceProvider.GetRequiredService<ISqlOSSigningKeyCustody>().Should().BeSameAs(custody);
+        typeof(ISqlOSSigningKeyCustody).IsNotPublic.Should().BeTrue();
+        typeof(SqlOSDataProtectionSigningKeyCustody).IsNotPublic.Should().BeTrue();
+        typeof(SqlOSCryptoService)
+            .GetConstructors()
+            .SelectMany(constructor => constructor.GetParameters())
+            .Should()
+            .NotContain(parameter => parameter.ParameterType == typeof(ISqlOSSigningKeyCustody));
     }
 
     [TestMethod]
     public async Task EnsureActiveSigningKey_ProviderSubstitution_FailsClosed()
     {
         using var context = CreateContext();
-        using var originalCustody = new TestExternalSigningKeyCustody("fake-kms:original");
+        using var originalCustody = new TestSigningKeyCustody("test-custody:original");
         var originalService = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
             signingKeyCustody: originalCustody);
         await originalService.EnsureActiveSigningKeyAsync();
-        using var substitutedCustody = new TestExternalSigningKeyCustody("fake-kms:substituted");
+        using var substitutedCustody = new TestSigningKeyCustody("test-custody:substituted");
         var substitutedService = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -304,14 +301,14 @@ public sealed class SqlOSCryptoServiceTests
         var act = async () => await substitutedService.EnsureActiveSigningKeyAsync();
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*bound to custody provider 'fake-kms:original'*");
+            .WithMessage("*bound to custody provider 'test-custody:original'*");
     }
 
     [TestMethod]
     public async Task EnsureActiveSigningKey_CustodyPublicPrivateMismatch_FailsBeforePersistence()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody { ReturnMismatchedSignature = true };
+        using var custody = new TestSigningKeyCustody { ReturnMismatchedSignature = true };
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -329,7 +326,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task RotateSigningKey_ProviderReusesExistingReference_FailsWithoutDeletingLiveKey()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -352,7 +349,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task RotateSigningKey_ProviderReusesReferenceWithDifferentPublicKey_DoesNotDeleteLiveKey()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -375,7 +372,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task RotateSigningKey_ProviderAliasesExistingPublicKey_FailsWithoutDeletingEitherReference()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -472,7 +469,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task RotateAndCleanupSigningKey_PreservesGraceThenRemovesRetiredJwksKey()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var options = new SqlOSAuthServerOptions { DefaultSigningKeyGraceWindowDays = 7 };
         var service = new SqlOSCryptoService(
             context,
@@ -502,7 +499,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task CleanupRetiredSigningKey_DuplicateActiveReference_FailsWithoutDeletingLiveKey()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -530,7 +527,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task EnsureActiveSigningKey_DuplicateStoredPublicKey_FailsClosed()
     {
         using var context = CreateContext();
-        using var custody = new TestExternalSigningKeyCustody();
+        using var custody = new TestSigningKeyCustody();
         var service = new SqlOSCryptoService(
             context,
             Options.Create(new SqlOSAuthServerOptions()),
@@ -637,11 +634,11 @@ public sealed class SqlOSCryptoServiceTests
     private static SqlOSSigningKeyDescriptor ToDescriptor(SqlOSSigningKey key)
         => new(key.Kid, key.Algorithm, key.PublicKeyPem, key.KeyReference, key.CustodyProvider);
 
-    private sealed class TestExternalSigningKeyCustody : ISqlOSSigningKeyCustody, IDisposable
+    private sealed class TestSigningKeyCustody : ISqlOSSigningKeyCustody, IDisposable
     {
         private readonly ConcurrentDictionary<string, RSA> _keys = new(StringComparer.Ordinal);
 
-        public TestExternalSigningKeyCustody(string providerId = "fake-kms:v1")
+        public TestSigningKeyCustody(string providerId = "test-custody:v1")
         {
             ProviderId = providerId;
         }
@@ -680,7 +677,7 @@ public sealed class SqlOSCryptoServiceTests
                         existing.Key));
                 }
 
-                var aliasReference = $"fake-kms:v1:alias:{kid}";
+                var aliasReference = $"test-custody:v1:alias:{kid}";
                 _keys[aliasReference] = existing.Value;
                 return Task.FromResult(new SqlOSSigningKeyCreationResult(
                     algorithm,
@@ -689,7 +686,7 @@ public sealed class SqlOSCryptoServiceTests
             }
 
             var rsa = RSA.Create(2048);
-            var keyReference = $"fake-kms:v1:{kid}";
+            var keyReference = $"test-custody:v1:{kid}";
             _keys[keyReference] = rsa;
             return Task.FromResult(new SqlOSSigningKeyCreationResult(
                 algorithm,

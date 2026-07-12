@@ -113,7 +113,7 @@ An OAuth compatibility mode that lets a client register at runtime instead of be
 
 ### Data Protection
 
-ASP.NET Core's cross-platform, key-ring-based cryptographic system for protecting application data. SqlOS uses it automatically for JWT signing-key custody, dashboard session cookies, and persisted secrets such as OIDC credentials, TOTP secrets, protected phone values, and calendar tokens. Production replicas must share a durable key ring unless the application supplies external signing-key custody. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
+ASP.NET Core's cross-platform, key-ring-based cryptographic system for protecting application data. SqlOS uses it automatically for JWT signing-key custody, dashboard session cookies, and persisted secrets such as OIDC credentials, TOTP secrets, protected phone values, and calendar tokens. Production replicas must share a durable key ring. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
 
 ### Device Authorization Grant (device flow)
 

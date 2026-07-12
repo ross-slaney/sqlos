@@ -10,7 +10,7 @@ namespace SqlOS.AuthServer.Services;
 /// Private PKCS#8 material exists only transiently in process memory and is persisted solely as a
 /// Data Protection ciphertext in the SqlOS signing-key row.
 /// </summary>
-public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCustody
+internal sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCustody
 {
     public const string DataProtectionProviderId = "aspnet-data-protection:v1";
     private const string KeyReferencePrefix = "sqlos-dp-signing:v1:";
@@ -108,7 +108,7 @@ public sealed class SqlOSDataProtectionSigningKeyCustody : ISqlOSSigningKeyCusto
         if (_dataProtectionProvider == null)
         {
             throw new InvalidOperationException(
-                "SqlOS signing-key custody requires an ASP.NET Core Data Protection provider or a custom ISqlOSSigningKeyCustody implementation.");
+                "SqlOS signing-key custody requires the ASP.NET Core Data Protection services registered by AddSqlOS.");
         }
     }
 

@@ -28,14 +28,25 @@ public sealed class SqlOSCryptoService
     public SqlOSCryptoService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
-        IDataProtectionProvider? dataProtectionProvider = null,
-        ISqlOSSigningKeyCustody? signingKeyCustody = null)
+        IDataProtectionProvider? dataProtectionProvider = null)
+        : this(
+            context,
+            options,
+            new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider),
+            dataProtectionProvider)
+    {
+    }
+
+    internal SqlOSCryptoService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        ISqlOSSigningKeyCustody signingKeyCustody,
+        IDataProtectionProvider? dataProtectionProvider = null)
     {
         _context = context;
         _options = options.Value;
         _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
-        _signingKeyCustody = signingKeyCustody
-            ?? new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider);
+        _signingKeyCustody = signingKeyCustody;
     }
 
     public string HashPassword(string password) => _passwordHasher.HashPassword(new object(), password);

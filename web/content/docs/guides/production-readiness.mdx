@@ -178,7 +178,7 @@ builder.Services
 builder.AddSqlOS<AppDbContext>(/* ... */);
 ```
 
-The filesystem path is only an example. Use a durable shared volume or a supported external key-ring provider for your platform, and protect the key ring at rest with an OS, certificate, or cloud key-management mechanism. Every replica and every concurrently deployed revision must use the same key ring and the same `ApplicationName`.
+The filesystem path is only an example. Use a durable local or shared volume for your platform, and protect the key ring at rest with operating-system permissions and encrypted storage. Every replica and every concurrently deployed revision must use the same key ring and the same `ApplicationName`.
 
 The key ring protects more than dashboard cookies. SqlOS uses it for JWT signing private keys, persisted OIDC client secrets and Apple private keys, TOTP secrets, protected phone values, refresh-rotation replacement tokens, calendar access and refresh tokens, and other protected values.
 
@@ -186,7 +186,7 @@ The key ring protects more than dashboard cookies. SqlOS uses it for JWT signing
   Back up the SQL Server database and the Data Protection key ring as one recovery set. Losing the key ring can leave restored protected values unreadable even though every row is present. Retain old Data Protection keys for as long as protected database values or cookies may still depend on them.
 </Callout>
 
-SqlOS protects JWT private signing keys automatically; there is no signing-key flag to enable. SQL Server stores the public key and an opaque protected reference, so the database remains part of recovery without containing plaintext private key material. For single-host, shared-filesystem, and external KMS/HSM choices, see [Production Readiness: Signing Keys](/docs/authserver/signing-key-custody).
+SqlOS protects JWT private signing keys automatically; there is no signing-key flag to enable. SQL Server stores the public key and an opaque protected reference, so the database remains part of recovery without containing plaintext private key material. For automatic single-host and shared-filesystem deployment examples, see [Production Readiness: Signing Keys](/docs/authserver/signing-key-custody).
 
 ## 6. Roll schema changes forward through one instance
 
