@@ -310,18 +310,18 @@ public sealed class SqlOSRefreshToken
     public string? ReplacedByTokenId { get; set; }
 
     /// <summary>
-    /// The access token JWT that was issued at the same time this refresh
-    /// token was rotated, encrypted at rest via ASP.NET Data Protection
-    /// (<see cref="Services.SqlOSCryptoService.ProtectSecret"/>). Used by
-    /// the refresh token grace window so that concurrent refresh attempts
-    /// within the window receive the SAME access token (instead of
-    /// getting a new one with a later expiry). Only populated when this
-    /// token is consumed; null otherwise.
+    /// The complete access/refresh token pair issued when this token was
+    /// rotated. The JSON payload is purpose-bound and time-limited with
+    /// ASP.NET Core Data Protection. It is only recoverable during the
+    /// configured retry grace window, allowing every concurrent retry to
+    /// receive the exact same credentials without creating sibling tokens.
+    /// This property remains mapped to the historical
+    /// <c>ReplacementAccessToken</c> database column.
     /// </summary>
-    public string? ReplacementAccessToken { get; set; }
+    public string? ReplacementTokenResponse { get; set; }
 
     /// <summary>
-    /// The organization ID the cached <see cref="ReplacementAccessToken"/>
+    /// The organization ID the cached <see cref="ReplacementTokenResponse"/>
     /// was minted for. Stored alongside the cached token so the grace
     /// window response metadata stays consistent with the cached JWT and
     /// callers can't switch organizations on the grace window path.
@@ -329,7 +329,8 @@ public sealed class SqlOSRefreshToken
     public string? ReplacementOrganizationId { get; set; }
 
     /// <summary>
-    /// The expiry timestamp of the cached <see cref="ReplacementAccessToken"/>.
+    /// The access-token expiry timestamp for the cached
+    /// <see cref="ReplacementTokenResponse"/>.
     /// Stored explicitly so the grace window response can return the same
     /// expiry that's encoded in the cached JWT, rather than recomputing
     /// from <see cref="DateTime.UtcNow"/> which would drift.

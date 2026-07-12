@@ -377,6 +377,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSRefreshTokens", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.Property(x => x.ReplacementTokenResponse)
+                .HasColumnName("ReplacementAccessToken");
             // ConsumedAt is the rotation lock. Marking it as a concurrency
             // token forces EF Core to include it in the WHERE clause of
             // the UPDATE statement. If two concurrent refresh requests

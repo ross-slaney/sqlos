@@ -85,10 +85,33 @@ public sealed class SqlOSAdminService
 
     public async Task CleanupExpiredRefreshTokensAsync(CancellationToken cancellationToken = default)
     {
-        var expired = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => x.ExpiresAt < DateTime.UtcNow || x.RevokedAt != null || x.ConsumedAt != null)
+        var now = DateTime.UtcNow;
+        var configuredGraceWindowSeconds = await _context.Set<SqlOSSettings>()
+            .Where(x => x.Id == "default")
+            .Select(x => (int?)x.RefreshTokenGraceWindowSeconds)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? _options.RefreshTokenGraceWindowSeconds;
+        var staleResponseCutoff = now.AddSeconds(-Math.Max(0, configuredGraceWindowSeconds));
+
+        // Keep consumed token hashes until their normal expiry so a later
+        // replay can still identify and revoke the family. Only the
+        // recoverable retry response is removed after the grace window.
+        var staleResponses = await _context.Set<SqlOSRefreshToken>()
+            .Where(x => x.ConsumedAt != null
+                && x.ConsumedAt <= staleResponseCutoff
+                && x.ReplacementTokenResponse != null)
             .ToListAsync(cancellationToken);
-        if (expired.Count == 0)
+        foreach (var token in staleResponses)
+        {
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
+        }
+
+        var expired = await _context.Set<SqlOSRefreshToken>()
+            .Where(x => x.ExpiresAt < now || x.RevokedAt != null)
+            .ToListAsync(cancellationToken);
+        if (expired.Count == 0 && staleResponses.Count == 0)
         {
             return;
         }

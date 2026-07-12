@@ -97,16 +97,17 @@ public sealed class AuthServiceIntegrationTests
         results[0].AccessToken.Should().NotBeNullOrWhiteSpace();
         results[1].AccessToken.Should().NotBeNullOrWhiteSpace();
 
-        // Critical invariant: both calls returned the SAME access token.
-        // The winner produced it; the loser hit the grace window path and
-        // returned the cached value.
+        // Critical invariant: both calls returned the SAME token pair. The
+        // winner produced it; the loser hit the grace window path and
+        // returned the cached response.
         results[0].AccessToken.Should().Be(results[1].AccessToken,
             "both concurrent refreshes must yield the same access token (winner produces, loser reads from cache)");
+        results[0].RefreshToken.Should().Be(results[1].RefreshToken,
+            "both app instances must converge on the exact same forward refresh credential");
 
         // Critical invariant: no orphaned refresh tokens. The family
-        // should contain the original (now consumed) + exactly ONE
-        // rotation replacement + ONE sibling token from the grace window
-        // reissue path = 3 rows total. NOT 2 separate rotation replacements.
+        // should contain only the original (now consumed) and exactly one
+        // replacement. Grace retries are read-only and cannot add siblings.
         instanceA.Dispose();
         instanceB.Dispose();
 
@@ -130,12 +131,15 @@ public sealed class AuthServiceIntegrationTests
 
             rotationsFromOriginal.Should().Be(1,
                 "exactly ONE rotation replacement should exist for the original token; orphans here would mean the concurrency token failed");
+            (await verifyCtx.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                .CountAsync(x => x.FamilyId == familyId)).Should().Be(2,
+                "the grace-window loser must not mint a sibling refresh token");
 
             // Original must be marked consumed.
             original.ConsumedAt.Should().NotBeNull();
             original.ReplacedByTokenId.Should().NotBeNullOrEmpty();
-            original.ReplacementAccessToken.Should().NotBeNullOrEmpty(
-                "the winner must have cached its access token for the grace window path");
+            original.ReplacementTokenResponse.Should().StartWith("dpt:",
+                "the winner must cache the exact token pair under time-limited Data Protection");
         }
         finally
         {
@@ -188,12 +192,12 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
-    public async Task Refresh_WithSameTokenTwiceWithinGraceWindow_ReturnsSameAccessToken()
+    public async Task Refresh_WithSameTokenTwiceWithinGraceWindow_ReturnsSameTokenPair()
     {
         // Issue #18 — proves the grace window survives a real DB round trip.
         // Two refresh calls with the same consumed refresh token, both
         // happening within the default 30s grace window, must return the
-        // SAME access token and must NOT revoke the token family.
+        // SAME token pair and must NOT revoke the token family.
         var auth = BuildAuthService();
         var http = new DefaultHttpContext();
         http.Request.Headers.UserAgent = "GraceWindowIntegrationTest";
@@ -217,12 +221,59 @@ public sealed class AuthServiceIntegrationTests
 
         secondRefresh.AccessToken.Should().Be(firstRefresh.AccessToken,
             "the grace window should hand back the cached access token");
+        secondRefresh.RefreshToken.Should().Be(firstRefresh.RefreshToken,
+            "the grace window should hand back the same forward refresh token");
 
         // The forward refresh token from the first call should still be
         // valid — proving the family was NOT revoked by the replay.
         var thirdRefresh = await auth.RefreshAsync(
             new SqlOSRefreshRequest(firstRefresh.RefreshToken, firstRefresh.OrganizationId));
         thirdRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindowAcrossEightInstances_ReturnsSamePairAndOneHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "GraceWindowMultiInstanceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Dana",
+            $"dana-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Multi Instance Corp",
+            "test-client",
+            null), http);
+
+        var originalToken = signup.Tokens!.RefreshToken;
+        var organizationId = signup.Tokens.OrganizationId;
+        var winner = await bootstrapAuth.RefreshAsync(
+            new SqlOSRefreshRequest(originalToken, organizationId));
+
+        for (var instanceNumber = 0; instanceNumber < 8; instanceNumber++)
+        {
+            using var instance = BuildIsolatedAuthService();
+            var retry = await instance.Service.RefreshAsync(
+                new SqlOSRefreshRequest(originalToken, organizationId));
+            retry.AccessToken.Should().Be(winner.AccessToken);
+            retry.RefreshToken.Should().Be(winner.RefreshToken);
+        }
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(originalToken));
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        family.Should().HaveCount(2);
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+        family.Single(x => x.ConsumedAt == null).TokenHash.Should().Be(
+            crypto.HashToken(winner.RefreshToken));
     }
 
     [TestMethod]

@@ -66,6 +66,20 @@ var tokens = await authService.RefreshAsync(
 
 **Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
 
+### Concurrent refresh retries
+
+By default, SqlOS allows a 30-second retry grace window for near-simultaneous refreshes from multiple tabs, SSR calls, or app instances. The first request performs the only rotation. Every accepted retry of that consumed token receives the byte-for-byte same access token and refresh token, so the family always remains one linear lineage:
+
+```text
+R0 (consumed) -> R1 (the only active replacement)
+```
+
+SqlOS never creates a sibling `R2` for a retry of `R0`. If `R1` has already advanced, an older retry can only converge through the same stored lineage; it cannot create another active branch. Outside the grace window, reuse revokes the family and session.
+
+The short-lived response cache is purpose-bound and encrypted with ASP.NET Core Data Protection, and its ciphertext is cryptographically unusable after the grace window. Consumed token hashes remain until normal expiry so later reuse can still identify and revoke the family. Persist and share the Data Protection key ring across every application instance and deployment revision. If Data Protection is unavailable while the grace window is enabled, refresh rotation fails closed before consuming the token.
+
+Set `RefreshTokenGraceWindowSeconds` to `0` when immediate replay detection is preferred over concurrent-retry tolerance.
+
 **Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
 
 ## CLI device-flow tokens

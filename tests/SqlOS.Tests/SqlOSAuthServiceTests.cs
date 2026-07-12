@@ -1259,7 +1259,7 @@ public sealed class SqlOSAuthServiceTests
        ───────────────────────────────────────────────────────────────────────── */
 
     [TestMethod]
-    public async Task Refresh_WithinGraceWindow_ReturnsSameAccessToken()
+    public async Task Refresh_WithinGraceWindow_ReturnsSameTokenPair()
     {
         var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
         var initialTokens = await harness.SignUpAsync("alice");
@@ -1275,9 +1275,8 @@ public sealed class SqlOSAuthServiceTests
 
         secondRefresh.AccessToken.Should().Be(firstRefresh.AccessToken,
             "the grace window should return the cached access token instead of generating a new one");
-        secondRefresh.RefreshToken.Should().NotBeNullOrWhiteSpace();
-        secondRefresh.RefreshToken.Should().NotBe(initialTokens.RefreshToken,
-            "callers should still get a usable forward refresh token");
+        secondRefresh.RefreshToken.Should().Be(firstRefresh.RefreshToken,
+            "a retry must converge on the winner's refresh token instead of creating a sibling lineage");
     }
 
     [TestMethod]
@@ -1290,8 +1289,9 @@ public sealed class SqlOSAuthServiceTests
             new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
 
         // Second call within the grace window — should NOT trigger replay detection.
-        await harness.Auth.RefreshAsync(
+        var retry = await harness.Auth.RefreshAsync(
             new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        retry.RefreshToken.Should().Be(firstRefresh.RefreshToken);
 
         // The forward refresh token from the first call should still be usable.
         var thirdRefresh = await harness.Auth.RefreshAsync(
@@ -1299,6 +1299,159 @@ public sealed class SqlOSAuthServiceTests
 
         thirdRefresh.AccessToken.Should().NotBeNullOrWhiteSpace(
             "the family should not have been revoked by a legitimate concurrent refresh");
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindowManyRetries_LeavesOneActiveReplacement()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("many-retries");
+
+        var winner = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        for (var attempt = 0; attempt < 25; attempt++)
+        {
+            var retry = await harness.Auth.RefreshAsync(
+                new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+            retry.AccessToken.Should().Be(winner.AccessToken);
+            retry.RefreshToken.Should().Be(winner.RefreshToken);
+        }
+
+        var originalHash = harness.Crypto.HashToken(initialTokens.RefreshToken);
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == originalHash);
+        var family = await harness.Context.Set<SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        family.Should().HaveCount(2);
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+        family.Single(x => x.ConsumedAt == null).TokenHash.Should().Be(
+            harness.Crypto.HashToken(winner.RefreshToken));
+    }
+
+    [TestMethod]
+    public async Task Refresh_AttackerAndLegitimateBranches_CannotCoexist()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("branch-convergence");
+
+        var legitimateR1 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        var attackerR1 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        attackerR1.RefreshToken.Should().Be(legitimateR1.RefreshToken);
+
+        var legitimateR2 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(legitimateR1.RefreshToken, legitimateR1.OrganizationId));
+        var attackerR2 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(attackerR1.RefreshToken, attackerR1.OrganizationId));
+
+        attackerR2.AccessToken.Should().Be(legitimateR2.AccessToken);
+        attackerR2.RefreshToken.Should().Be(legitimateR2.RefreshToken);
+
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        var family = await harness.Context.Set<SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+        family.Should().HaveCount(3, "R0 -> R1 -> R2 is one linear lineage");
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+    }
+
+    [TestMethod]
+    public async Task Refresh_OlderParentAfterReplacementAdvanced_DoesNotMintSibling()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("advanced-parent");
+
+        var r1 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        var r2 = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(r1.RefreshToken, r1.OrganizationId));
+
+        var staleParentRetry = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        staleParentRetry.RefreshToken.Should().Be(r1.RefreshToken,
+            "an older parent can only return its existing direct replacement");
+
+        var converged = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(staleParentRetry.RefreshToken, staleParentRetry.OrganizationId));
+        converged.RefreshToken.Should().Be(r2.RefreshToken);
+
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        (await harness.Context.Set<SqlOSRefreshToken>()
+            .CountAsync(x => x.FamilyId == original.FamilyId)).Should().Be(3);
+    }
+
+    [TestMethod]
+    public async Task OAuthTokenEndpoint_RefreshGraceRetry_ReturnsSameTokenPair()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("protocol-refresh");
+        var request = new SqlOSTokenRequest(
+            SqlOSOAuthGrantTypes.RefreshToken,
+            null,
+            null,
+            null,
+            null,
+            initialTokens.RefreshToken,
+            null);
+
+        var winner = await harness.Authorization.ExchangeAuthorizationCodeAsync(
+            request,
+            new DefaultHttpContext());
+        var retry = await harness.Authorization.ExchangeAuthorizationCodeAsync(
+            request,
+            new DefaultHttpContext());
+
+        retry.Tokens.AccessToken.Should().Be(winner.Tokens.AccessToken);
+        retry.Tokens.RefreshToken.Should().Be(winner.Tokens.RefreshToken);
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindowWithoutDataProtection_FailsClosedWithoutConsumingParent()
+    {
+        var harness = await TestHarness.CreateAsync(
+            graceWindowSeconds: 30,
+            includeDataProtection: false);
+        var initialTokens = await harness.SignUpAsync("no-data-protection");
+
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*require ASP.NET Core Data Protection*");
+
+        harness.Context.ChangeTracker.Clear();
+        var stored = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        stored.ConsumedAt.Should().BeNull();
+        stored.ReplacedByTokenId.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RefreshCleanup_AfterGrace_RemovesResponseButKeepsReplayLineage()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("cleanup");
+        await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+
+        var original = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+        original.ConsumedAt = DateTime.UtcNow.AddMinutes(-1);
+        await harness.Context.SaveChangesAsync();
+
+        await harness.Admin.CleanupExpiredRefreshTokensAsync();
+
+        var retained = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.Id == original.Id);
+        retained.ReplacementTokenResponse.Should().BeNull();
+        retained.ReplacedByTokenId.Should().NotBeNull();
+        retained.TokenHash.Should().NotBeNullOrWhiteSpace(
+            "the consumed parent must remain available for replay-family revocation");
     }
 
     [TestMethod]
@@ -1421,13 +1574,10 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
-    public async Task Refresh_GraceWindow_CachedAccessTokenIsEncryptedAtRest()
+    public async Task Refresh_GraceWindow_CachedTokenPairIsTimeLimitedAndEncryptedAtRest()
     {
-        // Issue #19 review fix #6: the ReplacementAccessToken column must
-        // store an encrypted value, not the raw JWT. We assert by checking
-        // that the persisted column does NOT contain the raw access token
-        // string AND that the grace window path can still successfully
-        // round-trip the value back to the original JWT.
+        // The historical ReplacementAccessToken column now contains the
+        // complete response under purpose-bound, time-limited protection.
         var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
         var initialTokens = await harness.SignUpAsync("encrypt");
 
@@ -1439,15 +1589,39 @@ public sealed class SqlOSAuthServiceTests
         var consumed = await harness.Context.Set<SqlOSRefreshToken>()
             .FirstAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
 
-        consumed.ReplacementAccessToken.Should().NotBeNullOrEmpty();
-        consumed.ReplacementAccessToken.Should().NotBe(firstRefresh.AccessToken,
-            "the cached access token must be encrypted at rest, not stored as plaintext");
+        consumed.ReplacementTokenResponse.Should().StartWith("dpt:");
+        consumed.ReplacementTokenResponse.Should().NotContain(firstRefresh.AccessToken);
+        consumed.ReplacementTokenResponse.Should().NotContain(firstRefresh.RefreshToken);
 
         // And the grace window path must still recover the original JWT.
         var graceHit = await harness.Auth.RefreshAsync(
             new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
         graceHit.AccessToken.Should().Be(firstRefresh.AccessToken,
             "decryption must round-trip back to the original JWT");
+        graceHit.RefreshToken.Should().Be(firstRefresh.RefreshToken,
+            "decryption must return the same forward refresh credential");
+    }
+
+    [TestMethod]
+    public async Task Refresh_DbContentsAlone_CannotRecoverCachedTokenPair()
+    {
+        var harness = await TestHarness.CreateAsync(graceWindowSeconds: 30);
+        var initialTokens = await harness.SignUpAsync("db-only");
+        var firstRefresh = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(initialTokens.RefreshToken, initialTokens.OrganizationId));
+        var consumed = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(initialTokens.RefreshToken));
+
+        var dbOnlyCrypto = new SqlOSCryptoService(
+            harness.Context,
+            Options.Create(harness.Options),
+            dataProtectionProvider: null);
+        var act = () => dbOnlyCrypto.UnprotectRefreshTokenResponse(consumed.ReplacementTokenResponse!);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no Data Protection provider is available*");
+        consumed.ReplacementTokenResponse.Should().NotContain(firstRefresh.AccessToken);
+        consumed.ReplacementTokenResponse.Should().NotContain(firstRefresh.RefreshToken);
     }
 
     [TestMethod]
@@ -1767,6 +1941,7 @@ public sealed class SqlOSAuthServiceTests
 
         public static async Task<TestHarness> CreateAsync(
             int graceWindowSeconds = 30,
+            bool includeDataProtection = true,
             Action<SqlOSAuthServerOptions>? configure = null)
         {
             var context = new TestSqlOSInMemoryDbContext(
@@ -1784,7 +1959,10 @@ public sealed class SqlOSAuthServiceTests
 
             // Inject a real ephemeral data protection provider so the
             // ReplacementAccessToken cache is encrypted at rest as in production.
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = new SqlOSCryptoService(
+                context,
+                options,
+                includeDataProtection ? new EphemeralDataProtectionProvider() : null);
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);
