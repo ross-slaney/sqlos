@@ -238,6 +238,28 @@ public sealed class SqlOSExampleApiIntegrationTests
         });
         downgradedPkceResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
 
+        var invalidChallengeResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
+        {
+            connectionId,
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/callback",
+            state,
+            codeChallenge = new string('A', 42),
+            codeChallengeMethod = "S256"
+        });
+        invalidChallengeResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var caseVariantRedirectResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
+        {
+            connectionId,
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/Callback",
+            state,
+            codeChallenge,
+            codeChallengeMethod = "S256"
+        });
+        caseVariantRedirectResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
         var authUrlResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
         {
             connectionId,
@@ -298,6 +320,18 @@ public sealed class SqlOSExampleApiIntegrationTests
                 ["code_verifier"] = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32))
             }));
         wrongVerifierResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var invalidVerifierShapeResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = "example-web",
+                ["redirect_uri"] = "https://client.example.local/callback",
+                ["code_verifier"] = new string('A', 42)
+            }));
+        invalidVerifierShapeResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
 
         var missingRedirectResponse = await ExampleApiFixture.Client.PostAsync(
             "/sqlos/auth/token",

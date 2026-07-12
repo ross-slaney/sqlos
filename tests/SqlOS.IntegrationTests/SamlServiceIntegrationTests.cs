@@ -182,9 +182,29 @@ public sealed class SamlServiceIntegrationTests
             "plain"));
         await downgradedPkce.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*requires an S256 PKCE code challenge*");
+
+        var invalidChallenge = async () => await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
+            $"user@{domain}",
+            client.ClientId,
+            "https://client.example.local/auth/callback",
+            state,
+            new string('A', 42),
+            "S256"));
+        await invalidChallenge.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*valid RFC 7636 S256 PKCE code challenge*");
+
+        var caseVariantRedirect = async () => await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
+            $"user@{domain}",
+            client.ClientId,
+            "https://client.example.local/auth/Callback",
+            state,
+            crypto.CreatePkceCodeChallenge(codeVerifier),
+            "S256"));
+        await caseVariantRedirect.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Redirect URI*not allowed*");
         (await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>().CountAsync())
             .Should().Be(authorizationRequestCount,
-                "invalid PKCE requests must be rejected before transaction state is persisted");
+                "invalid PKCE and redirect requests must be rejected before transaction state is persisted");
 
         var start = await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
             $"user@{domain}",
@@ -211,6 +231,19 @@ public sealed class SamlServiceIntegrationTests
             new DefaultHttpContext());
         await missingVerifier.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("PKCE verification failed.");
+
+        foreach (var invalidVerifier in new[] { new string('A', 42), new string('A', 129), new string('A', 42) + "!" })
+        {
+            var invalidVerifierExchange = async () => await ssoAuth.ExchangeCodeAsync(
+                new SqlOSPkceExchangeRequest(
+                    code!,
+                    client.ClientId,
+                    "https://client.example.local/auth/callback",
+                    invalidVerifier),
+                new DefaultHttpContext());
+            await invalidVerifierExchange.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("PKCE verification failed.");
+        }
 
         await using var attackerContext = CreateIsolatedContext();
         var attackerSso = BuildSsoAuthorizationService(attackerContext);

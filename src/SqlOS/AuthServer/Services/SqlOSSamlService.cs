@@ -79,6 +79,12 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("SAML authorization requires an S256 PKCE code challenge.");
         }
 
+        if (!_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge))
+        {
+            throw new InvalidOperationException(
+                "SAML authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+        }
+
         var connection = await _context.Set<SqlOSSsoConnection>()
             .FirstOrDefaultAsync(x => x.Id == request.ConnectionId && x.IsEnabled, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");

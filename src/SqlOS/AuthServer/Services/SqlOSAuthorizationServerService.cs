@@ -130,6 +130,12 @@ public sealed class SqlOSAuthorizationServerService
             {
                 throw new InvalidOperationException("Only S256 PKCE is supported.");
             }
+
+            if (!_cryptoService.IsValidS256PkceCodeChallenge(input.CodeChallenge))
+            {
+                throw new InvalidOperationException(
+                    "PKCE code challenge must be a 43-character RFC 7636 S256 value.");
+            }
         }
 
         var requestedScopes = NormalizeRequestedScopes(input.Scope);

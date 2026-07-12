@@ -283,7 +283,7 @@ public sealed class SqlOSCimdClientService
         }
 
         var redirectUris = SqlOSAdminService.DeserializeJsonList(redirectUrisJson);
-        if (!redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+        if (!redirectUris.Contains(redirectUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
         }
@@ -292,7 +292,7 @@ public sealed class SqlOSCimdClientService
     private static bool HasSecuritySensitiveMetadataChange(SqlOSClientApplication existingClient, ParsedCimdDocument parsed)
     {
         var existingRedirects = SqlOSAdminService.DeserializeJsonList(existingClient.RedirectUrisJson);
-        var redirectsChanged = !existingRedirects.SequenceEqual(parsed.RedirectUris, StringComparer.OrdinalIgnoreCase);
+        var redirectsChanged = !existingRedirects.SequenceEqual(parsed.RedirectUris, StringComparer.Ordinal);
         var authMethodChanged = !string.Equals(existingClient.TokenEndpointAuthMethod, parsed.TokenEndpointAuthMethod, StringComparison.Ordinal);
         var grantTypesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.GrantTypesJson)
             .SequenceEqual(parsed.GrantTypes, StringComparer.Ordinal);
@@ -362,7 +362,7 @@ public sealed class SqlOSCimdClientService
         }
 
         if (!string.IsNullOrWhiteSpace(redirectUri)
-            && !redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+            && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
         }

@@ -64,8 +64,17 @@ public sealed class SqlOSOidcAuthService
         CancellationToken cancellationToken = default)
     {
         var connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
+        ValidateCallbackUri(connection, request.CallbackUri);
 
         var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
+        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc
+            && (!string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal)
+                || !_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge)))
+        {
+            throw new InvalidOperationException(
+                "OIDC authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+        }
+
         var authorizationParameters = new Dictionary<string, string?>
         {
             ["client_id"] = connection.ClientId,
@@ -733,7 +742,7 @@ public sealed class SqlOSOidcAuthService
             throw new InvalidOperationException("This OIDC connection does not have any allowed callback URIs configured.");
         }
 
-        if (!allowed.Contains(callbackUri, StringComparer.OrdinalIgnoreCase))
+        if (!allowed.Contains(callbackUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException("The callback URI is not allowed for this OIDC connection.");
         }

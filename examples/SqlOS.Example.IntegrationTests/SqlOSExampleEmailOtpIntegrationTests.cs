@@ -79,7 +79,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var userId = await CreateUserAsync(client, email, "Headless OTP User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId, "member");
 
-        const string verifier = "headless-email-otp-verifier-123456789";
+        const string verifier = "headless-email-otp-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -142,7 +142,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
 
         var email = $"headless-otp-signup-{Guid.NewGuid():N}@example.com";
-        const string verifier = "headless-email-otp-signup-verifier-123456789";
+        const string verifier = "headless-email-otp-signup-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -235,7 +235,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var userId = await CreateUserAsync(client, email, "Hosted OTP User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId, "member");
 
-        const string verifier = "hosted-email-otp-verifier-123456789";
+        const string verifier = "hosted-email-otp-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>

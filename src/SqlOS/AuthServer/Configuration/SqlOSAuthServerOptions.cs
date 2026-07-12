@@ -317,7 +317,7 @@ public class SqlOSAuthServerOptions
             client.RedirectUris = redirectUris
                 .Where(static uri => !string.IsNullOrWhiteSpace(uri))
                 .Select(static uri => uri.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
             client.ClientType = "public_pkce";
             client.RequirePkce = true;
@@ -338,7 +338,7 @@ public class SqlOSAuthServerOptions
             client.RedirectUris = redirectUris
                 .Where(static uri => !string.IsNullOrWhiteSpace(uri))
                 .Select(static uri => uri.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
             client.ClientType = "public_pkce";
             client.RequirePkce = true;

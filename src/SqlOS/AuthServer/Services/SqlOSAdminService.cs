@@ -2116,8 +2116,8 @@ public sealed class SqlOSAdminService
             .Select(value => value?.Trim())
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => ReplaceConnectionIdPlaceholder(value!, connectionId))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
             .ToList()
         ?? [];
 
@@ -2479,7 +2479,7 @@ public sealed class SqlOSAdminService
 
         redirectUris = redirectUris
             .Select(NormalizeRedirectUri)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (redirectUris.Count == 0)
@@ -2773,7 +2773,7 @@ public sealed class SqlOSAdminService
         var normalizedRedirectUris = (redirectUris ?? [])
             .Where(static uri => !string.IsNullOrWhiteSpace(uri))
             .Select(static uri => uri.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (normalizedRedirectUris.Count == 0 && !allowDeviceAuthorization)

@@ -17,6 +17,59 @@ namespace SqlOS.Tests;
 public sealed class SqlOSOidcAuthServiceTests
 {
     [TestMethod]
+    public async Task StartAuthorization_RequiresExactCallbackAndValidS256Challenge()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            "Google",
+            "google-client",
+            "google-secret",
+            ["https://app.example.local/Auth/Callback"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+        var caseMismatch = async () => await oidc.StartAuthorizationAsync(
+            new SqlOSStartOidcAuthorizationRequest(
+                connection.Id,
+                "user@example.com",
+                "example-web",
+                "https://app.example.local/auth/callback",
+                "state",
+                "nonce",
+                new string('A', 43),
+                "S256"));
+        await caseMismatch.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*callback URI is not allowed*");
+
+        var invalidChallenge = async () => await oidc.StartAuthorizationAsync(
+            new SqlOSStartOidcAuthorizationRequest(
+                connection.Id,
+                "user@example.com",
+                "example-web",
+                "https://app.example.local/Auth/Callback",
+                "state",
+                "nonce",
+                new string('A', 42),
+                "S256"));
+        await invalidChallenge.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*valid RFC 7636 S256 PKCE code challenge*");
+    }
+
+    [TestMethod]
     public async Task CompleteAuthorization_GoogleVerifiedEmail_LinksExistingUser()
     {
         using var context = CreateContext();

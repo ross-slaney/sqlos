@@ -44,6 +44,12 @@ public sealed class SqlOSSsoAuthorizationService
             throw new InvalidOperationException("SAML authorization requires an S256 PKCE code challenge.");
         }
 
+        if (!_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge))
+        {
+            throw new InvalidOperationException(
+                "SAML authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+        }
+
         var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(request.Email), cancellationToken);
         if (!string.Equals(discovery.Mode, "sso", StringComparison.Ordinal))
         {

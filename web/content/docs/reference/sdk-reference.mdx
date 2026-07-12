@@ -152,7 +152,7 @@ var result = await authorizationServer.ExchangeAuthorizationCodeAsync(
 var tokens = result.Tokens;
 ```
 
-Authorization codes, including codes produced after SAML login, require S256 PKCE and the exact original redirect URI. Public HTTP clients should post the equivalent form fields to `/sqlos/auth/token`.
+Authorization codes, including codes produced after SAML login, require S256 PKCE and the exact original registered redirect URI, including path case. Verifiers must contain 43–128 RFC 7636 unreserved characters; the S256 challenge is exactly 43 base64url characters. Public HTTP clients should post the equivalent form fields to `/sqlos/auth/token`.
 
 ### Resource-server token validation
 

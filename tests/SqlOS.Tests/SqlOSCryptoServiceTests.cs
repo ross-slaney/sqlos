@@ -26,6 +26,64 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
+    public void Pkce_Rfc7636BoundaryVerifiers_ProduceValidS256Challenges()
+    {
+        using var context = CreateContext();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var minimumVerifier = new string('A', 43);
+        var maximumVerifier = new string('~', 128);
+
+        var minimumChallenge = service.CreatePkceCodeChallenge(minimumVerifier);
+        var maximumChallenge = service.CreatePkceCodeChallenge(maximumVerifier);
+
+        service.IsValidPkceCodeVerifier(minimumVerifier).Should().BeTrue();
+        service.IsValidPkceCodeVerifier(maximumVerifier).Should().BeTrue();
+        service.IsValidS256PkceCodeChallenge(minimumChallenge).Should().BeTrue();
+        service.IsValidS256PkceCodeChallenge(maximumChallenge).Should().BeTrue();
+        minimumChallenge.Should().HaveLength(43);
+        maximumChallenge.Should().HaveLength(43);
+        service.VerifyPkceCodeVerifier(minimumVerifier, minimumChallenge, "S256").Should().BeTrue();
+        service.VerifyPkceCodeVerifier(maximumVerifier, maximumChallenge, "S256").Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void Pkce_InvalidVerifierShapes_AreRejectedBeforeHashing()
+    {
+        using var context = CreateContext();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var invalidVerifiers = new[]
+        {
+            new string('A', 42),
+            new string('A', 129),
+            new string('A', 42) + "!",
+            new string('A', 42) + "é"
+        };
+
+        foreach (var verifier in invalidVerifiers)
+        {
+            service.IsValidPkceCodeVerifier(verifier).Should().BeFalse();
+            var act = () => service.CreatePkceCodeChallenge(verifier);
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*43 to 128 RFC 7636 unreserved characters*");
+        }
+    }
+
+    [TestMethod]
+    public void Pkce_InvalidS256ChallengeOrVerifier_FailsVerification()
+    {
+        using var context = CreateContext();
+        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var validVerifier = new string('A', 43);
+        var validChallenge = service.CreatePkceCodeChallenge(validVerifier);
+
+        service.IsValidS256PkceCodeChallenge(new string('A', 42)).Should().BeFalse();
+        service.IsValidS256PkceCodeChallenge(new string('A', 44)).Should().BeFalse();
+        service.IsValidS256PkceCodeChallenge(new string('A', 42) + "~").Should().BeFalse();
+        service.VerifyPkceCodeVerifier(new string('A', 42), validChallenge, "S256").Should().BeFalse();
+        service.VerifyPkceCodeVerifier(validVerifier, new string('A', 42), "S256").Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task EnsureActiveSigningKey_CreatesOneKey()
     {
         using var context = CreateContext();

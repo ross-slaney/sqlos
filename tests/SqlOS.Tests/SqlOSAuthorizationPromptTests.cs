@@ -12,6 +12,8 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSAuthorizationPromptTests
 {
+    private const string ValidCodeChallenge = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
     [TestMethod]
     public async Task CreateAuthorizationRequestAsync_PublicClientCannotDisablePkce()
     {
@@ -77,6 +79,24 @@ public sealed class SqlOSAuthorizationPromptTests
                 null));
         await plainPkce.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Only S256 PKCE is supported.");
+
+        var invalidS256Challenge = async () => await authorizationServer.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                client.ClientId,
+                "https://app.example.test/auth/callback",
+                "state-public",
+                "openid",
+                new string('A', 42),
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "hosted",
+                null));
+        await invalidS256Challenge.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*43-character RFC 7636 S256 value*");
         (await context.Set<SqlOS.AuthServer.Models.SqlOSAuthorizationRequest>().CountAsync())
             .Should().Be(0);
     }
@@ -114,7 +134,7 @@ public sealed class SqlOSAuthorizationPromptTests
                 "https://app.example.test/auth/callback",
                 "state-123",
                 "openid profile email",
-                "challenge-123",
+                ValidCodeChallenge,
                 "S256",
                 null,
                 "alice@example.com",

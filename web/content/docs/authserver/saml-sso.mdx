@@ -224,10 +224,10 @@ For metadata rotation, open the delegated portal again or use the dashboard, pas
 
 ## SSO login flow
 
-1. The client generates a high-entropy PKCE verifier, its S256 challenge, and a state value.
+1. The client generates a high-entropy PKCE verifier, its S256 challenge, and a state value. The verifier must be 43–128 RFC 7636 unreserved characters; generating 32 random bytes and base64url-encoding them produces the recommended 43-character verifier. The S256 challenge is exactly 43 base64url characters.
 2. User enters email on the login page.
 3. [Home realm discovery](/docs/authserver/home-realm-discovery) detects the `@acme.com` domain and checks the connection enrollment policy.
-4. AuthServer binds the client, exact redirect URI, state, and S256 challenge to the SAML authorization request, then redirects to the IdP.
+4. AuthServer binds the client, exact registered redirect URI (including path case), state, and validated S256 challenge to the SAML authorization request, then redirects to the IdP.
 5. User authenticates at the IdP.
 6. IdP POSTs a SAML Response to the ACS URL.
 7. AuthServer validates the assertion and returns an authorization code plus the original state to the registered redirect URI.
