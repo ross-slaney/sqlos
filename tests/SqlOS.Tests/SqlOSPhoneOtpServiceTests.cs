@@ -336,7 +336,7 @@ public sealed class SqlOSPhoneOtpServiceTests
 
             var options = Microsoft.Extensions.Options.Options.Create(authOptions);
             var emailSender = new TestAuthEmailSender();
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var fakeChannel = channel ?? new FakeOtpDeliveryChannel();

@@ -5,7 +5,7 @@ order: 4
 section: authserver
 ---
 
-SqlOS supports SAML 2.0 enterprise SSO. Each organization can have its own SSO connection, and users with matching email domains are automatically routed to their organization's identity provider.
+SqlOS supports SAML 2.0 enterprise SSO. Each organization can have its own connection. Home realm discovery routes a matching email domain only when that connection is complete, enabled, and its enrollment policy applies to the user.
 
 ## Setup
 
@@ -24,7 +24,7 @@ var draft = await adminService.CreateSsoConnectionDraftAsync(
         OrganizationId: org.Id,
         DisplayName: "Acme Entra SSO",
         PrimaryDomain: "acme.com",
-        AutoProvisionUsers: true,
+        AutoProvisionUsers: false,
         AutoLinkByEmail: true));
 ```
 
@@ -32,12 +32,13 @@ var draft = await adminService.CreateSsoConnectionDraftAsync(
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-connections/draft \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "organizationId": "org_...",
     "displayName": "Acme Entra SSO",
     "primaryDomain": "acme.com",
-    "autoProvisionUsers": true,
+    "autoProvisionUsers": false,
     "autoLinkByEmail": true
   }'
 ```
@@ -62,11 +63,12 @@ In Microsoft Entra ID (or any SAML IdP):
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-connections/{connectionId}/metadata \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{"metadataXml": "<?xml version=\"1.0\" ...>"}'
 ```
 
-The connection is now active. By default, existing organization members with verified `@acme.com` email addresses will be routed to Entra on their next sign-in. New users are not JIT-provisioned unless you explicitly enable that policy.
+The connection is now active. With the conservative examples above, existing organization members with verified `@acme.com` email addresses are routed to Entra on their next sign-in, while unknown users are not JIT-provisioned. Set `AutoProvisionUsers`/`autoProvisionUsers` to `true` only when you intentionally want a valid SAML assertion to create the missing user or membership.
 
 ## Delegated org-admin portal
 
@@ -74,6 +76,7 @@ Create a portal session from the dashboard organization SSO tab or through the a
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "organizationId": "org_...",
@@ -100,9 +103,12 @@ Revoke a setup link or portal session:
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/sso-portal/sessions/{sessionId}/revoke \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{"reason": "customer_cancelled"}'
 ```
+
+These platform-admin endpoints require an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls). Portal-scoped endpoints use the separate organization setup-session cookie described below.
 
 Portal-scoped APIs live under `/sqlos/admin/auth/sso-portal/api` and require the portal session cookie. They cannot list users, clients, other organizations, or global dashboard pages.
 
@@ -196,6 +202,8 @@ State-machine endpoints:
 | POST | `/test` | Record readiness or generate a test redirect |
 | POST | `/signout` | Clear the portal session |
 
+When `/test` includes `clientId` and `redirectUri`, it must also include a fresh `state`, an S256 `codeChallenge`, and `codeChallengeMethod: "S256"`. The bundled portal generates these values with Web Crypto. A host-owned portal should do the same; first-factor or portal-session state is never a substitute for PKCE.
+
 ## Options
 
 | Option | Default | Description |
@@ -224,9 +232,13 @@ For metadata rotation, open the delegated portal again or use the dashboard, pas
 
 ## SSO login flow
 
-1. User enters email on the login page
-2. [Home realm discovery](/docs/authserver/home-realm-discovery) detects the `@acme.com` domain and checks the connection enrollment policy
-3. AuthServer generates a SAML AuthnRequest and redirects to the IdP
-4. User authenticates at the IdP
-5. IdP POSTs a SAML Response to the ACS URL
-6. AuthServer validates the assertion, links the existing user or provisions access only when policy allows it, and creates a session
+1. The client generates a high-entropy PKCE verifier, its S256 challenge, and a state value. The verifier must be 43–128 RFC 7636 unreserved characters; generating 32 random bytes and base64url-encoding them produces the recommended 43-character verifier. The S256 challenge is exactly 43 base64url characters.
+2. User enters email on the login page.
+3. [Home realm discovery](/docs/authserver/home-realm-discovery) detects the `@acme.com` domain and checks the connection enrollment policy.
+4. AuthServer binds the client, exact registered redirect URI (including path case), state, and validated S256 challenge to the SAML authorization request, then redirects to the IdP.
+5. User authenticates at the IdP.
+6. IdP POSTs a SAML Response to the ACS URL.
+7. AuthServer validates the assertion and returns an authorization code plus the original state to the registered redirect URI.
+8. The client posts the code, client ID, exact redirect URI, and verifier to `/sqlos/auth/token`. Missing, wrong, downgraded, or `plain` PKCE is rejected.
+
+Use canonical `/sqlos/auth/authorize` and `/sqlos/auth/token` for hosted clients. The explicit `/sqlos/auth/sso/authorization-url` helper is retained for connection-directed flows, but it requires `state`, `codeChallenge`, and `codeChallengeMethod: "S256"` and produces the same PKCE-bound authorization-code record. The old `/sqlos/auth/token/exchange` and `/sqlos/auth/saml/login/{connectionId}` routes are retired.

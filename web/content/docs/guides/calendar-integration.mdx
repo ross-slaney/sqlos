@@ -65,13 +65,19 @@ SqlOS requests `access_type=offline&prompt=consent` for Google and `offline_acce
 From your app's backend (the user is already signed in), start a connect session and redirect the browser to the returned URL:
 
 ```csharp
-app.MapPost("/api/calendar/connect", async (
+var calendarApi = app.MapGroup("/api/calendar")
+    .RequireSqlOSAccessToken(apiAudience);
+
+calendarApi.MapPost("/connect", async (
     HttpContext http,
     SqlOSCalendarService calendarService,
     SqlOSOidcAuthService oidcAuthService,
     CancellationToken ct) =>
 {
-    var userId = http.User.FindFirst("sub")!.Value;
+    var userId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(userId))
+        return Results.Unauthorized();
+
     var providers = await oidcAuthService.ListEnabledProvidersAsync(ct);
     var google = providers.First(p => p.ProviderType == "Google");
 
@@ -104,7 +110,21 @@ var events = await calendarService.ListEventsAsync(
     forUserId: userId); // ownership check: throws if the connection belongs to someone else
 ```
 
-Each event carries `StartsAtUtc`, `EndsAtUtc`, `ShowAs` (`busy`, `free`, `tentative`, `oof`), `Status`, and `Subject`. Enroll additional calendars with `EnableCalendarSyncAsync`, or trigger a sync immediately with `SqlOSCalendarSyncService.SyncConnectionAsync`.
+Each event carries `StartsAtUtc`, `EndsAtUtc`, `ShowAs` (`busy`, `free`, `tentative`, `oof`), `Status`, and `Subject`. Enroll additional calendars with the owner-guarded `EnableCalendarSyncAsync` overloads.
+
+`SqlOSCalendarSyncService.SyncConnectionAsync` is intentionally an admin/worker-shaped API: it accepts a connection id but no user or organization ownership argument. Background jobs may call it directly because they already operate in a trusted service context. A user-facing endpoint must first authorize the connection against the current principal, then invoke the sync:
+
+```csharp
+// userId comes from the validated access token, never from the request body.
+await calendarService.GetConnectionAsync(
+    calendarConnectionId,
+    forUserId: userId,
+    cancellationToken: ct);
+
+var sync = await syncService.SyncConnectionAsync(calendarConnectionId, ct);
+```
+
+For organization-owned connections, perform the same check with `forOrganizationId` after verifying the caller may act for that organization. Keep this guard in the same server-side operation as the sync; never expose `SyncConnectionAsync` as a connection-id-only endpoint.
 
 ## 4. Or call the provider yourself (ConnectionOnly)
 
@@ -121,8 +141,11 @@ SqlOS never stores event copies for `ConnectionOnly` connections — `ListEvents
 await syncService.CreateEventAsync(
     calendarConnectionId,
     providerCalendarId,
-    new SqlOSCalendarEventDraft("Kickoff", startUtc, endUtc));
+    new SqlOSCalendarEventDraft("Kickoff", startUtc, endUtc),
+    forUserId: userId); // rejects a connection owned by another user
 ```
+
+For an organization-owned calendar, pass `forOrganizationId` instead after authorizing the caller's organization role. Both ownership arguments are optional for trusted worker/admin code, so user-facing endpoints must always supply the applicable guard.
 
 When a later pull finds that a provider changed an event your app created through SqlOS, the conflict is delegated to your callback (provider wins when you don't set one):
 

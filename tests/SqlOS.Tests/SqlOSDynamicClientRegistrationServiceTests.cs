@@ -170,7 +170,7 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
         SqlOSDynamicClientRegistrationRateLimiter limiter)
     {
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         return new SqlOSDynamicClientRegistrationService(context, options, crypto, admin, limiter);
     }

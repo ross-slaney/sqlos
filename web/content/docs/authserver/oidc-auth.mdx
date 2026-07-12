@@ -29,12 +29,16 @@ Provider authentication does not override the local account lifecycle. If a prov
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "google",
     "displayName": "Google",
     "clientId": "your-google-client-id",
-    "clientSecret": "your-google-client-secret"
+    "clientSecret": "your-google-client-secret",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
 
@@ -50,11 +54,16 @@ Add the exact dashboard-provided URI to your provider's allowed redirect URIs.
 
 If you build a custom headless callback with `SqlOSOidcAuthService`, register your app-owned callback route instead. The example API uses `/api/v1/auth/oidc/callback/{connectionId}` so the callback can complete the handoff before returning to the frontend.
 
-### 3. Enable the connection
+### 3. Confirm or re-enable the connection
+
+Creation enables a connection by default. If an operator later disables it, re-enable it with:
 
 ```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+All Admin API examples require an operator session. Follow [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls), or use the dashboard UI.
 
 ## Auth flow
 
@@ -72,38 +81,78 @@ Frontend                    Backend                     Provider
    │                          │                            │
    │    GET /oidc/callback ──►│── exchange code ──────────►│
    │                          │◄── user info ──────────────│
-   │◄── redirect with handoff │                            │
+   │◄── redirect with code    │                            │
    │                          │                            │
-   ├─ POST /oidc/complete ───►│                            │
-   │◄── tokens ───────────────│                            │
+   ├─ POST /oidc/exchange ───►│                            │
+   │◄── login state/tokens ───│                            │
 ```
+
+## Identity claim trust model
+
+SqlOS treats the validated ID token as the identity anchor. The standard `sub` claim must be present in that signed token. When a connection uses UserInfo, SqlOS accepts the UserInfo response only when its `sub` exactly matches the ID-token `sub` using ordinal comparison; a missing or different subject rejects the login before any UserInfo claim is used.
+
+Email and `email_verified` are resolved as one provenance-bound pair:
+
+- a subject-bound UserInfo email and its UserInfo verification claim are used together when UserInfo supplies the configured email claim;
+- otherwise the signed ID-token email and its ID-token verification claim are used together;
+- a verification flag from one response can never validate an email from another response;
+- automatic linking to an existing SqlOS account requires that same authenticated claim set to mark the email as verified.
+
+The provider callback is not an identity-claim source. Callback parameters cannot replace `sub`, email, or email verification. Apple's first-authorization `user` object is the only callback profile hint SqlOS reads, and only its bounded, sanitized first and last names may contribute to the display name.
+
+GitHub remains a separate OAuth profile flow: SqlOS uses GitHub's stable numeric user id plus the verified primary address returned by GitHub's email API. It does not mix GitHub profile fields into the OIDC claim pipeline.
 
 ### Backend code (from the example API)
 
+The normal application flow starts at `/sqlos/auth/authorize`; hosted AuthPage invokes the social provider and returns an OAuth authorization code to your application. Use the [ASP.NET Core login quickstart](/docs/quickstarts/aspnet-core-login) for that recommended path.
+
+If your app owns the social-provider chooser, use `SqlOSOidcBrowserAuthService`. It protects the provider callback with its own temporary state, returns an application authorization code, validates your PKCE verifier on exchange, and re-enters the normal organization-selection and MFA state machine. Do not compose a production flow directly from the lower-level `SqlOSOidcAuthService` unless you independently implement all of those controls.
+
+### App-owned provider chooser
+
 ```csharp
-// Start OIDC flow
-app.MapPost("/api/v1/auth/oidc/start", async (
-    OidcStartRequest request,
-    SqlOSOidcAuthService oidcService,
-    SqlOSHomeRealmDiscoveryService discoveryService) =>
+app.MapPost("/api/social/start", async (
+    SocialStartRequest request,
+    SqlOSOidcBrowserAuthService browserAuth,
+    HttpContext httpContext,
+    CancellationToken ct) =>
 {
-    var discovery = await discoveryService.DiscoverAsync(
-        new SqlOSHomeRealmDiscoveryRequest(request.Email), ct);
-
-    if (discovery.Mode == "sso")
-        return Results.Ok(new { mode = "sso", discovery.SsoConnectionId });
-
-    var result = await oidcService.StartAuthorizationAsync(
-        new SqlOSStartOidcAuthorizationRequest
-        {
-            ConnectionId = request.ConnectionId,
-            RedirectUri = $"{origin}/api/v1/auth/oidc/callback/{request.ConnectionId}",
-            State = state
-        }, ipAddress, ct);
+    var result = await browserAuth.CreateAuthorizationUrlAsync(
+        new SqlOSOidcAuthorizationUrlRequest(
+            ConnectionId: request.ConnectionId,
+            ClientId: "my-web-app",
+            RedirectUri: "https://app.example.com/auth/callback",
+            State: request.State,
+            CodeChallenge: request.CodeChallenge,
+            CodeChallengeMethod: "S256",
+            Email: request.Email),
+        httpContext,
+        ct);
 
     return Results.Ok(new { authorizationUrl = result.AuthorizationUrl });
 });
+
+app.MapPost("/api/social/exchange", async (
+    SocialExchangeRequest request,
+    SqlOSOidcBrowserAuthService browserAuth,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var outcome = await browserAuth.ExchangeCodeAsync(
+        new SqlOSPkceExchangeRequest(
+            Code: request.Code,
+            ClientId: "my-web-app",
+            RedirectUri: "https://app.example.com/auth/callback",
+            CodeVerifier: request.CodeVerifier),
+        httpContext,
+        ct);
+
+    // Branch on organization selection, MFA/enrollment, then Tokens.
+    return LoginOutcome(outcome);
+});
 ```
+
+The client must generate an unguessable `state` value and an S256 PKCE verifier/challenge, persist the verifier and state in a server-side or platform-protected transaction, and compare the returned state before exchange. `MapSqlOS()` already maps the provider callback at `/sqlos/auth/oidc/callback`; the application `RedirectUri` above is a separate, registered OAuth client callback.
 
 ### Frontend code (Next.js)
 
@@ -137,7 +186,7 @@ window.location.href = authorizationUrl;
 
 1. Register in [Apple Developer Portal](https://developer.apple.com/account/resources/identifiers/list/serviceId)
 2. Enable "Sign in with Apple" and configure the callback domain
-3. Create the connection with `providerType: "apple"`, your service ID and key
+3. Create the connection with `providerType: "apple"`, the Services ID, Team ID, Key ID, and `.p8` private key. SqlOS generates the client-secret JWT. Apple requires an HTTPS Return URL and does not accept localhost; follow [Apple OIDC](/docs/authserver/apple-oidc).
 
 ### GitHub
 
@@ -155,11 +204,19 @@ For any OIDC-compliant provider, use discovery-based or manual configuration:
 ```bash
 # Discovery-based (auto-fetches endpoints from .well-known)
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  -H 'Content-Type: application/json' \
   -d '{
     "providerType": "custom",
     "displayName": "Okta",
     "clientId": "...",
     "clientSecret": "...",
-    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration"
+    "useDiscovery": true,
+    "discoveryUrl": "https://your-org.okta.com/.well-known/openid-configuration",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
+
+For a provider without discovery, set `useDiscovery: false` and provide `issuer`, `authorizationEndpoint`, `tokenEndpoint`, `jwksUri`, and the exact `allowedCallbackUris`; add `userinfoEndpoint` when available. See [Custom OIDC](/docs/authserver/custom-oidc) for a complete payload.

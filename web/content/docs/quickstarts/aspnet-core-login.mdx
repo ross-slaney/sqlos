@@ -1,0 +1,250 @@
+---
+title: "Sign in an ASP.NET Core app"
+description: "Complete hosted SqlOS login with ASP.NET Core OAuth, PKCE, a secure cookie, and token revocation."
+order: 2
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Quickstart"
+  title="One .NET login, end to end"
+  href="#run-the-working-sample"
+  actionLabel="Run the sample"
+>
+  Let ASP.NET Core own PKCE, correlation state, and the application cookie. Let SqlOS own hosted sign-in, organizations, tokens, and revocation.
+</Banner>
+
+## Goal
+
+Run a Razor Pages application that:
+
+1. challenges ASP.NET Core's built-in OAuth handler;
+2. redirects to the SqlOS hosted AuthPage;
+3. exchanges an authorization code with PKCE at `/signin-sqlos`;
+4. creates an encrypted, HTTP-only ASP.NET Core session cookie;
+5. calls a SqlOS-protected API with the access token;
+6. rotates the refresh token and renews the application ticket before expiry; and
+7. revokes the refresh token and server session during sign-out.
+
+This is an all-.NET client. It does not require a JavaScript authentication SDK or an external identity provider.
+
+## Prerequisites
+
+- the SqlOS repository checked out locally;
+- .NET 9 SDK;
+- Docker running with enough memory for SQL Server;
+- ports `1435`, `5080`, `5090`, `18890`, and `18891` available.
+
+## Run the working sample
+
+From the repository root:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Use the authenticated Aspire dashboard URL printed in the terminal (its configured listener is `https://localhost:18890`). Wait for SQL Server to become healthy and for `todo-api` and `aspnet-web` to show **Running**, then open:
+
+```text
+http://localhost:5090
+```
+
+Select **Sign in with SqlOS**, then create a password account or sign in. Password authentication is the provider-free default; email and SMS delivery are not required.
+
+![Hosted SqlOS password screen used by the ASP.NET Core client](/docs/auth-password-step.png)
+
+After SqlOS redirects back, the page shows the authenticated identity, token expiration, and the JSON returned by `GET http://localhost:5080/api/me`. Select **Sign out and revoke** to revoke the SqlOS refresh token and session before deleting the local cookie.
+
+## How the flow is divided
+
+| Concern | Owner |
+| --- | --- |
+| PKCE verifier, protected `state`, and correlation cookie | ASP.NET Core OAuth handler |
+| Password, organization selection, SSO, and MFA | SqlOS hosted AuthPage |
+| Authorization code and access/refresh tokens | SqlOS AuthServer |
+| Application login session | ASP.NET Core cookie handler |
+| API signature, audience, and session validation | SqlOS token validation on the Todo API |
+
+The callback path `/signin-sqlos` belongs to authentication middleware. Do not create a Razor Page or controller for it.
+
+## Configure authentication
+
+The sample reads the SqlOS origin and client ID from configuration, with local defaults:
+
+```csharp
+var sqlosOrigin = (builder.Configuration["SqlOS:Origin"]
+    ?? "http://localhost:5080").TrimEnd('/');
+var clientId = builder.Configuration["SqlOS:ClientId"]
+    ?? "example-aspnet";
+```
+
+It then makes cookies the application session and SqlOS the challenge scheme:
+
+```csharp
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultScheme =
+            CookieAuthenticationDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = "SqlOS";
+    })
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "sqlos.aspnet.session";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+    })
+    .AddOAuth("SqlOS", options =>
+    {
+        options.ClientId = clientId;
+        options.ClientSecret = "public-pkce-client";
+        options.CallbackPath = "/signin-sqlos";
+        options.AuthorizationEndpoint =
+            $"{sqlosOrigin}/sqlos/auth/authorize";
+        options.TokenEndpoint = $"{sqlosOrigin}/sqlos/auth/token";
+        options.UsePkce = true;
+        options.SaveTokens = true;
+    });
+```
+
+<Callout type="warning" title="The placeholder is not a client secret">
+  ASP.NET Core's generic OAuth handler requires a non-empty `ClientSecret` property even for a public client. `example-aspnet` is registered in SqlOS as `public_pkce`; SqlOS authenticates the exchange with PKCE and intentionally ignores `"public-pkce-client"`. Do not rotate, vault, or treat that placeholder as a credential.
+</Callout>
+
+The sample requests `openid`, `profile`, `email`, `offline_access`, `todos.read`, and `todos.write`. The seeded client fixes the audience to `http://localhost:5080/api/todos` and allows the exact callback `http://localhost:5090/signin-sqlos`.
+
+## Start the challenge
+
+The login handler does not construct authorization URLs itself. It asks ASP.NET Core to challenge the `SqlOS` scheme:
+
+```csharp
+public IActionResult OnGetLogin()
+    => Challenge(
+        new AuthenticationProperties
+        {
+            RedirectUri = Url.Page("/Index") ?? "/"
+        },
+        "SqlOS");
+```
+
+The framework creates the correlation cookie, PKCE verifier and challenge, and protected `state`. SqlOS persists and returns that state unchanged. Current SqlOS schemas allow the longer protected state emitted by standard ASP.NET Core handlers.
+
+## Build the application identity
+
+During `OnCreatingTicket`, the sample calls the protected Todo endpoint with the new access token:
+
+```csharp
+using var request = new HttpRequestMessage(
+    HttpMethod.Get,
+    $"{sqlosOrigin}/api/me");
+request.Headers.Authorization =
+    new AuthenticationHeaderValue("Bearer", context.AccessToken);
+
+using var response = await context.Backchannel.SendAsync(
+    request,
+    context.HttpContext.RequestAborted);
+response.EnsureSuccessStatusCode();
+```
+
+It maps the returned subject, organization, client, email, and session ID into the `ClaimsIdentity`. ASP.NET Core then encrypts that identity and the saved tokens into its authentication ticket.
+
+<Callout type="info" title="SaveTokens keeps the sample inspectable">
+  `SaveTokens = true` puts access and refresh tokens in the encrypted authentication ticket. That is convenient for a small demo, but it can create a large browser cookie. For a production app, use an `ITicketStore` or another server-side token/session store and keep only an opaque session identifier in the browser.
+</Callout>
+
+## Call the protected API
+
+On each authenticated page load, the sample retrieves the access token from the ticket and calls `/api/me`:
+
+```csharp
+var accessToken = await HttpContext.GetTokenAsync("access_token");
+
+using var request = new HttpRequestMessage(HttpMethod.Get, "/api/me");
+request.Headers.Authorization =
+    new AuthenticationHeaderValue("Bearer", accessToken);
+```
+
+The Todo API validates the signature, issuer, expiry, exact audience, and persisted session existence/revocation/absolute expiry before returning identity claims that include the client ID. Your Razor application never accepts a user or organization ID from the browser as proof of identity.
+
+## Refresh and renew the application ticket
+
+SqlOS access tokens are deliberately short-lived—10 minutes by default. Before a protected call, the sample checks the saved `expires_at`; when less than one minute remains, it rotates the refresh token through the OAuth token endpoint:
+
+```csharp
+using var response = await client.PostAsync(
+    "/sqlos/auth/token",
+    new FormUrlEncodedContent(new Dictionary<string, string>
+    {
+        ["grant_type"] = "refresh_token",
+        ["client_id"] = clientId,
+        ["refresh_token"] = refreshToken
+    }),
+    cancellationToken);
+```
+
+It stores the new access token, rotated refresh token, token type, and expiry in `AuthenticationProperties`, then calls `SignInAsync` to renew the encrypted cookie. A high-traffic application should still coordinate concurrent refresh attempts—normally with a server-side ticket/token store. SqlOS has a configurable refresh-token grace window (30 seconds by default) for near-concurrent reuse; outside that grace/replay behavior, the rotating token is single-use.
+
+## Revoke before signing out locally
+
+Cookie sign-out alone leaves the SqlOS refresh token usable. The sample first sends the saved refresh token and session ID to the SqlOS logout endpoint, then clears the application cookie:
+
+```csharp
+await client.PostAsJsonAsync(
+    "/sqlos/auth/logout",
+    new { refreshToken, sessionId },
+    cancellationToken);
+
+await HttpContext.SignOutAsync(
+    CookieAuthenticationDefaults.AuthenticationScheme);
+```
+
+Keep logout as a `POST`. Razor Pages antiforgery protection prevents another site from silently signing a user out.
+
+## Source tour
+
+| File | What to copy or study |
+| --- | --- |
+| [`Program.cs`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Program.cs) | Cookie and OAuth registration, PKCE, scopes, and claim mapping |
+| [`Index.cshtml.cs`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Pages/Index.cshtml.cs) | Challenge, protected API call, and revoking logout |
+| [`Index.cshtml`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Pages/Index.cshtml) | Login/logout UI and authenticated proof |
+| [`Todo AppHost`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.AppHost/Program.cs) | One-command SQL Server, API, and Razor app orchestration |
+| [`Todo API`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.Api/Program.cs) | `example-aspnet` client seed and audience-protected `/api/me` |
+
+## Adapt it to your application
+
+Use the sample as a working reference, then change these values together:
+
+1. Give the ASP.NET Core client a stable HTTPS origin, such as `https://app.acme.com`.
+2. Register it in SqlOS as a public PKCE client with the exact redirect URI `https://app.acme.com/signin-sqlos`.
+3. Give the client the exact audience of the API it will call, such as `https://api.acme.com`.
+4. Set `SqlOS:Origin` to the externally reachable SqlOS origin and `SqlOS:ClientId` to the registered client ID.
+5. Replace the Todo-specific scopes and `/api/me` call with your application's scopes and session/bootstrap endpoint.
+
+If the same ASP.NET Core process hosts SqlOS and the application UI, [Add SqlOS to one app](/docs/quickstarts/add-to-app) supplies the server registration. Set its `RedirectPath` to `/signin-sqlos` so `UseSingleApplication` seeds the URI expected by the OAuth handler.
+
+## Common failures
+
+### SqlOS reports a redirect mismatch
+
+The URI is exact. The seeded client expects `http://localhost:5090/signin-sqlos`, including scheme, port, and path. Update the client registration and `CallbackPath` together if your app uses another origin.
+
+### Correlation failed or state is invalid
+
+Start sign-in from the application instead of opening the hosted page directly. Keep the browser on the same host name (`localhost`, not a mix of `localhost` and `127.0.0.1`). If the database came from an older source checkout, let current SqlOS startup migrations finish before retrying.
+
+### `/api/me` returns `401`
+
+Confirm the access token was issued for `http://localhost:5080/api/todos`, the `todo-api` resource is healthy, and you have not revoked the session. Audience comparison is exact.
+
+### The cookie is missing in production
+
+Use HTTPS, set the session and correlation cookies to `CookieSecurePolicy.Always`, configure forwarded headers before authentication when a proxy terminates TLS, and persist ASP.NET Core Data Protection keys across replicas.
+
+## Next steps
+
+- [Protect your own API](/docs/quickstarts/protect-api)
+- [Authorize EF Core queries](/docs/quickstarts/ef-authorization)
+- [Run the full example stack](/docs/quickstarts/run-example-stack)
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens)

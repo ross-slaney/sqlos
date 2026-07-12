@@ -99,21 +99,22 @@ public sealed record SqlOSRefreshRequest(
     string? OrganizationId,
     string? Resource = null);
 
-public sealed record SqlOSExchangeCodeRequest(
-    string Code,
-    string ClientId);
-
 public sealed record SqlOSForgotPasswordRequest(
     string Email,
     string? ClientId = null);
 
 public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
 
+/// <summary>
+/// Trusted in-process password-reset delivery request. Public password-reset endpoints bind
+/// <see cref="SqlOSForgotPasswordRequest"/> and never accept <see cref="ResetUrlTemplate"/>.
+/// </summary>
 public sealed record SqlOSSendPasswordResetEmailRequest(
     string Email,
     string? ResetUrlTemplate = null,
     string? ClientId = null);
 
+/// <summary>Trusted dashboard/admin password-reset delivery request.</summary>
 public sealed record SqlOSSendUserPasswordResetEmailRequest(
     string? ResetUrlTemplate = null);
 
@@ -406,7 +407,13 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     string? ApplePrivateKeyPem = null,
     string? LogoDataUrl = null);
 
-public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
+public sealed record SqlOSAuthorizationUrlRequest(
+    string ConnectionId,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string CodeChallenge,
+    string CodeChallengeMethod = "S256");
 
 public sealed record SqlOSCreateWorkspaceRequest(string Name);
 

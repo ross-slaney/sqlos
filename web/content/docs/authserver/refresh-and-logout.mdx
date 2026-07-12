@@ -16,16 +16,17 @@ var tokens = await authService.RefreshAsync(
 
 `OrganizationId: null` means "keep the session's stored organization," not "skip organization checks." SqlOS requires the stored organization and membership to remain active before rotating the token. It also requires the user to remain active. The OAuth token endpoint reports lifecycle rejection as a generic `invalid_grant`; the detailed reason is available only in the audit log.
 
-**Frontend**:
+**Browser backend-for-frontend**:
 
-```typescript
-const tokens = await apiPost("/api/v1/auth/refresh", {
-  refreshToken: storedRefreshToken,
-});
+```csharp
+var refreshToken = await tokenVault.GetRefreshTokenAsync(sessionId, ct);
+var tokens = await authService.RefreshAsync(
+    new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 
-localStorage.setItem("access_token", tokens.accessToken);
-localStorage.setItem("refresh_token", tokens.refreshToken);
+await tokenVault.ReplaceTokensAsync(sessionId, tokens, ct);
 ```
+
+Keep refresh tokens out of browser JavaScript. Store them in a server-side session or, for native and desktop apps, the platform credential vault. The browser should receive only your application's encrypted `Secure`, `HttpOnly`, `SameSite` session cookie.
 
 ### Organization switching
 
@@ -38,7 +39,9 @@ var tokens = await authService.RefreshAsync(
 
 ### Replay detection
 
-If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft -- if an attacker captures a refresh token and uses it, the legitimate user's next refresh attempt triggers revocation of everything.
+Refresh tokens are single use. By default, SqlOS allows a 30-second retry grace period for the immediately previous token so a network retry does not destroy a healthy session. A retry inside that window receives the cached access token plus a fresh sibling refresh token.
+
+Reuse outside the grace window revokes the entire token family and session. This protects against token theft: if an attacker captures and consumes a refresh token, a later replay shuts down the family instead of minting another usable branch. Set the initial default with `options.AuthServer.RefreshTokenGraceWindowSeconds = 0` if your threat model values strict replay rejection over network-retry tolerance. A persisted dashboard or `SqlOSSettingsService` value overrides that startup default; see [Security Settings](/docs/authserver/security-settings).
 
 Concurrent refreshes inside the configured grace window can receive the cached token produced by the winning rotation. Before returning that cached result, SqlOS rechecks session deadlines, client access, the user lifecycle, and the exact organization represented by the cached token.
 
@@ -64,13 +67,29 @@ await authService.LogoutAllAsync(userId, ct);
 
 Logout-all invalidates hosted AuthPage sessions as well as OAuth sessions and refresh-token families. Password reset has the same all-session invalidation behavior. Organization deactivation and the SSO organization-session revocation action invalidate the corresponding organization-bound AuthPage sessions.
 
-**Frontend**:
+**Browser backend-for-frontend**:
 
-```typescript
-await apiPost("/api/v1/auth/logout", {
-  refreshToken: storedRefreshToken,
-});
+```csharp
+app.MapPost("/logout", async (
+    HttpContext httpContext,
+    SqlOSAuthService authService,
+    IApplicationTokenVault tokenVault,
+    CancellationToken ct) =>
+{
+    var sessionId = httpContext.User.FindFirst("app_session_id")?.Value;
+    var refreshToken = sessionId is null
+        ? null
+        : await tokenVault.GetRefreshTokenAsync(sessionId, ct);
 
-localStorage.removeItem("access_token");
-localStorage.removeItem("refresh_token");
+    if (refreshToken is not null)
+        await authService.LogoutAsync(refreshToken, sessionId: null, ct);
+
+    if (sessionId is not null)
+        await tokenVault.DeleteAsync(sessionId, ct);
+
+    await httpContext.SignOutAsync();
+    return Results.NoContent();
+}).RequireAuthorization();
 ```
+
+Protect a cookie-authenticated logout endpoint against CSRF using an antiforgery token or a strict same-origin policy. Clear the local application session even if remote revocation times out; the ASP.NET Core example demonstrates that `finally`-style cleanup.

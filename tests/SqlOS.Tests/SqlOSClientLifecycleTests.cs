@@ -20,7 +20,7 @@ public sealed class SqlOSClientLifecycleTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("seeded-client", "Seeded Client", "https://client.example.test/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         await admin.UpsertSeededClientsAsync();
@@ -67,7 +67,7 @@ public sealed class SqlOSClientLifecycleTests
     {
         using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         var client = new SqlOSClientApplication
@@ -101,7 +101,7 @@ public sealed class SqlOSClientLifecycleTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.ClientRegistration.Dcr.StaleClientRetention = TimeSpan.FromDays(30);
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         context.Set<SqlOSClientApplication>().AddRange(
@@ -184,7 +184,7 @@ public sealed class SqlOSClientLifecycleTests
             Issuer = "https://app.example.com/sqlos/auth",
             PublicOrigin = "https://app.example.com"
         });
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);

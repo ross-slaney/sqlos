@@ -664,7 +664,7 @@ public sealed class SqlOSSsoPortalServiceTests
                 "https://client.example.test/callback");
             configure?.Invoke(authOptions);
             var options = Options.Create(authOptions);
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);

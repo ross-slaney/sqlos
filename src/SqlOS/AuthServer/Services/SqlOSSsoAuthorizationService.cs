@@ -33,6 +33,23 @@ public sealed class SqlOSSsoAuthorizationService
 
     public async Task<SqlOSSsoAuthorizationStartResult> StartAuthorizationAsync(SqlOSSsoAuthorizationStartRequest request, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(request.State))
+        {
+            throw new InvalidOperationException("A state value is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CodeChallenge)
+            || !string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML authorization requires an S256 PKCE code challenge.");
+        }
+
+        if (!_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge))
+        {
+            throw new InvalidOperationException(
+                "SAML authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+        }
+
         var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(request.Email), cancellationToken);
         if (!string.Equals(discovery.Mode, "sso", StringComparison.Ordinal))
         {
@@ -99,7 +116,14 @@ public sealed class SqlOSSsoAuthorizationService
         }
 
         authorizationCode.ConsumedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization code is no longer valid.", ex);
+        }
 
         return await _authService.CreateSessionTokensForUserAsync(
             authorizationCode.User!,

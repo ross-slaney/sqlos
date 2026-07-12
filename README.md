@@ -6,7 +6,7 @@
 [![NuGet](https://img.shields.io/nuget/v/SqlOS)](https://www.nuget.org/packages/SqlOS)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com)
 
-SqlOS 3.16.0 adds a hosted OAuth server, branded login, organizations, sessions, and optional fine-grained authorization to an ASP.NET Core application. It runs in your process and stores its data in your SQL Server database, so you do not need a separate identity or authorization service to get started.
+SqlOS 3.17.0 provides a hosted OAuth server, branded login, organizations, sessions, and optional fine-grained authorization to an ASP.NET Core application. It runs in your process and stores its data in your SQL Server database, so you do not need a separate identity or authorization service to get started.
 
 Start with one application and hosted login. Add SAML SSO, social login, Email OTP, audit logs, calendar connections, or hierarchical authorization when your product needs them.
 
@@ -20,7 +20,7 @@ Run the Todo sample if you want a working login and authorized EF Core queries b
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
-Open `http://localhost:5080/`. The Aspire AppHost starts SQL Server and the sample API for you.
+Open `http://localhost:5090/`. The Aspire AppHost starts SQL Server, the Todo API/SqlOS host at `http://localhost:5080`, and the Razor Pages client at `http://localhost:5090`.
 
 [Run the Todo sample](https://sqlos.dev/docs/quickstarts/run-todo) · [Browse all documentation](https://sqlos.dev/docs)
 
@@ -35,8 +35,10 @@ Requirements:
 Install the package:
 
 ```bash
-dotnet add package SqlOS --version 3.16.0
+dotnet add package SqlOS --version 3.17.0
 ```
+
+> The `main` branch is staged for the 3.17.0 package contract. If NuGet does not list 3.17.0 yet, run the repository examples from source or wait for the package release; do not pair these source docs with 3.16.0.
 
 Use `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare one application with `UseSingleApplication`:
 
@@ -56,14 +58,12 @@ const string publicOrigin = "http://localhost:5050";
 var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
     ?? throw new InvalidOperationException(
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
-
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
-
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;
@@ -87,7 +87,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 }
 ```
 
-The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback.
+The configuration lookup in this example is deliberate: `AddSqlOS` does not automatically bind the `SqlOS` configuration section. Read secrets from `builder.Configuration` and assign them inside the options callback. SqlOS configures its signing-key protection automatically; production replicas only need to share durable ASP.NET Core Data Protection storage during their readiness review.
 
 Run the host on the origin used above:
 
