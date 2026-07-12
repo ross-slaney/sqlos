@@ -636,10 +636,12 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Refresh token is no longer valid.");
         }
 
-        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow || session.IdleExpiresAt <= DateTime.UtcNow)
+        if (refreshToken.ConsumedAt != null)
         {
-            throw new InvalidOperationException("Session is no longer active.");
+            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
         }
+
+        EnsureSessionIsActive(session);
 
         if (_options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource))
         {
@@ -676,7 +678,7 @@ public sealed class SqlOSAuthService
         // Mint the access token, build the new refresh token row, and
         // populate the grace-window cache fields all BEFORE the single
         // SaveChangesAsync. This avoids a visibility window where
-        // ConsumedAt is set but ReplacementAccessToken is still null
+        // ConsumedAt is set but ReplacementTokenResponse is still null
         // (which would cause concurrent callers to fail the grace
         // window check and trigger false-positive replay detection).
         //
@@ -690,7 +692,6 @@ public sealed class SqlOSAuthService
         var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
         var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);
 
-        refreshToken.ConsumedAt = DateTime.UtcNow;
         var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
         var nextRefreshToken = new SqlOSRefreshToken
         {
@@ -701,13 +702,25 @@ public sealed class SqlOSAuthService
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.Add(securitySettings.RefreshTokenLifetime)
         };
+
+        string? protectedReplacementResponse = null;
+        if (securitySettings.RefreshTokenGraceWindow > TimeSpan.Zero)
+        {
+            var replacementResponse = JsonSerializer.Serialize(
+                new RefreshTokenReplacementPayload(accessToken, newRawRefreshToken));
+            protectedReplacementResponse = _cryptoService.ProtectRefreshTokenResponse(
+                replacementResponse,
+                securitySettings.RefreshTokenGraceWindow);
+        }
+
+        refreshToken.ConsumedAt = DateTime.UtcNow;
         refreshToken.ReplacedByTokenId = nextRefreshToken.Id;
 
-        // Cache the issued access token on the consumed row, encrypted
-        // at rest, alongside the org id and expiry, so concurrent
-        // refresh attempts within the grace window can return the SAME
-        // access token instead of getting a divergent fresh one.
-        refreshToken.ReplacementAccessToken = _cryptoService.ProtectSecret(accessToken);
+        // Cache the complete response as one purpose-bound, time-limited
+        // Data Protection payload. The raw replacement refresh token is
+        // otherwise never persisted, and every retry receives this exact
+        // pair instead of minting a sibling lineage.
+        refreshToken.ReplacementTokenResponse = protectedReplacementResponse;
         refreshToken.ReplacementOrganizationId = organizationId;
         refreshToken.ReplacementAccessTokenExpiresAt = accessTokenExpiresAt;
 
@@ -723,7 +736,7 @@ public sealed class SqlOSAuthService
         {
             // Lost the rotation race to a concurrent refresh on this or
             // another instance. The winner has already committed the
-            // entire rotation (ConsumedAt + ReplacementAccessToken cache
+            // entire rotation (ConsumedAt + ReplacementTokenResponse cache
             // + new refresh token row) atomically, so a fresh re-read
             // will see a fully populated grace-window cache. We need to:
             //   1) Discard our failed-rotation change tracker state (the
@@ -749,6 +762,21 @@ public sealed class SqlOSAuthService
                 .ThenInclude(x => x!.ClientApplication)
                 .FirstOrDefaultAsync(x => x.Id == refreshToken.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Refresh token vanished after concurrency conflict.");
+
+            if (fresh.RevokedAt != null || fresh.ExpiresAt <= DateTime.UtcNow)
+            {
+                throw new InvalidOperationException("Refresh token is no longer valid.");
+            }
+
+            // A concurrency conflict can now also mean replay detection
+            // revoked the session while this request was rotating a live
+            // descendant. In that case the parent was not consumed by a
+            // winning rotation, so it must never enter the grace path.
+            EnsureSessionIsActive(fresh.Session!);
+            if (fresh.ConsumedAt == null)
+            {
+                throw new InvalidOperationException("Refresh token rotation could not be completed.");
+            }
 
             return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
         }
@@ -777,6 +805,12 @@ public sealed class SqlOSAuthService
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        // Consumed-token retries bypass the normal rotation path, so the
+        // session lifecycle must be checked here before protected response
+        // material is read or released. Token-row revocation is not a
+        // substitute for the session security boundary.
+        EnsureSessionIsActive(session);
+
         var cachedOrganizationId = refreshToken.ReplacementOrganizationId ?? session.OrganizationId;
 
         // A consumed refresh token can only return the cached access token
@@ -805,7 +839,7 @@ public sealed class SqlOSAuthService
         var withinGraceWindow = graceWindow > TimeSpan.Zero
             && refreshToken.ConsumedAt!.Value.Add(graceWindow) > DateTime.UtcNow
             && !string.IsNullOrEmpty(refreshToken.ReplacedByTokenId)
-            && !string.IsNullOrEmpty(refreshToken.ReplacementAccessToken)
+            && !string.IsNullOrEmpty(refreshToken.ReplacementTokenResponse)
             && refreshToken.ReplacementAccessTokenExpiresAt is { } cachedExpiry
             && cachedExpiry > DateTime.UtcNow;
 
@@ -814,13 +848,65 @@ public sealed class SqlOSAuthService
             var replacement = await _context.Set<SqlOSRefreshToken>()
                 .FirstOrDefaultAsync(x => x.Id == refreshToken.ReplacedByTokenId, cancellationToken);
 
-            if (replacement != null && replacement.RevokedAt == null)
+            if (replacement != null
+                && replacement.RevokedAt == null
+                && replacement.ExpiresAt > DateTime.UtcNow
+                && string.Equals(replacement.SessionId, refreshToken.SessionId, StringComparison.Ordinal)
+                && string.Equals(replacement.FamilyId, refreshToken.FamilyId, StringComparison.Ordinal))
             {
-                var cachedAccessToken = _cryptoService.UnprotectSecret(refreshToken.ReplacementAccessToken!);
+                // Resource indicator validation must still match the original
+                // authorization, even on the grace window path.
+                if (_options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource))
+                {
+                    var requestedResource = request.Resource.Trim();
+                    if (string.IsNullOrWhiteSpace(session.Resource)
+                        || !string.Equals(session.Resource, requestedResource, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("Resource does not match the original authorization.");
+                    }
+                }
+
+                // Reject any attempt to switch organization on the grace
+                // window path. The cached JWT was minted for a specific
+                // organization and we must not return it to a caller asking
+                // for a different one — that would let a caller skip the
+                // membership check by replaying a sibling's refresh token.
+                if (!string.IsNullOrWhiteSpace(request.OrganizationId)
+                    && !string.Equals(request.OrganizationId, refreshToken.ReplacementOrganizationId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Organization does not match the original refresh.");
+                }
+
+                RefreshTokenReplacementPayload cachedResponse;
+                try
+                {
+                    var responseJson = _cryptoService.UnprotectRefreshTokenResponse(refreshToken.ReplacementTokenResponse!);
+                    cachedResponse = JsonSerializer.Deserialize<RefreshTokenReplacementPayload>(responseJson)
+                        ?? throw new InvalidOperationException("The cached refresh token response is invalid.");
+
+                    if (string.IsNullOrWhiteSpace(cachedResponse.AccessToken)
+                        || string.IsNullOrWhiteSpace(cachedResponse.RefreshToken)
+                        || !string.Equals(
+                            _cryptoService.HashToken(cachedResponse.RefreshToken),
+                            replacement.TokenHash,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("The cached refresh token response does not match its replacement token.");
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or JsonException)
+                {
+                    await RevokeRefreshTokenFamilyAsync(
+                        session.Id,
+                        refreshToken.FamilyId,
+                        "refresh_token_response_invalid",
+                        cancellationToken);
+                    throw new InvalidOperationException("Refresh token has already been used.");
+                }
 
                 return new SqlOSTokenResponse(
-                    cachedAccessToken,
-                    await ReissueGraceWindowRefreshTokenAsync(replacement, cancellationToken),
+                    cachedResponse.AccessToken,
+                    cachedResponse.RefreshToken,
                     session.Id,
                     session.ClientApplication!.ClientId,
                     cachedOrganizationId,
@@ -831,33 +917,6 @@ public sealed class SqlOSAuthService
 
         await RevokeRefreshTokenFamilyAsync(session.Id, refreshToken.FamilyId, "refresh_token_reuse", cancellationToken);
         throw new InvalidOperationException("Refresh token has already been used.");
-    }
-
-    /// <summary>
-    /// Mints a fresh opaque refresh token in the same family as the given
-    /// replacement and persists it. Used by the grace window path: we
-    /// can't return the original raw replacement refresh token because we
-    /// only stored its hash, so callers in the grace window receive a new
-    /// valid token in the same refresh-token family rather than the
-    /// original replacement token value. The new token shares lifetime,
-    /// family, and session with the replacement and rotates normally on
-    /// next use.
-    /// </summary>
-    private async Task<string> ReissueGraceWindowRefreshTokenAsync(SqlOSRefreshToken replacement, CancellationToken cancellationToken)
-    {
-        var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
-        var sibling = new SqlOSRefreshToken
-        {
-            Id = _cryptoService.GenerateId("rfr"),
-            SessionId = replacement.SessionId,
-            FamilyId = replacement.FamilyId,
-            TokenHash = _cryptoService.HashToken(newRawRefreshToken),
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = replacement.ExpiresAt
-        };
-        _context.Set<SqlOSRefreshToken>().Add(sibling);
-        await _context.SaveChangesAsync(cancellationToken);
-        return newRawRefreshToken;
     }
 
     public async Task LogoutAsync(string? refreshToken, string? sessionId, CancellationToken cancellationToken = default)
@@ -887,6 +946,9 @@ public sealed class SqlOSAuthService
         foreach (var token in refreshTokens)
         {
             token.RevokedAt = DateTime.UtcNow;
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -2495,26 +2557,107 @@ public sealed class SqlOSAuthService
 
     private async Task RevokeRefreshTokenFamilyAsync(string sessionId, string familyId, string reason, CancellationToken cancellationToken)
     {
+        var revokedAt = DateTime.UtcNow;
+
+        if (SupportsDatabaseTransactions())
+        {
+            // Replay revocation must win against a concurrent rotation on a
+            // different app instance. Revoking the session first takes the
+            // lifecycle lock observed by RefreshAsync's concurrency token;
+            // the family update then covers every descendant visible in the
+            // same transaction, including one committed just before it.
+            IDbContextTransaction? transaction = null;
+            try
+            {
+                if (_context.Database.CurrentTransaction == null)
+                {
+                    transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                await _context.Set<SqlOSSession>()
+                    .Where(x => x.Id == sessionId && x.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, revokedAt)
+                        .SetProperty(x => x.RevocationReason, reason), cancellationToken);
+
+                await _context.Set<SqlOSRefreshToken>()
+                    .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, x => x.RevokedAt ?? revokedAt)
+                        .SetProperty(x => x.ReplacementTokenResponse, (string?)null)
+                        .SetProperty(x => x.ReplacementOrganizationId, (string?)null)
+                        .SetProperty(x => x.ReplacementAccessTokenExpiresAt, (DateTime?)null), cancellationToken);
+
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (transaction != null)
+                {
+                    await transaction.DisposeAsync();
+                }
+            }
+
+            // ExecuteUpdate intentionally bypasses tracked state. Nothing in
+            // this failed grant may subsequently flush a stale active token
+            // or cached response back to the database.
+            if (_context is DbContext dbContext)
+            {
+                dbContext.ChangeTracker.Clear();
+            }
+
+            return;
+        }
+
+        // The in-memory provider used by unit tests has no transactions or
+        // server-side ExecuteUpdate support, so retain an equivalent tracked
+        // implementation for that provider.
         var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
         if (session != null && session.RevokedAt == null)
         {
-            session.RevokedAt = DateTime.UtcNow;
+            session.RevokedAt = revokedAt;
             session.RevocationReason = reason;
         }
 
         var refreshTokens = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId && x.RevokedAt == null)
+            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
             .ToListAsync(cancellationToken);
 
         foreach (var token in refreshTokens)
         {
-            token.RevokedAt = DateTime.UtcNow;
+            token.RevokedAt ??= revokedAt;
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    private static void EnsureSessionIsActive(SqlOSSession session)
+    {
+        var now = DateTime.UtcNow;
+        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= now || session.IdleExpiresAt <= now)
+        {
+            throw new InvalidOperationException("Session is no longer active.");
+        }
+    }
+
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
+    private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
+    private sealed record RefreshTokenReplacementPayload(string AccessToken, string RefreshToken);
     private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
     private sealed record PasswordResetRequestPayload(
         string NormalizedEmail,

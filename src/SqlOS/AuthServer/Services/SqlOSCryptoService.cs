@@ -23,6 +23,7 @@ public sealed class SqlOSCryptoService
     private readonly SqlOSAuthServerOptions _options;
     private readonly PasswordHasher<object> _passwordHasher = new();
     private readonly IDataProtector? _secretProtector;
+    private readonly ITimeLimitedDataProtector? _refreshTokenResponseProtector;
     private readonly ISqlOSSigningKeyCustody _signingKeyCustody;
 
     public SqlOSCryptoService(
@@ -46,6 +47,9 @@ public sealed class SqlOSCryptoService
         _context = context;
         _options = options.Value;
         _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
+        _refreshTokenResponseProtector = dataProtectionProvider?
+            .CreateProtector("SqlOS.AuthServer.RefreshTokenResponse.v1")
+            .ToTimeLimitedDataProtector();
         _signingKeyCustody = signingKeyCustody;
     }
 
@@ -90,6 +94,65 @@ public sealed class SqlOSCryptoService
         catch (CryptographicException ex)
         {
             throw new InvalidOperationException("This secret could not be unprotected. Ensure the ASP.NET Core Data Protection key ring is persisted and available to this application instance.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Protects a complete refresh-token response for the retry grace window.
+    /// Unlike general secret protection, this operation fails closed when Data
+    /// Protection is unavailable and embeds a cryptographic expiry in the
+    /// protected payload.
+    /// </summary>
+    internal string ProtectRefreshTokenResponse(string responseJson, TimeSpan lifetime)
+    {
+        if (string.IsNullOrWhiteSpace(responseJson))
+        {
+            throw new ArgumentException("A refresh token response is required.", nameof(responseJson));
+        }
+
+        if (lifetime <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lifetime), "The refresh token response lifetime must be positive.");
+        }
+
+        if (_refreshTokenResponseProtector == null)
+        {
+            throw new InvalidOperationException(
+                "Refresh token grace-window responses require ASP.NET Core Data Protection. " +
+                "Configure a persisted, shared Data Protection key ring or disable the refresh token grace window.");
+        }
+
+        return $"dpt:{_refreshTokenResponseProtector.Protect(responseJson, lifetime)}";
+    }
+
+    /// <summary>
+    /// Unprotects a grace-window response. Plaintext and general-purpose
+    /// Data Protection payloads are deliberately rejected so a database row
+    /// can never opt out of the purpose-bound, time-limited protection.
+    /// </summary>
+    internal string UnprotectRefreshTokenResponse(string protectedResponse)
+    {
+        if (string.IsNullOrWhiteSpace(protectedResponse)
+            || !protectedResponse.StartsWith("dpt:", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The cached refresh token response is not securely protected.");
+        }
+
+        if (_refreshTokenResponseProtector == null)
+        {
+            throw new InvalidOperationException(
+                "This refresh token response is protected with ASP.NET Core Data Protection, " +
+                "but no Data Protection provider is available.");
+        }
+
+        try
+        {
+            return _refreshTokenResponseProtector.Unprotect(protectedResponse[4..], out _);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException(
+                "The cached refresh token response is invalid or its retry window has expired.", ex);
         }
     }
 

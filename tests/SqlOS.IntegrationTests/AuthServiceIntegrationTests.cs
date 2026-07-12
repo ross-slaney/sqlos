@@ -1,8 +1,10 @@
 using System.Text;
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
@@ -507,16 +509,17 @@ public sealed class AuthServiceIntegrationTests
         results[0].AccessToken.Should().NotBeNullOrWhiteSpace();
         results[1].AccessToken.Should().NotBeNullOrWhiteSpace();
 
-        // Critical invariant: both calls returned the SAME access token.
-        // The winner produced it; the loser hit the grace window path and
-        // returned the cached value.
+        // Critical invariant: both calls returned the SAME token pair. The
+        // winner produced it; the loser hit the grace window path and
+        // returned the cached response.
         results[0].AccessToken.Should().Be(results[1].AccessToken,
             "both concurrent refreshes must yield the same access token (winner produces, loser reads from cache)");
+        results[0].RefreshToken.Should().Be(results[1].RefreshToken,
+            "both app instances must converge on the exact same forward refresh credential");
 
         // Critical invariant: no orphaned refresh tokens. The family
-        // should contain the original (now consumed) + exactly ONE
-        // rotation replacement + ONE sibling token from the grace window
-        // reissue path = 3 rows total. NOT 2 separate rotation replacements.
+        // should contain only the original (now consumed) and exactly one
+        // replacement. Grace retries are read-only and cannot add siblings.
         instanceA.Dispose();
         instanceB.Dispose();
 
@@ -540,12 +543,15 @@ public sealed class AuthServiceIntegrationTests
 
             rotationsFromOriginal.Should().Be(1,
                 "exactly ONE rotation replacement should exist for the original token; orphans here would mean the concurrency token failed");
+            (await verifyCtx.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                .CountAsync(x => x.FamilyId == familyId)).Should().Be(2,
+                "the grace-window loser must not mint a sibling refresh token");
 
             // Original must be marked consumed.
             original.ConsumedAt.Should().NotBeNull();
             original.ReplacedByTokenId.Should().NotBeNullOrEmpty();
-            original.ReplacementAccessToken.Should().NotBeNullOrEmpty(
-                "the winner must have cached its access token for the grace window path");
+            original.ReplacementTokenResponse.Should().StartWith("dpt:",
+                "the winner must cache the exact token pair under time-limited Data Protection");
         }
         finally
         {
@@ -558,11 +564,16 @@ public sealed class AuthServiceIntegrationTests
     /// at the shared SQL Server. Used to genuinely race two instances
     /// without sharing change-tracker state.
     /// </summary>
-    private static (SqlOSAuthService Service, TestSqlOSDbContext Context) BuildIsolatedServiceTuple()
+    private static (SqlOSAuthService Service, TestSqlOSDbContext Context) BuildIsolatedServiceTuple(
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IInterceptor? interceptor = null)
     {
-        var ctx = BuildIsolatedContext();
+        var ctx = BuildIsolatedContext(interceptor);
         var options = Microsoft.Extensions.Options.Options.Create(AspireFixture.Options);
-        var crypto = new SqlOSCryptoService(ctx, options, AspireFixture.DataProtectionProvider);
+        var crypto = new SqlOSCryptoService(
+            ctx,
+            options,
+            dataProtectionProvider ?? AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(ctx, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(ctx, options, emailSender);
@@ -583,17 +594,62 @@ public sealed class AuthServiceIntegrationTests
         public void Dispose() => _context.Dispose();
     }
 
-    private static IsolatedAuthService BuildIsolatedAuthService()
+    private sealed class IsolatedAuthorizationServer : IDisposable
     {
-        var (svc, ctx) = BuildIsolatedServiceTuple();
+        public SqlOSAuthorizationServerService Service { get; }
+        private readonly TestSqlOSDbContext _context;
+
+        public IsolatedAuthorizationServer(
+            SqlOSAuthorizationServerService service,
+            TestSqlOSDbContext context)
+        {
+            Service = service;
+            _context = context;
+        }
+
+        public void Dispose() => _context.Dispose();
+    }
+
+    private static IsolatedAuthService BuildIsolatedAuthService(
+        IDataProtectionProvider? dataProtectionProvider = null,
+        IInterceptor? interceptor = null)
+    {
+        var (svc, ctx) = BuildIsolatedServiceTuple(dataProtectionProvider, interceptor);
         return new IsolatedAuthService(svc, ctx);
     }
 
-    private static TestSqlOSDbContext BuildIsolatedContext()
+    private static IsolatedAuthorizationServer BuildIsolatedAuthorizationServer()
     {
-        var dbOptions = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestSqlOSDbContext>()
-            .UseSqlServer(AspireFixture.SqlConnectionString)
-            .Options;
+        var context = BuildIsolatedContext();
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var authorization = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            auth,
+            crypto,
+            settings,
+            authPageSession,
+            options);
+        return new IsolatedAuthorizationServer(authorization, context);
+    }
+
+    private static TestSqlOSDbContext BuildIsolatedContext(IInterceptor? interceptor = null)
+    {
+        var builder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(AspireFixture.SqlConnectionString);
+        if (interceptor != null)
+        {
+            builder.AddInterceptors(interceptor);
+        }
+
+        var dbOptions = builder.Options;
         return new TestSqlOSDbContext(dbOptions);
     }
 
@@ -656,12 +712,12 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
-    public async Task Refresh_WithSameTokenTwiceWithinGraceWindow_ReturnsSameAccessToken()
+    public async Task Refresh_WithSameTokenTwiceWithinGraceWindow_ReturnsSameTokenPair()
     {
         // Issue #18 — proves the grace window survives a real DB round trip.
         // Two refresh calls with the same consumed refresh token, both
         // happening within the default 30s grace window, must return the
-        // SAME access token and must NOT revoke the token family.
+        // SAME token pair and must NOT revoke the token family.
         var auth = BuildAuthService();
         var http = new DefaultHttpContext();
         http.Request.Headers.UserAgent = "GraceWindowIntegrationTest";
@@ -685,12 +741,264 @@ public sealed class AuthServiceIntegrationTests
 
         secondRefresh.AccessToken.Should().Be(firstRefresh.AccessToken,
             "the grace window should hand back the cached access token");
+        secondRefresh.RefreshToken.Should().Be(firstRefresh.RefreshToken,
+            "the grace window should hand back the same forward refresh token");
 
         // The forward refresh token from the first call should still be
         // valid — proving the family was NOT revoked by the replay.
         var thirdRefresh = await auth.RefreshAsync(
             new SqlOSRefreshRequest(firstRefresh.RefreshToken, firstRefresh.OrganizationId));
         thirdRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task Refresh_GraceWindowAcrossEightInstances_ReturnsSamePairAndOneHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "GraceWindowMultiInstanceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Dana",
+            $"dana-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Multi Instance Corp",
+            "test-client",
+            null), http);
+
+        var originalToken = signup.Tokens!.RefreshToken;
+        var organizationId = signup.Tokens.OrganizationId;
+        var winner = await bootstrapAuth.RefreshAsync(
+            new SqlOSRefreshRequest(originalToken, organizationId));
+
+        for (var instanceNumber = 0; instanceNumber < 8; instanceNumber++)
+        {
+            using var instance = BuildIsolatedAuthService();
+            var retry = await instance.Service.RefreshAsync(
+                new SqlOSRefreshRequest(originalToken, organizationId));
+            retry.AccessToken.Should().Be(winner.AccessToken);
+            retry.RefreshToken.Should().Be(winner.RefreshToken);
+        }
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(originalToken));
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        family.Should().HaveCount(2);
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+        family.Single(x => x.ConsumedAt == null).TokenHash.Should().Be(
+            crypto.HashToken(winner.RefreshToken));
+    }
+
+    [TestMethod]
+    public async Task OAuthTokenEndpoint_RefreshRaceAcrossInstances_ReturnsSamePairAndOneHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "OAuthTokenEndpointRaceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Endpoint Race",
+            $"endpoint-race-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Endpoint Race Corp",
+            "test-client",
+            null), http);
+
+        using var instanceA = BuildIsolatedAuthorizationServer();
+        using var instanceB = BuildIsolatedAuthorizationServer();
+        var request = new SqlOSTokenRequest(
+            SqlOSOAuthGrantTypes.RefreshToken,
+            null,
+            null,
+            null,
+            null,
+            signup.Tokens!.RefreshToken,
+            null);
+
+        var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var taskA = Task.Run(async () =>
+        {
+            await ready.Task;
+            return await instanceA.Service.ExchangeAuthorizationCodeAsync(request, new DefaultHttpContext());
+        });
+        var taskB = Task.Run(async () =>
+        {
+            await ready.Task;
+            return await instanceB.Service.ExchangeAuthorizationCodeAsync(request, new DefaultHttpContext());
+        });
+        ready.SetResult(true);
+
+        var results = await Task.WhenAll(taskA, taskB);
+        results[0].Tokens.AccessToken.Should().Be(results[1].Tokens.AccessToken);
+        results[0].Tokens.RefreshToken.Should().Be(results[1].Tokens.RefreshToken);
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+        family.Should().HaveCount(2);
+        family.Should().ContainSingle(x => x.ConsumedAt == null && x.RevokedAt == null);
+    }
+
+    [TestMethod]
+    public async Task Refresh_LostDataProtectionKeyRing_RevokesSessionAndEntireFamily()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "LostDataProtectionKeyTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Lost Key",
+            $"lost-key-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Lost Key Corp",
+            "test-client",
+            null), http);
+
+        await bootstrapAuth.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens!.RefreshToken,
+            signup.Tokens.OrganizationId));
+
+        // A new ephemeral provider models an instance that cannot read the
+        // original key ring after key loss or a bad deployment. The grant
+        // must fail closed and revoke the complete lineage.
+        using var isolated = BuildIsolatedAuthService(new EphemeralDataProtectionProvider());
+        var act = async () => await isolated.Service.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens.RefreshToken,
+            signup.Tokens.OrganizationId));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
+
+        await using var verifyContext = BuildIsolatedContext();
+        var crypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+        var session = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+            .SingleAsync(x => x.Id == original.SessionId);
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        session.RevokedAt.Should().NotBeNull();
+        session.RevocationReason.Should().Be("refresh_token_response_invalid");
+        family.Should().OnlyContain(x => x.RevokedAt != null);
+        family.Should().OnlyContain(x => x.ReplacementTokenResponse == null);
+    }
+
+    [TestMethod]
+    public async Task Refresh_ReplayRevocationRacingLegitimateDescendant_LeavesNoActiveHead()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.UserAgent = "ReplayRotationRaceTest";
+        var bootstrapAuth = BuildAuthService();
+        var signup = await bootstrapAuth.SignUpAsync(new SqlOSSignupRequest(
+            "Replay Race",
+            $"replay-race-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!",
+            "Replay Race Corp",
+            "test-client",
+            null), http);
+
+        var r1 = await bootstrapAuth.RefreshAsync(new SqlOSRefreshRequest(
+            signup.Tokens!.RefreshToken,
+            signup.Tokens.OrganizationId));
+
+        // Force R0 outside grace while R1 remains the legitimate live head.
+        await using (var setupContext = BuildIsolatedContext())
+        {
+            var crypto = new SqlOSCryptoService(
+                setupContext,
+                Options.Create(AspireFixture.Options),
+                AspireFixture.DataProtectionProvider);
+            var r0 = await setupContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                .SingleAsync(x => x.TokenHash == crypto.HashToken(signup.Tokens.RefreshToken));
+            r0.ConsumedAt = DateTime.UtcNow.AddMinutes(-1);
+            await setupContext.SaveChangesAsync();
+        }
+
+        var pause = new PauseRefreshRotationInterceptor();
+        using var legitimate = BuildIsolatedAuthService(interceptor: pause);
+        using var replay = BuildIsolatedAuthService();
+
+        var legitimateGrant = legitimate.Service.RefreshAsync(
+            new SqlOSRefreshRequest(r1.RefreshToken, r1.OrganizationId));
+        await pause.RotationReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var replayAct = async () => await replay.Service.RefreshAsync(
+            new SqlOSRefreshRequest(signup.Tokens.RefreshToken, signup.Tokens.OrganizationId));
+        await replayAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token has already been used.");
+
+        pause.ReleaseRotation.TrySetResult(true);
+        var legitimateAct = async () => await legitimateGrant;
+        await legitimateAct.Should().ThrowAsync<InvalidOperationException>();
+
+        await using var verifyContext = BuildIsolatedContext();
+        var verifyCrypto = new SqlOSCryptoService(
+            verifyContext,
+            Options.Create(AspireFixture.Options),
+            AspireFixture.DataProtectionProvider);
+        var original = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == verifyCrypto.HashToken(signup.Tokens.RefreshToken));
+        var session = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+            .SingleAsync(x => x.Id == original.SessionId);
+        var family = await verifyContext.Set<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+            .Where(x => x.FamilyId == original.FamilyId)
+            .ToListAsync();
+
+        session.RevokedAt.Should().NotBeNull();
+        session.RevocationReason.Should().Be("refresh_token_reuse");
+        family.Should().HaveCount(2, "the rejected legitimate rotation must roll back R2");
+        family.Should().OnlyContain(x => x.RevokedAt != null);
+        family.Should().NotContain(x => x.ConsumedAt == null && x.RevokedAt == null);
+    }
+
+    private sealed class PauseRefreshRotationInterceptor : SaveChangesInterceptor
+    {
+        private int _hasPaused;
+
+        public TaskCompletionSource<bool> RotationReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseRotation { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var context = eventData.Context;
+            var isRefreshRotation = context != null
+                && context.ChangeTracker.Entries<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                    .Any(entry => entry.State == EntityState.Added)
+                && context.ChangeTracker.Entries<SqlOS.AuthServer.Models.SqlOSRefreshToken>()
+                    .Any(entry => entry.State == EntityState.Modified
+                        && entry.Property(x => x.ConsumedAt).IsModified
+                        && entry.Entity.ConsumedAt != null);
+
+            if (isRefreshRotation && Interlocked.Exchange(ref _hasPaused, 1) == 0)
+            {
+                RotationReached.TrySetResult(true);
+                await ReleaseRotation.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
+        }
     }
 
     [TestMethod]

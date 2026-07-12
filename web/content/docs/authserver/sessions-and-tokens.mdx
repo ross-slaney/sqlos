@@ -72,6 +72,20 @@ var tokens = await authService.RefreshAsync(
 
 **Grace and replay detection**: The default 30-second refresh grace returns the same cached access token plus a fresh sibling refresh token in the same family and with the same expiry for a near-concurrent retry. Reuse outside the configured grace behavior revokes the entire token family and the session. Set `RefreshTokenGraceWindowSeconds` deliberately for your client concurrency model.
 
+### Concurrent refresh retries
+
+By default, SqlOS allows a 30-second retry grace window for near-simultaneous refreshes from multiple tabs, SSR calls, or app instances. The first request performs the only rotation. Every accepted retry of that consumed token receives the byte-for-byte same access token and refresh token, so the family always remains one linear lineage:
+
+```text
+R0 (consumed) -> R1 (the only active replacement)
+```
+
+SqlOS never creates a sibling `R2` for a retry of `R0`. If `R1` has already advanced, an older retry can only converge through the same stored lineage; it cannot create another active branch. Outside the grace window, reuse revokes the family and session.
+
+The short-lived response cache is purpose-bound and encrypted automatically, and its ciphertext is cryptographically unusable after the grace window. Consumed token hashes remain until normal expiry so later reuse can still identify and revoke the family. Production deployments with multiple replicas or ephemeral storage should follow the [Data Protection guidance in Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
+
+Set `RefreshTokenGraceWindowSeconds` to `0` when immediate replay detection is preferred over concurrent-retry tolerance.
+
 **Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating. SqlOS requires an active user, active target organization, and active membership before it mints the replacement token. When `organizationId` is omitted, SqlOS applies the same checks to the organization already stored on the session; omission never bypasses membership validation. Grace-window retries also revalidate the organization of the cached replacement token before returning it.
 
 ## Lifecycle enforcement

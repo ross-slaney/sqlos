@@ -358,6 +358,11 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.OrganizationId).HasMaxLength(64);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.EffectiveAudience).HasMaxLength(2048);
+            // Session revocation is the family-level lifecycle lock. A
+            // refresh rotation that loaded an active session must fail its
+            // transaction if replay detection revokes that session before
+            // the rotation commits a new descendant.
+            entity.Property(x => x.RevokedAt).IsConcurrencyToken();
             entity.HasOne(x => x.User)
                 .WithMany(x => x.Sessions)
                 .HasForeignKey(x => x.UserId)
@@ -377,6 +382,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSRefreshTokens", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.Property(x => x.ReplacementTokenResponse)
+                .HasColumnName("ReplacementAccessToken");
             // ConsumedAt is the rotation lock. Marking it as a concurrency
             // token forces EF Core to include it in the WHERE clause of
             // the UPDATE statement. If two concurrent refresh requests
