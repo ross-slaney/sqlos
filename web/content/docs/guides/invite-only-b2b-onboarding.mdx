@@ -1,0 +1,309 @@
+---
+title: "Invite-only B2B onboarding"
+description: "Invite verified people into an existing organization without trusting tenant or role data from the browser."
+order: 11
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Build invite-only organization onboarding"
+  href="/docs/authserver/invitations"
+  actionLabel="Invitation reference"
+>
+  Create email-bound membership invitations from an authorized team-management endpoint, then let SqlOS own acceptance, expiry, and membership activation.
+</Banner>
+
+![Atlas Workspace invite lifecycle from an authorized owner to a verified organization member](/docs/guides-invite-only-b2b.svg)
+
+This guide builds **Atlas Workspace**, a fictional B2B planning app. An organization owner invites a teammate from Atlas's members page. SqlOS emails a one-time link, verifies the invited identity, and creates the membership only after successful acceptance.
+
+<Callout type="warning" title="Invite-only has a precise boundary">
+  SqlOS makes membership in an existing organization invite-only: public signup cannot join an existing organization by supplying an `organizationId`. It does not currently have a global switch that disables every form of standalone account creation while preserving new-invitee signup. In particular, enabling Email OTP also enables generic Email OTP signup. Describe the guarantee as **invite-only organization access**, not invite-only user records.
+</Callout>
+
+## Goal
+
+Atlas should enforce this lifecycle:
+
+1. An authenticated owner or admin submits a teammate's email and an allowed role.
+2. Atlas derives the organization and inviter from the validated access token.
+3. SqlOS stores a hashed, expiring invitation token and sends the branded email.
+4. The invitee opens hosted AuthPage with the invited email fixed and read-only.
+5. SqlOS creates or reactivates membership only after the effective identity matches that email.
+6. Operators can inspect, resend, or revoke a pending invitation.
+
+## 1. Configure email, AuthPage, and invitations
+
+Use a real public origin so links generated behind a proxy or container ingress point back to the externally reachable SqlOS host.
+
+```csharp
+builder.AddSqlOS<AtlasDbContext>(options =>
+{
+    options.ConfigureEmail(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:Email:FromAddress"];
+    });
+
+    var auth = options.AuthServer;
+    auth.PublicOrigin = "https://identity.atlas.example";
+    auth.Issuer = "https://identity.atlas.example/sqlos/auth";
+
+    auth.ConfigureEmailOtp(email =>
+    {
+        email.ApplicationName = "Atlas Workspace";
+    });
+
+    auth.ConfigureInvitations(invitations =>
+    {
+        invitations.ApplicationName = "Atlas Workspace";
+        invitations.DefaultLifetime = TimeSpan.FromDays(3);
+        invitations.MaxInvitationsPerEmailPerHour = 5;
+        invitations.MaxInvitationsPerIpPerHour = 60;
+        invitations.MaxInvitationsPerOrganizationPerHour = 100;
+        invitations.MaxInvitationsPerInviterPerHour = 25;
+    });
+
+    auth.SeedAuthEmails(email =>
+    {
+        email.ApplicationName = "Atlas Workspace";
+        email.PrimaryColor = "#6d28d9";
+        email.AccentColor = "#111827";
+        email.BackgroundColor = "#f5f3ff";
+    });
+
+    auth.SeedAuthPage(page =>
+    {
+        page.PageTitle = "Join Atlas Workspace";
+        page.EnabledCredentialTypes = ["email_otp"];
+        page.EnablePasswordSignup = false;
+    });
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = "atlas-web";
+        client.Name = "Atlas Workspace";
+        client.Audience = "https://api.atlas.example";
+        client.RedirectUris = ["https://app.atlas.example/auth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
+});
+```
+
+Email OTP serves two purposes here: existing passwordless users can prove their identity with a code, and AuthPage can create a new passwordless user from the invitation. The new-invitee path treats possession of the emailed invitation link as the proof and does not send a second OTP challenge.
+
+SqlOS creates the built-in `auth.invitation` template automatically. Customize it in **Dashboard > Communications > Templates** without changing the runtime variables or token-bearing accept URL.
+
+## 2. Protect the team-management API
+
+Invitation creation is an administrative product action. Protect the route with database-backed SqlOS token validation before mapping it:
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+
+app.UseSqlOSAccessTokenValidation(validation =>
+{
+    validation.ExpectedAudience = "https://api.atlas.example";
+    validation.ShouldValidate = http =>
+        http.Request.Path.StartsWithSegments("/api/team");
+});
+```
+
+The middleware validates the signature, issuer, audience, token lifetime, and current SqlOS session. It then makes the validated `UserId`, `OrganizationId`, and `SessionId` available through `GetSqlOSValidatedToken()`.
+
+## 3. Create invitations from an app-owned endpoint
+
+The following endpoint never accepts an organization id, inviter id, OAuth callback, scope, or resource from the browser. `AtlasTeamAuthorization` is an app-owned policy service; it must verify that the actor can manage members in the token's organization.
+
+```csharp
+using System.Text.Json.Nodes;
+using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.AuthServer.Services;
+
+app.MapPost("/api/team/invitations", async (
+    CreateAtlasInvitationRequest request,
+    HttpContext http,
+    AtlasTeamAuthorization teamAuthorization,
+    SqlOSAuthService authService,
+    CancellationToken ct) =>
+{
+    var actor = http.GetSqlOSValidatedToken();
+    if (actor?.UserId is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    if (actor.OrganizationId is null)
+    {
+        return Results.Forbid();
+    }
+
+    if (!await teamAuthorization.CanInviteAsync(
+        actor.UserId,
+        actor.OrganizationId,
+        ct))
+    {
+        return Results.Forbid();
+    }
+
+    var role = request.Role?.Trim().ToLowerInvariant() switch
+    {
+        "member" => "member",
+        "admin" => "admin",
+        _ => null
+    };
+
+    if (role is null)
+    {
+        return Results.BadRequest(new { message = "Role must be member or admin." });
+    }
+
+    var invitation = await authService.CreateEmailInvitationAsync(
+        new SqlOSCreateEmailInvitationRequest(
+            OrganizationId: actor.OrganizationId,
+            Email: request.Email,
+            Role: role,
+            ClientId: "atlas-web",
+            RedirectUri: "https://app.atlas.example/auth/callback",
+            Scope: "openid profile email offline_access",
+            Resource: "https://api.atlas.example",
+            CustomFields: new JsonObject
+            {
+                ["source"] = "members-page"
+            },
+            InvitedByUserId: actor.UserId,
+            SendEmail: true),
+        http,
+        ct);
+
+    // Deliberately omit invitation.InviteUrl from the browser response.
+    return Results.Ok(new
+    {
+        invitation.Id,
+        invitation.Email,
+        invitation.Role,
+        invitation.Status,
+        invitation.ExpiresAt
+    });
+});
+
+public sealed record CreateAtlasInvitationRequest(string Email, string? Role);
+```
+
+`CreateEmailInvitationAsync` confirms that the organization is active, validates the fixed client and redirect URI, applies invitation rate limits, supersedes an older pending invite for the same organization/email, and records `invitation.created`. It deliberately does **not** decide whether the caller is allowed to invite or which product roles are valid; Atlas owns those decisions.
+
+<Callout type="warning" title="Do not return the accept URL by default">
+  `SqlOSEmailInvitationResult.InviteUrl` contains the raw bearer-style invitation token. Keep it out of browser telemetry, audit metadata, support transcripts, and ordinary API responses. Returning it is appropriate only for an explicitly authorized copy-link workflow.
+</Callout>
+
+## 4. Let hosted AuthPage accept the invitation
+
+The email links to:
+
+```text
+GET /sqlos/auth/invitations/accept?token=...
+```
+
+With this guide's configuration, AuthPage fixes the invited email and offers:
+
+- **Email me a sign-in code** for an existing account.
+- **Create account** for a new passwordless user.
+
+Acceptance is transactional. SqlOS compares normalized email before it creates access, marks the matching email verified, creates or reactivates membership, consumes the invitation, and completes the OAuth redirect.
+
+Membership behavior is intentionally idempotent:
+
+| Existing state | Acceptance result |
+| --- | --- |
+| No membership | Create membership with the invited role |
+| Inactive membership | Reactivate it with the invited role |
+| Active membership | Consume the invitation and preserve the current role |
+| Different effective email | Reject without creating membership |
+| Accepted, revoked, or expired invitation | Reject as invalid or expired |
+
+## 5. Resend and revoke safely
+
+Keep these operations behind the same team authorization policy and verify that the invitation belongs to the actor's organization before invoking the SDK.
+
+```csharp
+var resent = await authService.ResendEmailInvitationAsync(
+    new SqlOSResendEmailInvitationRequest(invitationId),
+    httpContext,
+    ct);
+
+var revoked = await authService.RevokeEmailInvitationAsync(
+    new SqlOSRevokeEmailInvitationRequest(invitationId, "email_corrected"),
+    httpContext,
+    ct);
+```
+
+Resend rotates the raw token, so the previous link stops working. Revocation is idempotent for an unaccepted invitation; an accepted invitation cannot be revoked. The dashboard exposes the same lifecycle under an organization's **Invitations** tab.
+
+## 6. Keep SSO invitation-managed
+
+If Atlas later enables SAML, keep JIT provisioning off when organization access must remain invitation- or admin-managed:
+
+```csharp
+var draft = await adminService.CreateSsoConnectionDraftAsync(
+    new SqlOSCreateSsoConnectionDraftRequest(
+        OrganizationId: organizationId,
+        DisplayName: "Customer SSO",
+        PrimaryDomain: "customer.example",
+        AutoProvisionUsers: false,
+        AutoLinkByEmail: true));
+```
+
+In the delegated SSO portal these settings are named:
+
+- `AllowJitProvisioning = false`
+- `RequireSsoForExistingMembers = true`
+
+With JIT off, an unknown person cannot acquire membership merely by authenticating at the customer's IdP. A new invitee first accepts through the email invitation path. After membership exists, home realm discovery can require SSO for later sign-ins.
+
+<Callout type="info" title="Why this example omits social provider buttons">
+  SqlOS rejects membership activation when a social/OIDC identity's normalized email does not match the invitation. However, the provider flow can provision or link that provider identity before the later invitation mismatch is surfaced. For a strict invite-only onboarding example, keep the credential surface to Email OTP or password until that earlier side effect fits your account-linking policy.
+</Callout>
+
+## Headless alternative
+
+A custom invitation UI uses the same server-owned state machine:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /sqlos/auth/headless/invitations/resolve` | Validate the raw token and load safe invitation context |
+| `POST /sqlos/auth/headless/start` | Create a PKCE authorization request with `invitationToken` |
+| `GET /sqlos/auth/headless/requests/{requestId}` | Reload the bound request and invitation view |
+| `POST /sqlos/auth/headless/invitations/signup` | Create a passwordless invited account and complete acceptance |
+
+Keep the invited email read-only. Once SqlOS binds the invitation to an authorization request, preserve the request id through subsequent sign-in steps. Do not replace the invitation flow with ordinary Email OTP signup; that creates an unnecessary second proof and can lose the bound membership context.
+
+## Production checklist
+
+- Derive organization, inviter, and OAuth target from server-validated state.
+- Require an explicit organization owner/admin permission before create, resend, revoke, or copy-link actions.
+- Allowlist roles; `SqlOSInvitationService` normalizes role text but does not define your product's role model.
+- Use HTTPS and set the correct `PublicOrigin` before sending real email.
+- Keep token-bearing links out of logs, analytics, screenshots, and referrer-bearing third-party content.
+- Tune email, IP, organization, and inviter limits for your traffic.
+- Keep SAML JIT off when invitations control membership.
+- Test wrong-email, expired, revoked, superseded, reused, and already-active membership cases.
+- Audit invite lifecycle events without storing the raw email token.
+
+## Expected outcome
+
+Atlas owners can invite a teammate without granting the browser authority over tenant or role assignment. The email recipient joins only after SqlOS verifies the invitation-bound identity, and the resulting membership is visible in the Auth dashboard with a complete invitation audit trail.
+
+## Next steps
+
+- [Email Invitations](/docs/authserver/invitations)
+- [Memberships](/docs/authserver/memberships)
+- [Transactional Email](/docs/authserver/transactional-email)
+- [Email Branding](/docs/authserver/email-branding)
+- [SAML SSO](/docs/authserver/saml-sso)
+- [Add Audit Logs](/docs/guides/audit-logs)

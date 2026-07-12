@@ -37,6 +37,10 @@ SqlOS supports resource indicators end to end:
 
 If no `resource` is supplied, SqlOS can preserve the client-audience fallback for non-MCP app flows.
 
+<Callout type="warning" title="Binding is not a resource allowlist">
+  Authorization-code requests currently bind any non-empty `resource` into the transaction; they do not compare it with the client's configured audience. Enforce the exact expected audience at the protected resource, and use validated identity plus FGA or application policy for tool/data authorization.
+</Callout>
+
 ## Configuration
 
 Resource indicators are enabled by default.
@@ -49,12 +53,11 @@ builder.AddSqlOS<AppDbContext>(options =>
     options.AuthServer.ConfigureResourceIndicators(resource =>
     {
         resource.Enabled = true;
-        resource.PreserveClientAudienceFallback = true;
-        resource.EnforceOnTokenExchange = true;
-        resource.PreserveOriginalBindingOnRefresh = true;
     });
 });
 ```
+
+`Enabled` is the runtime switch. SqlOS currently applies client-audience fallback, exact token-exchange resource matching, and refresh binding as fixed behavior rather than independently switchable policies.
 
 Or turn them on implicitly with portable and compatibility helpers:
 

@@ -48,9 +48,13 @@ SqlOS__PhoneOtp__DefaultRegion=US
 Enable phone OTP and keep the initial rollout geographically narrow:
 
 ```csharp
+const string publicOrigin = "https://api.example.com";
+
 builder.AddSqlOS<AppDbContext>(options =>
 {
     var auth = options.AuthServer;
+    auth.PublicOrigin = publicOrigin;
+    auth.Issuer = $"{publicOrigin}/sqlos/auth";
 
     auth.ConfigurePhoneOtp(phone =>
     {
@@ -80,11 +84,18 @@ Startup validation fails when phone OTP is enabled without a complete Twilio con
 Native headless auth is deliberately opt-in. Register a first-party PKCE client, its exact deep link, and `allowNativeHeadlessAuth: true`:
 
 ```csharp
-options.AuthServer.SeedOwnedNativeApp(
-    "trailnote-mobile",
-    "Trailnote Mobile",
-    true,
-    "trailnote://auth/callback");
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "trailnote-mobile";
+    client.Name = "Trailnote Mobile";
+    client.Audience = "https://api.example.com";
+    client.RedirectUris = ["trailnote://auth/callback"];
+    client.AllowedScopes = ["openid", "profile", "offline_access"];
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowNativeHeadlessAuth = true;
+});
 ```
 
 Configure the same scheme in the mobile app. For an Expo app:
@@ -216,6 +227,7 @@ const tokenResponse = await fetch(`${AUTH}/token`, {
     redirect_uri: REDIRECT_URI,
     code: authorizationCode,
     code_verifier: verifier,
+    resource: "https://api.example.com",
   }).toString(),
 });
 ```
