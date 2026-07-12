@@ -81,11 +81,32 @@ internal static class SqlOSOptionsValidator
         ValidateCalendarOptions(options.Calendar, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
+        ValidateSigningKeyOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
         {
             throw new InvalidOperationException(
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
+        }
+    }
+
+    private static void ValidateSigningKeyOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.DefaultSigningKeyRotationIntervalDays <= 0
+            || options.DefaultSigningKeyGraceWindowDays <= 0
+            || options.DefaultSigningKeyRetiredCleanupDays <= 0)
+        {
+            errors.Add("AuthServer default signing-key lifecycle values must be positive days.");
+        }
+
+        if (options.DefaultSigningKeyGraceWindowDays >= options.DefaultSigningKeyRotationIntervalDays)
+        {
+            errors.Add("AuthServer.DefaultSigningKeyGraceWindowDays must be shorter than DefaultSigningKeyRotationIntervalDays.");
+        }
+
+        if (options.DefaultSigningKeyRetiredCleanupDays < options.DefaultSigningKeyGraceWindowDays)
+        {
+            errors.Add("AuthServer.DefaultSigningKeyRetiredCleanupDays must be at least DefaultSigningKeyGraceWindowDays.");
         }
     }
 

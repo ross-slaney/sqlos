@@ -7,6 +7,7 @@ var todoOrigin = $"http://localhost:{todoPort}";
 var todoResource = $"{todoOrigin}/api/todos";
 var todoIssuer = $"{todoOrigin}/sqlos/auth";
 var todoEnableEmailOtp = builder.Configuration["TodoSample:EnableEmailOtp"];
+var todoEnableDcr = builder.Configuration["TodoSample:EnableDcr"] ?? "false";
 var todoEnablePhoneOtp = builder.Configuration["TodoSample:EnablePhoneOtp"]
     ?? builder.Configuration["SqlOS:PhoneOtp:Enabled"];
 var emailConnectionString = builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"]
@@ -40,7 +41,12 @@ var todoApi = builder.AddProject<Projects.SqlOS_Todo_Api>("todo-api")
     .WithEnvironment("TodoSample__PublicOrigin", todoOrigin)
     .WithEnvironment("TodoSample__Resource", todoResource)
     .WithEnvironment("TodoSample__EnableHeadless", "false")
-    .WithEnvironment("TodoSample__EnableDcr", "false");
+    .WithEnvironment("TodoSample__EnableDcr", todoEnableDcr);
+
+builder.AddProject<Projects.SqlOS_Example_AspNetCoreWeb>("aspnet-web")
+    .WithEnvironment("SqlOS__Origin", todoOrigin)
+    .WithEnvironment("SqlOS__ClientId", "example-aspnet")
+    .WaitFor(todoApi);
 
 if (!string.IsNullOrWhiteSpace(todoEnableEmailOtp))
 {

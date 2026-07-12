@@ -89,6 +89,7 @@ Organization MFA policies inherit global settings until overridden. Use the admi
 
 ```bash
 curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "isEnabled": true,
@@ -108,9 +109,14 @@ Use role-based enforcement for privileged users:
   "isEnabled": true,
   "requireMfaForAllUsers": false,
   "requireMfaForOwnersAndAdmins": true,
-  "requiredRoles": ["owner", "admin"]
+  "userSelfEnrollmentEnabled": true,
+  "recoveryCodesEnabled": true,
+  "requiredRoles": ["owner", "admin"],
+  "availableFactors": ["totp", "recovery_code"]
 }
 ```
+
+`PUT` replaces the whole organization policy. Always send every field, preferably by reading the current policy and changing only the intended values in your operator code. Omitting a Boolean binds it to `false`; a partial payload could require MFA while accidentally disabling enrollment or recovery. The Admin API also requires an [operator session](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 ## Dashboard settings
 

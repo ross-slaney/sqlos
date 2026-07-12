@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">SMS sign-in for the Trailnote mobile example</title>
+  <desc id="desc">Two mobile screens show entering a phone number and then entering a one-time SMS code.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eff6ff"/><stop offset="1" stop-color="#eef2ff"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="14" stdDeviation="20" flood-opacity=".16"/></filter>
+    <style>
+      .eyebrow{font:700 15px system-ui,sans-serif;letter-spacing:2px;fill:#4f46e5}.title{font:750 42px system-ui,sans-serif;fill:#111827}.sub{font:400 19px system-ui,sans-serif;fill:#64748b}.phoneTitle{font:750 25px system-ui,sans-serif;fill:#111827}.phoneBody{font:500 14px system-ui,sans-serif;fill:#64748b}.label{font:650 13px system-ui,sans-serif;fill:#334155}.input{font:500 16px system-ui,sans-serif;fill:#111827}.button{font:700 15px system-ui,sans-serif;fill:#fff}.step{font:700 14px system-ui,sans-serif;fill:#4f46e5}
+    </style>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <text x="64" y="76" class="eyebrow">MOBILE PASSWORDLESS AUTH</text>
+  <text x="64" y="124" class="title">One phone number. One short-lived code.</text>
+  <text x="64" y="159" class="sub">An original Trailnote example using SqlOS native headless auth, PKCE, and Twilio Verify.</text>
+
+  <path d="M560 408h160" stroke="#818cf8" stroke-width="6" stroke-linecap="round"/>
+  <path d="m702 394 18 14-18 14" fill="none" stroke="#4f46e5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="640" cy="408" r="28" fill="#fff" stroke="#c7d2fe"/><text x="640" y="413" text-anchor="middle" class="step">SMS</text>
+
+  <g filter="url(#shadow)">
+    <rect x="210" y="205" width="350" height="455" rx="46" fill="#111827"/>
+    <rect x="225" y="220" width="320" height="425" rx="34" fill="#fff"/>
+    <rect x="720" y="205" width="350" height="455" rx="46" fill="#111827"/>
+    <rect x="735" y="220" width="320" height="425" rx="34" fill="#fff"/>
+  </g>
+  <rect x="325" y="220" width="120" height="22" rx="11" fill="#111827"/><rect x="835" y="220" width="120" height="22" rx="11" fill="#111827"/>
+
+  <circle cx="267" cy="279" r="18" fill="url(#brand)"/><path d="M260 279h14m-7-7v14" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <text x="296" y="285" class="label">TRAILNOTE</text>
+  <text x="260" y="345" class="phoneTitle">Sign in by text</text>
+  <text x="260" y="376" class="phoneBody">Use your mobile number to sync trips</text><text x="260" y="397" class="phoneBody">across devices.</text>
+  <text x="260" y="444" class="label">MOBILE NUMBER</text>
+  <rect x="260" y="458" width="250" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="280" y="493" class="input">(202) 555-0148</text>
+  <rect x="260" y="539" width="250" height="58" rx="14" fill="url(#brand)"/>
+  <text x="385" y="575" text-anchor="middle" class="button">TEXT MY CODE</text>
+  <text x="385" y="625" text-anchor="middle" class="phoneBody">Message and data rates may apply.</text>
+
+  <circle cx="777" cy="279" r="18" fill="url(#brand)"/><path d="M770 279h14m-7-7v14" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <text x="806" y="285" class="label">TRAILNOTE</text>
+  <text x="770" y="345" class="phoneTitle">Enter your code</text>
+  <text x="770" y="376" class="phoneBody">We sent a one-time code to</text><text x="770" y="397" class="phoneBody">+1 ••• ••• 0148.</text>
+  <text x="770" y="444" class="label">VERIFICATION CODE</text>
+  <g fill="#f8fafc" stroke="#cbd5e1"><rect x="770" y="458" width="34" height="54" rx="10"/><rect x="811" y="458" width="34" height="54" rx="10"/><rect x="852" y="458" width="34" height="54" rx="10"/><rect x="893" y="458" width="34" height="54" rx="10"/><rect x="934" y="458" width="34" height="54" rx="10"/><rect x="975" y="458" width="34" height="54" rx="10"/></g>
+  <g class="input" text-anchor="middle"><text x="787" y="492">4</text><text x="828" y="492">8</text><text x="869" y="492">2</text><text x="910" y="492">1</text><text x="951" y="492">7</text><text x="992" y="492">0</text></g>
+  <rect x="770" y="539" width="239" height="58" rx="14" fill="url(#brand)"/>
+  <text x="889" y="575" text-anchor="middle" class="button">SIGN IN</text>
+  <text x="889" y="625" text-anchor="middle" class="phoneBody">Use a different number</text>
+</svg>

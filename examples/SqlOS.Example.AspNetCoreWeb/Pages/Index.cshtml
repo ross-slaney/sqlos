@@ -1,0 +1,109 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "SqlOS for ASP.NET Core";
+    var isAuthenticated = User.Identity?.IsAuthenticated == true;
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <link rel="stylesheet" href="~/site.css" />
+</head>
+<body>
+    <main class="shell">
+        <nav class="nav">
+            <a class="brand" href="/" aria-label="SqlOS ASP.NET Core example home">
+                <span class="brand-mark">So</span>
+                <span>SqlOS <em>ASP.NET Core</em></span>
+            </a>
+            <a class="text-link" href="@Model.DashboardUrl" target="_blank" rel="noreferrer">Open dashboard ↗</a>
+        </nav>
+
+        <section class="hero">
+            <div>
+                <p class="eyebrow">One .NET login, end to end</p>
+                <h1>Hosted SqlOS auth.<br />Native ASP.NET Core session.</h1>
+                <p class="lede">
+                    The built-in OAuth handler owns PKCE and state. SqlOS owns sign-in.
+                    A secure ASP.NET cookie owns the application session.
+                </p>
+            </div>
+
+            @if (isAuthenticated)
+            {
+                <form method="post" asp-page-handler="Logout">
+                    <button class="button secondary" type="submit">Sign out and revoke</button>
+                </form>
+            }
+            else
+            {
+                <a class="button" asp-page-handler="Login">Sign in with SqlOS</a>
+            }
+        </section>
+
+        @if (!string.IsNullOrWhiteSpace(Model.Error))
+        {
+            <aside class="notice error" role="alert">
+                <strong>Sign-in failed</strong>
+                <span>@Model.Error</span>
+            </aside>
+        }
+
+        @if (isAuthenticated)
+        {
+            <section class="proof-grid" aria-label="Authenticated session proof">
+                <article class="card identity-card">
+                    <p class="card-label">Application session</p>
+                    <h2>@(User.Identity?.Name ?? "Signed-in user")</h2>
+                    <dl>
+                        <div><dt>Email</dt><dd>@(User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "—")</dd></div>
+                        <div><dt>User ID</dt><dd>@(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "—")</dd></div>
+                        <div><dt>Organization</dt><dd>@(User.FindFirst("org_id")?.Value ?? "No organization selected")</dd></div>
+                        <div><dt>Client</dt><dd>@(User.FindFirst("client_id")?.Value ?? "example-aspnet")</dd></div>
+                        <div><dt>Token expires</dt><dd>@(Model.TokenExpiresAt ?? "—")</dd></div>
+                    </dl>
+                </article>
+
+                <article class="card api-card">
+                    <div class="card-heading">
+                        <div>
+                            <p class="card-label">Protected API</p>
+                            <h2>GET /api/me</h2>
+                        </div>
+                        <span class="status-dot @(Model.ApiSucceeded ? "" : "error")">@(Model.ApiStatusCode?.ToString() ?? "—")</span>
+                    </div>
+                    <pre><code>@Model.ApiResponse</code></pre>
+                </article>
+            </section>
+        }
+        else
+        {
+            <section class="flow" aria-label="Authentication flow">
+                <article>
+                    <span>1</span>
+                    <h2>Challenge</h2>
+                    <p>ASP.NET Core creates state, a correlation cookie, and a PKCE verifier.</p>
+                </article>
+                <article>
+                    <span>2</span>
+                    <h2>Hosted auth</h2>
+                    <p>SqlOS handles password, organization choice, SSO, and MFA on its own origin.</p>
+                </article>
+                <article>
+                    <span>3</span>
+                    <h2>Secure session</h2>
+                    <p>The callback exchanges the code, loads <code>/api/me</code>, and signs in the cookie.</p>
+                </article>
+            </section>
+        }
+
+        <footer>
+            <span>No JavaScript auth SDK. No hosted identity vendor.</span>
+            <span>Razor Pages · OAuth 2.0 + PKCE · SQL Server</span>
+        </footer>
+    </main>
+</body>
+</html>

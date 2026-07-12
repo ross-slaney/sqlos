@@ -1,7 +1,9 @@
+using System.Security.Cryptography;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
@@ -91,6 +93,30 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuthorizationCodes", "IX_SqlOSAuthorizationCodes_AuthorizationRequestId"),
             "SqlOSAuthorizationCodes.AuthorizationRequestId should be uniquely indexed.");
+        Assert.IsTrue(
+            await ColumnExistsAsync("SqlOSSigningKeys", "CustodyProvider"),
+            "SqlOSSigningKeys.CustodyProvider should identify the private-key custody backend.");
+        Assert.IsTrue(
+            await ColumnExistsAsync("SqlOSSigningKeys", "KeyReference"),
+            "SqlOSSigningKeys.KeyReference should contain only an opaque custody reference.");
+        Assert.IsFalse(
+            await ColumnExistsAsync("SqlOSSigningKeys", "PrivateKeyPem"),
+            "SqlOSSigningKeys must not retain a private-key PEM column.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSSigningKeys", "UX_SqlOSSigningKeys_OneActive"),
+            "SqlOSSigningKeys should enforce a single active key at the database boundary.");
+        Assert.AreEqual(
+            4096,
+            await ScalarIntAsync(
+                AspireFixture.SharedContext,
+                "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"),
+            "OAuth state must accommodate ASP.NET Core's protected correlation state.");
+        Assert.AreEqual(
+            4096,
+            await ScalarIntAsync(
+                AspireFixture.SharedContext,
+                "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"),
+            "Authorization codes must preserve the complete OAuth state value.");
     }
 
     [TestMethod]
@@ -154,7 +180,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(26, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(28, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -193,7 +219,173 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
-            Assert.AreEqual(26, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(28, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_UpgradesVersion26OAuthStateColumns()
+    {
+        var databaseName = $"SqlOSState_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion26OAuthStateSchemaAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.AreEqual(
+                4096,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"));
+            Assert.AreEqual(
+                4096,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"));
+            Assert.AreEqual(
+                new string('s', 256),
+                await ScalarStringAsync(
+                    context,
+                    "SELECT [State] FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_upgrade'"));
+            Assert.AreEqual(
+                28,
+                await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_DoesNotNarrowHotfixedOAuthStateColumns()
+    {
+        var databaseName = $"SqlOSStateWide_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion26WideOAuthStateSchemaAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.AreEqual(
+                8000,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationRequests', 'State')"));
+            Assert.AreEqual(
+                -1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT COL_LENGTH('dbo.SqlOSAuthorizationCodes', 'State')"));
+            Assert.AreEqual(
+                3000,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT LEN([State]) FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_wide'"));
+            Assert.AreEqual(
+                28,
+                await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_Version26PlaintextSigningKey_RenamesReferenceAndStartupRejectsIt()
+    {
+        var databaseName = $"SqlOSKeyUpgrade_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            using var rsa = RSA.Create(2048);
+            var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
+            var publicKeyPem = rsa.ExportRSAPublicKeyPem();
+            await context.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+                INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
+
+                CREATE TABLE [dbo].[SqlOSSigningKeys] (
+                    [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                    [Kid] NVARCHAR(120) NOT NULL UNIQUE,
+                    [Algorithm] NVARCHAR(20) NOT NULL,
+                    [PublicKeyPem] NVARCHAR(MAX) NOT NULL,
+                    [PrivateKeyPem] NVARCHAR(MAX) NOT NULL,
+                    [IsActive] BIT NOT NULL,
+                    [ActivatedAt] DATETIME2 NOT NULL,
+                    [RetiredAt] DATETIME2 NULL
+                );
+                """);
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO [dbo].[SqlOSSigningKeys] (
+                    [Id], [Kid], [Algorithm], [PublicKeyPem], [PrivateKeyPem],
+                    [IsActive], [ActivatedAt], [RetiredAt])
+                VALUES (
+                    {"key_legacy_plaintext"}, {"legacy-plaintext-kid"},
+                    {SecurityAlgorithms.RsaSha256}, {publicKeyPem}, {privateKeyPem},
+                    {true}, {DateTime.UtcNow}, NULL);
+                """);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+            await initializer.EnsureSchemaAsync();
+
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSSigningKeys", "KeyReference"));
+            Assert.IsFalse(await ColumnExistsAsync(context, "SqlOSSigningKeys", "PrivateKeyPem"));
+            Assert.AreEqual(
+                "legacy-unprotected",
+                await ScalarStringAsync(context, "SELECT TOP 1 [CustodyProvider] FROM [dbo].[SqlOSSigningKeys]"));
+            Assert.AreEqual(
+                privateKeyPem,
+                await ScalarStringAsync(context, "SELECT TOP 1 [KeyReference] FROM [dbo].[SqlOSSigningKeys]"));
+
+            var crypto = new SqlOSCryptoService(
+                context,
+                Options.Create(AspireFixture.Options),
+                AspireFixture.DataProtectionProvider);
+            var exception = await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+                () => crypto.EnsureActiveSigningKeyAsync());
+            StringAssert.Contains(exception.Message, "contains plaintext private key material");
         }
         finally
         {
@@ -355,6 +547,52 @@ public sealed class SchemaInitializerIntegrationTests
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
             );
             """);
+    }
+
+    private static async Task SeedVersion26OAuthStateSchemaAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
+
+            CREATE TABLE [dbo].[SqlOSAuthorizationRequests] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [State] NVARCHAR(256) NOT NULL
+            );
+
+            CREATE TABLE [dbo].[SqlOSAuthorizationCodes] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [State] NVARCHAR(256) NOT NULL
+            );
+            """);
+
+        var requestId = "req_state_upgrade";
+        var state = new string('s', 256);
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({requestId}, {state})");
+    }
+
+    private static async Task SeedVersion26WideOAuthStateSchemaAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (26);
+
+            CREATE TABLE [dbo].[SqlOSAuthorizationRequests] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [State] NVARCHAR(4000) NOT NULL
+            );
+
+            CREATE TABLE [dbo].[SqlOSAuthorizationCodes] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [State] NVARCHAR(MAX) NOT NULL
+            );
+            """);
+
+        var requestId = "req_state_wide";
+        var state = new string('s', 3000);
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO [dbo].[SqlOSAuthorizationRequests] ([Id], [State]) VALUES ({requestId}, {state})");
     }
 
     private static async Task<string?> ScalarStringAsync(DbContext context, string sql)

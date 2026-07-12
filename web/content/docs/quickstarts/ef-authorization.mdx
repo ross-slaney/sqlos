@@ -1,7 +1,7 @@
 ---
 title: "Authorize EF Core queries"
 description: "Model one protected entity and filter accessible rows in SQL."
-order: 3
+order: 4
 section: quickstarts
 ---
 
@@ -20,7 +20,7 @@ Create projects through an audience-protected API and return only projects the s
 
 ## Prerequisites
 
-- SqlOS 3.16.0;
+- SqlOS 3.17.0;
 - .NET 9, EF Core 9, and SQL Server;
 - a completed [Protect an API](/docs/quickstarts/protect-api) flow;
 - a valid access token whose `aud` is `http://localhost:5050/api`.
@@ -234,6 +234,10 @@ curl http://localhost:5050/api/projects \
 ```
 
 Open `/sqlos/admin/fga/resources` and confirm the project resource exists. Open Grants and confirm the signed-in subject has `project_owner` on that resource.
+
+Use the Access Tester to verify the same subject, resource, and permission before comparing the decision with the API response:
+
+![SqlOS Access Tester for an EF Core authorization decision](/docs/dashboard-access-tester.png)
 
 Sign in as another user and call the list endpoint. It should not return the first user's project until you explicitly grant that subject an appropriate role.
 

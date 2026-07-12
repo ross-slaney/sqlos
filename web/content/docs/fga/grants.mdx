@@ -28,6 +28,7 @@ await context.SaveChangesAsync(ct);
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/fga/api/grants \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "subjectId": "usr_...",
@@ -57,8 +58,11 @@ A Store Clerk granted on `store-001` can only see that one store's inventory. A 
 **Admin API**:
 
 ```bash
-curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{grantId}
+curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{grantId} \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+The Admin API requires an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 ## Time-bounded grants
 

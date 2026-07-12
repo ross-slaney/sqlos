@@ -25,15 +25,15 @@ Users click provider buttons such as **Continue with Google**, **Continue with M
 
 ![Hosted AuthPage with GitHub and Microsoft social providers enabled](/docs/guides-social-sign-in.png)
 
-The Todo demo above was started with password as its primary credential plus seeded GitHub and Microsoft connections. Provider buttons appear only for enabled connections.
+The screenshot shows a deliberately configured environment with GitHub and Microsoft enabled. The Todo demo does not seed GitHub, and its Microsoft connection appears only when client credentials are configured. Provider buttons appear only for enabled connections.
 
 ## Google
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth **Web application** client.
 2. Open **`/sqlos/admin/auth/oidc`** in your running app.
 3. Create a connection with provider **Google**, your client ID and secret.
-4. Copy the **callback URI** SqlOS shows (includes your connection id) and add it to Google’s authorized redirect URIs.
-5. Enable the connection in the dashboard.
+4. Copy the exact **callback URI** SqlOS shows—normally `/sqlos/auth/oidc/callback`, with no connection-id suffix—and add it to Google’s authorized redirect URIs.
+5. Confirm the connection is enabled; new connections start enabled.
 
 See [Google OIDC](/docs/authserver/google-oidc) for curl-based setup and failure modes.
 
@@ -42,7 +42,7 @@ See [Google OIDC](/docs/authserver/google-oidc) for curl-based setup and failure
 1. Register an app in [Microsoft Entra](https://entra.microsoft.com/) (App registrations).
 2. Add a redirect URI matching SqlOS (same pattern as Google).
 3. Create the connection in **`/sqlos/admin/auth/oidc`** with provider **Microsoft**.
-4. Enable the connection.
+4. Confirm the connection is enabled; new connections start enabled.
 
 See [Microsoft OIDC](/docs/authserver/microsoft-oidc).
 
@@ -52,7 +52,7 @@ See [Microsoft OIDC](/docs/authserver/microsoft-oidc).
 2. Open **`/sqlos/admin/auth/oidc`** in your running app.
 3. Create a connection with provider **GitHub**, your GitHub OAuth App client ID, and client secret.
 4. Copy the **provider callback URI** SqlOS shows and set it as the GitHub OAuth App **Authorization callback URL**.
-5. Enable the connection.
+5. Confirm the connection is enabled; new connections start enabled.
 
 SqlOS requests `read:user` and `user:email` by default so it can load the GitHub profile and verified primary email address. See [GitHub OIDC](/docs/authserver/github-oidc) for dashboard, API, and code-first setup.
 
@@ -113,7 +113,7 @@ auth.SeedOidcConnection(oidc =>
 
 ## Test
 
-1. Open your app’s login entry point (or `/sqlos/auth/login`).
+1. Start your app's OAuth login flow at `/sqlos/auth/authorize` (normally through your framework's OAuth middleware).
 2. Enter an email and choose the social provider.
 3. Complete the IdP flow and confirm you land back in your app with a valid session.
 
