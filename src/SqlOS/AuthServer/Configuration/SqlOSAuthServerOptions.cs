@@ -20,9 +20,9 @@ public class SqlOSAuthServerOptions
     /// <summary>
     /// Grace window after a refresh token has been rotated during which the
     /// previous refresh token can still be exchanged. Concurrent and near-
-    /// concurrent calls within the window receive the SAME new token pair
-    /// that was issued at rotation time, instead of triggering replay
-    /// detection. This prevents legitimate concurrent refresh requests
+    /// concurrent calls within the window receive the same cached access
+    /// token plus a fresh sibling refresh token in the same family and with
+    /// the same expiry, instead of triggering replay detection. This prevents legitimate concurrent refresh requests
     /// (multiple tabs, parallel SSR calls, mobile retries, multi-instance
     /// load-balanced deployments) from being false-flagged as token theft.
     /// Default 30 seconds matches Okta's default. Set to 0 to disable the

@@ -1,7 +1,7 @@
 ---
 title: "Protect an API"
 description: "Validate SqlOS access tokens for an exact API audience."
-order: 2
+order: 3
 section: quickstarts
 ---
 
@@ -11,7 +11,7 @@ section: quickstarts
   href="#complete-program"
   actionLabel="View the code"
 >
-  Apply `RequireSqlOSAccessToken` to a route group. SqlOS validates signature, lifetime, session state, revocation, and audience before your endpoint runs.
+  Apply `RequireSqlOSAccessToken` to a route group. SqlOS validates signature, lifetime, audience, and persisted session existence/revocation/absolute expiry before your endpoint runs.
 </Banner>
 
 ## Goal
@@ -20,10 +20,10 @@ Add `/api/me` to a one-application SqlOS host. Requests without a bearer token r
 
 ## Prerequisites
 
-- SqlOS 3.16.0;
+- SqlOS 3.17.0;
 - .NET 9 and EF Core 9;
 - the [Add SqlOS to one app](/docs/quickstarts/add-to-app) setup;
-- a browser or other PKCE client that completes the SqlOS authorization-code flow.
+- the working [.NET hosted-login flow](/docs/quickstarts/aspnet-core-login), adapted so its registered callback matches your handler and its audience is `http://localhost:5050/api`, or another PKCE client that does the same.
 
 ## Complete program
 
@@ -104,6 +104,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 `RequireSqlOSAccessToken` is an endpoint filter on the route group. After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
 
+<Callout type="info" title="Audience follows the API, not the login sample">
+  The runnable ASP.NET Core sample requests the Todo audience at `http://localhost:5080/api/todos`. When adapting that handler to this standalone host, register and request `http://localhost:5050/api`. A valid token for the Todo API is correctly rejected here.
+</Callout>
+
 ## Verify
 
 Start the application:
@@ -138,6 +142,10 @@ Expected result:
 }
 ```
 
+The persisted session remains visible to operators, including its user, client, organization, timestamps, and revocation state:
+
+![SqlOS session administration after a protected API call](/docs/dashboard-sessions.png)
+
 ## Common failures
 
 ### Every request returns `401`
@@ -146,7 +154,7 @@ Compare the token's `aud` claim with `ExpectedAudience`. Audience matching is ex
 
 ### The bearer token is valid but revoked
 
-Validation also checks the persisted session. Signing out all sessions, revoking the session, or disabling the client—which revokes its sessions—can invalidate an otherwise well-formed JWT. Removing an application assignment blocks new authorization and refresh, but it does not revoke an already-issued access token; revoke the relevant sessions for immediate database-backed rejection.
+SqlOS session-aware validation checks that the persisted session exists and is not revoked or absolutely expired. Signing out all sessions, revoking the session, or disabling the client—which revokes its sessions—invalidates an otherwise well-formed JWT. Removing an application assignment blocks new authorization and refresh, but it does not revoke an already-issued access token; revoke the relevant sessions when the policy change must invalidate current access immediately.
 
 ### `GetSqlOSValidatedToken()` is null
 

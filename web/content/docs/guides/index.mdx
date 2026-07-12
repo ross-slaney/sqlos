@@ -19,6 +19,7 @@ section: guides
 <CardGrid cols={2}>
   <Card title="Run the Todo sample" description="Fastest runnable proof." href="/docs/quickstarts/run-todo" />
   <Card title="Add SqlOS to one app" description="Canonical UseSingleApplication setup." href="/docs/quickstarts/add-to-app" />
+  <Card title="Sign in from ASP.NET Core" description="Framework-owned PKCE, callback, and cookie session." href="/docs/quickstarts/aspnet-core-login" />
   <Card title="Protect an API" description="Audience-aware bearer validation." href="/docs/quickstarts/protect-api" />
   <Card title="Authorize EF queries" description="SQL-backed row filtering." href="/docs/quickstarts/ef-authorization" />
 </CardGrid>
@@ -91,7 +92,13 @@ section: guides
   <Card title="Configuration" description="Review service registration, dashboard, and client modes." href="/docs/guides/configuration">
     <img className="sqlos-guide-card-image" src="/docs/guides-configuration.png" alt="Configured SqlOS dashboard" />
   </Card>
-  <Card title="Testing" description="Run unit, integration, and docs checks locally." href="/docs/guides/testing">
+  <Card title="Production readiness" description="Harden public URLs, proxies, keys, schema rollouts, backups, and health gates." href="/docs/guides/production-readiness">
+    <img className="sqlos-guide-card-image" src="/docs/guides-production-readiness.svg" alt="SqlOS production deployment boundary" />
+  </Card>
+  <Card title="Test your integration" description="Prove your own OAuth, SQL, tenant, grant, and revocation boundaries." href="/docs/guides/test-your-integration">
+    <img className="sqlos-guide-card-image" src="/docs/guides-test-your-integration.svg" alt="Consumer integration test architecture" />
+  </Card>
+  <Card title="Contribute to SqlOS" description="Run the repository's unit, integration, docs, and coverage checks." href="/docs/guides/testing">
     <img className="sqlos-guide-card-image" src="/docs/guides-testing.svg" alt="SqlOS testing pipeline" />
   </Card>
   <Card title="Troubleshooting" description="Diagnose common setup, OAuth, SAML, and SQL issues." href="/docs/guides/troubleshooting">

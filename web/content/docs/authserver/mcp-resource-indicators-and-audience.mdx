@@ -43,7 +43,7 @@ If no `resource` is supplied, SqlOS can preserve the client-audience fallback fo
 
 ## Configuration
 
-Resource indicators are enabled by default.
+Resource indicators are enabled in the raw multi-client defaults. `UseSingleApplication(...)` deliberately disables them for the simpler one-app model, so enable them explicitly before expecting a supplied `resource` value to control `aud` in that mode.
 
 You can configure them directly:
 

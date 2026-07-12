@@ -618,7 +618,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.LoginHintEmail).HasMaxLength(320);
             entity.Property(x => x.UiContextJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
-            entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.State).HasMaxLength(2048);
             entity.Property(x => x.Scope).HasMaxLength(1000);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.Nonce).HasMaxLength(256);
@@ -656,7 +656,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => x.CodeHash).IsUnique();
             entity.HasIndex(x => x.AuthorizationRequestId).IsUnique();
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
-            entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.State).HasMaxLength(2048);
             entity.Property(x => x.Scope).HasMaxLength(1000);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.CodeHash).HasMaxLength(128);

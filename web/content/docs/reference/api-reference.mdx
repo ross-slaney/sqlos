@@ -1,33 +1,50 @@
 ---
-title: "HTTP Protocol API"
-description: "Consumer-facing OAuth, hosted-auth, headless-auth, OIDC, SAML, and optional registration routes mounted by MapSqlOS."
+title: "HTTP API Reference"
+description: "Source-aligned OAuth, hosted-auth, headless-auth, direct JSON, SSO setup, and operator HTTP surfaces installed by SqlOS."
 order: 12
 section: reference
 ---
 
 <Banner
   eyebrow="HTTP reference"
-  title="Routes mounted by MapSqlOS"
+  title="HTTP surfaces installed by SqlOS"
   href="/docs/reference/hosting-api"
   actionLabel="Hosting API"
 >
-  This page covers consumer-facing protocol and authentication routes from the `SqlOS` package. Dashboard APIs and routes created by example applications have different support boundaries described below.
+  `AddSqlOS` installs the dashboard middleware and `MapSqlOS` maps the protocol, authentication, audit, email, and optional calendar endpoints. This page separates interoperable protocol routes from UI handlers and trusted operator surfaces.
 </Banner>
+
+## Choose the right surface
+
+SqlOS exposes several HTTP surfaces from the same package, but they are not interchangeable.
+
+| Surface | Intended caller | Contract |
+| --- | --- | --- |
+| OAuth protocol | OAuth clients, CLIs, and resource servers | Discoverable, standards-shaped endpoints such as `/authorize`, `/token`, device authorization, and JWKS |
+| Hosted AuthPage | A user's browser after your app redirects to `/authorize` | HTML pages and form handlers owned by SqlOS; do not build a client around individual form routes |
+| Headless AuthPage API | A host-owned custom sign-in UI | JSON state machine using `requestId` plus the SqlOS AuthPage session cookie |
+| Direct JSON auth helpers | Deliberate host-owned integrations | Strongly typed SqlOS request/result records, but no single shared error envelope or blanket route authorization policy; review each route before exposing it |
+| Dashboard/operator APIs | The bundled dashboards and trusted backend administration | UI implementation endpoints, not a stable browser management SDK |
 
 ## Base paths
 
-`app.MapSqlOS()` reads the configured paths and maps the package routes.
+With the normal `builder.AddSqlOS<TContext>(...)` and `app.MapSqlOS()` setup, `DashboardBasePath` is the effective root. `AddSqlOS` derives the auth base as `{DashboardBasePath}/auth` after running the configuration callback. Setting `AuthServer.BasePath` independently inside that callback is therefore not an independent route-prefix override.
 
 | Surface | Default base path | Configuration |
 | --- | --- | --- |
-| OAuth and hosted auth | `/sqlos/auth` | `SqlOSOptions.AuthServer.BasePath` |
-| Auth dashboard | `/sqlos/admin/auth` | Derived from the auth/dashboard base path |
+| Dashboard shell | `/sqlos` | `SqlOSOptions.DashboardBasePath` |
+| OAuth, hosted auth, and direct JSON auth | `/sqlos/auth` | `{DashboardBasePath}/auth` |
+| Headless AuthPage API | `/sqlos/auth/headless` | `AuthServer.Headless.HeadlessApiBasePath` |
+| Auth dashboard | `/sqlos/admin/auth` | Derived from `DashboardBasePath` |
 | FGA dashboard | `/sqlos/admin/fga` | `SqlOSOptions.DashboardBasePath` |
 | Audit dashboard | `/sqlos/admin/audit` | `SqlOSOptions.DashboardBasePath` |
 | Email dashboard | `/sqlos/admin/email` | `SqlOSOptions.DashboardBasePath` |
 | Calendar dashboard | `/sqlos/admin/calendar` | Mapped only when calendar is enabled |
+| Customer SSO setup API | `/sqlos/admin/auth/sso-portal/api/setup` | `AuthServer.SsoPortal.HeadlessApiBasePath` |
 
-Changing `DashboardBasePath` also aligns the default AuthServer base path. `AuthServer.Issuer` must be an absolute URI whose path matches `AuthServer.BasePath`; when `PublicOrigin` is configured, the issuer must be `{PublicOrigin}{BasePath}`.
+`AuthServer.Issuer` must be an absolute URI whose path matches the derived auth base. When `PublicOrigin` is configured, the issuer must be `{PublicOrigin}{BasePath}`.
+
+The dashboard shell and FGA dashboard are middleware installed by `AddSqlOS`. `MapSqlOS` maps AuthServer, audit, email, and—when enabled—calendar endpoints. This distinction matters if you compose the ASP.NET Core pipeline manually.
 
 ## OAuth discovery and keys
 
@@ -45,7 +62,33 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `GET` | `/sqlos/auth/authorize` | Query parameters | Start OAuth authorization code + PKCE |
 | `POST` | `/sqlos/auth/token` | `application/x-www-form-urlencoded` | Exchange an authorization code, refresh token, or device code |
 
-The authorization request supports standard OAuth fields including `client_id`, `redirect_uri`, `response_type=code`, `state`, `scope`, `code_challenge`, and `code_challenge_method=S256`. Resource-bound clients can also send `resource` when resource indicators are enabled.
+### Authorization request
+
+| Parameter | Required | Behavior |
+| --- | --- | --- |
+| `response_type` | Yes | Must be `code`. |
+| `client_id` | Yes | A stored client ID or, when CIMD is enabled, an allowed HTTPS metadata-document URL. |
+| `redirect_uri` | Yes for a usable browser flow | Must match one of the resolved client's redirect URIs. |
+| `state` | Yes | Returned unchanged to the client; length must be 1–2048 characters. |
+| `scope` | No | Space-separated. When a client has an allowed-scope list, SqlOS keeps only requested scopes from that list. |
+| `code_challenge` | For clients that require PKCE | Verified during token exchange. |
+| `code_challenge_method` | With PKCE | Only `S256` is supported. |
+| `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
+| `login_hint` | No | Prefills or routes the hosted/headless login flow. |
+| `prompt` | No | `login` clears the reusable AuthPage session; `none` returns `login_required` when no reusable session exists. |
+| `nonce` | No | Stored with the authorization request as client flow context. |
+
+SqlOS-specific presentation parameters include `view` (`invite`, `login`, `signup`, `password`, `forgot-password`, `email-otp`, `phone-otp`, or `phone-otp-signup`), `ui_context` for a headless UI, and `invitation_token`/`invitationToken` for an invitation-bound flow. Portable OAuth clients should rely only on discovery and standard parameters.
+
+On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, `state`, and the granted `scope`. Errors that occur after a valid authorization request can redirect to the client; malformed requests handled before that point render the hosted error page or redirect to the configured headless UI. Do not assume every `/authorize` failure has a JSON body.
+
+### Token request
+
+| `grant_type` | Required fields | Notes |
+| --- | --- | --- |
+| `authorization_code` | `code`, `client_id`; `code_verifier` when PKCE-bound | `redirect_uri`, when supplied, must match. `resource` must match the original request. |
+| `refresh_token` | `refresh_token` | `resource` is optional but cannot change the original resource binding. Public clients may still send `client_id`; SqlOS does not use it as client authentication for this grant. |
+| `urn:ietf:params:oauth:grant-type:device_code` | `client_id`, `device_code` | `resource` must match the device request. |
 
 Authorization-code exchange:
 
@@ -77,6 +120,7 @@ Successful token responses use OAuth-style snake-case JSON fields such as `acces
 | --- | --- | --- |
 | `POST` | `/sqlos/auth/device_authorization` | Start a device authorization request from a client allowed to use device flow |
 | `GET` | `/sqlos/auth/device` | Open the user verification page |
+| `GET` | `/sqlos/auth/device/approve` | Open a resolved approval page |
 | `POST` | `/sqlos/auth/device/verify` | Resolve a user code in the hosted UI |
 | `POST` | `/sqlos/auth/device/approve` | Approve the resolved request |
 | `POST` | `/sqlos/auth/device/deny` | Deny the resolved request |
@@ -92,30 +136,97 @@ curl -X POST https://app.example.com/sqlos/auth/device_authorization \
   --data-urlencode 'resource=https://app.example.com/api'
 ```
 
+Device authorization is enabled by default, but the client must explicitly allow the device grant. Seed it with `SeedDeviceFlowClient`/`SeedCliClient` or configure `AllowDeviceAuthorization` plus the device-code grant on the client.
+
+A successful start response is:
+
+```json
+{
+  "device_code": "opaque-device-secret",
+  "user_code": "ABCD-EFGH",
+  "verification_uri": "https://app.example.com/sqlos/auth/device",
+  "verification_uri_complete": "https://app.example.com/sqlos/auth/device?user_code=ABCD-EFGH",
+  "expires_in": 900,
+  "interval": 5
+}
+```
+
+Honor `interval` while polling `/token`. Device errors use the OAuth-style `error` and `error_description` fields and can include an updated `interval`.
+
+| Error | Meaning |
+| --- | --- |
+| `authorization_pending` | The user has not approved the request yet. |
+| `slow_down` | Polling is too frequent or the start rate limit was reached. |
+| `access_denied` | The user denied the request. |
+| `expired_token` | The device code expired. |
+| `unauthorized_client` / `invalid_client` | The client is not eligible for public device authorization. |
+| `invalid_scope` / `invalid_target` | A requested scope or resource is not allowed. |
+| `invalid_grant` | The device code is invalid, mismatched, or already consumed. |
+
 ## Hosted AuthPage
 
-These browser routes render or process the SqlOS-hosted sign-in experience. Applications normally begin at `/authorize`; they do not call each form handler directly.
+These browser routes render or process the SqlOS-hosted sign-in experience. Applications normally begin at `/authorize`; they do not call each form handler directly. The form posts use `application/x-www-form-urlencoded` and can change with the bundled UI.
 
-| Method | Route | Purpose |
+| Method | Route family | Purpose |
 | --- | --- | --- |
 | `GET` | `/sqlos/auth/login` | Hosted sign-in page |
 | `POST` | `/sqlos/auth/login/identify` | Home-realm discovery |
 | `POST` | `/sqlos/auth/login/password` | Password sign-in form |
-| `GET` / `POST` | `/sqlos/auth/login/email-otp` and child routes | Email-code sign-in UI/start/verify |
-| `GET` / `POST` | `/sqlos/auth/login/phone-otp` and child routes | Phone-code sign-in UI/start/verify |
+| `GET` plus child `POST` routes | `/sqlos/auth/login/email-otp` | Email-code sign-in UI, start, and verify |
+| `GET` plus child `POST` routes | `/sqlos/auth/login/phone-otp` | Phone-code sign-in UI, start, and verify |
 | `POST` | `/sqlos/auth/login/select-organization` | Complete multi-organization selection |
-| `GET` / `POST` | `/sqlos/auth/signup` and child routes | Password, email-code, phone-code, or invitation signup |
+| `GET` | `/sqlos/auth/login/oidc/{connectionId}` | Start a configured social/OIDC provider from the hosted UI |
+| `GET` plus child `POST` routes | `/sqlos/auth/signup` | Password, email-code, phone-code, or invitation signup |
+| `GET` | `/sqlos/auth/signup/phone-otp` | Phone-code signup page |
 | `POST` | `/sqlos/auth/mfa/verify` | Verify a hosted MFA challenge |
 | `POST` | `/sqlos/auth/mfa/totp/enroll/verify` | Complete required TOTP enrollment |
+| `GET` / `POST` | `/sqlos/auth/password/forgot` and `/password/forgot/submit` | Hosted password-reset request |
+| `GET` / `POST` | `/sqlos/auth/password/reset` and `/password/reset/submit` | Hosted password-reset form |
 | `GET` | `/sqlos/auth/invitations/accept?token=...` | Open an email invitation |
-| `GET` / `POST` | `/sqlos/auth/logout` | End the current session/token flow |
+| `GET` / `POST` | `/sqlos/auth/device` and child routes | Resolve, approve, or deny a device request |
+| `GET` | `/sqlos/auth/logout` | End the reusable AuthPage session and redirect safely |
 | `GET` | `/sqlos/auth/logged-out` | Hosted post-logout page |
 
-Form routes can change with the hosted UI. Integrate through `/authorize`, `/token`, and the documented AuthPage configuration unless you are intentionally building a headless UI.
+Integrate through `/authorize`, `/token`, and the documented AuthPage configuration unless you are intentionally building a headless UI. `POST /sqlos/auth/signup` and `POST /sqlos/auth/logout` are JSON helpers described next; they are not hosted form handlers.
+
+## Direct JSON authentication API
+
+These routes expose the same strongly typed contracts used by `SqlOSAuthService`. They can be useful for a first-party host integration, but they are not a second OAuth protocol and they do not share one normalized error envelope. Some handlers return a plain `400` message while others allow service exceptions to flow through the host's exception pipeline.
+
+| Method and route | JSON request | Success response |
+| --- | --- | --- |
+| `POST /sqlos/auth/signup` | `SqlOSSignupRequest` | `200 SqlOSLoginResult` |
+| `POST /sqlos/auth/password/login` | `SqlOSPasswordLoginRequest` | `200 SqlOSLoginResult` |
+| `POST /sqlos/auth/email-otp/start` | `SqlOSEmailOtpStartRequest` | `200 SqlOSEmailOtpStartResult` |
+| `POST /sqlos/auth/email-otp/verify` | `SqlOSEmailOtpVerifyRequest` | `200 SqlOSLoginResult` |
+| `POST /sqlos/auth/select-organization` | `SqlOSSelectOrganizationRequest` | `200 SqlOSLoginResult`, preserving possible MFA state |
+| `POST /sqlos/auth/mfa/challenge/verify` | `SqlOSMfaChallengeVerifyRequest` | `200 SqlOSMfaChallengeVerifyResult` |
+| `POST /sqlos/auth/mfa/challenge/totp/enroll/start` | `SqlOSTotpChallengeEnrollmentStartRequest` | `200 SqlOSTotpEnrollmentStartResult` |
+| `POST /sqlos/auth/mfa/challenge/totp/enroll/verify` | `SqlOSTotpEnrollmentVerifyRequest` | `200 SqlOSTotpEnrollmentVerifyResult` |
+| `POST /sqlos/auth/token/exchange` | `SqlOSExchangeCodeRequest` | `200 SqlOSTokenResponse` |
+| `POST /sqlos/auth/token/refresh` | `SqlOSRefreshRequest` | `200 SqlOSTokenResponse` |
+| `POST /sqlos/auth/logout` | `{ refreshToken?, sessionId? }` | `204 No Content` |
+| `POST /sqlos/auth/password/forgot` | `SqlOSForgotPasswordRequest` | `200 SqlOSPasswordResetRequestResult` |
+| `POST /sqlos/auth/password/reset-email` | `SqlOSSendPasswordResetEmailRequest` | `200 SqlOSPasswordResetRequestResult` |
+| `POST /sqlos/auth/password/reset` | `SqlOSResetPasswordRequest` | `204 No Content` |
+| `POST /sqlos/auth/email/verify` | `SqlOSVerifyEmailRequest` | `204 No Content` |
+
+`POST /token/exchange` consumes the temporary code created by the direct SAML request-token flow. An OAuth authorization-code client must use the form-encoded `POST /token` endpoint, which enforces the OAuth redirect URI, PKCE verifier, and optional resource binding.
+
+### Privileged helpers
+
+`MapSqlOS` also maps these JSON handlers:
+
+| Route | Behavior | Required host decision |
+| --- | --- | --- |
+| `POST /sqlos/auth/logout-all` | Accepts `{ userId }` and revokes every session for that user | Expose only behind host-owned authorization; the route does not infer the caller's user ID |
+| `POST /sqlos/auth/email/verification-token` | Accepts `SqlOSCreateVerificationTokenRequest` and returns the raw token | Never expose to an untrusted browser; call `SqlOSAuthService` from a protected backend workflow instead |
+
+The `/sqlos/auth` route group does not attach a blanket ASP.NET Core authorization policy. Flow endpoints validate their credentials, challenge tokens, or request state, but explicit IDs are not self-authorizing. Apply host middleware/edge rules to privileged helpers or wrap the .NET service in your own authorized endpoint.
 
 ## Headless AuthPage API
 
-The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthServer.Headless.HeadlessApiBasePath`. These endpoints use JSON and operate on SqlOS authorization-request state.
+The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthServer.Headless.HeadlessApiBasePath`. `AuthServer.Headless.EnableApi` defaults to `true`; disabling it leaves the routes unavailable with `404`. These endpoints use JSON and operate on SqlOS authorization-request state.
 
 | Method | Relative route | Purpose |
 | --- | --- | --- |
@@ -145,7 +256,45 @@ The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthS
 | `POST` | `/device/approve` | Approve a device request |
 | `POST` | `/device/deny` | Deny a device request |
 
-For browser clients on a different origin, send credentialed requests so the reusable AuthPage session cookie is preserved. See [Headless Auth](/docs/authserver/headless-auth) for request/response walkthroughs.
+Start a flow with the same OAuth values you would send to `/authorize`:
+
+```bash
+curl -X POST https://app.example.com/sqlos/auth/headless/start \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "responseType": "code",
+    "clientId": "acme-web",
+    "redirectUri": "https://app.example.com/auth/callback",
+    "state": "client-generated-state",
+    "scope": "openid offline_access",
+    "codeChallenge": "...",
+    "codeChallengeMethod": "S256",
+    "resource": "https://app.example.com/api",
+    "loginHint": "jane@example.com",
+    "view": "login",
+    "uiContext": { "returnTo": "/settings" }
+  }'
+```
+
+Actions return `SqlOSHeadlessActionResult`. This abridged response shows the control-flow fields:
+
+```json
+{
+  "type": "view",
+  "redirectUrl": null,
+  "viewModel": {
+    "view": "login",
+    "requestId": "req_...",
+    "settings": {},
+    "providers": [],
+    "organizationSelection": []
+  }
+}
+```
+
+Keep `requestId` from the view model and send it in subsequent action requests. A completed action returns `type: "redirect"` with the registered client redirect URL; organization selection and MFA instead return another `view`. Validation failures currently use route-specific `400` bodies rather than one universal error object.
+
+For browser clients on a different origin, send credentialed requests so the reusable AuthPage session cookie is preserved. The cookie is HttpOnly; the response view model and action result are the UI contract. See [Headless Auth](/docs/authserver/headless-auth) for request/response walkthroughs.
 
 ## Social OIDC and SAML callbacks
 
@@ -165,11 +314,36 @@ Prefer the hosted/headless flow abstractions over invoking callback routes manua
 
 `POST /sqlos/auth/register` is mapped only when `AuthServer.ClientRegistration.Dcr.Enabled` is `true`. It accepts a `SqlOSDynamicClientRegistrationRequest` JSON document and applies the configured DCR redirect, client-type, rate-limit, and policy constraints.
 
+| Request field | Behavior |
+| --- | --- |
+| `client_name` | Display name for the registered client |
+| `redirect_uris` | Required HTTPS or loopback redirect URIs |
+| `grant_types` | Limited to the supported public-client grant set |
+| `response_types` | `code` for authorization-code clients |
+| `token_endpoint_auth_method` | `none`; confidential client secrets are not issued |
+| `client_uri` / `logo_uri` | Optional client presentation metadata |
+| `software_id` / `software_version` | Optional software metadata |
+
+Success returns `201 Created` with `SqlOSDynamicClientRegistrationResponse`. Rejections use `{ error, error_description }` with the status selected by `SqlOSClientRegistrationException`. SqlOS does not implement an RFC 7592 client-management endpoint.
+
 CIMD does not add a registration route. When enabled, SqlOS resolves URL-shaped client IDs through client metadata documents subject to its trust configuration. See [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr).
+
+## Customer SSO setup portal
+
+Self-serve SAML setup has a narrower trust boundary than the full dashboard:
+
+| Surface | Default path | Authorization |
+| --- | --- | --- |
+| Create/list/revoke setup sessions | `/sqlos/admin/auth/api/sso-portal/sessions` and organization-scoped variants | Full dashboard/operator authorization |
+| Open hosted setup portal | `/sqlos/admin/auth/sso-portal/start?token=...` | One-time opaque setup-link token, exchanged for the portal cookie |
+| Hosted portal API | `/sqlos/admin/auth/sso-portal/api/*` | Organization-scoped portal session cookie |
+| Host-owned headless setup API | `/sqlos/admin/auth/sso-portal/api/setup/*` | The same organization-scoped portal session cookie |
+
+The portal API can configure only the session's organization and SAML connection; it is not a general admin API. For a product-owned backend, inject `SqlOSSsoPortalService` to create setup sessions and expose only the setup URL. See [SAML SSO](/docs/authserver/saml-sso).
 
 ## Calendar callback
 
-When `SqlOSOptions.Calendar.Enabled` is `true`, `MapSqlOS` adds:
+`SqlOSOptions.Calendar.Enabled` defaults to `true`. While enabled, `MapSqlOS` adds:
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -177,16 +351,20 @@ When `SqlOSOptions.Calendar.Enabled` is `true`, `MapSqlOS` adds:
 
 Applications start the flow through `SqlOSCalendarService.StartConnectAsync`; there is no public HTTP start endpoint supplied by the package.
 
+The callback consumes the one-time state and redirects to the exact `ReturnUri` from `SqlOSStartCalendarConnectRequest`. Success appends `calendarConnectionId`; provider or completion failure appends `error`. Treat both values as callback input and verify the resulting connection belongs to the expected user or organization before using it.
+
 ## Dashboard and operator APIs
 
-`MapSqlOS` also maps APIs used by the embedded auth, FGA, audit, email, SSO-setup, and optional calendar dashboards. Those routes:
+SqlOS also exposes APIs used by the embedded auth, FGA, audit, email, SSO-setup, and optional calendar dashboards. Endpoint groups are mapped by `MapSqlOS`; the root and FGA dashboards are middleware installed by `AddSqlOS`. These surfaces:
 
-- are excluded from endpoint/OpenAPI discovery;
-- are protected by the dashboard authorization/session rules;
-- return `404` when the current environment/request is not authorized;
+- are excluded from ApiExplorer/OpenAPI descriptions;
+- are protected by the dashboard authorization/session rules, except delegated SSO setup routes that use their own one-time setup token and organization-scoped portal cookie;
+- hide, reject, or redirect unauthorized requests according to dashboard auth mode and whether the request is an API or page;
 - are implementation endpoints for the bundled operator UI, not a stable browser-facing management SDK.
 
-For trusted backend administration, inject the corresponding .NET service (`SqlOSAdminService`, `ISqlOSAuditLogService`, `SqlOSEmailAdminService`, or `SqlOSCalendarService`) rather than coupling application code to dashboard JSON shapes. Restrict `/sqlos` and `/sqlos/admin/*` at the network/edge layer in production.
+For trusted backend administration, inject the corresponding .NET service (`SqlOSAdminService`, `ISqlOSAuditLogService`, `SqlOSEmailAdminService`, `SqlOSCalendarService`, or `SqlOSSsoPortalService`) rather than coupling application code to dashboard JSON shapes.
+
+Use path-specific network/edge rules in production. Restrict the exact dashboard root (`/sqlos` or `/sqlos/`) and dashboard/operator paths under `/sqlos/admin/*`, but allow `/sqlos/admin/auth/sso-portal*` when customers use delegated SSO setup. Keep the `/sqlos/auth/*` routes required by hosted OAuth/authentication reachable; do not apply blanket `/sqlos/*` or `/sqlos/admin/*` blocks without those intentional exceptions.
 
 ## Example-application routes are not package APIs
 
@@ -203,4 +381,4 @@ They demonstrate how a consuming application can wrap SqlOS services, publish pr
 
 ## OpenAPI boundary
 
-The current package protocol and dashboard routes call `ExcludeFromDescription()`, so a consuming app's Swagger/OpenAPI document does not automatically become the canonical SqlOS protocol specification. Use OAuth discovery for machine-readable OAuth endpoint metadata and this source-aligned route reference for the remaining package routes. Swagger shown by the example stack describes the example application's endpoints, not the complete SqlOS package surface.
+Mapped SqlOS endpoint groups call `ExcludeFromDescription()`, while dashboard middleware is not an endpoint surface at all. A consuming app's Swagger/OpenAPI document therefore does not automatically become the canonical SqlOS protocol specification. Use OAuth discovery for machine-readable OAuth endpoint metadata and this source-aligned route reference for the remaining package routes. Swagger shown by the example stack describes the example application's endpoints, not the complete SqlOS package surface.

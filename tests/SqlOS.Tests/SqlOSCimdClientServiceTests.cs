@@ -164,6 +164,25 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUntrustedHostBeforeFetch()
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        options.ClientRegistration.Cimd.TrustedHosts.Add("trusted.example.test");
+        var httpFactory = new FakeHttpClientFactory(_ =>
+            throw new InvalidOperationException("Untrusted metadata must not be fetched."));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://untrusted.example.test/oauth/client.json",
+            "https://untrusted.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*is not trusted*");
+        httpFactory.RequestCount.Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsMismatchedClientId()
     {
         using var context = CreateContext();

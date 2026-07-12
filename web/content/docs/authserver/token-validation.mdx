@@ -5,7 +5,7 @@ order: 28
 section: authserver
 ---
 
-Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token.
+Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token. SqlOS SDK/middleware validation is session-aware; plain JWKS validation is not.
 
 ## Resource-server middleware
 
@@ -54,6 +54,8 @@ if (string.IsNullOrWhiteSpace(subjectId))
 var orgId = validated.OrganizationId;
 ```
 
+`ValidateAccessTokenAsync` validates issuer, signature, JWT lifetime, exact audience, and that the referenced SqlOS session exists and is not revoked or absolutely expired. It does not apply the session idle timeout to each already-issued access token; idle expiry is enforced when the client refreshes.
+
 ## Resolve subjects in application code
 
 SqlOS FGA APIs take explicit `subjectId` values. For bearer tokens, a typical app-owned resolver reads the JWT subject claim from the authenticated principal:
@@ -73,7 +75,7 @@ await db.ProvisionUserSubjectAsync(
 
 If your app accepts API keys, agent tokens, or another credential type, resolve those credentials to the relevant service-account or agent subject ID in your own request layer, then pass that explicit subject ID to FGA.
 
-`ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session state, but it intentionally does not validate `aud`.
+`ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session existence/revocation/absolute expiry, but it intentionally does not validate `aud`.
 
 ## JWKS for external validation
 
@@ -88,6 +90,8 @@ And the OAuth metadata endpoint:
 ```
 GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
+
+JWKS validation in a separate service proves signature, issuer, JWT lifetime, and audience, but it cannot query the SqlOS session row. Logout or session revocation therefore does not invalidate an already-issued JWT in that service before `exp`. If immediate revocation is a requirement, add an application-owned session/introspection call to a trusted SqlOS host (with caching and fail-closed behavior appropriate to your availability model), or use the SqlOS session-aware validator in the same process.
 
 ## Token claims
 
