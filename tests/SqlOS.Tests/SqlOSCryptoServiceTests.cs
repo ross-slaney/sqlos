@@ -167,9 +167,26 @@ public sealed class SqlOSCryptoServiceTests
         var act = async () => await service.EnsureActiveSigningKeyAsync();
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*cannot be opened by this application instance*");
+            .WithMessage("*ambiguous provider ownership*");
         context.Set<SqlOSSigningKey>().Count(key => key.IsActive).Should().Be(1);
         context.Set<SqlOSSigningKey>().Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public async Task EnsureActiveSigningKey_InactiveRowWithoutRetiredAt_FailsClosed()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var key = await service.EnsureActiveSigningKeyAsync();
+        key.IsActive = false;
+        key.RetiredAt = null;
+        await context.SaveChangesAsync();
+
+        var act = async () => await service.EnsureActiveSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*inactive*retirement timestamp*");
+        context.Set<SqlOSSigningKey>().Should().ContainSingle();
     }
 
     [TestMethod]
@@ -389,6 +406,32 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
+    public async Task ValidateAccessToken_UsesPersistedGraceWindowConsistentWithJwks()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        var oldToken = await service.CreateAccessTokenAsync(user, session, client, null);
+        var oldKey = await context.Set<SqlOSSigningKey>().SingleAsync();
+        var activeKey = await service.RotateSigningKeyAsync();
+        oldKey.RetiredAt = DateTime.UtcNow.AddDays(-2);
+        context.Set<SqlOSSettings>().Add(new SqlOSSettings
+        {
+            Id = "default",
+            SigningKeyGraceWindowDays = 1,
+            SigningKeyRotationIntervalDays = 90,
+            SigningKeyRetiredCleanupDays = 30,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        var jwksKeys = await service.GetValidationSigningKeysAsync();
+
+        jwksKeys.Select(key => key.Kid).Should().Equal(activeKey.Kid);
+        (await service.ValidateAccessTokenAsync(oldToken, client.Audience)).Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task RotateAndCleanupSigningKey_PreservesGraceThenRemovesRetiredJwksKey()
     {
         using var context = CreateContext();
@@ -416,6 +459,54 @@ public sealed class SqlOSCryptoServiceTests
         (await service.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(7))).Should().Be(1);
         (await service.GetValidationSigningKeysAsync()).Select(key => key.Kid).Should().Equal(newKey.Kid);
         custody.DeleteCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task CleanupRetiredSigningKey_DuplicateActiveReference_FailsWithoutDeletingLiveKey()
+    {
+        using var context = CreateContext();
+        using var custody = new TestExternalSigningKeyCustody();
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            signingKeyCustody: custody);
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        var retiredKey = await service.EnsureActiveSigningKeyAsync();
+        var activeKey = await service.RotateSigningKeyAsync();
+        retiredKey.RetiredAt = DateTime.UtcNow.AddDays(-40);
+        var retiredReference = retiredKey.KeyReference;
+        retiredKey.KeyReference = activeKey.KeyReference;
+        await context.SaveChangesAsync();
+
+        var act = async () => await service.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(30));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*share a custody reference*ambiguous provider ownership*");
+        custody.DeleteCount.Should().Be(0);
+        retiredKey.KeyReference = retiredReference;
+        await context.SaveChangesAsync();
+        var token = await service.CreateAccessTokenAsync(user, session, client, null);
+        (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task EnsureActiveSigningKey_DuplicateStoredPublicKey_FailsClosed()
+    {
+        using var context = CreateContext();
+        using var custody = new TestExternalSigningKeyCustody();
+        var service = new SqlOSCryptoService(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            signingKeyCustody: custody);
+        var retiredKey = await service.EnsureActiveSigningKeyAsync();
+        var activeKey = await service.RotateSigningKeyAsync();
+        retiredKey.PublicKeyPem = activeKey.PublicKeyPem;
+        await context.SaveChangesAsync();
+
+        var act = async () => await service.EnsureActiveSigningKeyAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*share the same canonical RSA public key*ambiguous provider ownership*");
     }
 
     [TestMethod]

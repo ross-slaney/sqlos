@@ -168,7 +168,10 @@ BEGIN
         [KeyReference] NVARCHAR(MAX) NOT NULL,
         [IsActive] BIT NOT NULL,
         [ActivatedAt] DATETIME2 NOT NULL,
-        [RetiredAt] DATETIME2 NULL
+        [RetiredAt] DATETIME2 NULL,
+        CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle] CHECK (
+            ([IsActive] = 1 AND [RetiredAt] IS NULL)
+            OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL))
     );
 END
 

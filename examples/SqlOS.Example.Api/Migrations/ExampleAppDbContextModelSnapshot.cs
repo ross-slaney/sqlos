@@ -809,6 +809,8 @@ namespace SqlOS.Example.Api.Migrations
                     b.ToTable("SqlOSSigningKeys", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
+
+                            t.HasCheckConstraint("CK_SqlOSSigningKeys_Lifecycle", "([IsActive] = 1 AND [RetiredAt] IS NULL) OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL)");
                         });
                 });
 

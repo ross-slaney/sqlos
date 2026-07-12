@@ -160,17 +160,28 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             }
 
             await using (var firstRotationContext = CreateContext(connectionString!))
-            {
-                var first = BuildStack(firstRotationContext, options, CreateFileSystemProvider(keyRingPath));
-                await first.Crypto.RotateSigningKeyAsync();
-            }
-
             await using (var secondRotationContext = CreateContext(connectionString!))
             {
+                var first = BuildStack(firstRotationContext, options, CreateFileSystemProvider(keyRingPath));
                 var second = BuildStack(secondRotationContext, options, CreateFileSystemProvider(keyRingPath));
-                var observed = await second.Crypto.EnsureActiveSigningKeyAsync();
-                var rotated = await second.Crypto.RotateSigningKeyAsync();
-                rotated.Id.Should().NotBe(observed.Id);
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var arrivals = 0;
+
+                async Task<SqlOSSigningKey> RotateAfterBarrierAsync(SqlOSCryptoService crypto)
+                {
+                    if (Interlocked.Increment(ref arrivals) == 2)
+                    {
+                        release.TrySetResult();
+                    }
+
+                    await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    return await crypto.RotateSigningKeyAsync();
+                }
+
+                var rotated = await Task.WhenAll(
+                    RotateAfterBarrierAsync(first.Crypto),
+                    RotateAfterBarrierAsync(second.Crypto));
+                rotated.Select(key => key.Id).Distinct().Should().HaveCount(2);
             }
 
             await using var verifyContext = CreateContext(connectionString!);
@@ -329,6 +340,166 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task PersistedGraceWindow_SqlJwksAndStatefulValidationUseSameTrustBoundary()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSPersistedKeyGrace");
+            connectionString = context.Database.GetConnectionString();
+            var options = CreateOptions("persisted-key-grace", "https://client.example.test/persisted-grace/callback");
+            var stack = BuildStack(context, options, new EphemeralDataProtectionProvider());
+            var principal = await SeedTokenContextAsync(context, stack, "persisted-key-grace");
+            var oldToken = await stack.Crypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                null);
+            var oldKey = await context.Set<SqlOSSigningKey>().SingleAsync(key => key.IsActive);
+            var activeKey = await stack.Crypto.RotateSigningKeyAsync();
+            oldKey.RetiredAt = DateTime.UtcNow.AddDays(-2);
+            context.Set<SqlOSSettings>().Add(new SqlOSSettings
+            {
+                Id = "default",
+                SigningKeyGraceWindowDays = 1,
+                SigningKeyRotationIntervalDays = 90,
+                SigningKeyRetiredCleanupDays = 30,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await context.SaveChangesAsync();
+
+            var validationKeys = await stack.Crypto.GetValidationSigningKeysAsync();
+            var jwks = System.Text.Json.JsonSerializer.Serialize(
+                stack.Crypto.GetJwksDocument(validationKeys));
+
+            validationKeys.Select(key => key.Kid).Should().Equal(activeKey.Kid);
+            jwks.Should().Contain(activeKey.Kid).And.NotContain(oldKey.Kid);
+            (await stack.Crypto.ValidateAccessTokenAsync(oldToken, principal.Client.Audience)).Should().BeNull();
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
+    [TestMethod]
+    public async Task SigningKeyLifecycleInvariant_SqlConstraintAndServiceRejectInactiveKeyWithoutRetiredAt()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("lifecycle-invariant");
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyLifecycleInvariant");
+            connectionString = context.Database.GetConnectionString();
+            var options = CreateOptions("key-lifecycle", "https://client.example.test/key-lifecycle/callback");
+            var provider = CreateFileSystemProvider(keyRingPath);
+            var stack = BuildStack(context, options, provider);
+            var key = await stack.Crypto.EnsureActiveSigningKeyAsync();
+
+            var constrainedWrite = async () => await context.Database.ExecuteSqlRawAsync(
+                "UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}",
+                key.Id);
+            await constrainedWrite.Should().ThrowAsync<Exception>()
+                .WithMessage("*CK_SqlOSSigningKeys_Lifecycle*");
+
+            await context.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE [dbo].[SqlOSSigningKeys] NOCHECK CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle]");
+            await context.Database.ExecuteSqlRawAsync(
+                "UPDATE [dbo].[SqlOSSigningKeys] SET [IsActive] = 0, [RetiredAt] = NULL WHERE [Id] = {0}",
+                key.Id);
+            await context.DisposeAsync();
+            context = null;
+
+            await using var corruptedContext = CreateContext(connectionString!);
+            var corruptedStack = BuildStack(
+                corruptedContext,
+                options,
+                CreateFileSystemProvider(keyRingPath));
+            var act = async () => await corruptedStack.Crypto.EnsureActiveSigningKeyAsync();
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*inactive*retirement timestamp*");
+            (await corruptedContext.Set<SqlOSSigningKey>().CountAsync()).Should().Be(1);
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task CleanupRetiredSigningKey_SqlReferenceSubstitution_DoesNotDeleteActiveMockProviderKey()
+    {
+        TestSqlOSDbContext? context = null;
+        string? connectionString = null;
+
+        try
+        {
+            context = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSKeyReferenceSubstitution");
+            connectionString = context.Database.GetConnectionString();
+            var options = CreateOptions("key-reference-substitution", "https://client.example.test/key-reference/callback");
+            using var custody = new TrackingExternalSigningKeyCustody();
+            var stack = BuildStack(context, options, custody);
+            var principal = await SeedTokenContextAsync(context, stack, "key-reference-substitution");
+            await stack.Crypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                null);
+            var retiredKey = await context.Set<SqlOSSigningKey>().SingleAsync(key => key.IsActive);
+            var activeKey = await stack.Crypto.RotateSigningKeyAsync();
+            retiredKey.RetiredAt = DateTime.UtcNow.AddDays(-40);
+            await context.SaveChangesAsync();
+            var retiredReference = retiredKey.KeyReference;
+
+            await context.Database.ExecuteSqlRawAsync(
+                "UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}",
+                activeKey.KeyReference,
+                retiredKey.Id);
+            context.ChangeTracker.Clear();
+
+            var act = async () => await stack.Crypto.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(30));
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*share a custody reference*ambiguous provider ownership*");
+            custody.DeleteCount.Should().Be(0);
+
+            await context.Database.ExecuteSqlRawAsync(
+                "UPDATE [dbo].[SqlOSSigningKeys] SET [KeyReference] = {0} WHERE [Id] = {1}",
+                retiredReference,
+                retiredKey.Id);
+            context.ChangeTracker.Clear();
+            var token = await stack.Crypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                null);
+            (await stack.Crypto.ValidateAccessTokenAsync(token, principal.Client.Audience)).Should().NotBeNull();
+        }
+        finally
+        {
+            if (context != null)
+            {
+                await context.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
     private static SqlOSAuthServerOptions CreateOptions(string clientId, string redirectUri)
     {
         var options = new SqlOSAuthServerOptions
@@ -354,6 +525,27 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
     {
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options, dataProtectionProvider);
+        return BuildStack(context, options, crypto);
+    }
+
+    private static ServiceStack BuildStack(
+        TestSqlOSDbContext context,
+        SqlOSAuthServerOptions optionsValue,
+        ISqlOSSigningKeyCustody signingKeyCustody)
+    {
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(
+            context,
+            options,
+            signingKeyCustody: signingKeyCustody);
+        return BuildStack(context, options, crypto);
+    }
+
+    private static ServiceStack BuildStack(
+        TestSqlOSDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSCryptoService crypto)
+    {
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -548,4 +740,62 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         SqlOSSession Session,
         SqlOSClientApplication Client,
         string OrganizationId);
+
+    private sealed class TrackingExternalSigningKeyCustody : ISqlOSSigningKeyCustody, IDisposable
+    {
+        private readonly Dictionary<string, RSA> _keys = new(StringComparer.Ordinal);
+
+        public string ProviderId => "mock-kms:integration:v1";
+        public int DeleteCount { get; private set; }
+
+        public Task<SqlOSSigningKeyCreationResult> CreateKeyAsync(
+            string kid,
+            string algorithm,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var rsa = RSA.Create(2048);
+            var reference = $"mock-kms:key:{kid}";
+            _keys.Add(reference, rsa);
+            return Task.FromResult(new SqlOSSigningKeyCreationResult(
+                algorithm,
+                rsa.ExportRSAPublicKeyPem(),
+                reference));
+        }
+
+        public Task<byte[]> SignAsync(
+            SqlOSSigningKeyDescriptor key,
+            ReadOnlyMemory<byte> signingInput,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            key.CustodyProvider.Should().Be(ProviderId);
+            return Task.FromResult(_keys[key.KeyReference].SignData(
+                signingInput.Span,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1));
+        }
+
+        public Task DeleteKeyAsync(
+            SqlOSSigningKeyDescriptor key,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_keys.Remove(key.KeyReference, out var rsa))
+            {
+                rsa.Dispose();
+            }
+            DeleteCount++;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            foreach (var rsa in _keys.Values)
+            {
+                rsa.Dispose();
+            }
+            _keys.Clear();
+        }
+    }
 }

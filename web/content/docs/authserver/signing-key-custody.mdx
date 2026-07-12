@@ -111,6 +111,10 @@ Creation and rotation are serialized in SQL Server and reinforced by a filtered 
 
 SqlOS requires the retired-key cleanup window to be at least as long as the JWKS grace window, so provider deletion cannot invalidate a key that resource servers are still expected to accept.
 
+The persisted `SigningKeyGraceWindowDays` security setting is authoritative for both JWKS publication and SqlOS's stateful access-token validator. Changing it cannot leave the internal validator trusting a retired key after JWKS has withdrawn that key.
+
+Signing-key rows also have a fail-closed lifecycle invariant: an active key has no retirement timestamp, while every inactive key has one. SqlOS rejects duplicate custody references and duplicate canonical RSA public keys across stored rows before signing or cleanup, preventing a corrupted retired row from redirecting provider deletion at the live key.
+
 The JWKS endpoint is:
 
 ```text

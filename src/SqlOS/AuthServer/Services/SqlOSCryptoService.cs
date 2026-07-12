@@ -189,8 +189,7 @@ public sealed class SqlOSCryptoService
         bool validateExistingCustody,
         CancellationToken cancellationToken)
     {
-        var observedKeys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
-        ValidateStoredSigningKeyRows(observedKeys);
+        var observedKeys = await LoadAndValidateSigningKeysAsync(cancellationToken);
         var observedActiveKeys = observedKeys.Where(static key => key.IsActive).ToList();
         if (observedActiveKeys.Count > 1)
         {
@@ -218,8 +217,7 @@ public sealed class SqlOSCryptoService
         SqlOSSigningKey? createdKey = null;
         try
         {
-            var keys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
-            ValidateStoredSigningKeyRows(keys);
+            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
             var activeKeys = keys.Where(static key => key.IsActive).ToList();
             if (activeKeys.Count > 1)
             {
@@ -253,14 +251,14 @@ public sealed class SqlOSCryptoService
         }
     }
 
-    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(TimeSpan? graceWindow = null, CancellationToken cancellationToken = default)
+    public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(CancellationToken cancellationToken = default)
     {
-        var cutoff = DateTime.UtcNow.Add(-(graceWindow ?? TimeSpan.FromDays(_options.DefaultSigningKeyGraceWindowDays)));
-        var keys = await _context.Set<SqlOSSigningKey>()
-            .Where(x => x.IsActive || x.RetiredAt == null || x.RetiredAt >= cutoff)
-            .ToListAsync(cancellationToken);
-        ValidateStoredSigningKeyRows(keys);
-        return keys;
+        var graceWindow = await ResolveSigningKeyGraceWindowAsync(cancellationToken);
+        var cutoff = DateTime.UtcNow.Subtract(graceWindow);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        return keys
+            .Where(key => key.IsActive || key.RetiredAt >= cutoff)
+            .ToList();
     }
 
     public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
@@ -271,8 +269,7 @@ public sealed class SqlOSCryptoService
 
         try
         {
-            var keys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
-            ValidateStoredSigningKeyRows(keys);
+            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
             var activeKeys = keys.Where(static key => key.IsActive).ToList();
             if (activeKeys.Count > 1)
             {
@@ -309,8 +306,14 @@ public sealed class SqlOSCryptoService
 
     public async Task<bool> ShouldRotateSigningKeyAsync(TimeSpan rotationInterval, CancellationToken cancellationToken = default)
     {
-        var activeKey = await _context.Set<SqlOSSigningKey>()
-            .FirstOrDefaultAsync(x => x.IsActive, cancellationToken);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        var activeKeys = keys.Where(static key => key.IsActive).ToList();
+        if (activeKeys.Count > 1)
+        {
+            throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing rotation checks until signing-key state is repaired.");
+        }
+
+        var activeKey = activeKeys.SingleOrDefault();
         if (activeKey == null)
             return true;
         return DateTime.UtcNow - activeKey.ActivatedAt >= rotationInterval;
@@ -319,13 +322,13 @@ public sealed class SqlOSCryptoService
     public async Task<int> CleanupRetiredSigningKeysAsync(TimeSpan retiredCleanupWindow, CancellationToken cancellationToken = default)
     {
         var cutoff = DateTime.UtcNow.Add(-retiredCleanupWindow);
-        var expired = await _context.Set<SqlOSSigningKey>()
-            .Where(x => !x.IsActive && x.RetiredAt != null && x.RetiredAt < cutoff)
-            .ToListAsync(cancellationToken);
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        var expired = keys
+            .Where(key => !key.IsActive && key.RetiredAt < cutoff)
+            .ToList();
         if (expired.Count == 0)
             return 0;
 
-        ValidateStoredSigningKeyRows(expired);
         foreach (var key in expired)
         {
             await _signingKeyCustody.DeleteKeyAsync(ToDescriptor(key), cancellationToken);
@@ -337,9 +340,10 @@ public sealed class SqlOSCryptoService
     }
 
     public async Task<List<SqlOSSigningKey>> ListSigningKeysAsync(CancellationToken cancellationToken = default)
-        => await _context.Set<SqlOSSigningKey>()
-            .OrderByDescending(x => x.ActivatedAt)
-            .ToListAsync(cancellationToken);
+    {
+        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
+        return keys.OrderByDescending(key => key.ActivatedAt).ToList();
+    }
 
     public async Task<string> CreateAccessTokenAsync(
         SqlOSUser user,
@@ -581,9 +585,32 @@ public sealed class SqlOSCryptoService
 
     private void ValidateStoredSigningKeyRows(IEnumerable<SqlOSSigningKey> keys)
     {
-        foreach (var key in keys)
+        var rows = keys.ToList();
+        foreach (var key in rows)
         {
             ValidateStoredSigningKeyRow(key);
+        }
+
+        for (var firstIndex = 0; firstIndex < rows.Count; firstIndex++)
+        {
+            for (var secondIndex = firstIndex + 1; secondIndex < rows.Count; secondIndex++)
+            {
+                var first = rows[firstIndex];
+                var second = rows[secondIndex];
+                if (string.Equals(first.KeyReference, second.KeyReference, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Signing keys '{first.Kid}' and '{second.Kid}' share a custody reference. " +
+                        "Refusing ambiguous provider ownership.");
+                }
+
+                if (PublicKeysMatch(first.PublicKeyPem, second.PublicKeyPem))
+                {
+                    throw new InvalidOperationException(
+                        $"Signing keys '{first.Kid}' and '{second.Kid}' share the same canonical RSA public key. " +
+                        "Refusing ambiguous provider ownership.");
+                }
+            }
         }
     }
 
@@ -602,6 +629,18 @@ public sealed class SqlOSCryptoService
             || string.IsNullOrWhiteSpace(key.CustodyProvider))
         {
             throw new InvalidOperationException("A SqlOS signing-key row has incomplete custody metadata.");
+        }
+
+        if (key.IsActive && key.RetiredAt != null)
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' is active but has a retirement timestamp. Refusing inconsistent signing-key lifecycle state.");
+        }
+
+        if (!key.IsActive && key.RetiredAt == null)
+        {
+            throw new InvalidOperationException(
+                $"Signing key '{key.Kid}' is inactive but has no retirement timestamp. Refusing inconsistent signing-key lifecycle state.");
         }
 
         if (!string.Equals(key.Algorithm, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal))
@@ -674,6 +713,39 @@ public sealed class SqlOSCryptoService
             && (value.Contains("-----BEGIN PRIVATE KEY-----", StringComparison.Ordinal)
                 || value.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal)
                 || value.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal));
+
+    private async Task<List<SqlOSSigningKey>> LoadAndValidateSigningKeysAsync(CancellationToken cancellationToken)
+    {
+        var keys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
+        ValidateStoredSigningKeyRows(keys);
+        return keys;
+    }
+
+    private async Task<TimeSpan> ResolveSigningKeyGraceWindowAsync(CancellationToken cancellationToken)
+    {
+        var persistedGraceDays = await _context.Set<SqlOSSettings>()
+            .AsNoTracking()
+            .Where(settings => settings.Id == "default")
+            .Select(settings => (int?)settings.SigningKeyGraceWindowDays)
+            .SingleOrDefaultAsync(cancellationToken);
+        var graceDays = persistedGraceDays ?? _options.DefaultSigningKeyGraceWindowDays;
+        if (graceDays <= 0)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key grace configuration is invalid. SigningKeyGraceWindowDays must be positive.");
+        }
+
+        try
+        {
+            return TimeSpan.FromDays(graceDays);
+        }
+        catch (OverflowException ex)
+        {
+            throw new InvalidOperationException(
+                "SqlOS signing-key grace configuration exceeds the supported duration.",
+                ex);
+        }
+    }
 
     private async Task<IDbContextTransaction?> BeginSigningKeyTransactionAsync(CancellationToken cancellationToken)
     {

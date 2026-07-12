@@ -12,9 +12,28 @@ BEGIN
         [KeyReference] NVARCHAR(MAX) NOT NULL,
         [IsActive] BIT NOT NULL,
         [ActivatedAt] DATETIME2 NOT NULL,
-        [RetiredAt] DATETIME2 NULL
+        [RetiredAt] DATETIME2 NULL,
+        CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle] CHECK (
+            ([IsActive] = 1 AND [RetiredAt] IS NULL)
+            OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL))
     );
 END
+
+IF NOT EXISTS (
+    SELECT * FROM sys.check_constraints
+    WHERE name = 'CK_SqlOSSigningKeys_Lifecycle'
+      AND parent_object_id = OBJECT_ID('[{Schema}].[SqlOSSigningKeys]'))
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSSigningKeys] WITH CHECK
+    ADD CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle] CHECK (
+        ([IsActive] = 1 AND [RetiredAt] IS NULL)
+        OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL));
+    ALTER TABLE [{Schema}].[SqlOSSigningKeys]
+    CHECK CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle];
+END
+
+ALTER TABLE [{Schema}].[SqlOSSigningKeys] WITH CHECK
+CHECK CONSTRAINT [CK_SqlOSSigningKeys_Lifecycle];
 
 IF COL_LENGTH('{Schema}.SqlOSSigningKeys', 'KeyReference') IS NULL
 BEGIN
