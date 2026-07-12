@@ -304,7 +304,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             "https://client.example.test/callback",
             state,
             "openid profile email",
-            $"challenge-{state}-1234567890123456789012345678901234567890123",
+            new string('A', 43),
             "S256",
             null,
             email,
