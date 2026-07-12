@@ -27,6 +27,10 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         var environment = services.GetRequiredService<IHostEnvironment>();
         var prefix = hostOptions.DashboardBasePath.TrimEnd('/');
 
+        // Apply only the host-configured, trusted ForwardedHeaders options. The
+        // startup filter must do this before dashboard middleware so dashboard
+        // throttling and audit events see the external client IP and scheme.
+        app.UseForwardedHeaders();
         app.UseMiddleware<RootDashboardMiddleware>(prefix, environment, hostOptions.Dashboard);
         app.UseMiddleware<SqlOSFgaDashboardMiddleware>($"{prefix}/admin/fga", environment, hostOptions.Dashboard);
 

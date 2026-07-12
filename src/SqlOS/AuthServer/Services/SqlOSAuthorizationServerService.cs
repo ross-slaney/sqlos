@@ -115,6 +115,11 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("A state value is required.");
         }
 
+        if (input.State.Length > 2048)
+        {
+            throw new InvalidOperationException("State cannot exceed 2048 characters.");
+        }
+
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
         if (client.RequirePkce)
         {

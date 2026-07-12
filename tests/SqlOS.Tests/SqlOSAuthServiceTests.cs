@@ -32,7 +32,7 @@ public sealed class SqlOSAuthServiceTests
         var authOptions = new SqlOSAuthServerOptions();
         authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
         var options = Options.Create(authOptions);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -1078,7 +1078,7 @@ public sealed class SqlOSAuthServiceTests
             "OldPassword123!"));
 
         var result = await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!, ClientId: "test-client"),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!, ClientId: "test-client"),
             CreatePasswordHttpContext("203.0.113.90"));
 
         result.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
@@ -1091,12 +1091,234 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task PasswordResetEmail_PublicRequest_UsesTrustedOriginInsteadOfRequestHeaders()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PublicOrigin = "https://auth.example.test";
+            options.Issuer = "https://auth.example.test/sqlos/auth";
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Header Attack Reset",
+            "header-attack-reset@example.com",
+            "OldPassword123!"));
+        var context = CreatePasswordHttpContext("203.0.113.100");
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("attacker.example");
+        context.Request.Headers["Forwarded"] = "host=forwarded-attacker.example;proto=https";
+        context.Request.Headers["X-Forwarded-Host"] = "forwarded-attacker.example";
+        context.Request.Headers["X-Forwarded-Proto"] = "https";
+
+        await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!, "test-client"),
+            context);
+
+        var body = harness.EmailSender.Messages.Should().ContainSingle().Subject.TextBody;
+        body.Should().Contain("https://auth.example.test/sqlos/auth/password/reset?token=");
+        body.Should().NotContain("attacker.example");
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_ServerBuilder_ReceivesOnlyResolvedFirstPartyClient()
+    {
+        var observedClientIds = new List<string?>();
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.SeedClient(client =>
+            {
+                client.ClientId = "external-client";
+                client.Name = "External Client";
+                client.IsFirstParty = false;
+                client.RedirectUris = ["https://external.example/callback"];
+            });
+            options.PasswordReset.BuildResetUrl = context =>
+            {
+                observedClientIds.Add(context.ClientId);
+                var origin = context.ClientId == "test-client"
+                    ? "https://first-party.example"
+                    : "https://auth.example.test";
+                return $"{origin}/reset?token={Uri.EscapeDataString(context.Token)}";
+            };
+        });
+        var firstPartyUser = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "First Party Reset",
+            "first-party-reset@example.com",
+            "OldPassword123!"));
+        var externalUser = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "External Reset",
+            "external-reset@example.com",
+            "OldPassword123!"));
+
+        await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(firstPartyUser.DefaultEmail!, "test-client"));
+        await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(externalUser.DefaultEmail!, "external-client"));
+
+        observedClientIds.Should().Equal("test-client", null);
+        harness.EmailSender.Messages[0].TextBody.Should().Contain("https://first-party.example/reset?token=");
+        harness.EmailSender.Messages[1].TextBody.Should().Contain("https://auth.example.test/reset?token=");
+    }
+
+    [DataTestMethod]
+    [DataRow("//attacker.example/reset")]
+    [DataRow("javascript:alert(1)")]
+    [DataRow("https://trusted.example@attacker.example/reset")]
+    [DataRow("https://trusted.example\\@attacker.example/reset")]
+    [DataRow("http://attacker.example/reset")]
+    [DataRow("https:%2f%2fattacker.example/reset")]
+    [DataRow("https://trusted.example%2f@attacker.example/reset")]
+    [DataRow("https://trusted.example/reset\r\nBcc: victim@example.com")]
+    public async Task PasswordResetEmail_UnsafeConfiguredUrl_FailsClosedAndInvalidatesToken(string unsafeUrl)
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = _ => unsafeUrl;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Unsafe URL Reset",
+            $"unsafe-url-{Guid.NewGuid():N}@example.com",
+            "OldPassword123!"));
+
+        var act = async () => await harness.Auth.SendPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*configured password reset URL must be an absolute HTTPS URL (or loopback HTTP URL) without user information*");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.EventType == "password_reset.email_send_failed" && audit.UserId == user.Id))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_LoopbackHttpConfiguredUrl_IsAllowedForDevelopment()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = context =>
+                $"http://localhost:3000/reset?token={Uri.EscapeDataString(context.Token)}";
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Loopback Reset",
+            "loopback-reset@example.com",
+            "OldPassword123!"));
+
+        await harness.Auth.SendPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!));
+
+        harness.EmailSender.Messages.Should().ContainSingle()
+            .Which.TextBody.Should().Contain("http://localhost:3000/reset?token=");
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_TokenInConfiguredAuthority_FailsClosed()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = context => $"https://{context.Token}.attacker.example/reset";
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Authority Token Reset",
+            "authority-token-reset@example.com",
+            "OldPassword123!"));
+
+        var act = async () => await harness.Auth.SendPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The password reset token cannot appear in the URL authority.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_TrustedTemplate_AppendsTokenBeforeFragment()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Fragment Reset",
+            "fragment-reset@example.com",
+            "OldPassword123!"));
+
+        await harness.Auth.SendPasswordResetEmailAsync(
+            new SqlOSSendPasswordResetEmailRequest(
+                user.DefaultEmail!,
+                "https://app.example/reset?view=password#form"));
+
+        var body = harness.EmailSender.Messages.Should().ContainSingle().Subject.TextBody;
+        body.Should().MatchRegex(@"https://app\.example/reset\?view=password&amp;token=[A-Za-z0-9_-]+#form|https://app\.example/reset\?view=password&token=[A-Za-z0-9_-]+#form");
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_LinkGenerationFailure_ReturnsGenericResultAndInvalidatesToken()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = _ => throw new InvalidOperationException("private link failure");
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Builder Failure Reset",
+            "builder-failure-reset@example.com",
+            "OldPassword123!"));
+
+        var result = await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
+            CreatePasswordHttpContext("203.0.113.101"));
+
+        result.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.EventType == "password_reset.email_send_failed" && audit.UserId == user.Id))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task PasswordResetEmail_RequestCancellationAfterTokenCreation_InvalidatesToken()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.BuildResetUrl = _ =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(cancellation.Token);
+            };
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Cancelled Reset",
+            "cancelled-reset@example.com",
+            "OldPassword123!"));
+
+        var act = async () => await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
+            CreatePasswordHttpContext("203.0.113.102"),
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == user.Id && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.EventType == "password_reset.email_send_failed" && audit.UserId == user.Id))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task PasswordResetEmail_Request_UnknownEmail_ReturnsGenericSuccessAndDoesNotSend()
     {
         using var harness = await PasswordResetHarness.CreateAsync();
 
         var result = await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest("missing@example.com"),
+            new SqlOSForgotPasswordRequest("missing@example.com"),
             CreatePasswordHttpContext("203.0.113.91"));
 
         result.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
@@ -1117,7 +1339,7 @@ public sealed class SqlOSAuthServiceTests
         await harness.Context.SaveChangesAsync();
 
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.92"));
 
         harness.EmailSender.Messages.Should().BeEmpty();
@@ -1136,7 +1358,7 @@ public sealed class SqlOSAuthServiceTests
 
         harness.Options.EnableLocalPasswordAuth = false;
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.93"));
         var resetAct = async () => await harness.Auth.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, "NewPassword123!"));
 
@@ -1160,10 +1382,10 @@ public sealed class SqlOSAuthServiceTests
             "OldPassword123!"));
 
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.94"));
         var second = await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.94"));
 
         second.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
@@ -1189,10 +1411,10 @@ public sealed class SqlOSAuthServiceTests
             "OldPassword123!"));
 
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(first.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(first.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.96"));
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(second.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(second.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.96"));
 
         harness.EmailSender.Messages.Should().ContainSingle();
@@ -1218,10 +1440,10 @@ public sealed class SqlOSAuthServiceTests
             "OldPassword123!"));
 
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(first.DefaultEmail!, ClientId: "test-client"),
+            new SqlOSForgotPasswordRequest(first.DefaultEmail!, ClientId: "test-client"),
             CreatePasswordHttpContext("203.0.113.97"));
         await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(second.DefaultEmail!, ClientId: "test-client"),
+            new SqlOSForgotPasswordRequest(second.DefaultEmail!, ClientId: "test-client"),
             CreatePasswordHttpContext("203.0.113.98"));
 
         harness.EmailSender.Messages.Should().ContainSingle();
@@ -1241,7 +1463,7 @@ public sealed class SqlOSAuthServiceTests
         harness.EmailSender.IsConfigured = false;
 
         var result = await harness.Auth.RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(user.DefaultEmail!),
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
             CreatePasswordHttpContext("203.0.113.99"));
 
         result.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
@@ -1308,7 +1530,7 @@ public sealed class SqlOSAuthServiceTests
         authOptions.SeedAuthPage(page => page.EnabledCredentialTypes = ["email_otp"]);
         var options = Options.Create(authOptions);
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -2048,7 +2270,7 @@ public sealed class SqlOSAuthServiceTests
 
             var options = Microsoft.Extensions.Options.Options.Create(authOptions);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -2110,7 +2332,7 @@ public sealed class SqlOSAuthServiceTests
 
             var options = Options.Create(authOptions);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
@@ -2174,7 +2396,7 @@ public sealed class SqlOSAuthServiceTests
 
             // Inject a real ephemeral data protection provider so the
             // ReplacementAccessToken cache is encrypted at rest as in production.
-            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender { IsConfigured = true };
             var settings = new SqlOSSettingsService(context, options, emailSender);

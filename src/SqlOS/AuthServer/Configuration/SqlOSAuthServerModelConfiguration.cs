@@ -395,11 +395,21 @@ public static class SqlOSAuthServerModelConfiguration
 
         modelBuilder.Entity<SqlOSSigningKey>(entity =>
         {
-            entity.ToTable("SqlOSSigningKeys", schema, t => t.ExcludeFromMigrations());
+            entity.ToTable("SqlOSSigningKeys", schema, table =>
+            {
+                table.ExcludeFromMigrations();
+                table.HasCheckConstraint(
+                    "CK_SqlOSSigningKeys_Lifecycle",
+                    "([IsActive] = 1 AND [RetiredAt] IS NULL) OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL)");
+            });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.Kid).IsUnique();
+            entity.HasIndex(x => x.IsActive)
+                .IsUnique()
+                .HasFilter("[IsActive] = 1");
             entity.Property(x => x.Kid).HasMaxLength(120);
             entity.Property(x => x.Algorithm).HasMaxLength(20);
+            entity.Property(x => x.CustodyProvider).HasMaxLength(120);
         });
 
         modelBuilder.Entity<SqlOSTemporaryToken>(entity =>
@@ -618,7 +628,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.LoginHintEmail).HasMaxLength(320);
             entity.Property(x => x.UiContextJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
-            entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.State).HasMaxLength(2048);
             entity.Property(x => x.Scope).HasMaxLength(1000);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.Nonce).HasMaxLength(256);
@@ -656,7 +666,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => x.CodeHash).IsUnique();
             entity.HasIndex(x => x.AuthorizationRequestId).IsUnique();
             entity.Property(x => x.RedirectUri).HasMaxLength(2048);
-            entity.Property(x => x.State).HasMaxLength(256);
+            entity.Property(x => x.State).HasMaxLength(2048);
             entity.Property(x => x.Scope).HasMaxLength(1000);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.CodeHash).HasMaxLength(128);

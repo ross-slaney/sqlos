@@ -213,7 +213,7 @@ public sealed class SqlOSSingleApplicationTests
         var optionsValue = new SqlOSAuthServerOptions();
         configure(optionsValue);
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         return new Harness(context, admin);
     }

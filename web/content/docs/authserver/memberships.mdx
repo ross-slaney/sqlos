@@ -25,9 +25,12 @@ var membership = await adminService.CreateMembershipAsync(
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/memberships \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{"organizationId": "org_...", "userId": "usr_...", "role": "admin"}'
 ```
+
+The Admin API requires an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 | Field | Required | Description |
 | --- | --- | --- |

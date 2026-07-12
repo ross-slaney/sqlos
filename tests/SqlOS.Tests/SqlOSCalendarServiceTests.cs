@@ -657,7 +657,7 @@ public sealed class SqlOSCalendarServiceTests
         configure?.Invoke(sqlosOptions);
 
         var authOptions = Options.Create(sqlosOptions.AuthServer);
-        var crypto = new SqlOSCryptoService(context, authOptions, new EphemeralDataProtectionProvider());
+        var crypto = TestCryptoService.Create(context, authOptions, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(context, authOptions, crypto);
         var httpFactory = new FakeCalendarProviderHttpClientFactory();
         var adapters = new ISqlOSCalendarProviderAdapter[]

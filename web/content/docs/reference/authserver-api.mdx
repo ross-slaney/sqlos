@@ -34,6 +34,85 @@ Core authentication service. Handles login, signup, sessions, tokens, and passwo
 
 ---
 
+### Handle `SqlOSLoginResult` as a state machine
+
+Password login, password signup, invitation signup, and OTP verification do not always issue tokens immediately. Treat every `SqlOSLoginResult` as one of three states: organization selection, MFA, or complete. Reuse one response mapper so a new MFA policy cannot turn an otherwise-correct login endpoint into a null-token bug.
+
+```csharp
+static IResult ToLoginHttpResult(SqlOSLoginResult outcome)
+{
+    if (outcome.RequiresOrganizationSelection)
+    {
+        return Results.Ok(new
+        {
+            status = "organization_selection_required",
+            pendingAuthToken = outcome.PendingAuthToken,
+            organizations = outcome.Organizations
+        });
+    }
+
+    if (outcome.RequiresMfa)
+    {
+        return Results.Ok(new
+        {
+            status = outcome.RequiresMfaEnrollment
+                ? "mfa_enrollment_required"
+                : "mfa_required",
+            mfaToken = outcome.MfaToken,
+            methods = outcome.MfaMethods
+        });
+    }
+
+    return outcome.Tokens is { } tokens
+        ? Results.Ok(new { status = "complete", tokens })
+        : Results.Problem("Authentication did not reach a terminal state.");
+}
+```
+
+Organization selection feeds back into the same handler because selecting an organization can activate that organization's MFA policy:
+
+```csharp
+app.MapPost("/auth/select-organization", async (
+    SelectOrganizationBody body,
+    SqlOSAuthService authService,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var outcome = await authService.SelectOrganizationForLoginAsync(
+        new SqlOSSelectOrganizationRequest(
+            body.PendingAuthToken,
+            body.OrganizationId),
+        httpContext,
+        ct);
+
+    return ToLoginHttpResult(outcome);
+});
+```
+
+Complete a normal MFA challenge with the returned `MfaToken`:
+
+```csharp
+app.MapPost("/auth/mfa", async (
+    MfaBody body,
+    SqlOSAuthService authService,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var verified = await authService.VerifyMfaChallengeAsync(
+        new SqlOSMfaChallengeVerifyRequest(body.MfaToken, body.Code),
+        httpContext,
+        ct);
+
+    return verified.Tokens is { } tokens
+        ? Results.Ok(new { status = "complete", tokens })
+        : Results.Problem("MFA did not produce client tokens.");
+});
+```
+
+When `RequiresMfaEnrollment` is `true`, call `StartTotpEnrollmentForChallengeAsync`, display its provisioning URI or QR code, and then call `VerifyTotpEnrollmentAsync` with the enrollment token, authenticator code, **and the original MFA token**. Its `Tokens` field completes the login. See [MFA and TOTP](/docs/authserver/mfa-totp) for that enrollment UI.
+
+---
+
 ### Device Authorization Grant
 
 Start, resolve, approve, deny, and poll a CLI/device OAuth request.
@@ -79,7 +158,7 @@ See [CLI OAuth](/docs/authserver/cli-oauth).
 
 ### LoginWithPasswordAsync
 
-Authenticate a user with email and password. If the user belongs to multiple organizations and no `OrganizationId` is specified, returns `RequiresOrganizationSelection = true` with a `PendingAuthToken` and the list of organizations.
+Authenticate a user with email and password. The result may require organization selection or MFA before it contains tokens.
 
 ```csharp
 var result = await authService.LoginWithPasswordAsync(
@@ -88,17 +167,10 @@ var result = await authService.LoginWithPasswordAsync(
         Password: request.Password,
         ClientId: "my-app",
         OrganizationId: null),
-    httpContext);
+    httpContext,
+    ct);
 
-if (result.RequiresOrganizationSelection)
-    return Results.Ok(new
-    {
-        requiresOrgSelection = true,
-        pendingAuthToken = result.PendingAuthToken,
-        organizations = result.Organizations
-    });
-
-return Results.Ok(result.Tokens);
+return ToLoginHttpResult(result);
 ```
 
 **Parameters**
@@ -125,7 +197,7 @@ return Results.Ok(result.Tokens);
 | Field | Type | Description |
 |-------|------|-------------|
 | `RequiresOrganizationSelection` | `bool` | `true` if the user must pick an org before tokens can be issued. |
-| `PendingAuthToken` | `string?` | Temporary token for `SelectOrganizationAsync`. |
+| `PendingAuthToken` | `string?` | Temporary token for `SelectOrganizationForLoginAsync`. |
 | `Organizations` | `IReadOnlyList<SqlOSOrganizationOption>` | Available organizations. |
 | `Tokens` | `SqlOSTokenResponse?` | Issued tokens (null if org selection required). |
 | `RequiresMfa` | `bool` | `true` if a second-factor challenge is required before tokens can be issued. |
@@ -225,7 +297,7 @@ See [MFA and TOTP](/docs/authserver/mfa-totp).
 
 ### SignUpAsync
 
-Create a new user with email and password. Optionally creates an organization at the same time.
+Create a new user with email and password. Optionally creates an organization at the same time. Signup is subject to the same organization-selection and MFA state machine as login.
 
 ```csharp
 var result = await authService.SignUpAsync(
@@ -236,9 +308,10 @@ var result = await authService.SignUpAsync(
         OrganizationName: "Acme Corp",
         ClientId: "my-app",
         OrganizationId: null),
-    httpContext);
+    httpContext,
+    ct);
 
-return Results.Ok(result.Tokens);
+return ToLoginHttpResult(result);
 ```
 
 **Parameters**
@@ -448,7 +521,7 @@ The invited email must match the user's normalized email. Acceptance creates or 
 
 ### AcceptEmailInvitationSignupAsync
 
-Create a passwordless invited user and return tokens without sending a second OTP code.
+Create a passwordless invited user without sending a second OTP code. The result can still require organization-policy MFA before tokens are issued.
 
 ```csharp
 var result = await authService.AcceptEmailInvitationSignupAsync(
@@ -459,9 +532,11 @@ var result = await authService.AcceptEmailInvitationSignupAsync(
         CustomFields: null),
     httpContext,
     ct);
+
+return ToLoginHttpResult(result);
 ```
 
-Use this for backend-owned invite signup flows. Hosted and headless browser flows use their invitation endpoints.
+Use this for backend-owned invite signup flows. Hosted and headless browser flows use their invitation endpoints. Do not read `result.Tokens` directly: process the full `SqlOSLoginResult` as shown above.
 
 ---
 
@@ -483,18 +558,19 @@ Resending invalidates the previous token. Revocation prevents future acceptance.
 
 ---
 
-### SelectOrganizationAsync
+### SelectOrganizationForLoginAsync
 
-Complete login by selecting an organization. Called when `LoginWithPasswordAsync` returns `RequiresOrganizationSelection = true`.
+Continue login by selecting an organization. Call this whenever a preceding `SqlOSLoginResult` returns `RequiresOrganizationSelection = true`.
 
 ```csharp
-var tokens = await authService.SelectOrganizationAsync(
+var outcome = await authService.SelectOrganizationForLoginAsync(
     new SqlOSSelectOrganizationRequest(
         PendingAuthToken: result.PendingAuthToken!,
         OrganizationId: selectedOrgId),
-    httpContext);
+    httpContext,
+    ct);
 
-return Results.Ok(tokens);
+return ToLoginHttpResult(outcome);
 ```
 
 **Parameters**
@@ -507,17 +583,9 @@ return Results.Ok(tokens);
 
 **Returns**
 
-`Task<SqlOSTokenResponse>`
+`Task<SqlOSLoginResult>`. The selected organization's policy can produce `RequiresMfa = true`; otherwise `Tokens` is populated.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `AccessToken` | `string` | JWT access token. |
-| `RefreshToken` | `string` | Opaque refresh token. |
-| `SessionId` | `string` | Session identifier. |
-| `ClientId` | `string` | Client application ID. |
-| `OrganizationId` | `string?` | Organization the user is logged into. |
-| `AccessTokenExpiresAt` | `DateTime` | Access token expiry (UTC). |
-| `RefreshTokenExpiresAt` | `DateTime` | Refresh token expiry (UTC). |
+`SelectOrganizationAsync` is a token-only convenience wrapper retained for callers that can prove MFA will not be required. It throws `InvalidOperationException("The selected organization requires MFA.")` when selection activates MFA. Because the pending-auth token has already been consumed at that point, interactive application flows should use `SelectOrganizationForLoginAsync` and handle the returned state instead.
 
 ---
 
@@ -543,7 +611,9 @@ return Results.Ok(tokens);
 
 **Returns**
 
-`Task<SqlOSTokenResponse>` — new token pair. The previous refresh token is revoked.
+`Task<SqlOSTokenResponse>` — a rotated token pair. The previous refresh token is consumed; retry behavior within the configured grace window is described in [Refresh and logout](/docs/authserver/refresh-and-logout).
+
+`RefreshAsync` checks `SessionIdleTimeout` and `SessionAbsoluteLifetime` before issuing the new pair. A successful refresh sets the session's idle deadline to `UtcNow + SessionIdleTimeout`. The idle deadline is therefore a **refresh-session** control, not an access-token clock: an already-issued access token can continue to validate until its JWT `exp` time unless the session is revoked or reaches its absolute expiry. Access-token validation does not extend the idle deadline.
 
 ---
 
@@ -618,6 +688,8 @@ var orgId = validated.OrganizationId;
 
 `Task<SqlOSValidatedToken?>` — `null` if the token is invalid or expired.
 
+Validation checks the JWT signature, issuer, expected audience, lifetime (with the configured one-minute clock skew), and backing session existence, revocation, and absolute expiry. It updates `LastSeenAt`, but it does not check or extend `IdleExpiresAt`. Consequently, crossing the session idle deadline blocks the next refresh; it does not retroactively shorten the `exp` of an access token that was already issued. Use short access-token lifetimes when that distinction matters to your threat model.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `Principal` | `ClaimsPrincipal` | The validated claims principal. |
@@ -669,15 +741,23 @@ Create a one-time password reset token and send the built-in password reset emai
 
 ```csharp
 var result = await authService.RequestPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(
+    new SqlOSForgotPasswordRequest(
         Email: request.Email,
-        ResetUrlTemplate: "https://app.example.com/reset-password?token={token}",
         ClientId: "web"),
     httpContext,
     ct);
 ```
 
-Use `ResetUrlTemplate: null` to link to SqlOS' hosted reset form at `/sqlos/auth/password/reset?token=...`.
+Public callers cannot provide a reset URL or origin. By default the email links to SqlOS' hosted form
+at `{AuthServer.PublicOrigin}{AuthServer.BasePath}/password/reset?token=...`. When `PublicOrigin` is
+omitted, SqlOS derives the origin from the validated `Issuer`; it never derives password-reset links
+from request host or forwarded-host headers.
+
+Configure an app-owned reset page on the server with `AuthServer.PasswordReset.BuildResetUrl`. The
+callback receives a `ClientId` only for an active first-party client resolved by SqlOS. Its output is
+validated as an absolute HTTPS URL without user information; loopback HTTP is accepted only for local
+development. Link-generation failures invalidate the token without changing the enumeration-safe
+public response.
 
 Public routes:
 
@@ -731,7 +811,7 @@ var result = await authService.SendPasswordResetEmailAsync(
 | Name | Type | Description |
 |------|------|-------------|
 | `request.Email` | `string` | The user's email address. |
-| `request.ResetUrlTemplate` | `string?` | Optional reset URL template. If it includes `{token}`, SqlOS replaces it with the escaped reset token. |
+| `request.ResetUrlTemplate` | `string?` | Optional trusted server-side reset URL template. If it includes `{token}`, SqlOS replaces it with the escaped reset token. The generated URL is validated before delivery. This field is not accepted by public reset endpoints. |
 | `request.ClientId` | `string?` | Optional client/application key used for rate limiting and audit context. |
 
 **Returns**
@@ -808,7 +888,11 @@ await authService.VerifyEmailAsync(
 
 ### CreateSessionTokensForUserAsync
 
-Directly issue session tokens for a user. Used after OIDC/SSO flows complete, when you have a resolved user but need to create the SqlOS session.
+Directly issue session tokens for a user and client. This is a privileged escape hatch for a trusted backend that has already authenticated the principal and independently enforced every applicable policy.
+
+<Callout type="warning" title="This method bypasses the login state machine">
+  `CreateSessionTokensForUserAsync` does not run organization selection or evaluate the MFA state machine used by password, OTP, hosted OAuth, and headless OAuth flows. Prefer SqlOS's hosted or headless browser flows. Call this method only after your backend has independently authenticated the user, validated the selected organization membership, and enforced the required MFA policy. SqlOS still checks application-access assignments while creating the session, but that is not a substitute for those skipped login policies. Never expose this method as a client-callable "mint token" endpoint.
+</Callout>
 
 ```csharp
 var tokens = await authService.CreateSessionTokensForUserAsync(
@@ -828,6 +912,7 @@ var tokens = await authService.CreateSessionTokensForUserAsync(
 | `authenticationMethod` | `string` | How the user authenticated (e.g., `"password"`, `"oidc"`, `"saml"`). |
 | `userAgent` | `string?` | Browser user agent. |
 | `ipAddress` | `string?` | Client IP address. |
+| `resource` | `string?` | Optional OAuth resource indicator on the overload that accepts a resource. |
 
 **Returns**
 
@@ -1034,16 +1119,41 @@ var conn = await adminService.CreateOidcConnectionAsync(
 | `request.ProviderType` | `SqlOSOidcProviderType` | `Google`, `Microsoft`, `GitHub`, `Apple`, or `Custom`. |
 | `request.DisplayName` | `string` | Display name for the provider. |
 | `request.ClientId` | `string` | OAuth client ID from the provider. |
-| `request.ClientSecret` | `string?` | OAuth client secret. |
-| `request.AllowedCallbackUris` | `List<string>` | Allowed callback URIs. |
-| `request.UseDiscovery` | `bool` | Whether to use OIDC discovery. |
-| `request.DiscoveryUrl` | `string?` | The `.well-known/openid-configuration` URL. |
-| `request.MicrosoftTenant` | `string?` | Azure AD tenant ID (Microsoft only). |
-| `request.Scopes` | `List<string>?` | Custom scopes to request. |
+| `request.ClientSecret` | `string?` | OAuth client secret. Required for every provider except Apple. SqlOS encrypts it before persistence. |
+| `request.AllowedCallbackUris` | `List<string>` | At least one exact callback URI is required. `{connectionId}` placeholders are replaced with the generated connection ID. |
+| `request.UseDiscovery` | `bool` | Selects discovery for `Custom`. Built-ins override this: Google, Microsoft, and Apple use discovery; GitHub uses its OAuth profile endpoints. |
+| `request.DiscoveryUrl` | `string?` | Required for a discovery-based `Custom` connection. Built-in discovery URLs are supplied by SqlOS. |
+| `request.Issuer` | `string?` | Required for a manual `Custom` connection (`UseDiscovery: false`). |
+| `request.AuthorizationEndpoint` | `string?` | Required authorization endpoint for a manual `Custom` connection. |
+| `request.TokenEndpoint` | `string?` | Required token endpoint for a manual `Custom` connection. |
+| `request.UserInfoEndpoint` | `string?` | Optional UserInfo endpoint for manual custom configuration. Discovery can supply it. |
+| `request.JwksUri` | `string?` | Required JWKS URI for a manual `Custom` connection. |
+| `request.MicrosoftTenant` | `string?` | Microsoft tenant ID or domain. Defaults to `common`; ignored for other providers. |
+| `request.Scopes` | `List<string>?` | Scopes to request. Empty uses `openid email profile` for OIDC, `name email` for Apple, or `read:user user:email` for GitHub. |
+| `request.ClaimMapping` | `SqlOSOidcClaimMapping?` | Maps subject, email, email-verification, display-name, first-name, last-name, and preferred-username claims. Defaults to standard OIDC claim names; built-in Apple and GitHub mappings are fixed. |
+| `request.ClientAuthMethod` | `SqlOSOidcClientAuthMethod?` | `ClientSecretPost` (default) or `ClientSecretBasic`. Apple always uses `ClientSecretPost`. |
+| `request.UseUserInfo` | `bool?` | Whether to supplement token claims from UserInfo when an endpoint is available. Defaults to `true` except Apple; built-ins can override it. |
+| `request.AppleTeamId` | `string?` | Apple Developer team ID. Required for Apple. |
+| `request.AppleKeyId` | `string?` | Apple Sign in with Apple key ID. Required for Apple. |
+| `request.ApplePrivateKeyPem` | `string?` | Apple PKCS#8 private key in PEM form. Required for Apple and encrypted before persistence. |
+| `request.LogoDataUrl` | `string?` | Optional provider-button image data URL. Built-in providers have a default logo when this is null. |
 
 **Returns**
 
 `Task<SqlOSOidcConnection>` — the created connection.
+
+**Provider requirements**
+
+| Provider | Required configuration | SqlOS-owned behavior |
+| --- | --- | --- |
+| Google | Client ID, client secret, callback URI | Uses Google's discovery document and standard OIDC claims. |
+| Microsoft | Client ID, client secret, callback URI; optional tenant | Uses the selected tenant's v2 discovery document; `common` is the default. |
+| Apple | Service ID in `ClientId`, callback URI, team ID, key ID, PKCS#8 private key | Generates the short-lived Apple client secret, uses Apple discovery, disables UserInfo. |
+| GitHub | Client ID, client secret, callback URI | Uses GitHub OAuth profile/email APIs rather than OIDC discovery or ID tokens. |
+| Custom + discovery | Client ID, client secret, callback URI, discovery URL | Loads issuer, authorization, token, JWKS, and optional UserInfo endpoints from discovery. |
+| Custom + manual | Client ID, client secret, callback URI, issuer, authorization endpoint, token endpoint, JWKS URI | Uses the supplied endpoints; UserInfo remains optional. |
+
+Provider setup is covered end to end in [Google OIDC](/docs/authserver/google-oidc), [Microsoft OIDC](/docs/authserver/microsoft-oidc), [Apple OIDC](/docs/authserver/apple-oidc), [GitHub OAuth](/docs/authserver/github-oidc), and [Custom OIDC](/docs/authserver/custom-oidc). See [OIDC social login](/docs/authserver/oidc-auth) for the shared browser flow.
 
 ---
 
@@ -1374,7 +1484,7 @@ return Results.Redirect(result.AuthorizationUrl);
 
 ### CompleteAuthorizationAsync
 
-Complete the OIDC callback. Exchanges the authorization code with the provider, resolves the user, and returns session info.
+Low-level OIDC callback primitive. It exchanges the authorization code with the provider, validates the provider response, and resolves or provisions a SqlOS identity. It does **not** create a SqlOS session or return tokens.
 
 ```csharp
 var result = await oidcService.CompleteAuthorizationAsync(
@@ -1388,12 +1498,13 @@ var result = await oidcService.CompleteAuthorizationAsync(
         UserPayloadJson: null),
     ipAddress: httpContext.Connection.RemoteIpAddress?.ToString());
 
-// result.UserId, result.Email, result.OrganizationId
-// Now create a session:
-var tokens = await authService.CreateSessionTokensForUserAsync(
-    user, client, result.OrganizationId,
-    result.AuthenticationMethod, userAgent, ipAddress);
+// result describes the resolved identity; it is not a login session.
+// result.UserId, result.Email, result.OrganizationId, result.OrganizationCount
 ```
+
+<Callout type="warning" title="Prefer the policy-aware browser flows">
+  For application login, use SqlOS's hosted authorization endpoints or [headless authentication](/docs/authserver/headless-auth-how-to). Those flows preserve organization selection, MFA, PKCE, state, nonce, and the normal authorization handoff. Use `CompleteAuthorizationAsync` directly only when you are building a trusted server-side identity broker. If that broker later calls `CreateSessionTokensForUserAsync`, it must first enforce organization membership and the required MFA policy itself; direct token creation bypasses the normal login state machine. Token creation still applies SqlOS application-access assignments.
+</Callout>
 
 **Parameters**
 
@@ -1405,6 +1516,8 @@ var tokens = await authService.CreateSessionTokensForUserAsync(
 | `request.Code` | `string` | The authorization code from the provider. |
 | `request.CodeVerifier` | `string` | PKCE code verifier. |
 | `request.Nonce` | `string` | Must match the original nonce. |
+| `request.UserPayloadJson` | `string?` | Optional provider callback payload, used for provider-specific fields such as Apple's first-login user data. |
+| `ipAddress` | `string?` | Client IP recorded in the OIDC audit event. |
 
 **Returns**
 
@@ -1415,8 +1528,10 @@ var tokens = await authService.CreateSessionTokensForUserAsync(
 | `UserId` | `string` | Resolved or created user ID. |
 | `Email` | `string` | User's email from the provider. |
 | `DisplayName` | `string` | User's display name from the provider. |
-| `OrganizationId` | `string?` | Matched organization (if any). |
+| `OrganizationId` | `string?` | The organization ID only when the user has exactly one organization; otherwise null. |
 | `AuthenticationMethod` | `string` | Provider method: `"google"`, `"microsoft"`, `"apple"`, `"github"`, or `"oidc"` for a custom OIDC provider. |
+| `OrganizationCount` | `int` | Number of organizations available to the resolved user. |
+| `UserCreated` | `bool` | Whether this callback provisioned a new SqlOS user. |
 
 ---
 
@@ -1442,7 +1557,7 @@ var settings = await settingsService.GetResolvedSecuritySettingsAsync();
 | Field | Type | Description |
 |-------|------|-------------|
 | `RefreshTokenLifetime` | `TimeSpan` | How long refresh tokens are valid. |
-| `SessionIdleTimeout` | `TimeSpan` | Session expires after this idle period. |
+| `SessionIdleTimeout` | `TimeSpan` | Maximum time between successful refreshes. `RefreshAsync` checks this deadline and extends it after a successful refresh; access-token validation neither checks nor extends it. |
 | `SessionAbsoluteLifetime` | `TimeSpan` | Maximum session lifetime regardless of activity. |
 
 ---
@@ -1467,7 +1582,7 @@ var settings = await settingsService.UpdateSecuritySettingsAsync(
 | Name | Type | Description |
 |------|------|-------------|
 | `request.RefreshTokenLifetimeMinutes` | `int` | Refresh token lifetime in minutes. |
-| `request.SessionIdleTimeoutMinutes` | `int` | Idle timeout in minutes. |
+| `request.SessionIdleTimeoutMinutes` | `int` | Maximum minutes between successful refreshes. Does not change the lifetime of an already-issued access token. |
 | `request.SessionAbsoluteLifetimeMinutes` | `int` | Absolute lifetime in minutes. |
 | `request.SigningKeyRotationIntervalDays` | `int` | Signing key rotation interval in days. |
 | `request.SigningKeyGraceWindowDays` | `int` | Grace period for a previous signing key in days; must be shorter than the rotation interval. |
@@ -1550,7 +1665,7 @@ public sealed record SqlOSTokenResponse(
 
 ### SqlOSLoginResult
 
-Returned by `LoginWithPasswordAsync` and `SignUpAsync`.
+Returned by password, OTP, invitation-signup, external-login, and organization-selection flows. Handle it as the state machine shown at the start of `SqlOSAuthService`; `Tokens` is populated only in the complete state.
 
 ```csharp
 public sealed record SqlOSLoginResult(

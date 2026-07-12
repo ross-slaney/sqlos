@@ -19,20 +19,27 @@ http://localhost:5062/sqlos/auth/oidc/callback
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "microsoft",
     "displayName": "Microsoft",
     "clientId": "YOUR_AZURE_APP_CLIENT_ID",
-    "clientSecret": "YOUR_AZURE_APP_CLIENT_SECRET"
+    "clientSecret": "YOUR_AZURE_APP_CLIENT_SECRET",
+    "allowedCallbackUris": [
+      "http://localhost:5062/sqlos/auth/oidc/callback"
+    ]
   }'
 ```
 
-5. Enable the connection:
+5. The create operation enables the connection. Use the endpoint below only to re-enable it after an operator disabled it:
 
 ```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+See [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls) before using any admin `curl` example.
 
 ## Seed from code
 

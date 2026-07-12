@@ -18,7 +18,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
     {
         await using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
 
@@ -48,7 +48,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
     {
         await using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
 
@@ -86,7 +86,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
     {
         await using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
 
@@ -114,7 +114,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
     {
         await using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var discovery = new SqlOSHomeRealmDiscoveryService(context);
 
@@ -171,6 +171,20 @@ public sealed class SqlOSDiscoveryAndSettingsTests
         updated.SigningKeyRotationIntervalDays.Should().Be(90);
         updated.SigningKeyGraceWindowDays.Should().Be(7);
         updated.SigningKeyRetiredCleanupDays.Should().Be(30);
+    }
+
+    [TestMethod]
+    public async Task SettingsService_RejectsSigningKeyCleanupBeforeJwksGraceEnds()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
+
+        var act = async () => await settingsService.UpdateSecuritySettingsAsync(
+            new SqlOSUpdateSecuritySettingsRequest(1440, 60, 2880, 90, 7, 6));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cleanup must not run before the JWKS grace window ends*");
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()
