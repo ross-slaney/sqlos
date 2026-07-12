@@ -7,7 +7,7 @@ section: authserver
 
 A **client** is the app that sends a user into SqlOS sign in and later exchanges the auth code for tokens.
 
-SqlOS now supports three client onboarding paths:
+SqlOS supports four client onboarding paths:
 
 - **Owned apps** -- seeded or dashboard-created clients for your own web, mobile, desktop, or SPA apps
 - **CLI apps** -- device-flow clients for terminal tools without redirect listeners
@@ -54,6 +54,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "clientId": "my-web-app",
@@ -62,6 +63,8 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/clients \
     "redirectUris": ["http://localhost:3000/auth/callback"]
   }'
 ```
+
+The Admin API requires an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 | Field | Required | Description |
 | --- | --- | --- |

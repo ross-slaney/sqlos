@@ -1,6 +1,6 @@
 ---
-title: ".NET SDK Map"
-description: "Application-facing SqlOS services, contracts, namespaces, and source-aligned examples."
+title: ".NET SDK Reference"
+description: "Application-facing SqlOS services, trust boundaries, contracts, and source-aligned end-to-end examples."
 order: 9
 section: reference
 ---
@@ -11,29 +11,74 @@ section: reference
   href="/docs/reference/hosting-api"
   actionLabel="Hosting API"
 >
-  This page is a curated map of application-facing services. It does not claim to enumerate every public implementation class in `SqlOS.dll`. Follow the linked method references for exact contracts.
+  This page maps the supported application services, their trust boundaries, and complete flow patterns. Public infrastructure classes that exist only to compose the runtime are intentionally not presented as application APIs.
 </Banner>
 
 ## Service map
 
-All services below are registered by `AddSqlOS<TContext>`.
+All services below are registered by `AddSqlOS<TContext>`. Prefer interfaces when one is provided.
 
-| Task | Inject | Namespace | Detailed reference |
-| --- | --- | --- | --- |
-| Login, signup, invitations, sessions, tokens, MFA | `SqlOSAuthService` | `SqlOS.AuthServer.Services` | [AuthServer API](/docs/reference/authserver-api) |
-| Administrative identity workflows | `SqlOSAdminService` | `SqlOS.AuthServer.Services` | [AuthServer API](/docs/reference/authserver-api#sqlosadminservice) |
-| Point and query authorization | `ISqlOSFgaAuthService` | `SqlOS.Fga.Interfaces` | [FGA API](/docs/reference/fga-api) |
-| Record and query audit events | `ISqlOSAuditLogService` | `SqlOS.AuditLogs` | [Audit Logs](/docs/reference/audit-logs) |
-| Render and send application email | `ISqlOSTransactionalEmailService` | `SqlOS.Email.Interfaces` | [Transactional email](#transactional-email) |
-| Connect and use Google/Microsoft calendars | `SqlOSCalendarService` | `SqlOS.Calendar.Services` | [Calendar](#calendar) |
+### Primary application services
+
+| Task | Inject | Detailed reference |
+| --- | --- | --- |
+| Login, signup, invitations, sessions, tokens, MFA | `SqlOSAuthService` | [AuthServer API](/docs/reference/authserver-api) |
+| Trusted identity/client administration | `SqlOSAdminService` | [AuthServer API](/docs/reference/authserver-api#sqlosadminservice) |
+| Point and query authorization | `ISqlOSFgaAuthService` | [FGA API](/docs/reference/fga-api) |
+| Provision users, agents, service accounts, and groups | `ISqlOSFgaSubjectService` or `ISqlOSFgaDbContext` helpers | [Subject types](/docs/fga/subject-types) |
+| Execute authorized cursor-paged specifications | `ISpecificationExecutor` | [FGA API](/docs/reference/fga-api#ispecificationexecutor) |
+| Record and query audit events | `ISqlOSAuditLogService` | [Audit Logs](/docs/reference/audit-logs) |
+| Render and send application email | `ISqlOSTransactionalEmailService` | [Transactional email](#transactional-email) |
+| Connect and use Google/Microsoft calendars | `SqlOSCalendarService` | [Calendar](#calendar) |
+
+### Advanced and operator services
+
+| Task | Inject | Boundary |
+| --- | --- | --- |
+| Security, MFA, AuthPage, and auth-email settings | `SqlOSSettingsService` | Trusted backend/operator only |
+| Home-realm discovery and organization-domain proof | `SqlOSHomeRealmDiscoveryService` / `SqlOSOrganizationDomainService` | Use when building a custom SSO onboarding flow |
+| Low-level SAML or social/OIDC orchestration | `SqlOSSsoAuthorizationService` / `SqlOSOidcAuthService` | Prefer hosted/headless AuthPage unless you own the entire redirect and PKCE flow |
+| Customer SSO setup sessions | `SqlOSSsoPortalService` | Trusted backend creates links; the resulting portal session is organization-scoped |
+| Email template administration | `SqlOSEmailAdminService` | Dashboard-oriented trusted administration |
+| Calendar synchronization and event creation | `SqlOSCalendarSyncService` | Trusted worker/backend; caller authorization is the host's responsibility |
 
 Host registration, EF integration, route mapping, and bearer validation are documented separately in [Hosting API](/docs/reference/hosting-api).
+
+## DI lifetime and trust boundary
+
+The application services above are registered as scoped services. Inject them into a Minimal API handler, controller, Razor page, or another scoped service:
+
+```csharp
+app.MapPost(
+    "/api/session",
+    async (
+        LoginBody body,
+        HttpContext http,
+        SqlOSAuthService auth,
+        CancellationToken ct) =>
+    {
+        var result = await auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(
+                Email: body.Email,
+                Password: body.Password,
+                ClientId: "acme-web",
+                OrganizationId: null),
+            http,
+            ct);
+
+        return Results.Ok(result);
+    });
+```
+
+This shows scoped injection only. In a production endpoint, branch on `SqlOSLoginResult` as shown below and decide explicitly whether tokens belong in an HttpOnly application session, a native secure store, or another client-specific boundary.
+
+SqlOS services accept explicit user, organization, client, resource, and subject IDs. Supplying an ID does not prove that the current caller may act on it. Derive IDs from a validated token or authorize the operator before calling administrative, invitation, settings, raw-token, calendar-token, or session-revocation methods. Do not resolve a scoped service from the root container or keep it in a singleton.
 
 ## SqlOSAuthService
 
 **Namespace:** `SqlOS.AuthServer.Services`
 
-Use named arguments for positional request records so examples stay readable when several adjacent fields have the same type.
+Use named arguments for positional request records so examples stay readable when several adjacent fields have the same type. `SqlOSAuthService` combines public sign-in operations with trusted helpers such as invitation creation, raw token generation, and all-session revocation; authorize the caller before exposing the latter through an application endpoint.
 
 ### Password login
 
@@ -47,6 +92,63 @@ var login = await authService.LoginWithPasswordAsync(
     httpContext,
     ct);
 ```
+
+### Handle every login outcome
+
+Password, email-code, phone-code, invitation signup, and external-provider completion all converge on `SqlOSLoginResult`. A successful method call does not necessarily mean tokens are present.
+
+| State | Meaning | Next call |
+| --- | --- | --- |
+| `RequiresOrganizationSelection` | The user belongs to multiple organizations and no organization was selected | `SelectOrganizationForLoginAsync` with `PendingAuthToken` and the selected organization |
+| `RequiresMfa && RequiresMfaEnrollment` | Policy requires MFA, but the user has no usable TOTP authenticator | `StartTotpEnrollmentForChallengeAsync`, then `VerifyTotpEnrollmentAsync` |
+| `RequiresMfa` | The user must supply TOTP or a recovery code | `VerifyMfaChallengeAsync` |
+| `Tokens is not null` | Login is complete | Return/store tokens using your application's browser or native-client security model |
+
+Keep the branching in one place:
+
+```csharp
+static IResult LoginOutcome(SqlOSLoginResult result)
+{
+    if (result.RequiresOrganizationSelection)
+    {
+        return Results.Ok(new
+        {
+            next = "select_organization",
+            pendingAuthToken = result.PendingAuthToken,
+            organizations = result.Organizations
+        });
+    }
+
+    if (result.RequiresMfa)
+    {
+        return Results.Ok(new
+        {
+            next = result.RequiresMfaEnrollment ? "enroll_totp" : "verify_mfa",
+            mfaToken = result.MfaToken,
+            methods = result.MfaMethods
+        });
+    }
+
+    return result.Tokens is { } tokens
+        ? Results.Ok(new { next = "complete", tokens })
+        : Results.Problem("SqlOS returned no next authentication state.");
+}
+```
+
+Organization selection can itself lead to MFA:
+
+```csharp
+var selected = await authService.SelectOrganizationForLoginAsync(
+    new SqlOSSelectOrganizationRequest(
+        PendingAuthToken: pendingAuthToken,
+        OrganizationId: organizationId),
+    httpContext,
+    ct);
+
+return LoginOutcome(selected);
+```
+
+Use `SelectOrganizationAsync` only when your flow is prepared for it to throw if MFA is required. `SelectOrganizationForLoginAsync` retains the full state machine and is safer for a general login endpoint.
 
 ### Password signup
 
@@ -84,7 +186,7 @@ var login = await authService.VerifyEmailOtpAsync(
     ct);
 ```
 
-### Phone OTP (SqlOS 3.16)
+### Phone OTP
 
 Configure Twilio Verify through the AuthServer options:
 
@@ -167,23 +269,32 @@ Always pass the expected audience for a protected API. `ValidateAccessTokenWitho
 
 ### Password reset and email verification
 
+The public reset-email method is enumeration-safe: it returns the same public shape whether the email exists, is eligible, or delivery fails.
+
 ```csharp
 var reset = await authService.RequestPasswordResetEmailAsync(
-    new SqlOSSendPasswordResetEmailRequest(
+    new SqlOSForgotPasswordRequest(
         Email: email,
-        ResetUrlTemplate: "https://app.example.com/reset?token={token}",
         ClientId: clientId),
     httpContext,
     ct);
+```
 
+Raw email-verification tokens are a trusted-backend primitive:
+
+```csharp
 var verificationToken = await authService.CreateEmailVerificationTokenAsync(
     new SqlOSCreateVerificationTokenRequest(Email: email),
     ct);
 
+// Deliver verificationToken to that address through a trusted email workflow.
+// Consume it only when the user later follows the verification link.
 await authService.VerifyEmailAsync(
-    new SqlOSVerifyEmailRequest(Token: verificationToken),
+    new SqlOSVerifyEmailRequest(Token: tokenFromVerificationLink),
     ct);
 ```
+
+Never return `verificationToken` to an unauthenticated caller or call creation and verification back-to-back. The token is the proof carried by the email link.
 
 ## SqlOSAdminService
 
@@ -246,12 +357,48 @@ var connection = await adminService.ImportSsoMetadataAsync(
 
 **Namespace:** `SqlOS.Fga.Interfaces`
 
+FGA authorizes a `subjectId`; bearer authentication produces a SqlOS AuthServer `UserId`. Make that bridge explicit at your user-provisioning boundary. A common convention is to provision the FGA subject with the AuthServer user ID as its stable subject ID:
+
 ```csharp
+using SqlOS.Extensions;
+
+await db.ProvisionUserSubjectAsync(
+    subjectId: authUser.Id,
+    displayName: authUser.DisplayName,
+    email: authUser.DefaultEmail,
+    externalRef: authUser.Id,
+    cancellationToken: ct);
+
+await db.SaveChangesAsync(ct);
+```
+
+The provisioning helper is idempotent and tracks the insert/update; it does not save changes. If your application uses a different FGA subject key, persist and resolve that mapping instead of assuming both IDs match.
+
+On a protected request, take identity from the token rather than a body/query parameter:
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+
+var validated = httpContext.GetSqlOSValidatedToken();
+if (validated?.UserId is not { } subjectId)
+{
+    return Results.Unauthorized();
+}
+
 var decision = await fga.CheckAccessAsync(
     subjectId,
     permissionKey: "WORKSPACE_VIEW",
     resourceId);
 
+if (!decision.Allowed)
+{
+    return Results.Forbid();
+}
+```
+
+For collection queries, keep the generated expression inside the EF Core `IQueryable` so SQL Server applies the authorization TVF:
+
+```csharp
 var filter = await fga.GetAuthorizationFilterAsync<Workspace>(
     subjectId,
     permissionKey: "WORKSPACE_VIEW");
@@ -262,7 +409,7 @@ var visible = await db.Workspaces
     .ToListAsync(ct);
 ```
 
-For provisioning, grants, entity synchronization, traces, and pagination, see [FGA API](/docs/reference/fga-api).
+Do not compile the expression and filter in memory. For provisioning, grants, entity synchronization, traces, and pagination, see [FGA API](/docs/reference/fga-api).
 
 ## ISqlOSAuditLogService
 
@@ -288,6 +435,7 @@ See [Audit Logs Reference](/docs/reference/audit-logs) for filtering, idempotenc
 **Interface:** `ISqlOSTransactionalEmailService`
 
 **Namespace:** `SqlOS.Email.Interfaces`
+
 **Contracts:** `SqlOS.Email.Contracts`
 
 ```csharp
@@ -300,6 +448,42 @@ Task<SqlOSSendEmailResult> SendAsync(
     SqlOSSendEmailRequest request,
     CancellationToken cancellationToken = default);
 ```
+
+### 1. Create and preview a template
+
+Create templates once through the dashboard or a trusted setup/admin workflow, not on every send:
+
+```csharp
+using System.Text.Json.Nodes;
+
+await emailAdmin.CreateTemplateAsync(
+    new SqlOSCreateEmailTemplateRequest(
+        Key: "app.receipt",
+        DisplayName: "Purchase receipt",
+        SubjectTemplate: "Receipt {orderNumber}",
+        HtmlBodyTemplate: "<p>Order <strong>{orderNumber}</strong>: {total}</p>",
+        TextBodyTemplate: "Order {orderNumber}: {total}",
+        Variables: new JsonObject
+        {
+            ["orderNumber"] = new JsonObject { ["description"] = "Order number" },
+            ["total"] = new JsonObject { ["description"] = "Formatted total" }
+        },
+        IsActive: true),
+    ct);
+
+var preview = await email.PreviewAsync(
+    "app.receipt",
+    new Dictionary<string, object?>
+    {
+        ["orderNumber"] = "A-1234",
+        ["total"] = "$42.00"
+    },
+    ct);
+```
+
+`PreviewAsync` renders without sending. HTML variable values are encoded by the renderer. A missing placeholder value throws `SqlOSEmailTemplateValidationException` with `MissingVariables`.
+
+### 2. Send idempotently
 
 ```csharp
 var sent = await email.SendAsync(
@@ -315,13 +499,15 @@ var sent = await email.SendAsync(
     ct);
 ```
 
-The example assumes the application has created an active `app.receipt` template with matching variables. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow.
+`EnableIdempotency` defaults to `true`. Reusing `receipt:A-1234` returns the existing delivery instead of sending another message. Make the key unique to the business operation, not the HTTP request attempt.
 
-The configured `ISqlOSEmailSender` performs delivery. Template validation can throw `SqlOSEmailTemplateValidationException` when required variables are missing. See [Transactional Email](/docs/authserver/transactional-email) for configuration and built-in templates.
+Inspect `sent.Status`. An unconfigured sender or provider failure normally returns `Status = "failed"` with `SanitizedError`; it is not reported only by an exception. A successful provider submission returns `Status = "queued"` plus the provider message ID when available.
+
+The configured `ISqlOSEmailSender` performs delivery. When Azure Communication Services is not your provider, register a custom implementation after `AddSqlOS` so it becomes the single service resolved by the sender pipeline. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow. See [Transactional Email](/docs/authserver/transactional-email) for provider configuration, retention, privacy, and built-in templates.
 
 ## Calendar
 
-**Service:** `SqlOSCalendarService`
+**Services:** `SqlOSCalendarService` and `SqlOSCalendarSyncService`
 
 **Namespace:** `SqlOS.Calendar.Services`
 
@@ -329,7 +515,11 @@ The configured `ISqlOSEmailSender` performs delivery. Template validation can th
 
 **Modes and persisted models:** `SqlOS.Calendar.Models`
 
-Calendar support is opt-in with `options.ConfigureCalendar(calendar => calendar.Enabled = true)`. It reuses a configured Google or Microsoft social/OIDC connection for provider client credentials.
+Calendar route mapping and the background sync scheduler are enabled by default. Set `options.Calendar.Enabled = false` to skip the hosted callback and admin endpoints. Calendar consent reuses an enabled Google or Microsoft social/OIDC connection for provider client credentials, while sign-in and calendar scopes remain separate.
+
+### 1. Start consent for exactly one owner
+
+`SqlOSStartCalendarConnectRequest` requires exactly one of `UserId` or `OrganizationId`, and `ReturnUri` must be absolute. Derive the owner from your authenticated request and choose `ReturnUri` from a host allowlist rather than copying an arbitrary browser value:
 
 ```csharp
 var connect = await calendars.StartConnectAsync(
@@ -346,37 +536,87 @@ var connect = await calendars.StartConnectAsync(
 return Results.Redirect(connect.AuthorizationUrl);
 ```
 
-Frequently used methods:
+The provider returns to `/sqlos/auth/calendar/callback`. SqlOS stores protected tokens, then redirects to `ReturnUri` with either `calendarConnectionId` or `error`. Treat the ID as callback input; load it with the expected owner before showing success.
+
+### 2. Enforce ownership on every application request
+
+The `forUserId` and `forOrganizationId` parameters are ownership guards. They are optional so trusted dashboard/background services can operate, but an end-user endpoint should always pass the expected owner:
 
 ```csharp
-Task<IReadOnlyList<SqlOSCalendarConnectionSummary>> ListConnectionsAsync(
-    string? userId = null,
-    string? organizationId = null,
-    bool includeRevoked = false,
-    CancellationToken cancellationToken = default);
-
-Task<SqlOSCalendarAccessTokenResult> GetAccessTokenAsync(
-    string calendarConnectionId,
-    string? forUserId = null,
-    string? forOrganizationId = null,
-    CancellationToken cancellationToken = default);
-
-Task<IReadOnlyList<SqlOSCalendarSummary>> ListProviderCalendarsAsync(
-    string calendarConnectionId,
-    string? forUserId = null,
-    string? forOrganizationId = null,
-    CancellationToken cancellationToken = default);
-
-Task<IReadOnlyList<SqlOSCalendarEventSnapshot>> ListEventsAsync(
-    string calendarConnectionId,
-    DateTime fromUtc,
-    DateTime toUtc,
-    string? forUserId = null,
-    string? forOrganizationId = null,
-    CancellationToken cancellationToken = default);
+var connection = await calendars.GetConnectionAsync(
+    calendarConnectionId,
+    forUserId: validated.UserId,
+    forOrganizationId: null,
+    cancellationToken: ct);
 ```
 
-`ListEventsAsync` is for read-pull/two-way connections. Connection-only mode returns provider tokens through `GetAccessTokenAsync` and does not persist event copies. See [Calendar Integration](/docs/authserver/calendar-integration).
+Passing neither guard means “trusted caller, any owner”; it does not infer ownership from `HttpContext`.
+
+### 3. Choose a mode
+
+| Mode | SqlOS behavior | Application API |
+| --- | --- | --- |
+| `ConnectionOnly` | Stores and refreshes OAuth tokens; never stores event copies | `GetAccessTokenAsync`, then call the provider API directly |
+| `ReadPull` | Imports normalized events on the scheduler or an explicit sync | `ListProviderCalendarsAsync`, `EnableCalendarSyncAsync`, `ListEventsAsync` |
+| `TwoWay` | Read-pull plus provider event creation and conflict callbacks | Read-pull methods plus `SqlOSCalendarSyncService.CreateEventAsync` |
+
+`GetAccessTokenAsync` returns a live provider bearer token. Keep it server-side unless your product intentionally delegates direct provider access to a trusted client.
+
+For read-pull or two-way mode, select provider calendars and sync:
+
+```csharp
+var providerCalendars = await calendars.ListProviderCalendarsAsync(
+    calendarConnectionId,
+    forUserId: validated.UserId,
+    cancellationToken: ct);
+
+var primary = providerCalendars.First(calendar => calendar.IsPrimary);
+
+await calendars.EnableCalendarSyncAsync(
+    calendarConnectionId,
+    primary.ProviderCalendarId,
+    displayName: primary.DisplayName,
+    forUserId: validated.UserId,
+    cancellationToken: ct);
+
+// SyncConnectionAsync is a trusted worker/admin method with no owner parameter.
+var sync = await calendarSync.SyncConnectionAsync(calendarConnectionId, ct);
+
+var events = await calendars.ListEventsAsync(
+    calendarConnectionId,
+    fromUtc: DateTime.UtcNow,
+    toUtc: DateTime.UtcNow.AddDays(30),
+    forUserId: validated.UserId,
+    cancellationToken: ct);
+```
+
+The background scheduler also calls `SyncConnectionAsync` for due connections. Keep explicit sync behind a trusted worker or re-check ownership before invoking it.
+
+Two-way event creation retains the owner guard:
+
+```csharp
+var created = await calendarSync.CreateEventAsync(
+    calendarConnectionId,
+    primary.ProviderCalendarId,
+    new SqlOSCalendarEventDraft(
+        Subject: "Project review",
+        StartsAtUtc: startsAtUtc,
+        EndsAtUtc: endsAtUtc),
+    forUserId: validated.UserId,
+    cancellationToken: ct);
+```
+
+Disconnecting clears stored provider tokens:
+
+```csharp
+await calendars.DisconnectAsync(
+    calendarConnectionId,
+    reason: "user_disconnected",
+    forUserId: validated.UserId,
+    cancellationToken: ct);
+```
+
+See [Calendar Integration](/docs/authserver/calendar-integration) for provider scopes, scheduler configuration, conflict policy, and dashboard operations.
 
 ## Key result types
 

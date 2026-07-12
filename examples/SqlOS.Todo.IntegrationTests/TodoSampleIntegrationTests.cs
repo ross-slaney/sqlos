@@ -81,6 +81,83 @@ public sealed class TodoSampleIntegrationTests
     }
 
     [TestMethod]
+    public async Task AspNetCorePublicClient_PreservesProtectedState_ThroughCodeExchange()
+    {
+        const string clientId = "example-aspnet";
+        const string redirectUri = "http://localhost:5090/signin-sqlos";
+        var protectedState = $"CfDJ8-{new string('s', 1024)}";
+
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var authorize = await StartAuthorizationAsync(
+            client,
+            clientId,
+            redirectUri,
+            protectedState);
+        var signupResponse = await client.PostAsync(
+            "/sqlos/auth/signup/submit",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["requestId"] = authorize.RequestId,
+                ["displayName"] = "ASP.NET Core User",
+                ["email"] = $"aspnet-{Guid.NewGuid():N}@example.com",
+                ["password"] = "P@ssword123!",
+                ["organizationName"] = "ASP.NET Core Org"
+            }));
+
+        signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        signupResponse.Headers.Location.Should().NotBeNull();
+        var callback = signupResponse.Headers.Location!;
+        var callbackQuery = QueryHelpers.ParseQuery(callback.Query);
+        callbackQuery["state"].ToString().Should().Be(protectedState);
+        var code = callbackQuery["code"].ToString();
+        code.Should().NotBeNullOrWhiteSpace();
+
+        var tokens = await ExchangeAuthorizationCodeAsync(
+            client,
+            code,
+            clientId,
+            redirectUri,
+            authorize.CodeVerifier);
+
+        tokens.ClientId.Should().Be(clientId);
+        ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
+    }
+
+    [TestMethod]
+    public async Task AuthorizationRequest_RejectsStateBeyondStorageContract()
+    {
+        await using var factory = TodoApiFixture.CreateFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var codeVerifier = CreateCodeVerifier();
+
+        var response = await client.GetAsync(QueryHelpers.AddQueryString(
+            "/sqlos/auth/authorize",
+            new Dictionary<string, string?>
+            {
+                ["response_type"] = "code",
+                ["client_id"] = "example-aspnet",
+                ["redirect_uri"] = "http://localhost:5090/signin-sqlos",
+                ["state"] = new string('s', 2049),
+                ["scope"] = "openid profile email offline_access todos.read todos.write",
+                ["code_challenge"] = CreateCodeChallenge(codeVerifier),
+                ["code_challenge_method"] = "S256",
+                ["resource"] = TodoResource
+            }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain("State cannot exceed 2048 characters.");
+    }
+
+    [TestMethod]
     public async Task HostedEmailOtpSignup_DoesNotIssueTokenUntilCodeIsVerified()
     {
         await using var factory = TodoApiFixture.CreateFactory(builder =>
@@ -560,7 +637,11 @@ public sealed class TodoSampleIntegrationTests
         ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
     }
 
-    private static async Task<AuthorizationStartResult> StartAuthorizationAsync(HttpClient client, string clientId, string redirectUri)
+    private static async Task<AuthorizationStartResult> StartAuthorizationAsync(
+        HttpClient client,
+        string clientId,
+        string redirectUri,
+        string? state = null)
     {
         var codeVerifier = CreateCodeVerifier();
         var challenge = CreateCodeChallenge(codeVerifier);
@@ -570,7 +651,7 @@ public sealed class TodoSampleIntegrationTests
             ["response_type"] = "code",
             ["client_id"] = clientId,
             ["redirect_uri"] = redirectUri,
-            ["state"] = $"state-{Guid.NewGuid():N}",
+            ["state"] = state ?? $"state-{Guid.NewGuid():N}",
             ["scope"] = "openid profile email offline_access todos.read todos.write",
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",

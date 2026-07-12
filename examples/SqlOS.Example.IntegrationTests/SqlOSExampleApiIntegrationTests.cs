@@ -10,11 +10,16 @@ using System.Xml;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Configuration;
+using SqlOS.AuthServer.Models;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
+using SqlOS.Example.Api.Data;
 using SqlOS.Example.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Example.IntegrationTests;
@@ -182,6 +187,214 @@ public sealed class SqlOSExampleApiIntegrationTests
             organizationId
         });
         loginResponse.EnsureSuccessStatusCode();
+    }
+
+    [TestMethod]
+    public async Task PasswordReset_PublicEndpoints_IgnoreCallerUrlsAndHostHeaders()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Issuer", "https://auth.example.test/sqlos/auth");
+            builder.UseSetting("SqlOS:PublicOrigin", "https://auth.example.test");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+        var attacks = new[]
+        {
+            (Path: "/sqlos/auth/password/reset-email", Template: "https://attacker.example/collect?token={token}"),
+            (Path: "/sqlos/auth/password/forgot", Template: "//attacker.example/collect/{token}"),
+            (Path: "/sqlos/auth/headless/password/forgot", Template: "https://trusted.example@attacker.example/collect/{token}"),
+            (Path: "/sqlos/auth/headless/password/forgot", Template: "https:\\attacker.example\\collect\\{token}")
+        };
+        JsonElement? knownResponse = null;
+
+        foreach (var attack in attacks)
+        {
+            var email = $"public-reset-{Guid.NewGuid():N}@example.com";
+            var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+            {
+                displayName = "Public Reset Security User",
+                email,
+                password = "OldPassword123!",
+                clientId = "example-web"
+            });
+            signupResponse.EnsureSuccessStatusCode();
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, attack.Path)
+            {
+                Content = JsonContent.Create(new
+                {
+                    email,
+                    clientId = "example-web",
+                    requestId = (string?)null,
+                    resetUrlTemplate = attack.Template
+                })
+            };
+            request.Headers.Host = "attacker.example";
+            request.Headers.TryAddWithoutValidation("Forwarded", "host=forwarded-attacker.example;proto=https");
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Host", "forwarded-attacker.example");
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+
+            var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            using var responseJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            responseJson.RootElement.GetProperty("message").GetString().Should()
+                .Be("If an account can be reset, you'll receive a password reset email shortly.");
+            responseJson.RootElement.TryGetProperty("token", out _).Should().BeFalse();
+            responseJson.RootElement.TryGetProperty("deliveryId", out _).Should().BeFalse();
+            knownResponse ??= responseJson.RootElement.Clone();
+
+            var delivered = sender.Messages.Should().HaveCountGreaterThan(0).And.Subject.Last();
+            delivered.TextBody.Should().Contain("https://auth.example.test/sqlos/auth/password/reset?token=");
+            delivered.TextBody.Should().NotContain("attacker.example");
+            delivered.TextBody.Should().NotContain("forwarded-attacker.example");
+        }
+
+        var messageCount = sender.Messages.Count;
+        var unknownEmail = $"missing-reset-{Guid.NewGuid():N}@example.com";
+        using var unknownRequest = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/password/reset-email")
+        {
+            Content = JsonContent.Create(new
+            {
+                email = unknownEmail,
+                clientId = "example-web",
+                resetUrlTemplate = "https://attacker.example/unknown?token={token}"
+            })
+        };
+        unknownRequest.Headers.Host = "attacker.example";
+        var unknownResponse = await client.SendAsync(unknownRequest);
+        unknownResponse.EnsureSuccessStatusCode();
+        using var unknownJson = JsonDocument.Parse(await unknownResponse.Content.ReadAsStringAsync());
+
+        unknownJson.RootElement.GetProperty("message").GetString().Should()
+            .Be(knownResponse!.Value.GetProperty("message").GetString());
+        unknownJson.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name).Should()
+            .Equal(knownResponse.Value.EnumerateObject().Select(property => property.Name).OrderBy(name => name));
+        sender.Messages.Should().HaveCount(messageCount);
+    }
+
+    [TestMethod]
+    public async Task PasswordReset_DeliveryFailure_ReturnsGenericResponseAndLeavesNoActiveToken()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Issuer", "https://auth.example.test/sqlos/auth");
+            builder.UseSetting("SqlOS:PublicOrigin", "https://auth.example.test");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+        var email = $"delivery-failure-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Delivery Failure User",
+            email,
+            password = "OldPassword123!",
+            clientId = "example-web"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+        sender.FailDelivery = true;
+
+        var knownResponse = await client.PostAsJsonAsync("/sqlos/auth/password/reset-email", new
+        {
+            email,
+            clientId = "example-web"
+        });
+        var unknownResponse = await client.PostAsJsonAsync("/sqlos/auth/password/reset-email", new
+        {
+            email = $"missing-delivery-{Guid.NewGuid():N}@example.com",
+            clientId = "example-web"
+        });
+
+        knownResponse.EnsureSuccessStatusCode();
+        unknownResponse.EnsureSuccessStatusCode();
+        using var knownJson = JsonDocument.Parse(await knownResponse.Content.ReadAsStringAsync());
+        using var unknownJson = JsonDocument.Parse(await unknownResponse.Content.ReadAsStringAsync());
+        knownJson.RootElement.GetProperty("message").GetString().Should()
+            .Be(unknownJson.RootElement.GetProperty("message").GetString());
+        knownJson.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name).Should()
+            .Equal(unknownJson.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name));
+        sender.Messages.Should().BeEmpty();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+        var userId = await db.Set<SqlOSUserEmail>()
+            .Where(userEmail => userEmail.NormalizedEmail == email.ToUpperInvariant())
+            .Select(userEmail => userEmail.UserId)
+            .SingleAsync();
+        (await db.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == userId && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await db.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.UserId == userId && audit.EventType == "password_reset.email_send_failed"))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task PasswordReset_InvalidServerUrl_ReturnsGenericResponseAndLeavesNoActiveToken()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Issuer", "https://auth.example.test/sqlos/auth");
+            builder.UseSetting("SqlOS:PublicOrigin", "https://auth.example.test");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+                var options = (IOptions<SqlOSAuthServerOptions>)services
+                    .Last(descriptor => descriptor.ServiceType == typeof(IOptions<SqlOSAuthServerOptions>))
+                    .ImplementationInstance!;
+                options.Value.PasswordReset.BuildResetUrl = _ => "//attacker.example/reset";
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+        var email = $"invalid-server-url-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Invalid Server URL User",
+            email,
+            password = "OldPassword123!",
+            clientId = "example-web"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync("/sqlos/auth/password/reset-email", new
+        {
+            email,
+            clientId = "example-web"
+        });
+
+        response.EnsureSuccessStatusCode();
+        using var responseJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        responseJson.RootElement.GetProperty("message").GetString().Should()
+            .Be("If an account can be reset, you'll receive a password reset email shortly.");
+        sender.Messages.Should().BeEmpty();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+        var userId = await db.Set<SqlOSUserEmail>()
+            .Where(userEmail => userEmail.NormalizedEmail == email.ToUpperInvariant())
+            .Select(userEmail => userEmail.UserId)
+            .SingleAsync();
+        (await db.Set<SqlOSTemporaryToken>()
+                .CountAsync(token => token.UserId == userId && token.Purpose == "password_reset" && token.ConsumedAt == null))
+            .Should().Be(0);
+        (await db.Set<SqlOSAuditEvent>()
+                .CountAsync(audit => audit.UserId == userId && audit.EventType == "password_reset.email_send_failed"))
+            .Should().Be(1);
     }
 
     [TestMethod]
@@ -1065,12 +1278,18 @@ public sealed class SqlOSExampleApiIntegrationTests
     private sealed class CapturingTransactionalEmailSender : ISqlOSEmailSender
     {
         public bool IsConfigured => true;
+        public bool FailDelivery { get; set; }
         public List<SqlOSEmailMessage> Messages { get; } = [];
 
         public Task<SqlOSEmailProviderResult> SendAsync(
             SqlOSEmailMessage message,
             CancellationToken cancellationToken = default)
         {
+            if (FailDelivery)
+            {
+                throw new InvalidOperationException("Simulated email provider failure.");
+            }
+
             Messages.Add(message);
             return Task.FromResult(new SqlOSEmailProviderResult($"provider-{Messages.Count}"));
         }

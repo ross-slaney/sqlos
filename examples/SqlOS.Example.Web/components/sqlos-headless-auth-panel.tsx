@@ -276,13 +276,7 @@ export function SqlOSHeadlessAuthPanel() {
     setLoading(true); setError(null); setNotice(null); setFieldErrors({});
     try {
       const targetEmail = (resetEmail || email).trim();
-      const resetUrl = new URL("/auth/authorize", window.location.origin);
-      resetUrl.searchParams.set("view", "password-reset");
-      if (requestId) resetUrl.searchParams.set("request", requestId);
-      if (targetEmail) resetUrl.searchParams.set("email", targetEmail);
-      const resetUrlBase = resetUrl.toString();
-      const resetUrlTemplate = `${resetUrlBase}${resetUrlBase.includes("?") ? "&" : "?"}token={token}`;
-      const result = await headlessRequestPasswordResetEmail(targetEmail, requestId, resetUrlTemplate);
+      const result = await headlessRequestPasswordResetEmail(targetEmail, requestId);
       setNotice(result.message || "If the account can be reset, a reset email is on the way.");
       setView("forgot-password-sent");
     } catch (err) {

@@ -73,7 +73,6 @@ public sealed class SqlOSTotpMfaService
         string userId,
         string? organizationId = null,
         string? displayName = null,
-        bool requireEnrollmentAllowed = true,
         CancellationToken cancellationToken = default)
     {
         var evaluation = await _policyService.EvaluateAsync(userId, organizationId, authenticationMethod: null, cancellationToken);
@@ -82,10 +81,70 @@ public sealed class SqlOSTotpMfaService
             throw new InvalidOperationException("Authenticator app enrollment is not enabled.");
         }
 
-        if (requireEnrollmentAllowed && !evaluation.CanSelfEnroll && !evaluation.EnrollmentRequired)
+        if (!evaluation.CanSelfEnroll && !evaluation.EnrollmentRequired)
         {
             throw new InvalidOperationException("Authenticator app enrollment is not available for this account.");
         }
+
+        return await CreateEnrollmentAsync(
+            userId,
+            organizationId,
+            clientApplicationId: null,
+            displayName,
+            challengeBinding: null,
+            cancellationToken);
+    }
+
+    internal async Task<SqlOSTotpEnrollmentStartResult> StartChallengeEnrollmentAsync(
+        SqlOSTemporaryToken challengeToken,
+        SqlOSMfaChallengePayload challengePayload,
+        string? displayName,
+        CancellationToken cancellationToken = default)
+    {
+        if (challengeToken.UserId == null || challengeToken.ClientApplicationId == null)
+        {
+            throw ChallengeEnrollmentRejected();
+        }
+
+        var evaluation = await _policyService.EvaluateAsync(
+            challengeToken.UserId,
+            challengeToken.OrganizationId,
+            challengePayload.AuthenticationMethod,
+            cancellationToken);
+        if (!challengePayload.EnrollmentRequired
+            || challengePayload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
+            || !evaluation.EnrollmentRequired
+            || evaluation.HasTotp
+            || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase))
+        {
+            throw ChallengeEnrollmentRejected();
+        }
+
+        return await CreateEnrollmentAsync(
+            challengeToken.UserId,
+            challengeToken.OrganizationId,
+            challengeToken.ClientApplicationId,
+            displayName,
+            new TotpEnrollmentChallengeBinding(
+                challengeToken.Id,
+                challengeToken.UserId,
+                challengeToken.ClientApplicationId,
+                challengeToken.OrganizationId,
+                challengePayload.Flow,
+                challengePayload.ClientId,
+                challengePayload.AuthorizationRequestId,
+                challengePayload.Resource),
+            cancellationToken);
+    }
+
+    private async Task<SqlOSTotpEnrollmentStartResult> CreateEnrollmentAsync(
+        string userId,
+        string? organizationId,
+        string? clientApplicationId,
+        string? displayName,
+        TotpEnrollmentChallengeBinding? challengeBinding,
+        CancellationToken cancellationToken)
+    {
 
         var now = DateTime.UtcNow;
         var stale = await _context.Set<SqlOSUserAuthenticator>()
@@ -128,9 +187,9 @@ public sealed class SqlOSTotpMfaService
         var token = await _cryptoService.CreateTemporaryTokenAsync(
             EnrollmentPurpose,
             userId,
-            clientApplicationId: null,
+            clientApplicationId,
             organizationId,
-            new TotpEnrollmentPayload(authenticatorId),
+            new TotpEnrollmentPayload(authenticatorId, challengeBinding),
             _options.Mfa.Totp.EnrollmentTokenLifetime,
             cancellationToken);
 
@@ -158,6 +217,97 @@ public sealed class SqlOSTotpMfaService
 
         var payload = _cryptoService.DeserializePayload<TotpEnrollmentPayload>(temporaryToken)
             ?? throw new InvalidOperationException("Authenticator enrollment payload is invalid.");
+        if (payload.ChallengeBinding != null)
+        {
+            throw new InvalidOperationException("Challenge-bound enrollment must be verified with its original MFA challenge.");
+        }
+
+        return await ConfirmEnrollmentAsync(temporaryToken, payload, request.Code, challengeToken: null, cancellationToken);
+    }
+
+    internal async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyChallengeEnrollmentAsync(
+        SqlOSTotpEnrollmentVerifyRequest request,
+        string expectedFlow,
+        string? expectedAuthorizationRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.MfaToken))
+        {
+            throw ChallengeEnrollmentRejected();
+        }
+
+        var challengeToken = await _cryptoService.FindTemporaryTokenAsync(
+                SqlOSAuthService.MfaChallengePurpose,
+                request.MfaToken,
+                cancellationToken)
+            ?? throw ChallengeEnrollmentRejected();
+        var enrollmentToken = await _cryptoService.FindTemporaryTokenAsync(
+                EnrollmentPurpose,
+                request.EnrollmentToken,
+                cancellationToken)
+            ?? throw ChallengeEnrollmentRejected();
+        var challengePayload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(challengeToken)
+            ?? throw ChallengeEnrollmentRejected();
+        var enrollmentPayload = _cryptoService.DeserializePayload<TotpEnrollmentPayload>(enrollmentToken)
+            ?? throw ChallengeEnrollmentRejected();
+        var binding = enrollmentPayload.ChallengeBinding
+            ?? throw ChallengeEnrollmentRejected();
+
+        if (challengeToken.UserId == null
+            || challengeToken.ClientApplicationId == null
+            || !challengePayload.EnrollmentRequired
+            || challengePayload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
+            || !string.Equals(enrollmentToken.UserId, challengeToken.UserId, StringComparison.Ordinal)
+            || !string.Equals(enrollmentToken.ClientApplicationId, challengeToken.ClientApplicationId, StringComparison.Ordinal)
+            || !string.Equals(enrollmentToken.OrganizationId, challengeToken.OrganizationId, StringComparison.Ordinal)
+            || !string.Equals(binding.ChallengeTokenId, challengeToken.Id, StringComparison.Ordinal)
+            || !string.Equals(binding.UserId, challengeToken.UserId, StringComparison.Ordinal)
+            || !string.Equals(binding.ClientApplicationId, challengeToken.ClientApplicationId, StringComparison.Ordinal)
+            || !string.Equals(binding.OrganizationId, challengeToken.OrganizationId, StringComparison.Ordinal)
+            || !string.Equals(binding.Flow, challengePayload.Flow, StringComparison.Ordinal)
+            || !string.Equals(challengePayload.Flow, expectedFlow, StringComparison.Ordinal)
+            || !string.Equals(binding.ClientId, challengePayload.ClientId, StringComparison.Ordinal)
+            || !string.Equals(binding.AuthorizationRequestId, challengePayload.AuthorizationRequestId, StringComparison.Ordinal)
+            || (expectedAuthorizationRequestId != null
+                && !string.Equals(challengePayload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal))
+            || !string.Equals(binding.Resource, challengePayload.Resource, StringComparison.Ordinal))
+        {
+            throw ChallengeEnrollmentRejected();
+        }
+
+        var evaluation = await _policyService.EvaluateAsync(
+            challengeToken.UserId,
+            challengeToken.OrganizationId,
+            challengePayload.AuthenticationMethod,
+            cancellationToken);
+        if (!evaluation.EnrollmentRequired
+            || evaluation.HasTotp
+            || !evaluation.AvailableFactors.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase))
+        {
+            throw ChallengeEnrollmentRejected();
+        }
+
+        var result = await ConfirmEnrollmentAsync(
+            enrollmentToken,
+            enrollmentPayload,
+            request.Code,
+            challengeToken,
+            cancellationToken);
+        return new SqlOSTotpChallengeEnrollmentVerification(challengeToken, challengePayload, result);
+    }
+
+    private async Task<SqlOSTotpEnrollmentVerifyResult> ConfirmEnrollmentAsync(
+        SqlOSTemporaryToken temporaryToken,
+        TotpEnrollmentPayload payload,
+        string code,
+        SqlOSTemporaryToken? challengeToken,
+        CancellationToken cancellationToken)
+    {
+        if (temporaryToken.UserId == null)
+        {
+            throw new InvalidOperationException("Authenticator enrollment is invalid.");
+        }
+
         var authenticator = await _context.Set<SqlOSUserAuthenticator>()
             .FirstOrDefaultAsync(x =>
                 x.Id == payload.AuthenticatorId
@@ -173,7 +323,7 @@ public sealed class SqlOSTotpMfaService
         }
 
         var secret = _cryptoService.UnprotectSecret(authenticator.SecretProtected);
-        if (!TryValidateTotp(secret, request.Code, authenticator.PeriodSeconds, authenticator.Digits, out var matchedStep))
+        if (!TryValidateTotp(secret, code, authenticator.PeriodSeconds, authenticator.Digits, out var matchedStep))
         {
             throw new InvalidOperationException("Authenticator code is invalid.");
         }
@@ -183,13 +333,24 @@ public sealed class SqlOSTotpMfaService
         authenticator.LastUsedAt = DateTime.UtcNow;
         authenticator.LastAcceptedTimeStep = matchedStep;
         temporaryToken.ConsumedAt = DateTime.UtcNow;
+        if (challengeToken != null)
+        {
+            challengeToken.ConsumedAt = DateTime.UtcNow;
+        }
 
         var recoveryCodes = await ReplaceRecoveryCodesAsync(
             temporaryToken.UserId,
             temporaryToken.OrganizationId,
             cancellationToken);
         await EnsureUserOptInPolicyAsync(temporaryToken.UserId, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InvalidOperationException("MFA enrollment challenge has already been used.");
+        }
 
         return new SqlOSTotpEnrollmentVerifyResult(authenticator.Id, recoveryCodes);
     }
@@ -541,5 +702,25 @@ public sealed class SqlOSTotpMfaService
     private static string FormatRecoveryCode(string code)
         => $"{code[..5]}-{code[5..10]}";
 
-    private sealed record TotpEnrollmentPayload(string AuthenticatorId);
+    private static InvalidOperationException ChallengeEnrollmentRejected()
+        => new("MFA enrollment is not authorized for this challenge.");
+
+    private sealed record TotpEnrollmentPayload(
+        string AuthenticatorId,
+        TotpEnrollmentChallengeBinding? ChallengeBinding = null);
+
+    private sealed record TotpEnrollmentChallengeBinding(
+        string ChallengeTokenId,
+        string UserId,
+        string ClientApplicationId,
+        string? OrganizationId,
+        string Flow,
+        string ClientId,
+        string? AuthorizationRequestId,
+        string? Resource);
 }
+
+internal sealed record SqlOSTotpChallengeEnrollmentVerification(
+    SqlOSTemporaryToken ChallengeToken,
+    SqlOSMfaChallengePayload ChallengePayload,
+    SqlOSTotpEnrollmentVerifyResult Enrollment);

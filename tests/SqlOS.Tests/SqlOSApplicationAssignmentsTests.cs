@@ -286,7 +286,7 @@ public sealed class SqlOSApplicationAssignmentsTests
             authOptions.SeedCliClient("test-cli", "Test CLI", "test-cli", "openid", "offline_access");
 
             var options = Options.Create(authOptions);
-            var crypto = new SqlOSCryptoService(context, options);
+            var crypto = TestCryptoService.Create(context, options);
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender();
             var settings = new SqlOSSettingsService(context, options, emailSender);

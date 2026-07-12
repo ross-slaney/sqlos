@@ -105,11 +105,16 @@ public sealed record SqlOSForgotPasswordRequest(
 
 public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
 
+/// <summary>
+/// Trusted in-process password-reset delivery request. Public password-reset endpoints bind
+/// <see cref="SqlOSForgotPasswordRequest"/> and never accept <see cref="ResetUrlTemplate"/>.
+/// </summary>
 public sealed record SqlOSSendPasswordResetEmailRequest(
     string Email,
     string? ResetUrlTemplate = null,
     string? ClientId = null);
 
+/// <summary>Trusted dashboard/admin password-reset delivery request.</summary>
 public sealed record SqlOSSendUserPasswordResetEmailRequest(
     string? ResetUrlTemplate = null);
 

@@ -9,18 +9,26 @@ section: fga
 
 This helper is for read-side authorization. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; `AuthorizedDetailAsync` only needs the inherited `IHasResourceId` contract to check access for a fetched row.
 
+It does not authenticate the caller. Validate a bearer token for this API's exact audience before running the FGA check, and derive the subject from that validated token rather than from client input or an unvalidated JWT.
+
 ## Usage
 
 ```csharp
-using System.IdentityModel.Tokens.Jwt;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
 
-app.MapGet("/api/chains/{id}", async (
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapGet("/chains/{id}", async (
     string id,
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
     HttpContext http) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 

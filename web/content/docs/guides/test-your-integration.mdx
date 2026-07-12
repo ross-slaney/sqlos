@@ -1,0 +1,333 @@
+---
+title: "Test Your SqlOS Integration"
+description: "Build consumer-owned integration tests for OAuth, SQL-backed authorization, tenant isolation, provider fakes, revocation, and upgrades."
+order: 7
+section: guides
+---
+
+<Banner
+  eyebrow="Integration testing"
+  title="Prove your application—not just the package"
+  href="https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Todo.IntegrationTests"
+  actionLabel="Browse the Todo tests"
+>
+  Run your real ASP.NET Core entry point against a real SQL Server, drive SqlOS through HTTP, and assert the failures that matter: wrong audiences, revoked sessions, missing grants, and cross-tenant access.
+</Banner>
+
+SqlOS unit tests prove library behavior. Your application still owns client registration, callback URLs, audiences, claim-to-subject mapping, resource IDs, grants, middleware order, and database lifecycle. A small consumer integration suite is the most reliable place to prove those pieces fit together.
+
+<Callout type="info" title="This is not the contributor test guide">
+  This page is for a product that **uses** SqlOS. If you are changing the SqlOS repository itself, use [Testing SqlOS](/docs/guides/testing) for the repository scripts, unit suite, benchmarks, and contributor workflow.
+</Callout>
+
+## The test architecture
+
+The SqlOS examples use a practical hybrid:
+
+1. **Aspire Hosting Testing** starts a real SQL Server container.
+2. A unique database name gives each test assembly a fresh SqlOS schema.
+3. **`WebApplicationFactory<Program>`** boots the actual application entry point in process with the test connection string.
+4. Test-only DI replacements capture email/OTP and emulate external OIDC or calendar providers.
+5. `HttpClient` drives hosted auth, token exchange, protected APIs, and dashboard boundaries.
+
+This keeps the product host real while avoiding network calls to production identity and messaging providers.
+
+```text
+MSTest / xUnit / NUnit
+        |
+        +-- Aspire test AppHost ----> SQL Server container
+        |
+        +-- WebApplicationFactory --> your Program.cs
+                                      |
+                                      +-- AddSqlOS + MapSqlOS
+                                      +-- real EF Core SQL Server provider
+                                      +-- fake email / OIDC / SMS adapters
+```
+
+Do not substitute EF Core's in-memory provider or SQLite for the SQL-backed suite. SqlOS bootstraps SQL Server scripts, uses SQL Server concurrency behavior, and implements FGA query filtering through SQL functions. A non-SQL provider can make the test green while skipping the behavior you need to trust.
+
+## Test-project setup
+
+The consumer test project needs:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Aspire.Hosting.Testing" Version="9.4.2" />
+  <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.0" />
+  <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
+  <!-- Add your normal test framework and assertion library. -->
+</ItemGroup>
+
+<ItemGroup>
+  <ProjectReference Include="..\YourProduct.Api\YourProduct.Api.csproj" />
+  <ProjectReference Include="..\YourProduct.TestAppHost\YourProduct.TestAppHost.csproj" />
+</ItemGroup>
+```
+
+Use versions compatible with the target framework and Aspire version in your solution. The values above match the current SqlOS repository; they are not a requirement imposed by the `SqlOS` package.
+
+Your test AppHost can be intentionally small:
+
+```csharp
+using Aspire.Hosting;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+// A non-production credential used only by this disposable test container.
+var sqlPassword = builder.AddParameter(
+    "sql-password",
+    value: "SqlOS-Test-Only-Password!42");
+var sql = builder.AddSqlServer("sql", password: sqlPassword)
+    .WithContainerRuntimeArgs("--platform", "linux/amd64");
+
+sql.AddDatabase("sqlos-test");
+
+builder.Build().Run();
+```
+
+The repository's [`SqlOS.IntegrationTests.AppHost`](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests.AppHost/Program.cs) uses this same shape. Keep infrastructure in the AppHost and application configuration in `WebApplicationFactory`; that makes failures easier to localize.
+
+## Build a fresh-database fixture
+
+The fixture below shows the important lifecycle. It uses MSTest assembly hooks because the SqlOS repository uses MSTest, but the same ownership works with xUnit fixtures or NUnit setup fixtures.
+
+```csharp
+using Aspire.Hosting;
+using Aspire.Hosting.Testing;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.SqlClient;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+[TestClass]
+public static class ProductApiFixture
+{
+    private static DistributedApplication? _infrastructure;
+    private static WebApplicationFactory<Program>? _factory;
+    private static string _connectionString = string.Empty;
+
+    public static HttpClient Client { get; private set; } = null!;
+
+    [AssemblyInitialize]
+    public static async Task StartAsync(TestContext testContext)
+    {
+        var appHost = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.YourProduct_TestAppHost>();
+
+        _infrastructure = await appHost.BuildAsync();
+        await _infrastructure.StartAsync();
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        await _infrastructure.ResourceNotifications
+            .WaitForResourceHealthyAsync("sql", timeout.Token);
+
+        var baseConnectionString =
+            await _infrastructure.GetConnectionStringAsync("sqlos-test")
+            ?? throw new InvalidOperationException("SQL connection string was not available.");
+
+        var connection = new SqlConnectionStringBuilder(baseConnectionString)
+        {
+            InitialCatalog = $"ProductSqlOS_{Guid.NewGuid():N}"[..30]
+        };
+        _connectionString = connection.ConnectionString;
+
+        _factory = BuildFactory();
+        Client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var discovery = await Client.GetAsync(
+            "/sqlos/auth/.well-known/oauth-authorization-server");
+        discovery.EnsureSuccessStatusCode();
+
+        testContext.WriteLine($"SqlOS test database: {connection.InitialCatalog}");
+    }
+
+    public static WebApplicationFactory<Program> CreateFactory(
+        Action<IWebHostBuilder>? configure = null)
+        => BuildFactory(configure);
+
+    private static WebApplicationFactory<Program> BuildFactory(
+        Action<IWebHostBuilder>? configure = null)
+        => new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("environment", "Development");
+                builder.UseSetting(
+                    "ConnectionStrings:DefaultConnection",
+                    _connectionString);
+                builder.UseSetting(
+                    "SqlOS:PublicOrigin",
+                    "https://sqlos.example.test");
+                builder.UseSetting(
+                    "SqlOS:Issuer",
+                    "https://sqlos.example.test/sqlos/auth");
+
+                configure?.Invoke(builder);
+            });
+
+    [AssemblyCleanup]
+    public static async Task StopAsync()
+    {
+        Client?.Dispose();
+
+        if (_factory is not null)
+            await _factory.DisposeAsync();
+
+        // Drop the uniquely named database here with your DbContext or a
+        // master-database helper. Make cleanup best-effort but observable.
+
+        if (_infrastructure is not null)
+        {
+            await _infrastructure.StopAsync();
+            await _infrastructure.DisposeAsync();
+        }
+    }
+}
+```
+
+The application under test must create or migrate the unique database during startup. If production deliberately keeps migration outside the web host, have the fixture create the database and run the same migration/bootstrap entry point before building `WebApplicationFactory`.
+
+Two details prevent misleading tests:
+
+- Keep `AllowAutoRedirect = false` for OAuth tests so assertions can inspect `302` locations, `state`, authorization codes, and error redirects.
+- Make `Program` read the same configuration keys the fixture overrides. `UseSetting` cannot change a value that the application ignores or hard-codes.
+
+Compare the complete repository fixtures:
+
+- [`ExampleApiFixture`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/Infrastructure/ExampleApiFixture.cs) — Aspire SQL plus `WebApplicationFactory` and an OIDC fake.
+- [`TodoApiFixture`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.IntegrationTests/Infrastructure/TodoApiFixture.cs) — a fresh Todo database and exact public issuer/resource settings.
+- [`AspireFixture`](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/Infrastructure/AspireFixture.cs) — direct service integration against SQL Server, including isolated databases for schema/signing-key cases.
+
+## Test the protocol from the outside
+
+Prefer the same HTTP boundary your real client uses. A hosted authorization-code test should perform these steps:
+
+1. Generate a high-entropy PKCE verifier and its S256 challenge.
+2. Call `/sqlos/auth/authorize` with the real `client_id`, `redirect_uri`, scopes, `state`, and resource when used.
+3. Complete the hosted password, OTP, invitation, OIDC, or SAML interaction.
+4. Assert the callback location contains the original `state` and a code—not tokens.
+5. POST the code and verifier to `/sqlos/auth/token` as form data.
+6. Call the protected application API with the access token.
+7. Refresh, then logout; prove the revoked session is rejected.
+
+Use one helper for the mechanical PKCE/redirect parsing, then keep each test focused on the product rule it proves. The current [`TodoSampleIntegrationTests`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.IntegrationTests/TodoSampleIntegrationTests.cs) contains working helpers for hosted signup, code exchange, bearer requests, CIMD, and DCR.
+
+<Callout type="tip" title="Assert configuration in the token">
+  A `200 OK` token response does not prove the integration is correct. Validate the JWT signature and assert `iss`, `aud`, `sub`, `sid`, `client_id`, expiration, authentication methods, and `org_id` where applicable. Then send that token through your actual API middleware.
+</Callout>
+
+## Replace deliveries, not business logic
+
+Keep SqlOS services and your application endpoints real. Replace only nondeterministic external boundaries such as email, SMS, OIDC HTTP calls, DNS, and calendar providers.
+
+For Email OTP, register a test sender that captures messages:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SqlOS.AuthServer.Interfaces;
+using SqlOS.Email.Interfaces;
+
+await using var factory = ProductApiFixture.CreateFactory(builder =>
+{
+    builder.ConfigureServices(services =>
+    {
+        services.RemoveAll<ISqlOSAuthEmailSender>();
+        services.RemoveAll<ISqlOSEmailSender>();
+
+        services.AddSingleton<TestAuthEmailSender>();
+        services.AddSingleton<ISqlOSAuthEmailSender>(sp =>
+            sp.GetRequiredService<TestAuthEmailSender>());
+        services.AddSingleton<ISqlOSEmailSender>(sp =>
+            sp.GetRequiredService<TestAuthEmailSender>());
+    });
+});
+```
+
+The fake should capture the rendered recipient/body and expose the latest OTP without changing SqlOS verification. That proves configuration, template rendering, challenge persistence, and consumption together. See the repository's [`TestAuthEmailSender`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/Infrastructure/TestAuthEmailSender.cs).
+
+For OIDC, emulate discovery, JWKS, token, and user-info responses and sign the fake ID token with the JWKS key. Returning a hard-coded profile without signature/nonce validation skips the security behavior under test. The [`FakeOidcProviderHttpClientFactory`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/Infrastructure/FakeOidcProviderHttpClientFactory.cs) is a complete example.
+
+For SAML, generate signed assertions with test-only keys and mutate one security property per negative case. Never call a real customer IdP from the normal pull-request suite.
+
+## The minimum product test matrix
+
+Start with one test in every row, then add cases for the features you enable.
+
+| Area | Happy-path proof | Negative proof |
+| --- | --- | --- |
+| Startup/schema | Fresh database boots and a second start is idempotent | Bad connection or failed migration keeps the revision unhealthy |
+| Discovery/JWKS | Published issuer and endpoints match the public origin; active key validates a token | Internal host/scheme never appears in metadata or links |
+| Authorization code + PKCE | Hosted sign-in returns one exchangeable code and the expected state | Wrong verifier, redirect URI, client, reused code, or expired request fails |
+| Token validation | Correct issuer, signature, lifetime, and exact audience reach the API | Missing, malformed, expired, wrong-audience, or wrong-issuer token returns `401` |
+| Refresh/logout | Refresh rotates; logout revokes the session and protected API access | Reuse outside the grace behavior triggers the expected rejection/revocation |
+| Organizations | The selected organization appears in `org_id` and app context | Multiple-org login requires selection; inactive/nonmember organization is denied |
+| FGA list query | Subject sees exactly the rows granted through the hierarchy | Missing grant and cross-tenant rows are absent—not trimmed after loading |
+| FGA mutation | Permitted subject can create/update/delete the resource | Cross-tenant or underprivileged mutation returns `403` and changes no row |
+| Auth-to-FGA bridge | Login subject is provisioned and receives the intended role/resource grant | Unknown subject or missing resource never gains an implicit grant |
+| Email/phone OTP | Captured code completes once and produces the expected session | Wrong, expired, replayed, or mismatched challenge cannot authenticate |
+| Invitation | Bound email accepts once and creates only the intended membership | Wrong email, revoked/expired token, or replay creates no membership |
+| OIDC/SAML | Signed response maps the intended identity and organization | Bad nonce/signature/audience/time/`InResponseTo`, disabled connection, and JIT-off user fail |
+| Dashboard | Configured operator can access root, page, and admin API | Anonymous caller is redirected, `401`, or `404` according to the surface; auth routes remain public |
+| Data Protection | Replacement instance sharing the key ring reads existing protected material | Test configuration with a different/lost key ring fails visibly and safely |
+| Upgrade | Current build upgrades a restored previous-version database and completes smoke tests | Rollback/recovery procedure is exercised against an incompatible schema copy |
+
+## High-value tests already in the repository
+
+Use these as patterns, not as a substitute for product tests:
+
+- [Hosted signup, resource-bound token, and Todo API](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.IntegrationTests/TodoSampleIntegrationTests.cs) proves the HTTP flow and protected-resource metadata.
+- [FGA filtering and cross-tenant mutation denial](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.IntegrationTests/TodoSampleIntegrationTests.cs) proves tenant isolation in the sample's real endpoints.
+- [Dashboard password protection](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs) checks the root shell and AuthServer, FGA, and email admin APIs before and after login/logout.
+- [Refresh and logout](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/SqlOSExampleWebAuthIntegrationTests.cs) verifies session revocation.
+- [Signing-key replacement resilience](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/AuthServerSigningKeyResilienceIntegrationTests.cs) exercises database-persisted keys across service instances.
+- [SAML rejection cases](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/SamlServiceIntegrationTests.cs) cover signatures, audience, response correlation, expiry, SHA-1, and unsafe XML.
+- [Authorization-code concurrency](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/OAuthArtifactConcurrencyIntegrationTests.cs) proves single consumption under parallel requests.
+
+## Keep the database deterministic
+
+A fresh database per test assembly is a good default: container startup is amortized, while one CI job cannot inherit schema or identities from another. Within the suite:
+
+- generate unique emails, organization names, client IDs, resource IDs, and keys;
+- reset mutable shared rows before tests that assume counts or global settings;
+- avoid order-dependent tests;
+- put destructive schema, upgrade, and concurrency cases in their own isolated databases;
+- drop each generated database in cleanup and log failures instead of silently accumulating them;
+- disable parallel execution for tests that intentionally share global settings, or give those tests separate factories/databases.
+
+Do not wrap an end-to-end HTTP test in a test-process EF transaction and assume the application server participates. It uses another DbContext/connection. Reset through public behavior or explicit fixture cleanup instead.
+
+## Run locally and in CI
+
+The machine needs the .NET SDK and a container runtime capable of running SQL Server. Fail early with a clear prerequisite message if the container runtime is unavailable.
+
+For this repository:
+
+```bash
+dotnet test examples/SqlOS.Todo.IntegrationTests/SqlOS.Todo.IntegrationTests.csproj
+dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj
+```
+
+For your product, keep a fast, required suite containing bootstrap, one hosted login, token/API validation, logout, and tenant/FGA isolation. Run the broader provider, upgrade, recovery, and concurrency matrix on every release or on a scheduled pipeline if its runtime is too high for every commit.
+
+## A useful definition of done
+
+Your integration is covered when a test can answer all of these with evidence:
+
+- Which public issuer did discovery publish?
+- Which client, callback, resource, and PKCE request produced this token?
+- Why did this exact API accept the token, and why did another API reject it?
+- Which SqlOS subject and grant made this row visible?
+- Can another tenant read or mutate it?
+- Does logout change the result of token validation?
+- Can a replacement instance decrypt the protected state it inherits?
+- Can the team upgrade a restored production-like database and recover it?
+
+## Next steps
+
+- [Production readiness](/docs/guides/production-readiness)
+- [ASP.NET Core API protection](/docs/quickstarts/protect-api)
+- [EF query authorization](/docs/quickstarts/ef-authorization)
+- [Troubleshooting](/docs/guides/troubleshooting)
