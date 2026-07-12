@@ -173,6 +173,12 @@ When `viewModel.view` is `mfa`, render an input for a 6-digit authenticator code
 
 When `viewModel.view` is `mfa-enroll`, render authenticator setup. The view model includes `totpEnrollment` with `qrCodeDataUrl`, `secret`, `provisioningUri`, `enrollmentToken`, and `expiresAt`. Post the verification code to `/headless/mfa/totp/enroll/verify`.
 
+Keep `requestId`, `mfaToken`, and `enrollmentToken` from the same view model
+together. They are transaction-bound and cannot be substituted across users,
+clients, organizations, or parallel authorization requests. A normal `mfa`
+view never permits starting enrollment; first-factor completion by itself is
+not authorization to add or replace an authenticator.
+
 If your headless app does not render these views, required-MFA users will authenticate their primary credential and then stop at an unhandled state.
 
 ## Invitations

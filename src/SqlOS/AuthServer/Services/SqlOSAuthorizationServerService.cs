@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -648,16 +649,55 @@ public sealed class SqlOSAuthorizationServerService
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
-    public async Task<string> CompleteMfaChallengeWithoutCodeAsync(
+    public async Task<string> VerifyMfaTotpEnrollmentAsync(
         string mfaToken,
-        string factorMethod,
+        string enrollmentToken,
+        string code,
+        string authorizationRequestId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, mfaToken, cancellationToken)
-            ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
-        token.ConsumedAt = DateTime.UtcNow;
-        return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (SupportsDatabaseTransactions() && _context.Database.CurrentTransaction == null)
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            await GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+            var verification = await _authService.VerifyTotpEnrollmentForAuthorizationChallengeAsync(
+                new SqlOSTotpEnrollmentVerifyRequest(enrollmentToken, code, mfaToken),
+                authorizationRequestId,
+                cancellationToken);
+            var redirect = await CompleteConsumedMfaChallengeAsync(
+                verification.ChallengeToken,
+                SqlOSMfaFactorTypes.Totp,
+                httpContext,
+                cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return redirect;
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     private async Task<string> CompleteConsumedMfaChallengeAsync(
@@ -729,6 +769,11 @@ public sealed class SqlOSAuthorizationServerService
             organizationId,
             authenticationMethod,
             "authorization",
+            evaluation.EnrollmentRequired,
+            evaluation.EnrollmentRequired
+                ? evaluation.AvailableFactors.Where(static factor =>
+                    string.Equals(factor, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)).ToArray()
+                : Array.Empty<string>(),
             authorizationRequest.Id,
             authorizationRequest.Resource,
             cancellationToken);
@@ -1034,6 +1079,9 @@ public sealed class SqlOSAuthorizationServerService
 
     private SqlOSTotpMfaService RequireTotpMfaService()
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
+
+    private bool SupportsDatabaseTransactions()
+        => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
         => exception.InnerException is SqlException { Number: 2601 or 2627 };

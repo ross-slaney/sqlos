@@ -107,4 +107,6 @@ public sealed record SqlOSMfaChallengePayload(
     string ClientId,
     string AuthenticationMethod,
     string? AuthorizationRequestId = null,
-    string? Resource = null);
+    string? Resource = null,
+    bool EnrollmentRequired = false,
+    IReadOnlyList<string>? PermittedEnrollmentFactors = null);

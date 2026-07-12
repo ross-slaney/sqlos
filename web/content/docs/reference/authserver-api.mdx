@@ -183,6 +183,10 @@ var result = await authService.VerifyMfaChallengeAsync(
 
 For forced enrollment:
 
+This method succeeds only when the policy decision persisted on that exact
+challenge has `EnrollmentRequired = true`. A normal challenge for a user with a
+confirmed factor must be completed with `VerifyMfaChallengeAsync` instead.
+
 ```csharp
 var enrollment = await authService.StartTotpEnrollmentForChallengeAsync(
     mfaToken,
@@ -197,6 +201,12 @@ var result = await authService.VerifyTotpEnrollmentAsync(
     httpContext,
     ct);
 ```
+
+`VerifyTotpEnrollmentAsync` treats the challenge and enrollment tokens as one
+proof. User, organization, client, flow, authorization request, and challenge
+identity must all match before it confirms the factor or issues login artifacts.
+Omitting `mfaToken` is valid only for account self-enrollment; it cannot verify a
+challenge-bound enrollment token.
 
 Direct HTTP endpoints:
 
