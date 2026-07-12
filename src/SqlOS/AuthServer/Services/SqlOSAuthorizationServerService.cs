@@ -886,8 +886,8 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authorization code was not issued for this client.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.RedirectUri)
-            && !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(request.RedirectUri)
+            || !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Redirect URI does not match the authorization request.");
         }

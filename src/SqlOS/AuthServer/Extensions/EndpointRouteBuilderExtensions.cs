@@ -2951,9 +2951,6 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/mfa/challenge/totp/enroll/verify", async (SqlOSTotpEnrollmentVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.VerifyTotpEnrollmentAsync(request, httpContext, cancellationToken)));
 
-        auth.MapPost("/token/exchange", async (SqlOSExchangeCodeRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.ExchangeCodeAsync(request, httpContext, cancellationToken)));
-
         auth.MapPost("/token/refresh", async (SqlOSRefreshRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
             Results.Ok(await authService.RefreshAsync(request, cancellationToken)));
 
@@ -3035,10 +3032,23 @@ public static class EndpointRouteBuilderExtensions
             Results.Ok(await oidcBrowserAuthService.ExchangeCodeAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/sso/authorization-url", async (SqlOSAuthorizationUrlRequest request, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
-            Results.Ok(new { authorizationUrl = await samlService.CreateAuthorizationUrlAsync(request, cancellationToken) }));
-
-        auth.MapGet("/saml/login/{connectionId}", async (string connectionId, string requestToken, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
-            Results.Redirect(await samlService.BuildIdentityProviderRedirectAsync(connectionId, requestToken, cancellationToken)));
+        {
+            try
+            {
+                return Results.Ok(new
+                {
+                    authorizationUrl = await samlService.CreateAuthorizationUrlAsync(request, cancellationToken)
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid_request",
+                    error_description = ex.Message
+                });
+            }
+        });
 
         static async Task<IResult> HandleSamlAcsAsync(
             string connectionId,
@@ -3451,7 +3461,13 @@ public static class EndpointRouteBuilderExtensions
                 if (!string.IsNullOrWhiteSpace(request.ClientId) && !string.IsNullOrWhiteSpace(request.RedirectUri))
                 {
                     authorizationUrl = await samlService.CreateAuthorizationUrlAsync(
-                        new SqlOSAuthorizationUrlRequest(state.Connection.Id, request.ClientId, request.RedirectUri),
+                        new SqlOSAuthorizationUrlRequest(
+                            state.Connection.Id,
+                            request.ClientId,
+                            request.RedirectUri,
+                            request.State ?? string.Empty,
+                            request.CodeChallenge ?? string.Empty,
+                            request.CodeChallengeMethod ?? string.Empty),
                         cancellationToken);
                 }
 

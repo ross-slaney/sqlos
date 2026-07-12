@@ -627,15 +627,20 @@ Resource servers must use `ValidateAccessTokenAsync(rawToken, expectedAudience, 
 
 ---
 
-### ExchangeCodeAsync
+### ExchangeAuthorizationCodeAsync
 
-Exchange an authorization code for tokens. Used in SSO callback flows.
+Exchange an OAuth authorization code for tokens through the canonical token service. SAML authorization codes use this same path.
 
 ```csharp
-var tokens = await authService.ExchangeCodeAsync(
-    new SqlOSExchangeCodeRequest(
+var result = await authorizationServer.ExchangeAuthorizationCodeAsync(
+    new SqlOSTokenRequest(
+        GrantType: "authorization_code",
         Code: code,
-        ClientId: "my-app"),
+        RedirectUri: "https://example.com/callback",
+        ClientId: "my-app",
+        CodeVerifier: codeVerifier,
+        RefreshToken: null,
+        Resource: null),
     httpContext);
 ```
 
@@ -645,11 +650,15 @@ var tokens = await authService.ExchangeCodeAsync(
 |------|------|-------------|
 | `request.Code` | `string` | The authorization code. |
 | `request.ClientId` | `string` | The client application ID. |
+| `request.RedirectUri` | `string` | Exact redirect URI from the authorization request. |
+| `request.CodeVerifier` | `string` | Verifier for the required S256 PKCE challenge. |
 | `httpContext` | `HttpContext` | Current HTTP context. |
 
 **Returns**
 
-`Task<SqlOSTokenResponse>`
+`Task<SqlOSTokenEndpointResult>`
+
+The retired `/token/exchange` shortcut is not mapped. Public clients use form-encoded `/sqlos/auth/token` for password, OIDC, and SAML authorization-code exchanges.
 
 ---
 

@@ -32,6 +32,8 @@ public sealed class SamlServiceIntegrationTests
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
         var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
         var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
+        var discovery = new SqlOSHomeRealmDiscoveryService(AspireFixture.SharedContext);
+        var ssoAuth = new SqlOSSsoAuthorizationService(AspireFixture.SharedContext, admin, crypto, discovery, saml, auth);
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML {Guid.NewGuid():N}", null));
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
@@ -63,7 +65,13 @@ public sealed class SamlServiceIntegrationTests
         var code = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query)["code"].ToString();
         code.Should().NotBeNull();
 
-        var tokens = await auth.ExchangeCodeAsync(new SqlOSExchangeCodeRequest(code!, client.ClientId), new DefaultHttpContext());
+        var tokens = await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(
+                code!,
+                client.ClientId,
+                "https://client.example.local/callback",
+                flow.CodeVerifier!),
+            new DefaultHttpContext());
         tokens.OrganizationId.Should().Be(org.Id);
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
     }
@@ -107,6 +115,30 @@ public sealed class SamlServiceIntegrationTests
 
         var codeVerifier = crypto.GenerateOpaqueToken();
         var state = crypto.GenerateOpaqueToken();
+        var authorizationRequestCount = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>().CountAsync();
+        var missingPkce = async () => await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
+            $"user@{domain}",
+            client.ClientId,
+            "https://client.example.local/auth/callback",
+            state,
+            string.Empty,
+            "S256"));
+        await missingPkce.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires an S256 PKCE code challenge*");
+
+        var downgradedPkce = async () => await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
+            $"user@{domain}",
+            client.ClientId,
+            "https://client.example.local/auth/callback",
+            state,
+            crypto.CreatePkceCodeChallenge(codeVerifier),
+            "plain"));
+        await downgradedPkce.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires an S256 PKCE code challenge*");
+        (await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>().CountAsync())
+            .Should().Be(authorizationRequestCount,
+                "invalid PKCE requests must be rejected before transaction state is persisted");
+
         var start = await ssoAuth.StartAuthorizationAsync(new SqlOSSsoAuthorizationStartRequest(
             $"user@{domain}",
             client.ClientId,
@@ -127,12 +159,40 @@ public sealed class SamlServiceIntegrationTests
         var code = query["code"].ToString();
         query["state"].ToString().Should().Be(state);
 
+        var missingVerifier = async () => await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://client.example.local/auth/callback", string.Empty),
+            new DefaultHttpContext());
+        await missingVerifier.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PKCE verification failed.");
+
+        var wrongVerifier = async () => await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(
+                code!,
+                client.ClientId,
+                "https://client.example.local/auth/callback",
+                crypto.GenerateOpaqueToken()),
+            new DefaultHttpContext());
+        await wrongVerifier.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PKCE verification failed.");
+
+        var wrongRedirect = async () => await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://attacker.example.test/callback", codeVerifier),
+            new DefaultHttpContext());
+        await wrongRedirect.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Redirect URI does not match the authorization request.");
+
         var tokens = await ssoAuth.ExchangeCodeAsync(
             new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://client.example.local/auth/callback", codeVerifier),
             new DefaultHttpContext());
 
         tokens.OrganizationId.Should().Be(org.Id);
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
+
+        var interceptedReplay = async () => await ssoAuth.ExchangeCodeAsync(
+            new SqlOSPkceExchangeRequest(code!, client.ClientId, "https://client.example.local/auth/callback", codeVerifier),
+            new DefaultHttpContext());
+        await interceptedReplay.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Authorization code is no longer valid.");
     }
 
     [TestMethod]
@@ -338,14 +398,14 @@ public sealed class SamlServiceIntegrationTests
             "first_name",
             "last_name"));
 
-        var startUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
+        var codeVerifier = crypto.GenerateOpaqueToken();
+        var loginUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
             connection.Id,
             client.ClientId,
-            "https://client.example.local/callback"));
-
-        var loginUrl = await saml.BuildIdentityProviderRedirectAsync(
-            connection.Id,
-            QueryHelpers.ParseQuery(new Uri($"https://localhost{startUrl}").Query)["requestToken"].ToString());
+            "https://client.example.local/callback",
+            crypto.GenerateOpaqueToken(),
+            crypto.CreatePkceCodeChallenge(codeVerifier),
+            "S256"));
 
         var samlRequest = QueryHelpers.ParseQuery(new Uri(loginUrl).Query)["SAMLRequest"].ToString();
         samlRequest.Should().NotBeNullOrWhiteSpace();
@@ -582,17 +642,17 @@ public sealed class SamlServiceIntegrationTests
 
     private static async Task<SamlFlow> StartSamlRequestAsync(SqlOSSamlService saml, string connectionId, string clientId)
     {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var codeVerifier = crypto.GenerateOpaqueToken();
         var authUrl = await saml.CreateAuthorizationUrlAsync(new SqlOSAuthorizationUrlRequest(
             connectionId,
             clientId,
-            "https://client.example.local/callback"));
-        var requestToken = QueryHelpers.ParseQuery(new Uri($"https://localhost{authUrl}").Query)["requestToken"].ToString();
-        requestToken.Should().NotBeNullOrWhiteSpace();
-
-        var loginUrl = await saml.BuildIdentityProviderRedirectAsync(connectionId, requestToken!);
-        var flow = ParseSamlFlow(loginUrl);
-        flow.RelayState.Should().Be(requestToken);
-        return flow;
+            "https://client.example.local/callback",
+            crypto.GenerateOpaqueToken(),
+            crypto.CreatePkceCodeChallenge(codeVerifier),
+            "S256"));
+        return ParseSamlFlow(authUrl) with { CodeVerifier = codeVerifier };
     }
 
     private static async Task MarkEmailVerifiedAsync(string userId)
@@ -726,5 +786,9 @@ public sealed class SamlServiceIntegrationTests
         return reader.ReadToEnd();
     }
 
-    private sealed record SamlFlow(string RelayState, string RequestId, string AssertionConsumerServiceUrl);
+    private sealed record SamlFlow(
+        string RelayState,
+        string RequestId,
+        string AssertionConsumerServiceUrl,
+        string? CodeVerifier = null);
 }

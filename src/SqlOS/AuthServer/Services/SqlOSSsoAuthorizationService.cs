@@ -33,6 +33,17 @@ public sealed class SqlOSSsoAuthorizationService
 
     public async Task<SqlOSSsoAuthorizationStartResult> StartAuthorizationAsync(SqlOSSsoAuthorizationStartRequest request, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(request.State))
+        {
+            throw new InvalidOperationException("A state value is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CodeChallenge)
+            || !string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML authorization requires an S256 PKCE code challenge.");
+        }
+
         var discovery = await _discoveryService.DiscoverAsync(new SqlOSHomeRealmDiscoveryRequest(request.Email), cancellationToken);
         if (!string.Equals(discovery.Mode, "sso", StringComparison.Ordinal))
         {

@@ -618,25 +618,6 @@ public sealed class SqlOSAuthService
         return result with { Organizations = organizations };
     }
 
-    public async Task<SqlOSTokenResponse> ExchangeCodeAsync(SqlOSExchangeCodeRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
-    {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("auth_code", request.Code, cancellationToken)
-            ?? throw new InvalidOperationException("Authorization code is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<AuthCodePayload>(token)
-            ?? throw new InvalidOperationException("Authorization code payload is invalid.");
-
-        if (!string.Equals(payload.ClientId, request.ClientId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Authorization code was not issued for this client.");
-        }
-
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId!, cancellationToken);
-        var client = await _adminService.RequireClientAsync(request.ClientId, payload.RedirectUri, cancellationToken);
-        var tokens = await CreateSessionAndTokensAsync(user, client, token.OrganizationId, payload.AuthenticationMethod, httpContext, cancellationToken);
-        await _adminService.RecordAuditAsync("user.login.code-exchanged", "user", user.Id, userId: user.Id, organizationId: token.OrganizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
-        return tokens;
-    }
-
     public async Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
@@ -2256,7 +2237,6 @@ public sealed class SqlOSAuthService
     }
 
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
-    private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
     private sealed record PasswordResetRequestPayload(
         string NormalizedEmail,

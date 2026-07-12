@@ -134,16 +134,25 @@ var invitation = await authService.CreateEmailInvitationAsync(
     ct);
 ```
 
-### Authorization-code exchange
+### OAuth authorization-code exchange
 
 ```csharp
-var tokens = await authService.ExchangeCodeAsync(
-    new SqlOSExchangeCodeRequest(
+var result = await authorizationServer.ExchangeAuthorizationCodeAsync(
+    new SqlOSTokenRequest(
+        GrantType: "authorization_code",
         Code: code,
-        ClientId: clientId),
+        RedirectUri: redirectUri,
+        ClientId: clientId,
+        CodeVerifier: codeVerifier,
+        RefreshToken: null,
+        Resource: null),
     httpContext,
     ct);
+
+var tokens = result.Tokens;
 ```
+
+Authorization codes, including codes produced after SAML login, require S256 PKCE and the exact original redirect URI. Public HTTP clients should post the equivalent form fields to `/sqlos/auth/token`.
 
 ### Resource-server token validation
 

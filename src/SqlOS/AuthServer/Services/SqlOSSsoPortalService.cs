@@ -792,7 +792,13 @@ public sealed class SqlOSSsoPortalService
             if (!string.IsNullOrWhiteSpace(request.ClientId) && !string.IsNullOrWhiteSpace(request.RedirectUri))
             {
                 authorizationUrl = await samlService.CreateAuthorizationUrlAsync(
-                    new SqlOSAuthorizationUrlRequest(state.Connection.Id, request.ClientId, request.RedirectUri),
+                    new SqlOSAuthorizationUrlRequest(
+                        state.Connection.Id,
+                        request.ClientId,
+                        request.RedirectUri,
+                        request.State ?? string.Empty,
+                        request.CodeChallenge ?? string.Empty,
+                        request.CodeChallengeMethod ?? string.Empty),
                     cancellationToken);
             }
 

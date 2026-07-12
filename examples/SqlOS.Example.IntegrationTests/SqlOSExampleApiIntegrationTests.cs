@@ -213,18 +213,44 @@ public sealed class SqlOSExampleApiIntegrationTests
         var connectionJson = JsonDocument.Parse(await connectionResponse.Content.ReadAsStringAsync());
         var connectionId = connectionJson.RootElement.GetProperty("id").GetString();
 
+        var codeVerifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var codeChallenge = WebEncoders.Base64UrlEncode(
+            SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)));
+        var state = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+
+        var missingPkceResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
+        {
+            connectionId,
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/callback",
+            state
+        });
+        missingPkceResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var downgradedPkceResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
+        {
+            connectionId,
+            clientId = "example-web",
+            redirectUri = "https://client.example.local/callback",
+            state,
+            codeChallenge,
+            codeChallengeMethod = "plain"
+        });
+        downgradedPkceResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
         var authUrlResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/sso/authorization-url", new
         {
             connectionId,
             clientId = "example-web",
-            redirectUri = "https://client.example.local/callback"
+            redirectUri = "https://client.example.local/callback",
+            state,
+            codeChallenge,
+            codeChallengeMethod = "S256"
         });
         authUrlResponse.EnsureSuccessStatusCode();
         var authUrlJson = JsonDocument.Parse(await authUrlResponse.Content.ReadAsStringAsync());
         var authUrl = authUrlJson.RootElement.GetProperty("authorizationUrl").GetString()!;
-        var loginResponse = await ExampleApiFixture.Client.GetAsync(authUrl);
-        loginResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
-        var flow = ParseSamlFlow(loginResponse.Headers.Location!.ToString());
+        var flow = ParseSamlFlow(authUrl);
 
         var samlResponse = BuildSignedSamlResponse(certificate, "urn:example:idp", "saml-user@example.com", "Saml", "User", flow);
         var acsResponse = await ExampleApiFixture.Client.PostAsync(
@@ -237,17 +263,71 @@ public sealed class SqlOSExampleApiIntegrationTests
 
         acsResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Redirect);
         var location = acsResponse.Headers.Location!.ToString();
-        var code = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
+        var callbackQuery = QueryHelpers.ParseQuery(new Uri(location).Query);
+        var code = callbackQuery["code"].ToString();
         code.Should().NotBeNullOrWhiteSpace();
+        callbackQuery["state"].ToString().Should().Be(state);
 
-        var exchangeResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/sqlos/auth/token/exchange", new
+        var retiredExchangeResponse = await ExampleApiFixture.Client.PostAsJsonAsync(
+            "/sqlos/auth/token/exchange",
+            new { code, clientId = "example-web" });
+        retiredExchangeResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+
+        var missingVerifierResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = "example-web",
+                ["redirect_uri"] = "https://client.example.local/callback"
+            }));
+        missingVerifierResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var wrongVerifierResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = "example-web",
+                ["redirect_uri"] = "https://client.example.local/callback",
+                ["code_verifier"] = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32))
+            }));
+        wrongVerifierResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var missingRedirectResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = "example-web",
+                ["code_verifier"] = codeVerifier
+            }));
+        missingRedirectResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+
+        var correctExchangeForm = new Dictionary<string, string>
         {
-            code,
-            clientId = "example-web"
-        });
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "https://client.example.local/callback",
+            ["code_verifier"] = codeVerifier
+        };
+        var exchangeResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(correctExchangeForm));
         exchangeResponse.EnsureSuccessStatusCode();
         var exchangeJson = JsonDocument.Parse(await exchangeResponse.Content.ReadAsStringAsync());
-        exchangeJson.RootElement.GetProperty("organizationId").GetString().Should().Be(organizationId);
+        var accessToken = exchangeJson.RootElement.GetProperty("access_token").GetString()!;
+        var jwtPayload = JsonDocument.Parse(WebEncoders.Base64UrlDecode(accessToken.Split('.')[1]));
+        jwtPayload.RootElement.GetProperty("org_id").GetString().Should().Be(organizationId);
+
+        var interceptedReplayResponse = await ExampleApiFixture.Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(correctExchangeForm));
+        interceptedReplayResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
     }
 
     [TestMethod]
@@ -353,16 +433,23 @@ public sealed class SqlOSExampleApiIntegrationTests
         var activateJson = JsonDocument.Parse(await activateResponse.Content.ReadAsStringAsync());
         activateJson.RootElement.GetProperty("connection").GetProperty("setupStatus").GetString().Should().Be("active");
 
+        var portalTestVerifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var portalTestChallenge = WebEncoders.Base64UrlEncode(
+            SHA256.HashData(Encoding.ASCII.GetBytes(portalTestVerifier)));
+        var portalTestState = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
         var testResponse = await PortalPostAsync("/sqlos/admin/auth/sso-portal/api/test", portalCookie, new
         {
             clientId = "example-web",
-            redirectUri = "https://client.example.local/callback"
+            redirectUri = "https://client.example.local/callback",
+            state = portalTestState,
+            codeChallenge = portalTestChallenge,
+            codeChallengeMethod = "S256"
         });
         testResponse.EnsureSuccessStatusCode();
         var testJson = JsonDocument.Parse(await testResponse.Content.ReadAsStringAsync());
         testJson.RootElement.GetProperty("status").GetString().Should().Be("started");
         testJson.RootElement.GetProperty("authorizationUrl").GetString()
-            .Should().Contain($"/sqlos/auth/saml/login/{connectionId}");
+            .Should().Contain("SAMLRequest=").And.Contain("RelayState=");
     }
 
     [TestMethod]
