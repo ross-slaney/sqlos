@@ -51,7 +51,6 @@ builder.AddSqlOS<AppDbContext>(
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
-
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;
@@ -91,7 +90,7 @@ builder.AddSqlOS<AppDbContext>(
 
 ## What starts automatically
 
-When the host starts, SqlOS initializes and upgrades its own tables, signing keys, settings, and startup seeds. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
+When the host starts, SqlOS initializes and upgrades its own tables, automatically creates and protects a signing key when none exists, and applies settings and startup seeds. Your EF migrations continue to own your application tables. `app.MapSqlOS()` maps the OAuth, hosted login, and admin API routes; the dashboard middleware is registered by `AddSqlOS`.
 
 Default paths:
 

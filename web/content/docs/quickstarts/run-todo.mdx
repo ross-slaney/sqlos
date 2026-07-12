@@ -43,7 +43,7 @@ https://localhost:18890
 
 Wait for SQL Server to become healthy and for `todo-api` and `aspnet-web` to show **Running**. Aspire keeps the logs and resource endpoints together, which is the fastest place to diagnose a failed first start.
 
-The AppHost uses a persistent SQL Server container on port `1435` and passes the database connection string to the API. SqlOS initializes its schema, signing key, OAuth clients, and FGA seed data when `todo-api` starts.
+The AppHost uses a persistent SQL Server container on port `1435` and passes the database connection string to the API. SqlOS initializes its schema, automatically protected signing key, OAuth clients, and FGA seed data when `todo-api` starts.
 
 ## Verify the all-.NET login
 
@@ -124,6 +124,7 @@ The Todo project is an evaluation sample, not a production deployment template. 
 - use `CookieSecurePolicy.Always` and persist Data Protection keys across replicas;
 - protect `/sqlos` and `/sqlos/admin/*` with a private network, VPN, identity-aware proxy, or equivalent admin control while keeping `/sqlos/auth/*` reachable by users;
 - store database credentials, dashboard credentials, provider secrets, and key rings outside source control;
+- complete the [production signing-key custody](/docs/authserver/signing-key-custody) review for containers or multiple replicas;
 - create application-specific resource types and permissions instead of reusing the Todo model.
 
 ## Next steps

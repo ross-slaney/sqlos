@@ -113,7 +113,7 @@ An OAuth compatibility mode that lets a client register at runtime instead of be
 
 ### Data Protection
 
-ASP.NET Core's key-ring-based cryptographic system for protecting application data. SqlOS uses it for dashboard session cookies and persisted secrets such as OIDC credentials, TOTP secrets, protected phone values, and calendar tokens. It is separate from JWT signing unless `ProtectSigningKeysWithDataProtection` is enabled. Production replicas must share a durable key ring. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
+ASP.NET Core's cross-platform, key-ring-based cryptographic system for protecting application data. SqlOS uses it automatically for JWT signing-key custody, dashboard session cookies, and persisted secrets such as OIDC credentials, TOTP secrets, protected phone values, and calendar tokens. Production replicas must share a durable key ring. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
 
 ### Device Authorization Grant (device flow)
 
@@ -277,7 +277,7 @@ The persisted SqlOS record created after authentication. It connects the user, c
 
 ### Signing key
 
-The RSA key pair SqlOS uses to sign access tokens. Public validation material appears in JWKS; private material stays in the database and can optionally be protected with Data Protection. Rotation retains retired public keys for a grace period so existing tokens can still validate. See [AuthServer Overview](/docs/authserver/overview#signing-keys-and-protected-secrets).
+The RSA key pair SqlOS uses to sign access tokens. Public validation material appears in JWKS; SQL Server stores only an opaque protected reference to private material. Rotation retains retired public keys for a grace period so existing tokens can still validate. See [Production Readiness: Signing Keys](/docs/authserver/signing-key-custody).
 
 ### SSO (single sign-on)
 

@@ -18,7 +18,7 @@ public sealed class SqlOSAdminDashboardTests
     {
         using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         context.Set<SqlOSClientApplication>().AddRange(
@@ -129,7 +129,7 @@ public sealed class SqlOSAdminDashboardTests
     {
         using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         context.Set<SqlOSClientApplication>().AddRange(

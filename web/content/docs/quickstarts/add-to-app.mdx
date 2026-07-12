@@ -72,14 +72,12 @@ const string publicOrigin = "http://localhost:5050";
 var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
     ?? throw new InvalidOperationException(
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
-
 builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
         options.AuthServer.PublicOrigin = publicOrigin;
         options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
-
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;
@@ -119,7 +117,7 @@ Use the same origin declared in the code:
 dotnet run --urls http://localhost:5050
 ```
 
-On the first start, SqlOS creates or upgrades its schema, creates a signing key, writes default settings, and reconciles the `acme-web` application seed.
+On the first start, SqlOS creates or upgrades its schema, automatically protects its signing key, writes default settings, and reconciles the `acme-web` application seed.
 
 ## Verify
 
@@ -175,7 +173,7 @@ Single-application mode will not overwrite an unrelated manual client. Pick a di
 - Replace the local origin with the externally reachable HTTPS origin.
 - Read the connection string and dashboard password from your deployment secret store.
 - Restrict `/sqlos` and `/sqlos/admin` at the network or identity-aware proxy layer; the built-in password is a baseline, not the only control for a public admin endpoint.
-- Persist and share ASP.NET Core Data Protection keys across replicas before enabling features that protect durable secrets with Data Protection.
+- Review signing-key persistence before deploying containers or multiple replicas. See [Production signing-key custody](/docs/authserver/signing-key-custody).
 - Run SqlOS bootstrap before application migrations if your application schema has foreign keys to SqlOS-owned tables.
 
 ## Next steps

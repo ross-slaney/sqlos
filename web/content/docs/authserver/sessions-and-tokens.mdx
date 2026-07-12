@@ -55,6 +55,10 @@ External services can validate SqlOS-issued JWTs using the public key at:
 GET /sqlos/auth/.well-known/jwks.json
 ```
 
+JWKS publishes the active public key and any retired public keys still inside the configured rotation grace window. Tokens require an exact `RS256` algorithm, `JWT` type, and matching `kid`; resource servers should refresh JWKS when rotation introduces an unknown `kid`.
+
+Private signing material is never returned by this endpoint or stored as plaintext in the application database.
+
 JWKS-only validation cannot see the persisted SqlOS session. It accepts a signed, correctly issued token until its JWT expiry even if the session was logged out in the meantime. Use the SDK/middleware validator—or an application-owned trusted introspection/session check—when immediate revocation is required.
 
 ## Refresh tokens

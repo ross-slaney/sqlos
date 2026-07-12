@@ -83,12 +83,6 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 | `SqlOSOidcAuthService` | Google, Microsoft, GitHub, Apple, and custom social login |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
 
-## Signing keys and protected secrets
-
-SqlOS stores JWT signing keys in your application database. By default, private signing key PEMs are plaintext at rest in that database. Set `AuthServer.ProtectSigningKeysWithDataProtection = true` to protect them with ASP.NET Core Data Protection; enabling the option also upgrades legacy plaintext rows when the active key is loaded.
-
-When protection is enabled, production deployments must configure a durable, shared Data Protection key ring outside the application database. If those keys are lost, protected signing keys and other protected secrets cannot be unprotected. See [Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys) for the rollout sequence and rotation caveats.
-
 ## Hosted and headless
 
 <Accordion>

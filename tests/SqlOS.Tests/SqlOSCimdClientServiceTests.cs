@@ -356,7 +356,7 @@ public sealed class SqlOSCimdClientServiceTests
         IHttpClientFactory httpClientFactory)
     {
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var cimd = new SqlOSCimdClientService(context, options, httpClientFactory, crypto);
         return new SqlOSClientResolutionService(context, options, cimd);
     }

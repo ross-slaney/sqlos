@@ -33,14 +33,6 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
-    /// <summary>
-    /// Protects SqlOS JWT signing private keys with ASP.NET Core Data Protection before storing
-    /// them in the application database. Enable this only when the host application's Data
-    /// Protection key ring is persisted and shared by every application instance and revision;
-    /// container-local key rings make protected signing keys unreadable after replacement or
-    /// scale-out and can prevent token issuance.
-    /// </summary>
-    public bool ProtectSigningKeysWithDataProtection { get; set; }
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;

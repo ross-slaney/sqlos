@@ -773,6 +773,11 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("CustodyProvider")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -781,7 +786,7 @@ namespace SqlOS.Example.Api.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
 
-                    b.Property<string>("PrivateKeyPem")
+                    b.Property<string>("KeyReference")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -797,9 +802,15 @@ namespace SqlOS.Example.Api.Migrations
                     b.HasIndex("Kid")
                         .IsUnique();
 
+                    b.HasIndex("IsActive")
+                        .IsUnique()
+                        .HasFilter("[IsActive] = 1");
+
                     b.ToTable("SqlOSSigningKeys", "dbo", t =>
                         {
                             t.ExcludeFromMigrations();
+
+                            t.HasCheckConstraint("CK_SqlOSSigningKeys_Lifecycle", "([IsActive] = 1 AND [RetiredAt] IS NULL) OR ([IsActive] = 0 AND [RetiredAt] IS NOT NULL)");
                         });
                 });
 

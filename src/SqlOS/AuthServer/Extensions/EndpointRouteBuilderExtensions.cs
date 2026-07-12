@@ -76,10 +76,9 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, SqlOSSettingsService settingsService, CancellationToken cancellationToken) =>
+        auth.MapGet("/.well-known/jwks.json", async (SqlOSCryptoService cryptoService, CancellationToken cancellationToken) =>
         {
-            var rotationSettings = await settingsService.GetKeyRotationSettingsAsync(cancellationToken);
-            var keys = await cryptoService.GetValidationSigningKeysAsync(rotationSettings.GraceWindow, cancellationToken);
+            var keys = await cryptoService.GetValidationSigningKeysAsync(cancellationToken);
             return Results.Ok(cryptoService.GetJwksDocument(keys));
         });
 

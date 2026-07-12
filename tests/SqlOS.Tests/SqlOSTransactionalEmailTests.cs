@@ -338,7 +338,7 @@ public sealed class SqlOSTransactionalEmailTests
         var authEmailSender = new TestAuthEmailSender { IsConfigured = false };
         var transactionalSender = new FakeTransactionalEmailSender();
         var transactionalService = CreateEmailService(context, transactionalSender);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, authEmailSender);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService);
@@ -385,7 +385,7 @@ public sealed class SqlOSTransactionalEmailTests
         var authEmailSender = new TestAuthEmailSender { IsConfigured = false };
         var transactionalSender = new FakeTransactionalEmailSender();
         var transactionalService = CreateEmailService(context, transactionalSender);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var settings = new SqlOSSettingsService(context, options, authEmailSender);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, authEmailSender, options, transactionalService);
@@ -421,7 +421,7 @@ public sealed class SqlOSTransactionalEmailTests
         FakeTransactionalEmailSender sender)
         => new(
             context,
-            new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions())),
+            TestCryptoService.Create(context, Options.Create(new SqlOSAuthServerOptions())),
             sender,
             new SqlOSEmailTemplateRenderer(),
             Options.Create(new SqlOSEmailOptions()));
@@ -429,7 +429,7 @@ public sealed class SqlOSTransactionalEmailTests
     private static SqlOSEmailAdminService CreateEmailAdmin(TestSqlOSInMemoryDbContext context)
         => new(
             context,
-            new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions())),
+            TestCryptoService.Create(context, Options.Create(new SqlOSAuthServerOptions())),
             new SqlOSEmailTemplateRenderer());
 
     private static async Task AddTemplateAsync(TestSqlOSInMemoryDbContext context, string key)
