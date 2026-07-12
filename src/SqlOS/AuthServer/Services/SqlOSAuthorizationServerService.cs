@@ -269,11 +269,19 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
+        var user = await _context.Set<SqlOSUser>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == emailRecord.UserId, cancellationToken);
+        if (user == null || !user.IsActive)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "inactive_user", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
         credential.LastUsedAt = DateTime.UtcNow;
         await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == emailRecord.UserId, cancellationToken);
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
         return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
@@ -753,9 +761,17 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        await RequireActiveLifecycleAsync(
+            user.Id,
+            organizationId: null,
+            "authorization_subject",
+            allowPendingInvitationMembership: false,
+            cancellationToken);
+
+        SqlOSInvitationAcceptanceResult? invitationAcceptance = null;
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
-            var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
+            invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
                 authorizationRequest.InvitationId,
                 user.Id,
                 saveChanges: false,
@@ -763,6 +779,13 @@ public sealed class SqlOSAuthorizationServerService
                 cancellationToken);
             organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
         }
+
+        await RequireActiveLifecycleAsync(
+            user.Id,
+            organizationId,
+            "authorization_code_issue",
+            invitationAcceptance is { MembershipCreated: true } or { MembershipReactivated: true },
+            cancellationToken);
 
         var client = authorizationRequest.ClientApplication
             ?? await _context.Set<SqlOSClientApplication>()
@@ -838,6 +861,43 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
+
+    private async Task RequireActiveLifecycleAsync(
+        string userId,
+        string? organizationId,
+        string boundary,
+        bool allowPendingInvitationMembership,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId,
+            cancellationToken);
+        if (lifecycle.IsActive
+            || (allowPendingInvitationMembership
+                && string.Equals(lifecycle.Reason, "membership_inactive", StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId,
+            organizationId,
+            lifecycle,
+            DateTime.UtcNow,
+            cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            boundary,
+            lifecycle,
+            userId,
+            organizationId);
+        await _context.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException("Authentication session is no longer active.");
     }
 
     public async Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(

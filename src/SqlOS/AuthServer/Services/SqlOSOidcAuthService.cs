@@ -535,6 +535,7 @@ public sealed class SqlOSOidcAuthService
         if (externalIdentity != null)
         {
             var existingUser = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
+            await RequireActiveFederatedUserAsync(existingUser, cancellationToken);
             return new ProvisionedProviderUser(existingUser, Created: false);
         }
 
@@ -549,6 +550,7 @@ public sealed class SqlOSOidcAuthService
             if (existingEmail != null)
             {
                 user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+                await RequireActiveFederatedUserAsync(user, cancellationToken);
             }
         }
 
@@ -606,6 +608,38 @@ public sealed class SqlOSOidcAuthService
 
         await _context.SaveChangesAsync(cancellationToken);
         return new ProvisionedProviderUser(user, created);
+    }
+
+    private async Task RequireActiveFederatedUserAsync(
+        SqlOSUser user,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            user.Id,
+            organizationId: null,
+            cancellationToken: cancellationToken);
+        if (lifecycle.IsActive)
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId: user.Id,
+            organizationId: null,
+            decision: lifecycle,
+            now: DateTime.UtcNow,
+            cancellationToken: cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            "oidc_callback",
+            lifecycle,
+            user.Id,
+            organizationId: null);
+        await _context.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException("Social sign-in could not be completed.");
     }
 
     private async Task<SqlOSOidcConnection> RequireEnabledConnectionAsync(string connectionId, CancellationToken cancellationToken)

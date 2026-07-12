@@ -14,6 +14,173 @@ namespace SqlOS.IntegrationTests;
 public sealed class AuthServiceIntegrationTests
 {
     [TestMethod]
+    public async Task OAuthRefresh_OmittedOrganization_AfterMembershipRemoval_IsRejected()
+    {
+        var email = $"refresh-offboard-{Guid.NewGuid():N}@example.com";
+        SqlOSTokenResponse tokens;
+        string userId;
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var signup = await issuance.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Refresh Offboard",
+                    email,
+                    "P@ssword123!",
+                    $"Refresh Offboard {Guid.NewGuid():N}",
+                    "test-client",
+                    null),
+                new DefaultHttpContext());
+            tokens = signup.Tokens!;
+            userId = await issuance.Context.Set<SqlOS.AuthServer.Models.SqlOSUser>()
+                .Where(x => x.DefaultEmail == email)
+                .Select(x => x.Id)
+                .SingleAsync();
+        }
+
+        await using (var offboarding = BuildIsolatedContext())
+        {
+            var membership = await offboarding.Set<SqlOS.AuthServer.Models.SqlOSMembership>()
+                .SingleAsync(x => x.UserId == userId && x.OrganizationId == tokens.OrganizationId);
+            membership.IsActive = false;
+            await offboarding.SaveChangesAsync();
+        }
+
+        await using var refreshInstance = BuildIsolatedLifecycleStack();
+        var action = async () => await refreshInstance.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(tokens.RefreshToken, OrganizationId: null));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Session is no longer active.");
+        (await refreshInstance.Context.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+            .SingleAsync(x => x.Id == tokens.SessionId)).RevocationReason.Should().Be("membership_inactive");
+        (await refreshInstance.Context.Set<SqlOS.AuthServer.Models.SqlOSAuditEvent>()
+            .AnyAsync(x => x.EventType == "auth.lifecycle.denied"
+                && x.UserId == userId
+                && x.OrganizationId == tokens.OrganizationId)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task AuthPageSession_AfterMembershipRemoval_IsRejectedAcrossDbContexts()
+    {
+        var email = $"cookie-offboard-{Guid.NewGuid():N}@example.com";
+        string userId;
+        string organizationId;
+        string rawCookie;
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var signup = await issuance.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Cookie Offboard",
+                    email,
+                    "P@ssword123!",
+                    $"Cookie Offboard {Guid.NewGuid():N}",
+                    "test-client",
+                    null),
+                new DefaultHttpContext());
+            userId = await issuance.Context.Set<SqlOS.AuthServer.Models.SqlOSUser>()
+                .Where(x => x.DefaultEmail == email)
+                .Select(x => x.Id)
+                .SingleAsync();
+            organizationId = signup.Tokens!.OrganizationId!;
+            rawCookie = await issuance.Crypto.CreateTemporaryTokenAsync(
+                "auth_page_session",
+                userId,
+                clientApplicationId: null,
+                organizationId: organizationId,
+                payload: new { AuthenticationMethod = "password" },
+                lifetime: TimeSpan.FromMinutes(30));
+        }
+
+        await using (var offboarding = BuildIsolatedContext())
+        {
+            var membership = await offboarding.Set<SqlOS.AuthServer.Models.SqlOSMembership>()
+                .SingleAsync(x => x.UserId == userId && x.OrganizationId == organizationId);
+            membership.IsActive = false;
+            await offboarding.SaveChangesAsync();
+        }
+
+        await using var reuseInstance = BuildIsolatedLifecycleStack();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Cookie = $"sqlos_auth_page={rawCookie}";
+
+        (await reuseInstance.AuthPage.TryGetSessionAsync(httpContext)).Should().BeNull();
+        (await reuseInstance.Crypto.FindTemporaryTokenAsync("auth_page_session", rawCookie)).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessToken_IdleExpiredOrLifecycleInvalidSession_IsRejected()
+    {
+        SqlOSTokenResponse idleTokens;
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            idleTokens = (await issuance.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Idle SQL",
+                    $"idle-sql-{Guid.NewGuid():N}@example.com",
+                    "P@ssword123!",
+                    $"Idle SQL {Guid.NewGuid():N}",
+                    "test-client",
+                    null),
+                new DefaultHttpContext())).Tokens!;
+        }
+
+        await using (var offboarding = BuildIsolatedContext())
+        {
+            var session = await offboarding.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+                .SingleAsync(x => x.Id == idleTokens.SessionId);
+            session.IdleExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+            await offboarding.SaveChangesAsync();
+        }
+
+        await using (var validation = BuildIsolatedLifecycleStack())
+        {
+            (await validation.Auth.ValidateAccessTokenAsync(idleTokens.AccessToken, AspireFixture.Options.DefaultAudience))
+                .Should().BeNull();
+            (await validation.Context.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+                .SingleAsync(x => x.Id == idleTokens.SessionId)).RevocationReason.Should().Be("session_idle_expired");
+        }
+
+        var lifecycleEmail = $"access-offboard-{Guid.NewGuid():N}@example.com";
+        SqlOSTokenResponse lifecycleTokens;
+        string lifecycleUserId;
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            lifecycleTokens = (await issuance.Auth.SignUpAsync(
+                new SqlOSSignupRequest(
+                    "Access Offboard",
+                    lifecycleEmail,
+                    "P@ssword123!",
+                    $"Access Offboard {Guid.NewGuid():N}",
+                    "test-client",
+                    null),
+                new DefaultHttpContext())).Tokens!;
+            lifecycleUserId = await issuance.Context.Set<SqlOS.AuthServer.Models.SqlOSUser>()
+                .Where(x => x.DefaultEmail == lifecycleEmail)
+                .Select(x => x.Id)
+                .SingleAsync();
+        }
+
+        await using (var offboarding = BuildIsolatedContext())
+        {
+            var organization = await offboarding.Set<SqlOS.AuthServer.Models.SqlOSOrganization>()
+                .SingleAsync(x => x.Id == lifecycleTokens.OrganizationId);
+            organization.IsActive = false;
+            await offboarding.SaveChangesAsync();
+        }
+
+        await using (var validation = BuildIsolatedLifecycleStack())
+        {
+            (await validation.Auth.ValidateAccessTokenAsync(lifecycleTokens.AccessToken, AspireFixture.Options.DefaultAudience))
+                .Should().BeNull();
+            (await validation.Context.Set<SqlOS.AuthServer.Models.SqlOSSession>()
+                .SingleAsync(x => x.Id == lifecycleTokens.SessionId)).RevocationReason.Should().Be("organization_inactive");
+            (await validation.Context.Set<SqlOS.AuthServer.Models.SqlOSAuditEvent>()
+                .AnyAsync(x => x.EventType == "auth.lifecycle.denied" && x.UserId == lifecycleUserId))
+                .Should().BeTrue();
+        }
+    }
+
+    [TestMethod]
     public async Task Signup_Refresh_Logout_RoundTrips()
     {
         var auth = BuildAuthService();
@@ -185,6 +352,34 @@ public sealed class AuthServiceIntegrationTests
             .UseSqlServer(AspireFixture.SqlConnectionString)
             .Options;
         return new TestSqlOSDbContext(dbOptions);
+    }
+
+    private static IsolatedLifecycleStack BuildIsolatedLifecycleStack()
+    {
+        var context = BuildIsolatedContext();
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authPage = new SqlOSAuthPageSessionService(context, crypto, settings);
+        return new IsolatedLifecycleStack(context, crypto, auth, authPage);
+    }
+
+    private sealed class IsolatedLifecycleStack(
+        TestSqlOSDbContext context,
+        SqlOSCryptoService crypto,
+        SqlOSAuthService auth,
+        SqlOSAuthPageSessionService authPage) : IAsyncDisposable
+    {
+        public TestSqlOSDbContext Context { get; } = context;
+        public SqlOSCryptoService Crypto { get; } = crypto;
+        public SqlOSAuthService Auth { get; } = auth;
+        public SqlOSAuthPageSessionService AuthPage { get; } = authPage;
+
+        public ValueTask DisposeAsync() => Context.DisposeAsync();
     }
 
     [TestMethod]

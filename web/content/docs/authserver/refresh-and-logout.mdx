@@ -14,6 +14,8 @@ var tokens = await authService.RefreshAsync(
     new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 ```
 
+`OrganizationId: null` means "keep the session's stored organization," not "skip organization checks." SqlOS requires the stored organization and membership to remain active before rotating the token. It also requires the user to remain active. The OAuth token endpoint reports lifecycle rejection as a generic `invalid_grant`; the detailed reason is available only in the audit log.
+
 **Frontend**:
 
 ```typescript
@@ -38,6 +40,8 @@ var tokens = await authService.RefreshAsync(
 
 If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft -- if an attacker captures a refresh token and uses it, the legitimate user's next refresh attempt triggers revocation of everything.
 
+Concurrent refreshes inside the configured grace window can receive the cached token produced by the winning rotation. Before returning that cached result, SqlOS rechecks session deadlines, client access, the user lifecycle, and the exact organization represented by the cached token.
+
 ## Logout
 
 Revoke a session by refresh token:
@@ -57,6 +61,8 @@ Revoke all sessions for a user:
 ```csharp
 await authService.LogoutAllAsync(userId, ct);
 ```
+
+Logout-all invalidates hosted AuthPage sessions as well as OAuth sessions and refresh-token families. Password reset has the same all-session invalidation behavior. Organization deactivation and the SSO organization-session revocation action invalidate the corresponding organization-bound AuthPage sessions.
 
 **Frontend**:
 

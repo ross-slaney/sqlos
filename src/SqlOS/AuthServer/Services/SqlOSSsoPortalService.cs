@@ -506,6 +506,14 @@ public sealed class SqlOSSsoPortalService
             : await _context.Set<SqlOSRefreshToken>()
                 .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
                 .ToListAsync(cancellationToken);
+        var authPageSessions = eligibleUserIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSTemporaryToken>()
+                .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose
+                    && x.OrganizationId == session.OrganizationId
+                    && x.ConsumedAt == null
+                    && eligibleUserIds.Contains(x.UserId!))
+                .ToListAsync(cancellationToken);
 
         foreach (var activeSession in sessions)
         {
@@ -518,6 +526,11 @@ public sealed class SqlOSSsoPortalService
             refreshToken.RevokedAt = now;
         }
 
+        foreach (var authPageSession in authPageSessions)
+        {
+            authPageSession.ConsumedAt = now;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPortalAuditAsync(
             "sso.portal.organization_sessions.revoked",
@@ -527,7 +540,8 @@ public sealed class SqlOSSsoPortalService
             {
                 connectionId = connection.Id,
                 domain = domain.Domain,
-                revokedSessions = sessions.Count
+                revokedSessions = sessions.Count,
+                invalidatedAuthPageSessions = authPageSessions.Count
             },
             cancellationToken);
 

@@ -303,6 +303,27 @@ public sealed class SqlOSSsoPortalServiceTests
         AddSession(harness, "sess_revoke_domain_miss", unrelatedDomain.Id, org.Id);
         AddSession(harness, "sess_revoke_other_org", otherOrganizationUser.Id, otherOrg.Id);
         await harness.Context.SaveChangesAsync();
+        var matchingAuthPage = await harness.Crypto.CreateTemporaryTokenAsync(
+            "auth_page_session",
+            matching.Id,
+            clientApplicationId: null,
+            organizationId: org.Id,
+            payload: new { AuthenticationMethod = "saml" },
+            lifetime: TimeSpan.FromHours(1));
+        var unrelatedAuthPage = await harness.Crypto.CreateTemporaryTokenAsync(
+            "auth_page_session",
+            unrelatedDomain.Id,
+            clientApplicationId: null,
+            organizationId: org.Id,
+            payload: new { AuthenticationMethod = "password" },
+            lifetime: TimeSpan.FromHours(1));
+        var otherOrgAuthPage = await harness.Crypto.CreateTemporaryTokenAsync(
+            "auth_page_session",
+            otherOrganizationUser.Id,
+            clientApplicationId: null,
+            organizationId: otherOrg.Id,
+            payload: new { AuthenticationMethod = "saml" },
+            lifetime: TimeSpan.FromHours(1));
 
         var blocked = async () => await harness.Portal.RevokeOrganizationSessionsAsync(
             session,
@@ -331,10 +352,14 @@ public sealed class SqlOSSsoPortalServiceTests
             .Should().BeNull();
         (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_other_org")).RevokedAt
             .Should().BeNull();
+        (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", matchingAuthPage)).Should().BeNull();
+        (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", unrelatedAuthPage)).Should().NotBeNull();
+        (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", otherOrgAuthPage)).Should().NotBeNull();
         (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.organization_sessions.revoked"
             && x.OrganizationId == org.Id
             && x.MetadataJson != null
-            && x.MetadataJson.Contains("\"revokedSessions\":1", StringComparison.Ordinal)))
+            && x.MetadataJson.Contains("\"revokedSessions\":1", StringComparison.Ordinal)
+            && x.MetadataJson.Contains("\"invalidatedAuthPageSessions\":1", StringComparison.Ordinal)))
             .Should().BeTrue();
     }
 

@@ -7,6 +7,8 @@ section: authserver
 
 Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token.
 
+SqlOS validation is stateful: after signature, issuer, audience, and JWT lifetime checks, it loads the current session and requires that the session is not revoked or idle/absolutely expired. It also requires an active user and, for organization-scoped tokens, an active organization and membership. This is what makes logout and offboarding visible before the JWT's `exp` time.
+
 ## Resource-server middleware
 
 ```csharp
@@ -88,6 +90,8 @@ And the OAuth metadata endpoint:
 ```
 GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
+
+JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Use `UseSqlOSAccessTokenValidation`, `RequireSqlOSAccessToken`, or `ValidateAccessTokenAsync` when immediate lifecycle enforcement matters. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
 
 ## Token claims
 

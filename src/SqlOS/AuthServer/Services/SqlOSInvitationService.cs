@@ -317,6 +317,10 @@ public sealed class SqlOSInvitationService
             .Include(x => x.Organization)
             .FirstOrDefaultAsync(x => x.Id == invitationId, cancellationToken)
             ?? throw new InvalidOperationException("Invitation is invalid or expired.");
+        if (invitation.Organization == null || !invitation.Organization.IsActive)
+        {
+            throw new InvalidOperationException("Invitation is invalid or expired.");
+        }
 
         if (invitation.AcceptedAt != null)
         {

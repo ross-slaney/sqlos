@@ -66,7 +66,22 @@ var tokens = await authService.RefreshAsync(
 
 **Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
 
-**Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
+**Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating. SqlOS requires an active user, active target organization, and active membership before it mints the replacement token. When `organizationId` is omitted, SqlOS applies the same checks to the organization already stored on the session; omission never bypasses membership validation. Grace-window retries also revalidate the organization of the cached replacement token before returning it.
+
+## Lifecycle enforcement
+
+SqlOS treats the database lifecycle state as part of authentication, not only as dashboard metadata. The following boundaries require the user to remain active. When an organization is present, the organization and the user's membership must also remain active:
+
+- authorization-code and device-flow approval
+- authorization-code exchange and all session/token creation
+- refresh, including concurrent grace-window retries
+- hosted AuthPage cookie reuse
+- OIDC and SAML callbacks
+- stateful access-token validation
+
+Lifecycle failures are returned as generic authentication or `invalid_grant` failures. The audit log records `auth.lifecycle.denied` with the internal boundary and reason (`user_inactive`, `organization_inactive`, or `membership_inactive`) without exposing that detail to the browser or OAuth client.
+
+Stateful access-token validation checks both the absolute and idle session deadlines. Successful validation records activity and slides the idle deadline, capped by the absolute session deadline.
 
 ## CLI device-flow tokens
 
@@ -94,6 +109,8 @@ Revoke all sessions for a user:
 ```csharp
 await authService.LogoutAllAsync(userId, ct);
 ```
+
+`LogoutAllAsync` invalidates both OAuth sessions and hosted AuthPage sessions. A successful password reset does the same. Organization deactivation invalidates organization-bound OAuth and AuthPage sessions, and the SSO portal's organization-session revocation action invalidates matching-domain AuthPage sessions along with OAuth sessions.
 
 ## Session lifetimes
 
