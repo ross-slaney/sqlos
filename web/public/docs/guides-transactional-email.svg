@@ -21,7 +21,7 @@
     <rect x="98" y="235" width="68" height="68" rx="16" fill="#0f766e"/>
     <path d="M117 270h30m-22-12h14m-21 24h28" stroke="#ccfbf1" stroke-width="5" stroke-linecap="round"/>
     <text x="98" y="344" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="25" font-weight="700">Order shipped</text>
-    <text x="98" y="380" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">order:A-1042:shipped</text>
+    <text x="98" y="380" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">org:acme:order:A-1042:shipped</text>
     <text x="98" y="413" fill="#5eead4" font-family="Inter, ui-sans-serif, system-ui" font-size="16">trusted server event</text>
 
     <rect x="470" y="178" width="276" height="296" rx="22" fill="#111a30" stroke="#3b82f6" stroke-width="2"/>
