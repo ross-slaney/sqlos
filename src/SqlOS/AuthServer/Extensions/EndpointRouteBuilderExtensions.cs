@@ -3314,7 +3314,7 @@ public static class EndpointRouteBuilderExtensions
         auth.MapPost("/logout", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
             var request = await context.Request.ReadFromJsonAsync<LogoutRequest>(cancellationToken: cancellationToken) ?? new LogoutRequest(null);
-            await authService.LogoutAsync(request.RefreshToken, sessionId: null, cancellationToken);
+            await authService.LogoutByRefreshTokenAsync(request.RefreshToken, cancellationToken);
             return Results.NoContent();
         });
 
@@ -3376,6 +3376,10 @@ public static class EndpointRouteBuilderExtensions
 
         auth.MapGet("/email/verify", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             try
             {
                 await authService.VerifyEmailAsync(
@@ -5592,6 +5596,7 @@ public static class EndpointRouteBuilderExtensions
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="referrer" content="no-referrer" />
           <title>Reset password</title>
           <style>
             body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }

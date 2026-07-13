@@ -980,6 +980,25 @@ public sealed class SqlOSAuthService
             return;
         }
 
+        await RevokeSessionAsync(session, cancellationToken);
+    }
+
+    internal async Task<bool> LogoutByRefreshTokenAsync(
+        string? refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await FindActiveSessionByRefreshTokenAsync(refreshToken, cancellationToken);
+        if (session == null)
+        {
+            return false;
+        }
+
+        await RevokeSessionAsync(session, cancellationToken);
+        return true;
+    }
+
+    private async Task RevokeSessionAsync(SqlOSSession session, CancellationToken cancellationToken)
+    {
         session.RevokedAt = DateTime.UtcNow;
         session.RevocationReason = "logout";
         var refreshTokens = await _context.Set<SqlOSRefreshToken>().Where(x => x.SessionId == session.Id && x.RevokedAt == null).ToListAsync(cancellationToken);
@@ -1012,9 +1031,23 @@ public sealed class SqlOSAuthService
         string? refreshToken,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(refreshToken))
+        var session = await FindActiveSessionByRefreshTokenAsync(refreshToken, cancellationToken);
+        if (session == null)
         {
             return false;
+        }
+
+        await LogoutAllAsync(session.UserId, cancellationToken);
+        return true;
+    }
+
+    private async Task<SqlOSSession?> FindActiveSessionByRefreshTokenAsync(
+        string? refreshToken,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return null;
         }
 
         var now = DateTime.UtcNow;
@@ -1027,16 +1060,12 @@ public sealed class SqlOSAuthService
                 && x.ExpiresAt >= now,
                 cancellationToken);
         var session = token?.Session;
-        if (session == null
-            || session.RevokedAt != null
-            || session.IdleExpiresAt < now
-            || session.AbsoluteExpiresAt < now)
-        {
-            return false;
-        }
-
-        await LogoutAllAsync(session.UserId, cancellationToken);
-        return true;
+        return session != null
+            && session.RevokedAt == null
+            && session.IdleExpiresAt >= now
+            && session.AbsoluteExpiresAt >= now
+                ? session
+                : null;
     }
 
     public async Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken cancellationToken = default)
@@ -1452,7 +1481,7 @@ public sealed class SqlOSAuthService
             EmailVerificationLifetime,
             cancellationToken);
 
-        await _adminService.RecordAuditAsync("user.email-verification-token-created", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
+        await _adminService.RecordAuditAsync("user.email-verification-token-created", "system", null, userId: email.UserId, cancellationToken: cancellationToken);
         return token;
     }
 

@@ -143,7 +143,8 @@ public sealed class SqlOSExampleApiIntegrationTests
         using var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
         var signupTokens = signupJson.RootElement.GetProperty("tokens");
         var sessionId = signupTokens.GetProperty("sessionId").GetString();
-        var refreshToken = signupTokens.GetProperty("refreshToken").GetString();
+        var originalRefreshToken = signupTokens.GetProperty("refreshToken").GetString();
+        var refreshToken = originalRefreshToken;
 
         var sessionIdLogout = await client.PostAsJsonAsync("/sqlos/auth/logout", new { sessionId });
         sessionIdLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
@@ -152,6 +153,13 @@ public sealed class SqlOSExampleApiIntegrationTests
         refreshAfterSessionIdAttack.IsSuccessStatusCode.Should().BeTrue("an anonymous session id must not authorize logout");
         using var refreshedJson = JsonDocument.Parse(await refreshAfterSessionIdAttack.Content.ReadAsStringAsync());
         refreshToken = refreshedJson.RootElement.GetProperty("refreshToken").GetString();
+
+        var historicalTokenLogout = await client.PostAsJsonAsync("/sqlos/auth/logout", new { refreshToken = originalRefreshToken });
+        historicalTokenLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+        var refreshAfterHistoricalTokenAttack = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new { refreshToken });
+        refreshAfterHistoricalTokenAttack.IsSuccessStatusCode.Should().BeTrue("a consumed refresh token must not authorize logout");
+        using var postAttackRefreshJson = JsonDocument.Parse(await refreshAfterHistoricalTokenAttack.Content.ReadAsStringAsync());
+        refreshToken = postAttackRefreshJson.RootElement.GetProperty("refreshToken").GetString();
 
         var userId = await GetUserIdByEmailAsync(factory.Services, email);
         var userIdLogoutAll = await client.PostAsJsonAsync("/sqlos/auth/logout-all", new { userId });
@@ -231,6 +239,9 @@ public sealed class SqlOSExampleApiIntegrationTests
         var verificationToken = ExtractVerificationToken(delivered.TextBody);
         var verifyResponse = await client.GetAsync($"/sqlos/auth/email/verify?token={Uri.EscapeDataString(verificationToken)}");
         verifyResponse.EnsureSuccessStatusCode();
+        verifyResponse.Headers.CacheControl!.NoStore.Should().BeTrue();
+        verifyResponse.Headers.GetValues("Referrer-Policy").Should().ContainSingle("no-referrer");
+        verifyResponse.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
         (await verifyResponse.Content.ReadAsStringAsync()).Should().Contain("Email verified");
         (await IsEmailVerifiedAsync(factory.Services, userId)).Should().BeTrue();
 
@@ -283,6 +294,10 @@ public sealed class SqlOSExampleApiIntegrationTests
         (await db.Set<SqlOSAuditEvent>().CountAsync(audit =>
             audit.UserId == userId
             && audit.EventType == "user.email-verification-send-failed")).Should().Be(1);
+        var tokenCreatedAudit = await db.Set<SqlOSAuditEvent>()
+            .SingleAsync(audit => audit.UserId == userId && audit.EventType == "user.email-verification-token-created");
+        tokenCreatedAudit.ActorType.Should().Be("system");
+        tokenCreatedAudit.ActorId.Should().BeNull();
     }
 
     [TestMethod]
