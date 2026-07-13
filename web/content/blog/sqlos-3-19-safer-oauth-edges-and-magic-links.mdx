@@ -1,0 +1,68 @@
+---
+title: "SqlOS 3.19: Safer OAuth Edges and Opt-In Magic Links"
+description: "SqlOS 3.19 hardens remote OAuth inputs and public failures, improves validation performance, and adds secure magic-link login without changing the password-first local setup."
+date: "2026-07-12"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "Security", "OIDC", "Magic Link", "SqlOS"]
+---
+
+SqlOS 3.19 continues the security work from 3.18 at the places where an embedded identity server meets untrusted networks and application-owned UI.
+
+The default developer experience stays deliberately quiet. A normal SqlOS application remains password-first, local to the .NET process and SQL Server, and free of required cloud identity or key-management services. The new passwordless and portable-client paths appear only when an application explicitly enables them.
+
+## Remote OAuth inputs now have tighter boundaries
+
+OIDC discovery, JWKS, and UserInfo responses are read as bounded streams. SqlOS rejects an oversized body while reading it instead of buffering an unlimited provider response first.
+
+Client ID Metadata Documents (CIMD) now use a purpose-built HTTP transport. It resolves the metadata host, rejects loopback, private, link-local, documentation, multicast, and mixed public/private answers, connects directly to the validated public address, bypasses ambient proxies, and refuses redirects. Metadata must use a JSON content type and fit the configured byte limit.
+
+CIMD remains disabled until an application asks for portable clients:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnablePortableMcpClients();
+});
+```
+
+That opt-in works without a host allowlist, which keeps the portable-client use case portable. Closed deployments can add `TrustedHosts` or a parsed-document trust policy as an additional application rule. The network boundary is enforced underneath either configuration.
+
+## Magic-link login is opt-in and origin-safe
+
+Applications can now offer a magic link as a primary credential in both the hosted AuthPage and headless OAuth flows. SqlOS creates, emails, consumes, and audits the short-lived token while the existing authorization request continues through organization selection, MFA, and authorization-code issuance.
+
+Magic links are disabled by default. Enabling them does not replace password login or require an external delivery service when the application already supplies an `ISqlOSAuthEmailSender`:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["password", "magic_link"];
+    });
+});
+```
+
+Default links come from the configured public origin or issuer, never the request `Host` header. Redemption is atomic and single-use even when two instances race on the same token. Replays and losing concurrent requests receive the same generic public failure without exposing the token or an internal exception.
+
+## Public errors are intentionally less interesting
+
+Hosted and headless authentication endpoints now map failures through one typed public-error boundary. OAuth protocol responses keep stable error codes, browser pages get reviewed messages, and unexpected internal detail stays in diagnostics and audit records. Diagnostic fields are excluded from JSON serialization even if an application serializes the error object itself.
+
+The release also updates protocol-level tests that previously asserted internal exception text. Those tests now verify the public contract and continue to prove that rejected OIDC flows issue no handoff token.
+
+## Validation does less repeated work
+
+Stateful access-token validation now caches safe signing and lifecycle lookups and debounces last-seen writes. Rotation, cleanup, and lifecycle changes invalidate the relevant cache entries. The result is less database work on hot validation paths without extending the security boundary or adding application configuration.
+
+## Tested as real flows
+
+The automated integration suite exercises these changes through the real example hosts and SQL Server, including:
+
+- hosted and headless magic-link authorization-code flows;
+- hostile Host headers, token replay, and concurrent redemption;
+- CIMD metadata fetching, redirects, DNS answers, content types, and bounded streaming;
+- OIDC claim-rejection responses with no handoff token;
+- password, email-code, OIDC, SAML, MFA, refresh, device, DCR, and protected-resource compatibility paths.
+
+SqlOS 3.19 does not include the separate SCIM work under review. This release is narrowly about safer OAuth boundaries, clearer public failures, validation efficiency, and an optional passwordless credential that preserves the existing first-run experience.
