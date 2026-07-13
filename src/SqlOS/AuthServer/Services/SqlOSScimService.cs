@@ -159,14 +159,13 @@ internal sealed class SqlOSScimService
 
         if (!string.IsNullOrWhiteSpace(filter))
         {
-            var expected = TryReadEqFilter(filter, "userName") ?? TryReadEqFilter(filter, "externalId");
-            if (!string.IsNullOrWhiteSpace(expected))
+            var (attribute, expected) = ReadEqFilter(filter, "userName", "externalId");
+            users = attribute switch
             {
-                users = users
-                    .Where(x => string.Equals(x.DefaultEmail, expected, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(x.Id, expected, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
+                "username" => users.Where(x => string.Equals(x.DefaultEmail, expected, StringComparison.OrdinalIgnoreCase)).ToList(),
+                "externalid" => users.Where(x => string.Equals(x.Id, expected, StringComparison.OrdinalIgnoreCase)).ToList(),
+                _ => []
+            };
         }
 
         var total = users.Count;
@@ -313,6 +312,12 @@ internal sealed class SqlOSScimService
         var user = await _context.Set<SqlOSUser>()
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new SqlOSScimException(StatusCodes.Status404NotFound, "SCIM user not found.");
+        var membershipExists = await _context.Set<SqlOSMembership>()
+            .AnyAsync(x => x.OrganizationId == connection.OrganizationId && x.UserId == user.Id, cancellationToken);
+        if (!membershipExists)
+        {
+            throw new SqlOSScimException(StatusCodes.Status404NotFound, "SCIM user not found.");
+        }
         var now = DateTime.UtcNow;
         var link = await _context.Set<SqlOSScimExternalId>()
             .FirstOrDefaultAsync(x => x.ConnectionId == connection.Id && x.ResourceType == "User" && x.EntityId == user.Id, cancellationToken);
@@ -341,14 +346,13 @@ internal sealed class SqlOSScimService
 
         if (!string.IsNullOrWhiteSpace(filter))
         {
-            var expected = TryReadEqFilter(filter, "displayName") ?? TryReadEqFilter(filter, "externalId");
-            if (!string.IsNullOrWhiteSpace(expected))
+            var (attribute, expected) = ReadEqFilter(filter, "displayName", "externalId");
+            links = attribute switch
             {
-                links = links
-                    .Where(x => string.Equals(x.DisplayName, expected, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(x.ExternalId, expected, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
+                "displayname" => links.Where(x => string.Equals(x.DisplayName, expected, StringComparison.OrdinalIgnoreCase)).ToList(),
+                "externalid" => links.Where(x => string.Equals(x.ExternalId, expected, StringComparison.OrdinalIgnoreCase)).ToList(),
+                _ => []
+            };
         }
 
         var total = links.Count;
@@ -818,7 +822,19 @@ internal sealed class SqlOSScimService
             return null;
         }
 
-        var match = Regex.Match(displayName, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        Match match;
+        try
+        {
+            match = Regex.Match(
+                displayName,
+                pattern,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM group mapping pattern exceeded the evaluation limit.", "invalidValue");
+        }
         if (!match.Success)
         {
             return null;
@@ -1089,10 +1105,30 @@ internal sealed class SqlOSScimService
     private static string NormalizeScimExternalId(string? externalId, string fallback)
         => string.IsNullOrWhiteSpace(externalId) ? fallback.Trim() : externalId.Trim();
 
-    private static string? TryReadEqFilter(string filter, string attribute)
+    private static (string Attribute, string Value) ReadEqFilter(string filter, params string[] allowedAttributes)
     {
-        var match = Regex.Match(filter, $"^{Regex.Escape(attribute)}\\s+eq\\s+\"(?<value>.+)\"$", RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups["value"].Value : null;
+        if (filter.Length > 512)
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM filter is too long.", "invalidFilter");
+        }
+
+        var match = Regex.Match(
+            filter,
+            "^(?<attribute>[A-Za-z][A-Za-z0-9.]*)\\s+eq\\s+\"(?<value>[^\"]{1,450})\"$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
+        if (!match.Success)
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "Unsupported SCIM filter.", "invalidFilter");
+        }
+
+        var attribute = match.Groups["attribute"].Value;
+        if (!allowedAttributes.Contains(attribute, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "Unsupported SCIM filter attribute.", "invalidFilter");
+        }
+
+        return (attribute.ToLowerInvariant(), match.Groups["value"].Value);
     }
 
     private static (int Skip, int Take, int StartIndex, int Count) ResolveScimPaging(int? startIndex, int? count)

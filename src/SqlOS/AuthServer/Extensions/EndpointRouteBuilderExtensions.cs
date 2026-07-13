@@ -22,6 +22,7 @@ namespace SqlOS.AuthServer.Extensions;
 
 public static class EndpointRouteBuilderExtensions
 {
+    private const int MaxScimPayloadBytes = 256 * 1024;
     public static IEndpointRouteBuilder MapAuthServer(this IEndpointRouteBuilder endpoints, string? pathPrefix = null)
     {
         var authPrefix = (pathPrefix ?? "/sqlos/auth").TrimEnd('/');
@@ -5295,8 +5296,39 @@ public static class EndpointRouteBuilderExtensions
             contentType: "application/scim+json");
 
     private static async Task<JsonObject> ReadScimPayloadAsync(HttpContext context, CancellationToken cancellationToken)
-        => await context.Request.ReadFromJsonAsync<JsonObject>(cancellationToken: cancellationToken)
-            ?? throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM JSON body is required.", "invalidSyntax");
+    {
+        if (context.Request.ContentLength is > MaxScimPayloadBytes)
+        {
+            throw new SqlOSScimException(StatusCodes.Status413PayloadTooLarge, "SCIM JSON body exceeds the allowed size.", "tooMany");
+        }
+
+        await using var buffer = new MemoryStream(Math.Min(MaxScimPayloadBytes, 81920));
+        var chunk = new byte[81920];
+        while (true)
+        {
+            var read = await context.Request.Body.ReadAsync(chunk, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > MaxScimPayloadBytes)
+            {
+                throw new SqlOSScimException(StatusCodes.Status413PayloadTooLarge, "SCIM JSON body exceeds the allowed size.", "tooMany");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        if (buffer.Length == 0)
+        {
+            throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM JSON body is required.", "invalidSyntax");
+        }
+
+        buffer.Position = 0;
+        return await JsonNode.ParseAsync(buffer, cancellationToken: cancellationToken) as JsonObject
+            ?? throw new SqlOSScimException(StatusCodes.Status400BadRequest, "SCIM JSON body must be a JSON object.", "invalidSyntax");
+    }
 
     private static string NormalizeScimBasePath(string? basePath)
     {

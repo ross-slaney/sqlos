@@ -254,7 +254,7 @@ public sealed class SqlOSScimServiceTests
     }
 
     [TestMethod]
-    public async Task GetUserAsync_DoesNotCrossOrganizationBoundary()
+    public async Task UserReadAndDelete_DoNotCrossOrganizationBoundary()
     {
         using var context = CreateContext();
         await SeedOrganizationAsync(context);
@@ -291,6 +291,26 @@ public sealed class SqlOSScimServiceTests
 
         var error = await act.Should().ThrowAsync<SqlOSScimException>();
         error.Which.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+
+        var delete = async () => await harness.Scim.DeleteUserAsync(connection, "usr_other");
+        var deleteError = await delete.Should().ThrowAsync<SqlOSScimException>();
+        deleteError.Which.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        (await context.Set<SqlOSUser>().SingleAsync(x => x.Id == "usr_other")).IsActive.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ListUsersAsync_RejectsUnsupportedFilterInsteadOfReturningTenantDirectory()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+
+        var act = async () => await harness.Scim.ListUsersAsync(connection, 1, 100, "displayName co \"Admin\"");
+
+        var error = await act.Should().ThrowAsync<SqlOSScimException>();
+        error.Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        error.Which.ScimType.Should().Be("invalidFilter");
     }
 
     private static Harness CreateHarness(TestSqlOSInMemoryDbContext context, SqlOSAuthServerOptions? optionsValue = null)
