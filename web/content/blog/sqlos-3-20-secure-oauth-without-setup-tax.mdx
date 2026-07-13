@@ -1,0 +1,81 @@
+---
+title: "SqlOS 3.20: Secure OAuth Without the Setup Tax"
+description: "SqlOS 3.20 closes high-priority session, MFA, silent SSO, authorization, URL-generation, and login-CSRF gaps while keeping the normal embedded .NET setup automatic."
+date: "2026-07-13"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "Security", "MFA", "FGA", "SqlOS"]
+---
+
+SqlOS 3.20 completes a focused pass over the highest-priority security boundaries in the embedded OAuth server.
+
+The important part for application developers is what did **not** change. A normal SqlOS application still runs inside its existing .NET process, stores identity data in its existing SQL Server database, and needs no separate identity product, cloud key service, or security-specific middleware choreography. The new protections are on by default underneath the hosted and headless flows that already exist.
+
+## Password reset now has an explicit revocation contract
+
+Changing a password invalidates the user's existing sessions, access-token lifecycle state, refresh tokens, and pending authentication artifacts. The release adds real SQL-backed protocol coverage proving that a refresh token captured before reset cannot rotate afterward and that a database-validated access token from the old session stops working immediately.
+
+A fresh login with the new password continues normally. There is no application callback to remember and no second revocation API to call.
+
+## TOTP guessing has bounded, shared enforcement
+
+TOTP and recovery-code verification now share atomic attempt limits across hosted, headless, and direct MFA flows. Limits apply to the individual challenge and to recent failures associated with the user and source address, so issuing a new challenge does not reset the attacker's budget.
+
+The state lives in SQL rather than process memory. Multiple application instances therefore enforce the same limit, while unrelated users behind a shared corporate or mobile-network address do not consume one another's challenge budget. Public failures remain generic.
+
+These limits ship with secure defaults and require no new registration or cache service.
+
+## Silent SSO is a fresh policy decision
+
+An AuthPage cookie is now treated as evidence of the first authentication factor, not as permanent permission to issue authorization codes.
+
+For every silent authorization request, SqlOS re-evaluates:
+
+- whether the client is an explicitly owned first-party application;
+- whether current consent policy permits silent continuation;
+- whether the user still belongs to the requested organization; and
+- whether current MFA policy requires another factor.
+
+Owned applications retain the quiet SSO experience they had before. Third-party clients receive standards-aligned `consent_required` or `interaction_required` results when the server cannot safely continue without the user.
+
+## Authorization follows principal and resource lifecycle
+
+Fine-grained authorization now fails closed when a user or group is inactive, a service account is expired, or a resource or ancestor is inactive. The same lifecycle rules apply to point checks, authorization traces, and the SQL table-valued function used by EF Core query filters.
+
+Applications keep using the existing authorization APIs. Changing `IsActive` or `ExpiresAt` is enough to make the new state effective; developers do not have to find and delete every inherited grant manually.
+
+The implementation also closes race and parsing edges around group deactivation and typed subject resolution, so the SQL-time decision is based on current lifecycle state rather than a stale pre-check.
+
+## Security URLs no longer trust the request Host
+
+Invitation links, OIDC callbacks, device verification links, metadata, SSO portal links, and calendar callbacks now use one trusted public-origin resolver. An attacker-controlled `Host` header cannot rewrite them.
+
+Local development and the normal single-application setup remain automatic. SqlOS derives the trusted origin from the configured issuer and application model. `AuthServer.PublicOrigin` remains available only as an optional production-readiness override for deployments whose externally visible origin differs behind a reverse proxy.
+
+No cloud service or external key system is involved.
+
+## Hosted login forms now resist login CSRF automatically
+
+Every state-changing hosted AuthPage form now carries a short-lived, cryptographically protected browser transaction. Cross-site requests cannot establish or replace the AuthPage session even when an attacker supplies valid credentials.
+
+The token and its HttpOnly, `SameSite=Strict` cookie are injected and validated inside SqlOS. Cookie names and protection purposes are derived from the mounted auth path, which keeps multiple SqlOS applications on one host isolated. Headless and native JSON integrations remain separate and do not inherit an HTML form-token requirement.
+
+SqlOS owns this mechanism instead of changing the host application's global ASP.NET Core antiforgery options. Existing MVC and Razor Pages antiforgery configuration therefore continues to work independently.
+
+## Public account operations require the right authority
+
+The public account-management surface now consistently distinguishes anonymous recovery operations from authenticated account changes. Sensitive changes validate the caller and current session rather than relying on a user identifier supplied by the request.
+
+This closes an authorization gap without making ordinary signup, password recovery, or hosted account flows harder to integrate.
+
+## Tested as protocols, not only helper methods
+
+The release exercises these boundaries through the real ASP.NET Core hosts and SQL Server, including:
+
+- access- and refresh-token use after password reset;
+- concurrent and cross-instance TOTP attempts;
+- hosted and headless silent SSO with consent, organization, and MFA changes;
+- FGA point checks, traces, and EF Core query-filter parity;
+- hostile `Host` headers across every security-sensitive URL producer; and
+- cross-site hosted login attempts followed by a real OAuth authorization request.
+
+Each security change went through an adversarial review and a follow-up implementation pass before merge. SqlOS 3.20 raises the internet-facing security floor while preserving the reason to use an embedded identity server in the first place: the straightforward path stays straightforward.
