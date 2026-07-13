@@ -1,0 +1,560 @@
+---
+title: "Make Hierarchical Authorization Feel Native to EF Core"
+description: "Upgrade a simple EF Core application so organizations, workspaces, and projects become one authorization hierarchy synchronized through SaveChanges and filtered in SQL."
+date: "2026-07-13"
+author: "Ross Slaney"
+tags: ["EF Core", "Authorization", "FGA", "RBAC", "SQL Server", "SqlOS"]
+---
+
+A simple Entity Framework application usually begins with simple authorization. A project has a `WorkspaceId`. The current user has a workspace membership. Every project query includes the right workspace IDs.
+
+That model is understandable, but it gets weaker as the product grows. Organization administrators should see every workspace. Workspace editors should see every project beneath one workspace. A contractor might see only one project. Groups and service accounts need the same rules. Soon, authorization is no longer a single tenant predicate. It is a hierarchy.
+
+The interesting question is not whether EF Core can execute another `Where` clause. It can. The question is whether authorization can become part of the application's normal EF model and unit of work without turning every repository into policy infrastructure.
+
+SqlOS takes that approach:
+
+- application entities describe their corresponding authorization resources;
+- parent IDs turn ordinary domain relationships into an authorization tree;
+- `SaveChanges` synchronizes entity and resource lifecycles;
+- grants stay explicit and can be placed at any level of the tree;
+- list authorization becomes a composable EF expression executed by SQL Server.
+
+This is query-level authorization, not a SQL Server Row-Level Security policy. An unfiltered EF query or raw SQL query is not automatically protected. The advantage is that application identity, hierarchical grants, business predicates, ordering, and pagination can participate in one EF query.
+
+## Start with the domain you already have
+
+Consider a small project application:
+
+```text
+Organization
+  Workspace
+    Project
+```
+
+Those relationships already exist for product reasons. They are also the natural authorization boundary:
+
+- an organization administrator can work across the organization;
+- a workspace editor can create and read projects in one workspace;
+- a project viewer can be granted access to one project;
+- access granted on a parent applies to its descendants.
+
+A flat `TenantId` can express the first version of this product, but it cannot naturally express all four cases. Copying organization, workspace, and project joins into every endpoint makes authorization both repetitive and easy to omit.
+
+The better upgrade is to preserve the domain model and make its hierarchy legible to the authorization system.
+
+## Give each protected entity a resource identity
+
+In the runnable application below, `Organization`, `Workspace`, and `Project` implement `ISqlOSResourceEntity`. The contract supplies six pieces of information:
+
+- a stable `ResourceId` used to join application rows to authorization decisions;
+- a resource type;
+- a display name;
+- an optional parent resource ID;
+- an optional description;
+- whether the resource is active.
+
+The key property is `ParentResourceId`. A workspace returns its organization's resource ID. A project returns its workspace's resource ID. Those values produce this authorization tree from the ordinary EF entities:
+
+```text
+org::2f...
+  workspace::5a...
+    project::90...
+    project::c1...
+```
+
+The domain foreign keys remain normal `Guid` properties. The resource IDs are stable strings used by the FGA model. No authorization-specific navigation property is required on the application entities.
+
+## Let the EF unit of work own synchronization
+
+The application context derives from `SqlOSDbContext<AppDbContext>` instead of directly from `DbContext`. Application mappings move into `OnApplicationModelCreating`.
+
+When EF tracks a resource-backed entity, the context synchronizes its corresponding FGA resource during `SaveChanges` or `SaveChangesAsync`:
+
+- adding an entity creates its resource;
+- changing its name, description, parent, or active state updates its resource;
+- deleting it removes its grants and resource when the hierarchy permits deletion;
+- invalid parents, duplicate resource IDs, self-parenting, and obvious cycles fail the save.
+
+Because application rows and authorization resources share the context, they participate in the same EF save. The application does not create a project successfully and then hope that a second authorization write succeeds later. If a larger workflow spans multiple saves or other database operations, use an explicit EF transaction around that workflow as usual.
+
+Synchronization deliberately does not grant access. Resource lifecycle and access policy are different decisions. Subjects must be provisioned, and role grants must still be created explicitly.
+
+## Grant once, inherit downward
+
+The sample seeds two permissions and one role:
+
+- `workspace.create_project` applies to workspaces;
+- `project.read` applies to projects;
+- `workspace_editor` contains both permissions.
+
+When a user creates a workspace, the application grants `workspace_editor` on that workspace. Projects created beneath it require no copied grants. A `project.read` decision starts at a project and walks upward until it finds the workspace grant.
+
+That is the strategic difference between hierarchical authorization and role-name proliferation. You do not need `AcmeWorkspaceEditor`, `LaunchProjectEditor`, and `RoadmapProjectEditor`. The role says what a subject may do. The resource on the grant says where that authority begins.
+
+## Keep authorized rows inside the EF query
+
+For list endpoints, SqlOS returns an `Expression<Func<TEntity, bool>>`. Applying it with `Where` keeps the query as `IQueryable`, so ordinary business filters still compose with authorization:
+
+```text
+Projects
+  → optional workspace filter
+  → hierarchical authorization filter
+  → order and projection
+  → one SQL query
+```
+
+The database does not materialize every project and ask an authorization service about each row. SQL Server evaluates the authorization predicate together with the rest of the query. Pagination and counts can therefore operate on authorized rows rather than on a list trimmed in memory afterward.
+
+## What changes in an existing EF application
+
+The upgrade is smaller than the complete sample makes it look. Authentication and API setup occupy most of the file; the EF authorization integration is four focused changes:
+
+| Existing application surface | Hierarchical upgrade |
+|---|---|
+| `AppDbContext : DbContext` | Derive from `SqlOSDbContext<AppDbContext>` and keep application mappings in `OnApplicationModelCreating`. |
+| `Organization`, `Workspace`, and `Project` entities | Implement `ISqlOSResourceEntity`, persist a stable `ResourceId`, and return the parent resource ID from existing foreign keys. |
+| Workspace membership or role assignment | Provision the authenticated subject and place one explicit role grant on the appropriate workspace or project. |
+| `db.Projects.Where(...)` | Compose the expression from `GetAuthorizationFilterAsync<Project>` before ordering, projection, and pagination. |
+
+Keys, relationships, migrations, change tracking, and business predicates remain ordinary EF Core. SqlOS adds a synchronized resource representation and an authorization predicate; it does not replace the application's data model.
+
+## A complete runnable API host
+
+The following `Program.cs` is a complete .NET 9 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
+
+Create the host and install the same package version used to compile this article:
+
+```bash
+dotnet new web --framework net9.0 --name HierarchicalEf
+cd HierarchicalEf
+dotnet add package SqlOS --version 3.19.0
+```
+
+Replace `Program.cs` with the program below. It assumes SQL Server is running and that callers obtain an audience-bound access token through the [Protect an API quickstart](/docs/quickstarts/protect-api). That keeps the sample focused on upgrading the EF model rather than rebuilding the OAuth client flow in the same file.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Configuration;
+using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not configured.");
+
+var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException(
+        "Configure SqlOS:Dashboard:Password with user secrets or a secret store.");
+
+const string publicOrigin = "http://localhost:5050";
+const string apiAudience = $"{publicOrigin}/api";
+const string createProject = "workspace.create_project";
+const string readProject = "project.read";
+const string workspaceEditor = "workspace_editor";
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.PublicOrigin = publicOrigin;
+        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+
+        options.UseSingleApplication("Projects", application =>
+        {
+            application.Origin = publicOrigin;
+            application.ClientId = "projects-web";
+            application.Audience = apiAudience;
+        });
+
+        options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+        options.Dashboard.Password = dashboardPassword;
+
+        options.Fga.Seed(seed =>
+        {
+            seed.ResourceType("organization", "Organization");
+            seed.ResourceType("workspace", "Workspace");
+            seed.ResourceType("project", "Project");
+
+            seed.Permission(
+                createProject,
+                "Create projects",
+                "workspace");
+            seed.Permission(
+                readProject,
+                "Read projects",
+                "project");
+
+            seed.Role(workspaceEditor, "Workspace editor")
+                .Can(createProject, readProject);
+        });
+    });
+
+var app = builder.Build();
+
+app.MapSqlOS();
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapPost("/workspaces", async (
+    CreateWorkspaceRequest request,
+    HttpContext http,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(request.OrganizationName)
+        || string.IsNullOrWhiteSpace(request.WorkspaceName))
+    {
+        return Results.BadRequest(new
+        {
+            error = "organizationName and workspaceName are required"
+        });
+    }
+
+    // This sample models self-service workspace creation. In an invite-only
+    // product, authorize the caller's create-organization entitlement here.
+
+    var organizationId = Guid.NewGuid();
+    var workspaceId = Guid.NewGuid();
+
+    var organization = new Organization
+    {
+        Id = organizationId,
+        ResourceId = $"org::{organizationId:D}",
+        Name = request.OrganizationName.Trim()
+    };
+
+    var workspace = new Workspace
+    {
+        Id = workspaceId,
+        OrganizationId = organizationId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        Name = request.WorkspaceName.Trim()
+    };
+
+    db.AddRange(organization, workspace);
+
+    var token = http.GetSqlOSValidatedToken()!;
+    await db.ProvisionUserSubjectAsync(
+        subjectId,
+        displayName: subjectId,
+        organizationId: token.OrganizationId,
+        cancellationToken: cancellationToken);
+
+    await db.GrantRoleAsync(
+        subjectId,
+        workspace,
+        workspaceEditor,
+        cancellationToken);
+
+    await db.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/workspaces/{workspace.Id}", new
+    {
+        OrganizationId = organization.Id,
+        OrganizationName = organization.Name,
+        WorkspaceId = workspace.Id,
+        WorkspaceName = workspace.Name
+    });
+});
+
+api.MapPost("/workspaces/{workspaceId:guid}/projects", async (
+    Guid workspaceId,
+    CreateProjectRequest request,
+    HttpContext http,
+    AppDbContext db,
+    ISqlOSFgaAuthService authorization,
+    CancellationToken cancellationToken) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Name))
+    {
+        return Results.BadRequest(new { error = "name is required" });
+    }
+
+    var workspaceFilter =
+        await authorization.GetAuthorizationFilterAsync<Workspace>(
+            subjectId,
+            createProject);
+
+    var workspace = await db.Workspaces
+        .Where(item => item.Id == workspaceId)
+        .Where(workspaceFilter)
+        .SingleOrDefaultAsync(cancellationToken);
+
+    if (workspace is null)
+    {
+        return Results.NotFound();
+    }
+
+    var projectId = Guid.NewGuid();
+    var project = new Project
+    {
+        Id = projectId,
+        WorkspaceId = workspace.Id,
+        ResourceId = $"project::{projectId:D}",
+        Name = request.Name.Trim(),
+        CreatedAt = DateTime.UtcNow
+    };
+
+    db.Projects.Add(project);
+    await db.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/projects/{project.Id}", new
+    {
+        project.Id,
+        project.WorkspaceId,
+        project.Name,
+        project.CreatedAt
+    });
+});
+
+api.MapGet("/projects", async (
+    Guid? workspaceId,
+    HttpContext http,
+    AppDbContext db,
+    ISqlOSFgaAuthService authorization,
+    CancellationToken cancellationToken) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+    {
+        return Results.Unauthorized();
+    }
+
+    var projectFilter =
+        await authorization.GetAuthorizationFilterAsync<Project>(
+            subjectId,
+            readProject);
+
+    var query = db.Projects
+        .AsNoTracking()
+        .Where(projectFilter);
+
+    if (workspaceId.HasValue)
+    {
+        query = query.Where(project => project.WorkspaceId == workspaceId);
+    }
+
+    var projects = await query
+        .OrderBy(project => project.Name)
+        .Select(project => new
+        {
+            project.Id,
+            project.WorkspaceId,
+            project.Name,
+            project.CreatedAt
+        })
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(projects);
+});
+
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // Demo bootstrap only. Use EF migrations for application tables in production.
+    await db.Database.EnsureCreatedAsync();
+}
+
+app.Run();
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Organization> Organizations => Set<Organization>();
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<Project> Projects => Set<Project>();
+
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+    {
+        ConfigureResource<Organization>(modelBuilder);
+        ConfigureResource<Workspace>(modelBuilder);
+        ConfigureResource<Project>(modelBuilder);
+
+        modelBuilder.Entity<Workspace>()
+            .HasOne<Organization>()
+            .WithMany()
+            .HasForeignKey(workspace => workspace.OrganizationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Project>()
+            .HasOne<Workspace>()
+            .WithMany()
+            .HasForeignKey(project => project.WorkspaceId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureResource<TEntity>(ModelBuilder modelBuilder)
+        where TEntity : class, ISqlOSResourceEntity
+    {
+        modelBuilder.Entity<TEntity>(entity =>
+        {
+            entity.HasKey("Id");
+            entity.Property(resource => resource.ResourceId)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.HasIndex(resource => resource.ResourceId).IsUnique();
+
+            entity.Ignore(resource => resource.ResourceTypeId);
+            entity.Ignore(resource => resource.ResourceName);
+            entity.Ignore(resource => resource.ParentResourceId);
+            entity.Ignore(resource => resource.ResourceDescription);
+            entity.Ignore(resource => resource.ResourceIsActive);
+        });
+    }
+}
+
+public sealed class Organization : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public string ResourceTypeId => "organization";
+    public string ResourceName => Name;
+    public string? ParentResourceId => "root";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string? ParentResourceId => $"org::{OrganizationId:D}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+public sealed class Project : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public Guid WorkspaceId { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+
+    public string ResourceTypeId => "project";
+    public string ResourceName => Name;
+    public string? ParentResourceId => $"workspace::{WorkspaceId:D}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+public sealed record CreateWorkspaceRequest(
+    string OrganizationName,
+    string WorkspaceName);
+
+public sealed record CreateProjectRequest(string Name);
+```
+
+The generic `ConfigureResource` mapping is doing deliberate work. `ResourceId` remains a required, indexed application column because it is the bridge used in authorized list queries. The other interface properties are computed metadata, so the mapping ignores them instead of creating redundant columns. If your application stores any of those values directly, map the stored properties and return them through the interface rather than blindly copying this helper.
+
+The repository documentation check extracts this entire C# block and compiles it against the current SqlOS project. That catches stale types, method names, overloads, and expression shapes. The SQL Server startup and authenticated HTTP walkthrough remain runtime verification steps for the reader's configured environment.
+
+The create-project query applies the workspace permission before materialization. Returning `404` when that filtered query finds nothing deliberately gives the same response for a missing workspace and a workspace the caller cannot access, avoiding an existence leak.
+
+Configure a local development database and dashboard password without committing either value to `appsettings.json`:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
+  "Server=localhost;Database=HierarchicalEf;User Id=sa;Password=<local-sa-password>;TrustServerCertificate=True"
+dotnet user-secrets set "SqlOS:Dashboard:Password" \
+  "<local-dashboard-password>"
+```
+
+Use the deployment platform's secret store in production.
+
+Start the API:
+
+```bash
+dotnet run --urls http://localhost:5050
+```
+
+Open `http://localhost:5050/sqlos` to confirm the host and dashboard are running. After obtaining an access token for the configured `http://localhost:5050/api` audience, create a workspace, create a child project, and list the authorized projects:
+
+```bash
+curl -X POST http://localhost:5050/api/workspaces \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"organizationName":"Acme","workspaceName":"Engineering"}'
+
+curl -X POST http://localhost:5050/api/workspaces/<workspace-id>/projects \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Launch plan"}'
+
+curl http://localhost:5050/api/projects \
+  -H "Authorization: Bearer <access-token>"
+```
+
+Repeat the list request with an access token for a second subject that has no grant. The response should be an empty array. Attempting to create a project beneath the first subject's workspace should return `404`, the same response used for an unknown workspace. Those negative checks prove both row isolation and the anti-enumeration behavior; a happy-path response alone does not prove authorization.
+
+For a production application, replace `EnsureCreatedAsync` with normal EF migrations for the application tables. SqlOS continues to manage its own schema and authorization function during startup.
+
+## What the application gained
+
+The original application still has ordinary EF entities, keys, relationships, indexes, and LINQ queries. The upgrade adds four capabilities without introducing a separate policy service into each endpoint:
+
+1. **The domain tree is the authorization tree.** `OrganizationId` and `WorkspaceId` determine each resource's parent.
+2. **The resource lifecycle follows the entity lifecycle.** The same save creates or updates both representations.
+3. **A role can start at any level.** A workspace grant covers descendant projects; a project grant can remain narrow.
+4. **Authorized lists remain database queries.** Search, sorting, projection, and pagination can compose after the authorization predicate.
+
+The most important property is not that SqlOS adds more authorization APIs. It is that the authorization model fits into the EF Core habits the application already uses.
+
+## Boundaries worth keeping explicit
+
+An integrated model still needs disciplined application code:
+
+- Apply the authorization filter to every protected list query. It is not an automatic global query filter.
+- Perform a point authorization check before updating or deleting an existing entity.
+- Take the subject from a validated session or access token, never from client-controlled input.
+- Provision subjects explicitly. Implementing `ISqlOSResourceEntity` provisions resources, not users or service accounts.
+- Create grants explicitly. Synchronizing a resource never decides who should access it.
+- Keep resource IDs stable and unique, and keep the mapped `ResourceId` column indexed.
+- Use one `SqlOSDbContext` unit of work for entity-backed resources. Saving the entity through another context bypasses synchronization.
+- Integration-test both sides of the boundary: an allowed subject sees the row, and an ungranted subject does not.
+
+If an application needs database-enforced protection against every possible query—including unfiltered EF and raw SQL—use SQL Server security policies or another database-level control as well. SqlOS's EF integration solves a different problem: making rich, application-aware hierarchical authorization composable, inspectable, and natural inside a .NET application's data layer.
+
+## The practical upgrade path
+
+You do not need to remodel the whole application at once. Start with one aggregate whose list authorization has become difficult:
+
+1. Give the entity a stable resource ID.
+2. Implement `ISqlOSResourceEntity` and identify its parent.
+3. Move the context to `SqlOSDbContext<TContext>`.
+4. Seed one resource type, permission, and role.
+5. Grant that role at the narrowest useful parent.
+6. Apply `GetAuthorizationFilterAsync` to the protected list query.
+7. Add integration tests for allowed and denied subjects.
+
+That is enough to turn a flat EF query into hierarchical authorization. Additional entities can join the same tree when the product needs them.
+
+The contract remains opt-in and visible: every protected list path must compose the authorization expression, and every protected mutation must perform its point check. This is more explicit than an invisible global query filter, and it remains application-aware in a way that a database-user policy usually is not. Centralize those calls in repositories or specifications when that makes omissions easier to prevent and test.
+
+Continue with the [EF authorization quickstart](/docs/quickstarts/ef-authorization), [resource hierarchy guide](/docs/fga/resource-hierarchy), and [EF query-filter guide](/docs/guides/ef-query-filters).
