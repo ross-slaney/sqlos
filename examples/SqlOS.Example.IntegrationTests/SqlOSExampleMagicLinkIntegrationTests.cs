@@ -67,7 +67,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         var organizationId = await CreateOrganizationAsync(client, $"Magic Headless Org {Guid.NewGuid():N}");
         var userId = await CreateUserAsync(client, email, "Magic Headless User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId);
-        const string verifier = "headless-magic-link-verifier-123456789";
+        const string verifier = "headless-magic-link-verifier-123456789-rfc7636-secure-value";
         var requestId = await StartAuthorizationAsync(client, verifier, expectHostedPage: false);
 
         var start = await client.PostAsJsonAsync("/sqlos/auth/headless/magic-link/start", new { requestId, email });
@@ -94,7 +94,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         var organizationId = await CreateOrganizationAsync(client, $"Magic Hosted Org {Guid.NewGuid():N}");
         var userId = await CreateUserAsync(client, email, "Magic Hosted User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId);
-        const string verifier = "hosted-magic-link-verifier-123456789";
+        const string verifier = "hosted-magic-link-verifier-123456789-rfc7636-secure-value";
         var requestId = await StartAuthorizationAsync(client, verifier, expectHostedPage: true);
 
         var start = await client.PostAsync("/sqlos/auth/login/magic-link/start", new FormUrlEncodedContent(new Dictionary<string, string>
