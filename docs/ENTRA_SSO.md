@@ -2,6 +2,8 @@
 
 This guide covers the manual end-to-end test flow for a customer organization that uses Microsoft Entra ID as its SAML identity provider.
 
+Start with the public [customer-managed enterprise SSO guide](../web/content/docs/guides/customer-managed-sso.mdx) for the platform/customer trust boundary, one-time setup link, DNS ownership, enrollment policy, and revocation model. This repository supplement focuses on the Entra-specific manual test.
+
 It assumes you are running the shared example stack through the Aspire AppHost and want to validate:
 
 - org-level home realm discovery by email domain
