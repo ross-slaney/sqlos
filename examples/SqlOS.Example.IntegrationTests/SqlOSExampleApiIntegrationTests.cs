@@ -330,6 +330,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
         var tokens = signupJson.RootElement.GetProperty("tokens");
         var refreshToken = tokens.GetProperty("refreshToken").GetString();
+        var accessToken = tokens.GetProperty("accessToken").GetString();
         var organizationId = tokens.GetProperty("organizationId").GetString();
 
         var refreshResponse = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
@@ -338,6 +339,16 @@ public sealed class SqlOSExampleApiIntegrationTests
             organizationId
         });
         refreshResponse.EnsureSuccessStatusCode();
+        using var refreshJson = JsonDocument.Parse(await refreshResponse.Content.ReadAsStringAsync());
+        refreshToken = refreshJson.RootElement.GetProperty("refreshToken").GetString();
+        accessToken = refreshJson.RootElement.GetProperty("accessToken").GetString();
+
+        using (var beforeResetRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello"))
+        {
+            beforeResetRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            var beforeResetResponse = await client.SendAsync(beforeResetRequest);
+            beforeResetResponse.EnsureSuccessStatusCode();
+        }
 
         var forgotResponse = await client.PostAsJsonAsync("/sqlos/auth/password/forgot", new { email, clientId = "example-web" });
         forgotResponse.EnsureSuccessStatusCode();
@@ -352,6 +363,21 @@ public sealed class SqlOSExampleApiIntegrationTests
             newPassword = "NewPassword123!"
         });
         resetResponse.EnsureSuccessStatusCode();
+
+        var refreshAfterReset = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
+        {
+            refreshToken,
+            organizationId
+        });
+        refreshAfterReset.IsSuccessStatusCode.Should().BeFalse("password reset must revoke every pre-reset refresh token");
+
+        using (var afterResetRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello"))
+        {
+            afterResetRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            var afterResetResponse = await client.SendAsync(afterResetRequest);
+            afterResetResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized,
+                "database-backed access-token validation must reject a session revoked by password reset");
+        }
 
         var loginResponse = await client.PostAsJsonAsync("/sqlos/auth/password/login", new
         {
