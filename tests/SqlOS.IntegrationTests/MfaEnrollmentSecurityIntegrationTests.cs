@@ -214,7 +214,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         {
             rejectedJson.RootElement.GetProperty("type").GetString().Should().Be("view");
             rejectedJson.RootElement.GetProperty("viewModel").GetProperty("error").GetString()
-                .Should().Be("MFA enrollment is not authorized for this challenge.");
+                .Should().Be("The request could not be completed.");
         }
 
         await AssertNoAuthorizationArtifactsAsync(server, requestA, requestB);
