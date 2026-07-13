@@ -110,6 +110,7 @@ export async function getHeadlessRequest(
   pendingToken?: string | null,
   email?: string | null,
   displayName?: string | null,
+  mfaToken?: string | null,
 ): Promise<HeadlessViewModel> {
   const url = new URL(`${headlessBase()}/requests/${requestId}`);
   if (view) url.searchParams.set("view", view);
@@ -117,6 +118,7 @@ export async function getHeadlessRequest(
   if (pendingToken) url.searchParams.set("pendingToken", pendingToken);
   if (email) url.searchParams.set("email", email);
   if (displayName) url.searchParams.set("displayName", displayName);
+  if (mfaToken) url.searchParams.set("mfaToken", mfaToken);
 
   const res = await fetch(url.toString(), {
     credentials: "include",

@@ -175,7 +175,8 @@ public sealed class SqlOSAuthorizationServerService
             CodeChallenge = input.CodeChallenge ?? string.Empty,
             CodeChallengeMethod = input.CodeChallengeMethod ?? "S256",
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            ClientApplication = client
         };
 
         _context.Set<SqlOSAuthorizationRequest>().Add(authorizationRequest);
@@ -228,6 +229,27 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         return QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
+
+    public async Task CancelAuthorizationInteractionAsync(
+        SqlOSAuthorizationRequestLoginResult completion,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(completion.PendingToken))
+        {
+            _ = await _cryptoService.ConsumeTemporaryTokenAsync(
+                "auth_page_pending",
+                completion.PendingToken,
+                cancellationToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(completion.MfaToken))
+        {
+            _ = await _cryptoService.ConsumeTemporaryTokenAsync(
+                SqlOSAuthService.MfaChallengePurpose,
+                completion.MfaToken,
+                cancellationToken);
+        }
     }
 
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(

@@ -86,7 +86,8 @@ builder.AddSqlOS<AppDbContext>(options =>
                 ["error"] = context.Error,
                 ["email"] = context.Email,
                 ["displayName"] = context.DisplayName,
-                ["pendingToken"] = context.PendingToken
+                ["pendingToken"] = context.PendingToken,
+                ["mfaToken"] = context.MfaToken
             });
     });
 });

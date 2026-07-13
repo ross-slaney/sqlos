@@ -93,7 +93,8 @@ public sealed class SqlOSHeadlessAuthService
         string? pendingToken,
         string? email,
         string? displayName,
-        JsonObject? uiContext)
+        JsonObject? uiContext,
+        string? mfaToken = null)
     {
         if (!IsBrowserUiEnabled)
         {
@@ -114,7 +115,8 @@ public sealed class SqlOSHeadlessAuthService
                 pendingToken,
                 email,
                 displayName,
-                uiContext));
+                uiContext,
+                mfaToken));
     }
 
     public async Task<string?> TryBuildUiUrlForAuthorizationRequestAsync(
@@ -151,9 +153,42 @@ public sealed class SqlOSHeadlessAuthService
         string? pendingToken,
         string? email,
         string? displayName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? mfaToken = null)
     {
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(mfaToken))
+        {
+            var state = await RequireAuthService().GetAuthorizationMfaChallengeStateAsync(
+                mfaToken,
+                authorizationRequest.Id,
+                cancellationToken);
+            SqlOSTotpEnrollmentStartResult? enrollment = null;
+            if (state.EnrollmentRequired)
+            {
+                enrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
+                    mfaToken,
+                    authorizationRequest.Id,
+                    new SqlOSTotpEnrollmentStartRequest(),
+                    cancellationToken);
+            }
+
+            return await BuildViewModelAsync(
+                authorizationRequest,
+                state.EnrollmentRequired ? "mfa-enroll" : "mfa",
+                error,
+                pendingToken: null,
+                email,
+                displayName,
+                fieldErrors: null,
+                organizationSelection: null,
+                mfaToken: mfaToken,
+                requiresMfaEnrollment: state.EnrollmentRequired,
+                mfaMethods: state.Methods,
+                totpEnrollment: enrollment,
+                cancellationToken: cancellationToken);
+        }
+
         return await BuildViewModelAsync(
             authorizationRequest,
             requestedView,

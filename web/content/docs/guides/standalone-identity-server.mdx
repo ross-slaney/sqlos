@@ -138,6 +138,7 @@ auth.UseHeadlessAuthPage(headless =>
                 ["view"] = ctx.View,
                 ["email"] = ctx.Email,
                 ["pendingToken"] = ctx.PendingToken,
+                ["mfaToken"] = ctx.MfaToken,
                 ["ui_context"] = ctx.UiContext?.ToJsonString()
             });
 });

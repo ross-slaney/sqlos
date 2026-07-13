@@ -98,6 +98,7 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSAuthService authService,
             SqlOSAuthPageSessionService authPageSessionService,
             SqlOSInvitationService invitationService,
             CancellationToken cancellationToken) =>
@@ -151,14 +152,94 @@ public static class EndpointRouteBuilderExtensions
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
                 if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
                 {
-                    var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
-                        authorizationRequest,
-                        existingSession.User,
-                        existingSession.OrganizationId,
-                        existingSession.AuthenticationMethod,
-                        context,
-                        cancellationToken);
-                    return Results.Redirect(redirectUrl);
+                    if (authorizationRequest.ClientApplication?.IsFirstParty != true)
+                    {
+                        if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                        {
+                            return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                                authorizationRequest,
+                                "consent_required",
+                                "User interaction is required for this client.",
+                                cancellationToken));
+                        }
+                    }
+                    else
+                    {
+                        var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                            authorizationRequest,
+                            existingSession.User,
+                            existingSession.AuthenticationMethod,
+                            context,
+                            cancellationToken);
+                        if ((completion.RequiresOrganizationSelection || completion.RequiresMfa)
+                            && string.Equals(prompt, "none", StringComparison.Ordinal))
+                        {
+                            await authorizationServerService.CancelAuthorizationInteractionAsync(
+                                completion,
+                                cancellationToken);
+                            return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                                authorizationRequest,
+                                "interaction_required",
+                                "Additional user interaction is required.",
+                                cancellationToken));
+                        }
+
+                        if (completion.RequiresOrganizationSelection)
+                        {
+                            if (headlessAuthService.IsBrowserUiEnabled)
+                            {
+                                return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                    context,
+                                    authorizationRequest.Id,
+                                    "organization",
+                                    error: null,
+                                    pendingToken: completion.PendingToken,
+                                    email: existingSession.User.DefaultEmail,
+                                    displayName: null,
+                                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+                            }
+
+                            return Html(await BuildAuthPageViewModelAsync(
+                                "organization",
+                                authorizationRequest.Id,
+                                existingSession.User.DefaultEmail,
+                                error: null,
+                                displayName: null,
+                                pendingToken: completion.PendingToken,
+                                authPrefix,
+                                authorizationServerService,
+                                cancellationToken,
+                                organizationSelection: completion.Organizations));
+                        }
+
+                        if (completion.RequiresMfa)
+                        {
+                            if (headlessAuthService.IsBrowserUiEnabled)
+                            {
+                                return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                    context,
+                                    authorizationRequest.Id,
+                                    completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
+                                    error: null,
+                                    pendingToken: null,
+                                    email: existingSession.User.DefaultEmail,
+                                    displayName: null,
+                                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                                    mfaToken: completion.MfaToken));
+                            }
+
+                            return await RenderMfaChallengeAsync(
+                                completion,
+                                authorizationRequest.Id,
+                                existingSession.User.DefaultEmail,
+                                authPrefix,
+                                authorizationServerService,
+                                authService,
+                                cancellationToken);
+                        }
+
+                        return Results.Redirect(completion.RedirectUrl!);
+                    }
                 }
 
                 if (string.Equals(prompt, "none", StringComparison.Ordinal))
@@ -2634,6 +2715,7 @@ public static class EndpointRouteBuilderExtensions
             string? pendingToken,
             string? email,
             string? displayName,
+            string? mfaToken,
             HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
@@ -2652,7 +2734,8 @@ public static class EndpointRouteBuilderExtensions
                     pendingToken,
                     email,
                     displayName,
-                    cancellationToken));
+                    cancellationToken,
+                    mfaToken));
             }
             catch (InvalidOperationException ex)
             {
