@@ -76,7 +76,7 @@ When EF tracks a resource-backed entity, the context synchronizes its correspond
 - deleting it removes its grants and resource when the hierarchy permits deletion;
 - invalid parents, duplicate resource IDs, self-parenting, and obvious cycles fail the save.
 
-Because application rows and authorization resources share the context, they participate in the same EF save. The application does not create a project successfully and then hope that a second authorization write succeeds later.
+Because application rows and authorization resources share the context, they participate in the same EF save. The application does not create a project successfully and then hope that a second authorization write succeeds later. If a larger workflow spans multiple saves or other database operations, use an explicit EF transaction around that workflow as usual.
 
 Synchronization deliberately does not grant access. Resource lifecycle and access policy are different decisions. Subjects must be provisioned, and role grants must still be created explicitly.
 
@@ -109,6 +109,16 @@ The database does not materialize every project and ask an authorization service
 ## The complete runnable application
 
 The following `Program.cs` is a complete .NET 9 minimal API. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject.
+
+Create the host and install the same package version used to compile this article:
+
+```bash
+dotnet new web --framework net9.0 --name HierarchicalEf
+cd HierarchicalEf
+dotnet add package SqlOS --version 3.19.0
+```
+
+Replace `Program.cs` with the program below. It assumes SQL Server is running and that callers obtain an audience-bound access token through the [Protect an API quickstart](/docs/quickstarts/protect-api). That keeps the sample focused on upgrading the EF model rather than rebuilding the OAuth client flow in the same file.
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -198,6 +208,9 @@ api.MapPost("/workspaces", async (
             error = "organizationName and workspaceName are required"
         });
     }
+
+    // This sample models self-service workspace creation. In an invite-only
+    // product, authorize the caller's create-organization entitlement here.
 
     var organizationId = Guid.NewGuid();
     var workspaceId = Guid.NewGuid();
@@ -343,6 +356,7 @@ api.MapGet("/projects", async (
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // Demo bootstrap only. Use EF migrations for application tables in production.
     await db.Database.EnsureCreatedAsync();
 }
 
@@ -443,7 +457,11 @@ public sealed record CreateWorkspaceRequest(
 public sealed record CreateProjectRequest(string Name);
 ```
 
-Use the normal SqlOS connection string and dashboard secret configuration:
+The generic `ConfigureResource` mapping is doing deliberate work. `ResourceId` remains a required, indexed application column because it is the bridge used in authorized list queries. The other interface properties are computed metadata, so the mapping ignores them instead of creating redundant columns. If your application stores any of those values directly, map the stored properties and return them through the interface rather than blindly copying this helper.
+
+The create-project query applies the workspace permission before materialization. Returning `404` when that filtered query finds nothing deliberately gives the same response for a missing workspace and a workspace the caller cannot access, avoiding an existence leak.
+
+Use the normal SqlOS connection string and dashboard secret configuration in `appsettings.json`:
 
 ```json
 {
@@ -456,6 +474,29 @@ Use the normal SqlOS connection string and dashboard secret configuration:
     }
   }
 }
+```
+
+Start the API:
+
+```bash
+dotnet run --urls http://localhost:5050
+```
+
+Open `http://localhost:5050/sqlos` to confirm the host and dashboard are running. After obtaining an access token for the configured `http://localhost:5050/api` audience, create a workspace, create a child project, and list the authorized projects:
+
+```bash
+curl -X POST http://localhost:5050/api/workspaces \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"organizationName":"Acme","workspaceName":"Engineering"}'
+
+curl -X POST http://localhost:5050/api/workspaces/<workspace-id>/projects \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Launch plan"}'
+
+curl http://localhost:5050/api/projects \
+  -H "Authorization: Bearer <access-token>"
 ```
 
 For a production application, replace `EnsureCreatedAsync` with normal EF migrations for the application tables. SqlOS continues to manage its own schema and authorization function during startup.
