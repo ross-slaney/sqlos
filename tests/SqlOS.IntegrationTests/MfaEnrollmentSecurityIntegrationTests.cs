@@ -351,6 +351,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         MfaEndpointServer server,
         HttpClient client)
     {
+        var antiforgery = await GetHostedAntiforgeryAsync(client);
         string email;
         string requestA;
         string requestB;
@@ -367,14 +368,16 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             requestB = (await CreateAuthorizationRequestAsync(authorization, "hosted-b", email, null)).Id;
         }
 
-        var loginResponse = await client.PostAsync(
+        var loginResponse = await PostHostedFormAsync(
+            client,
             "/sqlos/auth/login/password",
-            new FormUrlEncodedContent(new Dictionary<string, string>
+            new Dictionary<string, string>
             {
                 ["requestId"] = requestA,
                 ["email"] = email,
                 ["password"] = "P@ssword123!"
-            }));
+            },
+            antiforgery);
         loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var html = await loginResponse.Content.ReadAsStringAsync();
         var mfaToken = ExtractHtmlValue(html, "mfaToken");
@@ -383,27 +386,31 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         secret.Should().NotBeNullOrWhiteSpace();
         var code = await GenerateCodeAsync(server, WebUtility.HtmlDecode(secret));
 
-        var rejected = await client.PostAsync(
+        var rejected = await PostHostedFormAsync(
+            client,
             "/sqlos/auth/mfa/totp/enroll/verify",
-            new FormUrlEncodedContent(new Dictionary<string, string>
+            new Dictionary<string, string>
             {
                 ["requestId"] = requestB,
                 ["mfaToken"] = mfaToken,
                 ["enrollmentToken"] = enrollmentToken,
                 ["code"] = code
-            }));
+            },
+            antiforgery);
         rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         await AssertNoAuthorizationArtifactsAsync(server, requestA, requestB);
 
-        var accepted = await client.PostAsync(
+        var accepted = await PostHostedFormAsync(
+            client,
             "/sqlos/auth/mfa/totp/enroll/verify",
-            new FormUrlEncodedContent(new Dictionary<string, string>
+            new Dictionary<string, string>
             {
                 ["requestId"] = requestA,
                 ["mfaToken"] = mfaToken,
                 ["enrollmentToken"] = enrollmentToken,
                 ["code"] = code
-            }));
+            },
+            antiforgery);
         accepted.StatusCode.Should().Be(HttpStatusCode.Redirect);
         await AssertAuthorizationCodeOnlyForAsync(server, requestA, requestB);
     }
@@ -442,6 +449,32 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             RegexOptions.CultureInvariant);
         match.Success.Should().BeTrue($"hosted MFA HTML should include {inputName}");
         return WebUtility.HtmlDecode(match.Groups[1].Value);
+    }
+
+    private static async Task<(string Token, string Cookie)> GetHostedAntiforgeryAsync(HttpClient client)
+    {
+        var response = await client.GetAsync("/sqlos/auth/password/reset?token=test-only-antiforgery-bootstrap");
+        response.EnsureSuccessStatusCode();
+        var token = ExtractHtmlValue(await response.Content.ReadAsStringAsync(), "__RequestVerificationToken");
+        var cookie = response.Headers.GetValues("Set-Cookie")
+            .Select(value => value.Split(';', 2)[0])
+            .Single(value => value.StartsWith("sqlos_auth_page_csrf_", StringComparison.Ordinal));
+        return (token, cookie);
+    }
+
+    private static async Task<HttpResponseMessage> PostHostedFormAsync(
+        HttpClient client,
+        string path,
+        Dictionary<string, string> fields,
+        (string Token, string Cookie) antiforgery)
+    {
+        fields["__RequestVerificationToken"] = antiforgery.Token;
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = new FormUrlEncodedContent(fields)
+        };
+        request.Headers.TryAddWithoutValidation("Cookie", antiforgery.Cookie);
+        return await client.SendAsync(request);
     }
 
     private static async Task AssertNoAuthorizationArtifactsAsync(

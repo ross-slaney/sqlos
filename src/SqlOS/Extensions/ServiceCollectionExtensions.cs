@@ -8,6 +8,7 @@ using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
+using SqlOS.AuthServer.Security;
 using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Services;
 using SqlOS.Dashboard;
@@ -43,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Email));
         services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
+        services.AddSingleton<SqlOSHostedFormAntiforgery>();
         services.AddHttpClient();
         services.AddHttpClient(nameof(SqlOSOidcAuthService), client =>
         {

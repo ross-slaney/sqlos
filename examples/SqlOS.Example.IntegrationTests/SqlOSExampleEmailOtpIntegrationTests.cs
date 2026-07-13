@@ -294,11 +294,13 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         authorizeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var authorizeHtml = await authorizeResponse.Content.ReadAsStringAsync();
         var requestId = ExtractHiddenInput(authorizeHtml, "requestId");
+        var antiforgeryToken = ExtractHiddenInput(authorizeHtml, "__RequestVerificationToken");
 
         var startResponse = await client.PostAsync("/sqlos/auth/login/email-otp/start", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["requestId"] = requestId,
-            ["email"] = email
+            ["email"] = email,
+            ["__RequestVerificationToken"] = antiforgeryToken
         }));
         startResponse.EnsureSuccessStatusCode();
         var verifyPageHtml = await startResponse.Content.ReadAsStringAsync();
@@ -309,7 +311,8 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
             ["requestId"] = requestId,
             ["email"] = email,
             ["challengeToken"] = challengeToken,
-            ["code"] = sender.GetLatestCode(email)
+            ["code"] = sender.GetLatestCode(email),
+            ["__RequestVerificationToken"] = antiforgeryToken
         }));
 
         verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);

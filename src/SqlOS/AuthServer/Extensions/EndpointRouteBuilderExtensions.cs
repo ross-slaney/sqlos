@@ -17,6 +17,7 @@ using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
 
@@ -37,6 +38,9 @@ public static class EndpointRouteBuilderExtensions
 
         var auth = endpoints.MapGroup(authPrefix);
         auth.ExcludeFromDescription();
+        var hostedForms = auth.MapGroup(string.Empty);
+        hostedForms.WithMetadata(SqlOSHostedFormAntiforgeryMetadata.Instance);
+        hostedForms.AddEndpointFilter<SqlOSHostedFormAntiforgeryFilter>();
 
         var adminRoot = endpoints.MapGroup(adminPrefix);
         adminRoot.ExcludeFromDescription();
@@ -395,7 +399,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/password/forgot/submit", async (
+        hostedForms.MapPost("/password/forgot/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
@@ -660,7 +664,7 @@ public static class EndpointRouteBuilderExtensions
                 deviceAuthorization: resolved));
         });
 
-        auth.MapPost("/device/verify", async (
+        hostedForms.MapPost("/device/verify", async (
             HttpContext context,
             CancellationToken cancellationToken) =>
         {
@@ -672,7 +676,7 @@ public static class EndpointRouteBuilderExtensions
                 userCode));
         });
 
-        auth.MapPost("/device/approve", async (
+        hostedForms.MapPost("/device/approve", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
@@ -773,7 +777,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/device/deny", async (
+        hostedForms.MapPost("/device/deny", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
@@ -807,7 +811,7 @@ public static class EndpointRouteBuilderExtensions
                 deviceUserCode: userCode));
         });
 
-        auth.MapPost("/login/identify", async (
+        hostedForms.MapPost("/login/identify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSHomeRealmDiscoveryService discoveryService,
@@ -872,7 +876,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/login/password", async (
+        hostedForms.MapPost("/login/password", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
@@ -1041,7 +1045,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/login/email-otp/start", async (
+        hostedForms.MapPost("/login/email-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
@@ -1118,7 +1122,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/login/email-otp/verify", async (
+        hostedForms.MapPost("/login/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
@@ -1283,7 +1287,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/login/magic-link/start", async (
+        hostedForms.MapPost("/login/magic-link/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSMagicLinkService magicLinkService,
@@ -1398,7 +1402,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/login/magic-link/complete", async (
+        hostedForms.MapPost("/login/magic-link/complete", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSMagicLinkService magicLinkService,
@@ -1535,7 +1539,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/login/phone-otp/start", async (
+        hostedForms.MapPost("/login/phone-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSPhoneOtpService phoneOtpService,
@@ -1589,7 +1593,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/login/phone-otp/verify", async (
+        hostedForms.MapPost("/login/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSPhoneOtpService phoneOtpService,
@@ -1683,7 +1687,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/login/select-organization", async (
+        hostedForms.MapPost("/login/select-organization", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
@@ -1713,7 +1717,7 @@ public static class EndpointRouteBuilderExtensions
             return Results.Redirect(completion.RedirectUrl!);
         });
 
-        auth.MapPost("/mfa/verify", async (
+        hostedForms.MapPost("/mfa/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
@@ -1750,7 +1754,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/mfa/totp/enroll/verify", async (
+        hostedForms.MapPost("/mfa/totp/enroll/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthService authService,
@@ -1944,7 +1948,7 @@ public static class EndpointRouteBuilderExtensions
             return Html(page);
         });
 
-        auth.MapPost("/signup/submit", async (
+        hostedForms.MapPost("/signup/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
@@ -2054,7 +2058,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/signup/invitation/submit", async (
+        hostedForms.MapPost("/signup/invitation/submit", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
@@ -2167,7 +2171,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/signup/email-otp/start", async (
+        hostedForms.MapPost("/signup/email-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSEmailOtpService emailOtpService,
@@ -2250,7 +2254,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/signup/email-otp/verify", async (
+        hostedForms.MapPost("/signup/email-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
@@ -2356,7 +2360,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/signup/phone-otp/start", async (
+        hostedForms.MapPost("/signup/phone-otp/start", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSPhoneOtpService phoneOtpService,
@@ -2428,7 +2432,7 @@ public static class EndpointRouteBuilderExtensions
             }
         });
 
-        auth.MapPost("/signup/phone-otp/verify", async (
+        hostedForms.MapPost("/signup/phone-otp/verify", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
@@ -3424,11 +3428,12 @@ public static class EndpointRouteBuilderExtensions
             Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 
         auth.MapGet("/password/reset", (HttpContext context) =>
-            Results.Content(
-                BuildPasswordResetPage(context.Request.Query["token"].ToString(), error: null, success: false),
-                contentType: "text/html"));
+            HostedHtml(BuildPasswordResetPage(
+                context.Request.Query["token"].ToString(),
+                error: null,
+                success: false)));
 
-        auth.MapPost("/password/reset/submit", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        hostedForms.MapPost("/password/reset/submit", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var token = form["token"].ToString();
@@ -3443,14 +3448,13 @@ public static class EndpointRouteBuilderExtensions
                 }
 
                 await authService.ResetPasswordAsync(new SqlOSResetPasswordRequest(token, newPassword), cancellationToken);
-                return Results.Content(BuildPasswordResetPage(token: null, error: null, success: true), contentType: "text/html");
+                return HostedHtml(BuildPasswordResetPage(token: null, error: null, success: true));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Content(
+                return HostedHtml(
                     BuildPasswordResetPage(token, await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken), success: false),
-                    contentType: "text/html",
-                    statusCode: StatusCodes.Status400BadRequest);
+                    StatusCodes.Status400BadRequest);
             }
         });
 
@@ -5651,7 +5655,10 @@ public static class EndpointRouteBuilderExtensions
     }
 
     private static IResult Html(SqlOSAuthPageViewModel model, int statusCode = StatusCodes.Status200OK)
-        => Results.Content(SqlOSAuthPageRenderer.RenderPage(model), contentType: "text/html", statusCode: statusCode);
+        => HostedHtml(SqlOSAuthPageRenderer.RenderPage(model), statusCode);
+
+    private static IResult HostedHtml(string html, int statusCode = StatusCodes.Status200OK)
+        => new SqlOSHostedHtmlResult(html, statusCode);
 
     private static string BuildPasswordResetPage(string? token, string? error, bool success)
     {

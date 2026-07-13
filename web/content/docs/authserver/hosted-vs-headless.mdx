@@ -29,6 +29,12 @@ The default. SqlOS renders the sign-in, sign-up, invite acceptance, OTP, CLI dev
 
 ![Hosted sign-in page](/docs/auth-signin-page.png)
 
+### Hosted form CSRF protection
+
+Hosted AuthPage forms are protected automatically. Every state-changing form gets a cryptographic ASP.NET Core Data Protection token bound to an `HttpOnly`, auth-path-scoped browser cookie. Tokens expire after 15 minutes, the cookie uses `SameSite=Strict`, and SqlOS also rejects a supplied `Origin` or `Referer` that does not match the configured public origin or issuer. The token service is isolated from the host application's MVC/Razor antiforgery configuration, and there is no middleware or option for the consuming application to add.
+
+`SameSite` is defense in depth, not the proof by itself: a cross-site form can establish a new login cookie even when no old cookie is sent. The form token is what prevents an attacker from signing a victim's browser into the attacker's account. OAuth `state` and PKCE protect different protocol boundaries and do not replace this hosted-login protection.
+
 ## Headless Auth
 
 SqlOS owns the OAuth protocol. Your app owns the UI.
@@ -61,6 +67,8 @@ builder.AddSqlOS<AppDbContext>(options =>
 ```
 
 Headless uses one switch: `BuildUiUrl`. If that callback exists, `/sqlos/auth/authorize` redirects into your app. [Build the custom UI](/docs/guides/custom-login-ui) or review the [mode details](/docs/authserver/headless-auth#how-sqlos-picks-the-ui).
+
+Headless JSON endpoints deliberately do not require the hosted HTML form token. A native client is not subject to browser cookie CSRF. For a browser-owned headless UI, keep credentialed CORS limited to the exact UI origins, prefer same-origin or backend-for-frontend requests, and apply the UI host's normal CSRF control if it accepts cookie-authenticated actions. Do not copy the hidden hosted-form token into SDK or native-client integrations.
 
 ## Don't rebuild the auth flow
 

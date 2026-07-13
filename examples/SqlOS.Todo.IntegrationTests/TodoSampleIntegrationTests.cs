@@ -107,7 +107,8 @@ public sealed class TodoSampleIntegrationTests
                 ["displayName"] = "ASP.NET Core User",
                 ["email"] = $"aspnet-{Guid.NewGuid():N}@example.com",
                 ["password"] = "P@ssword123!",
-                ["organizationName"] = "ASP.NET Core Org"
+                ["organizationName"] = "ASP.NET Core Org",
+                ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
             }));
 
         signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
@@ -190,7 +191,8 @@ public sealed class TodoSampleIntegrationTests
             ["displayName"] = "Password Bypass User",
             ["email"] = $"password-bypass-{Guid.NewGuid():N}@example.com",
             ["password"] = "P@ssword123!",
-            ["organizationName"] = "Password Bypass Org"
+            ["organizationName"] = "Password Bypass Org",
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
         passwordSignupResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         passwordSignupResponse.Headers.Location.Should().BeNull("password signup is disabled in the Todo email OTP demo");
@@ -200,7 +202,8 @@ public sealed class TodoSampleIntegrationTests
             ["requestId"] = authorize.RequestId,
             ["displayName"] = "OTP Hosted User",
             ["email"] = email,
-            ["organizationName"] = "OTP Hosted Org"
+            ["organizationName"] = "OTP Hosted Org",
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
         startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -218,7 +221,8 @@ public sealed class TodoSampleIntegrationTests
             ["email"] = email,
             ["challengeToken"] = challengeToken,
             ["signupToken"] = signupToken,
-            ["code"] = code
+            ["code"] = code,
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
         verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
@@ -266,7 +270,8 @@ public sealed class TodoSampleIntegrationTests
             ["requestId"] = authorize.RequestId,
             ["displayName"] = "SMS Hosted User",
             ["phoneNumber"] = phoneNumber,
-            ["organizationName"] = "SMS Hosted Org"
+            ["organizationName"] = "SMS Hosted Org",
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
         startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -284,7 +289,8 @@ public sealed class TodoSampleIntegrationTests
             ["phoneNumber"] = phoneNumber,
             ["challengeToken"] = challengeToken,
             ["signupToken"] = signupToken,
-            ["code"] = TestOtpDeliveryChannel.ApprovedCode
+            ["code"] = TestOtpDeliveryChannel.ApprovedCode,
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
         verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
@@ -664,14 +670,19 @@ public sealed class TodoSampleIntegrationTests
         {
             var redirectUriResult = authorizeResponse.Headers.Location!;
             var requestId = QueryHelpers.ParseQuery(redirectUriResult.Query)["request"].ToString();
-            return new AuthorizationStartResult(requestId, codeVerifier, redirectUriResult, null);
+            return new AuthorizationStartResult(requestId, codeVerifier, redirectUriResult, null, null);
         }
 
         authorizeResponse.EnsureSuccessStatusCode();
         var html = await authorizeResponse.Content.ReadAsStringAsync();
         var requestIdMatch = Regex.Match(html, "name=\"requestId\" value=\"([^\"]+)\"");
         requestIdMatch.Success.Should().BeTrue();
-        return new AuthorizationStartResult(requestIdMatch.Groups[1].Value, codeVerifier, null, html);
+        return new AuthorizationStartResult(
+            requestIdMatch.Groups[1].Value,
+            codeVerifier,
+            null,
+            html,
+            ExtractHiddenInput(html, "__RequestVerificationToken"));
     }
 
     private static async Task<HostedSignupResult> ExecuteHostedSignupAsync(HttpClient client, string clientId, string redirectUri)
@@ -684,7 +695,8 @@ public sealed class TodoSampleIntegrationTests
             ["displayName"] = "Hosted User",
             ["email"] = $"hosted-{Guid.NewGuid():N}@example.com",
             ["password"] = "P@ssword123!",
-            ["organizationName"] = "Hosted Org"
+            ["organizationName"] = "Hosted Org",
+            ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
         signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
@@ -776,7 +788,12 @@ public sealed class TodoSampleIntegrationTests
         return WebUtility.HtmlDecode(match.Groups[1].Value);
     }
 
-    private sealed record AuthorizationStartResult(string RequestId, string CodeVerifier, Uri? HeadlessRedirect, string? Html);
+    private sealed record AuthorizationStartResult(
+        string RequestId,
+        string CodeVerifier,
+        Uri? HeadlessRedirect,
+        string? Html,
+        string? AntiforgeryToken);
     private sealed record HostedSignupResult(string Code, string CodeVerifier);
     private sealed record TokenResult(string AccessToken, string RefreshToken, string ClientId);
 
