@@ -106,9 +106,22 @@ Projects
 
 The database does not materialize every project and ask an authorization service about each row. SQL Server evaluates the authorization predicate together with the rest of the query. Pagination and counts can therefore operate on authorized rows rather than on a list trimmed in memory afterward.
 
-## The complete runnable application
+## What changes in an existing EF application
 
-The following `Program.cs` is a complete .NET 9 minimal API. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject.
+The upgrade is smaller than the complete sample makes it look. Authentication and API setup occupy most of the file; the EF authorization integration is four focused changes:
+
+| Existing application surface | Hierarchical upgrade |
+|---|---|
+| `AppDbContext : DbContext` | Derive from `SqlOSDbContext<AppDbContext>` and keep application mappings in `OnApplicationModelCreating`. |
+| `Organization`, `Workspace`, and `Project` entities | Implement `ISqlOSResourceEntity`, persist a stable `ResourceId`, and return the parent resource ID from existing foreign keys. |
+| Workspace membership or role assignment | Provision the authenticated subject and place one explicit role grant on the appropriate workspace or project. |
+| `db.Projects.Where(...)` | Compose the expression from `GetAuthorizationFilterAsync<Project>` before ordering, projection, and pagination. |
+
+Keys, relationships, migrations, change tracking, and business predicates remain ordinary EF Core. SqlOS adds a synchronized resource representation and an authorization predicate; it does not replace the application's data model.
+
+## A complete runnable API host
+
+The following `Program.cs` is a complete .NET 9 minimal API host. It creates workspaces, grants the creator a role at the workspace, creates child projects after checking the parent permission, and lists only projects visible to the signed-in subject. SQL Server and an access token are explicit prerequisites; this is not a standalone browser client.
 
 Create the host and install the same package version used to compile this article:
 
@@ -459,22 +472,21 @@ public sealed record CreateProjectRequest(string Name);
 
 The generic `ConfigureResource` mapping is doing deliberate work. `ResourceId` remains a required, indexed application column because it is the bridge used in authorized list queries. The other interface properties are computed metadata, so the mapping ignores them instead of creating redundant columns. If your application stores any of those values directly, map the stored properties and return them through the interface rather than blindly copying this helper.
 
+The repository documentation check extracts this entire C# block and compiles it against the current SqlOS project. That catches stale types, method names, overloads, and expression shapes. The SQL Server startup and authenticated HTTP walkthrough remain runtime verification steps for the reader's configured environment.
+
 The create-project query applies the workspace permission before materialization. Returning `404` when that filtered query finds nothing deliberately gives the same response for a missing workspace and a workspace the caller cannot access, avoiding an existence leak.
 
-Use the normal SqlOS connection string and dashboard secret configuration in `appsettings.json`:
+Configure a local development database and dashboard password without committing either value to `appsettings.json`:
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Server=localhost;Database=HierarchicalEf;User Id=sa;Password=LocalDevPassword123!;TrustServerCertificate=True"
-  },
-  "SqlOS": {
-    "Dashboard": {
-      "Password": "replace-this-with-a-secret"
-    }
-  }
-}
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
+  "Server=localhost;Database=HierarchicalEf;User Id=sa;Password=<local-sa-password>;TrustServerCertificate=True"
+dotnet user-secrets set "SqlOS:Dashboard:Password" \
+  "<local-dashboard-password>"
 ```
+
+Use the deployment platform's secret store in production.
 
 Start the API:
 
@@ -498,6 +510,8 @@ curl -X POST http://localhost:5050/api/workspaces/<workspace-id>/projects \
 curl http://localhost:5050/api/projects \
   -H "Authorization: Bearer <access-token>"
 ```
+
+Repeat the list request with an access token for a second subject that has no grant. The response should be an empty array. Attempting to create a project beneath the first subject's workspace should return `404`, the same response used for an unknown workspace. Those negative checks prove both row isolation and the anti-enumeration behavior; a happy-path response alone does not prove authorization.
 
 For a production application, replace `EnsureCreatedAsync` with normal EF migrations for the application tables. SqlOS continues to manage its own schema and authorization function during startup.
 
@@ -540,5 +554,7 @@ You do not need to remodel the whole application at once. Start with one aggrega
 7. Add integration tests for allowed and denied subjects.
 
 That is enough to turn a flat EF query into hierarchical authorization. Additional entities can join the same tree when the product needs them.
+
+The contract remains opt-in and visible: every protected list path must compose the authorization expression, and every protected mutation must perform its point check. This is more explicit than an invisible global query filter, and it remains application-aware in a way that a database-user policy usually is not. Centralize those calls in repositories or specifications when that makes omissions easier to prevent and test.
 
 Continue with the [EF authorization quickstart](/docs/quickstarts/ef-authorization), [resource hierarchy guide](/docs/fga/resource-hierarchy), and [EF query-filter guide](/docs/guides/ef-query-filters).

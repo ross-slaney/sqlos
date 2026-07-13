@@ -29,7 +29,7 @@ const snippetSpecs = [
     name: "hierarchical EF authorization blog complete program",
     relativePath:
       "web/content/blog/hierarchical-authorization-native-ef-core.mdx",
-    heading: "## The complete runnable application",
+    heading: "## A complete runnable API host",
     marker: "var builder = WebApplication.CreateBuilder(args);",
     wrap: asCompleteProgram,
   },
