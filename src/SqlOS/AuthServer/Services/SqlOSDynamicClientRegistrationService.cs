@@ -229,7 +229,7 @@ public sealed class SqlOSDynamicClientRegistrationService
         var normalized = (redirectUris ?? [])
             .Where(static uri => !string.IsNullOrWhiteSpace(uri))
             .Select(static uri => uri.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (normalized.Count == 0)

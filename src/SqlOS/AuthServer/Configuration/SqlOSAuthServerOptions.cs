@@ -20,9 +20,9 @@ public class SqlOSAuthServerOptions
     /// <summary>
     /// Grace window after a refresh token has been rotated during which the
     /// previous refresh token can still be exchanged. Concurrent and near-
-    /// concurrent calls within the window receive the SAME new token pair
-    /// that was issued at rotation time, instead of triggering replay
-    /// detection. This prevents legitimate concurrent refresh requests
+    /// concurrent calls within the window receive the same cached access
+    /// token plus a fresh sibling refresh token in the same family and with
+    /// the same expiry, instead of triggering replay detection. This prevents legitimate concurrent refresh requests
     /// (multiple tabs, parallel SSR calls, mobile retries, multi-instance
     /// load-balanced deployments) from being false-flagged as token theft.
     /// Default 30 seconds matches Okta's default. Set to 0 to disable the
@@ -33,14 +33,6 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
-    /// <summary>
-    /// Protects SqlOS JWT signing private keys with ASP.NET Core Data Protection before storing
-    /// them in the application database. Enable this only when the host application's Data
-    /// Protection key ring is persisted and shared by every application instance and revision;
-    /// container-local key rings make protected signing keys unreadable after replacement or
-    /// scale-out and can prevent token issuance.
-    /// </summary>
-    public bool ProtectSigningKeysWithDataProtection { get; set; }
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
@@ -317,7 +309,7 @@ public class SqlOSAuthServerOptions
             client.RedirectUris = redirectUris
                 .Where(static uri => !string.IsNullOrWhiteSpace(uri))
                 .Select(static uri => uri.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
             client.ClientType = "public_pkce";
             client.RequirePkce = true;
@@ -338,7 +330,7 @@ public class SqlOSAuthServerOptions
             client.RedirectUris = redirectUris
                 .Where(static uri => !string.IsNullOrWhiteSpace(uri))
                 .Select(static uri => uri.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
             client.ClientType = "public_pkce";
             client.RequirePkce = true;
@@ -366,6 +358,13 @@ public class SqlOSAuthServerOptions
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
         });
+
+    public SqlOSAuthServerOptions SeedDeviceFlowClient(
+        string clientId,
+        string name,
+        string? audience = null,
+        params string[] allowedScopes)
+        => SeedCliClient(clientId, name, audience, allowedScopes);
 
     public SqlOSAuthServerOptions EnablePortableMcpClients(Action<SqlOSClientRegistrationOptions>? configure = null)
     {

@@ -25,6 +25,8 @@ You'll learn how to create the GitHub OAuth App, register the SqlOS callback URL
 
 Users see **Continue with GitHub** on the hosted AuthPage or your headless login UI. After GitHub redirects back to SqlOS, SqlOS resolves the user's GitHub profile, requires a verified primary email address, and completes the normal SqlOS login flow.
 
+![Configured GitHub OAuth provider in the SqlOS dashboard](/docs/guides-github-sign-in.png)
+
 <Callout type="info" title="Protocol note">
   SqlOS shows GitHub beside the OIDC providers because it uses the same social login connection, dashboard, hosted AuthPage, and headless API surface. GitHub login itself is OAuth 2.0 with profile and email API lookups, not an OIDC ID-token flow.
 </Callout>

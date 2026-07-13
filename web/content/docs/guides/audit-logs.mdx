@@ -31,6 +31,8 @@ When a user changes an important business resource, SqlOS should store a structu
 - when it happened
 - what safe metadata explains the outcome
 
+![Structured application and SqlOS events in the Audit Logs dashboard](/docs/guides-audit-logs.png)
+
 ## 1. Pick event names
 
 Use stable dot-delimited action names. Prefer past-tense or outcome-specific names:
@@ -47,6 +49,10 @@ Keep action names stable because operators filter and export by action.
 ## 2. Identify actor and targets
 
 The actor is the principal that performed the action.
+
+<Callout type="warning" title="Identity is server-owned">
+  Never accept an actor id, actor display name, or organization id from the request body. For a SqlOS-protected endpoint, read them from `GetSqlOSValidatedToken()` after access-token validation. For another authentication scheme, resolve them from the authenticated server-side principal or session. The request DTO should contain business input only.
+</Callout>
 
 Common actor types:
 
@@ -69,22 +75,51 @@ Targets:
 
 ## 3. Record the event from server-side code
 
-Inject `ISqlOSAuditLogService` into the endpoint, controller, or domain service that performs the mutation.
+Inject `ISqlOSAuditLogService` into the endpoint, controller, or domain service that performs the mutation. Mount the endpoint on a route group that uses `RequireSqlOSAccessToken`, so it can read the validated token. Scope the resource to that trusted organization and authorize the mutation before changing state.
 
 ```csharp
-app.MapPut("/api/locations/{locationId}/inventory/{itemId}", async (
+var inventoryApi = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+inventoryApi.MapPut("/locations/{locationId}/inventory/{itemId}", async (
     string locationId,
     string itemId,
     UpdateInventoryRequest request,
-    ExampleAppDbContext db,
+    InventoryDbContext db,
+    ISqlOSFgaAuthService fga,
     ISqlOSAuditLogService auditLogs,
     HttpContext httpContext,
     CancellationToken ct) =>
 {
-    var item = await db.InventoryItems.FindAsync([itemId], ct);
+    var token = httpContext.GetSqlOSValidatedToken();
+    if (token?.UserId is not { Length: > 0 } userId)
+    {
+        return Results.Unauthorized();
+    }
+
+    if (token.OrganizationId is not { Length: > 0 } organizationId)
+    {
+        return Results.Forbid();
+    }
+
+    var item = await db.InventoryItems
+        .SingleOrDefaultAsync(x =>
+            x.Id == itemId &&
+            x.LocationId == locationId &&
+            x.OrganizationId == organizationId,
+            ct);
     if (item is null)
     {
         return Results.NotFound();
+    }
+
+    var access = await fga.CheckAccessAsync(
+        userId,
+        RetailPermissionKeys.InventoryEdit,
+        item.ResourceId);
+    if (!access.Allowed)
+    {
+        return Results.Forbid();
     }
 
     var previousQuantity = item.QuantityOnHand;
@@ -93,10 +128,13 @@ app.MapPut("/api/locations/{locationId}/inventory/{itemId}", async (
 
     await auditLogs.RecordAsync(new SqlOSAuditLogRecordRequest(
         Action: "retail.inventory_item.updated",
-        OrganizationId: request.OrganizationId,
+        OrganizationId: organizationId,
         ApplicationKey: "northwind-retail",
         Source: "application",
-        Actor: new SqlOSAuditActor("user", request.UserId, request.UserDisplayName),
+        Actor: new SqlOSAuditActor(
+            "user",
+            userId,
+            token.Principal.Identity?.Name),
         Targets:
         [
             new SqlOSAuditTarget("location", locationId),
@@ -111,12 +149,20 @@ app.MapPut("/api/locations/{locationId}/inventory/{itemId}", async (
             ["newQuantity"] = item.QuantityOnHand,
             ["delta"] = item.QuantityOnHand - previousQuantity
         },
-        IdempotencyKey: $"retail:inventory:{item.Id}:updated:{httpContext.TraceIdentifier}"),
+        IdempotencyKey: $"retail:inventory:{item.Id}:updated:{userId}:{httpContext.TraceIdentifier}"),
         ct);
 
     return Results.Ok(item);
 });
+
+public sealed record UpdateInventoryRequest(int QuantityOnHand);
 ```
+
+This example uses a representative host-owned `InventoryItem` model with an explicit `OrganizationId`. The query binds the resource to the token's organization, then the FGA check proves the same actor may edit that resource. If your schema derives tenancy from a parent or FGA root instead, resolve and verify that trusted ownership mapping before mutation and use the resolved organization in the audit row. A valid token alone is not authorization.
+
+<Callout type="warning" title="Decide how durable the audit must be">
+  `SaveChangesAsync` followed by `RecordAsync` is two writes, not one atomic operation. A process failure between them can commit the business change without its audit event. If that event cannot be lost, commit the mutation and audit row in one application transaction when both use the same database context, or write an outbox record in the mutation transaction and publish it to `RecordAsync` with a stable idempotency key.
+</Callout>
 
 Use `ApplicationKey` for the product surface that produced the event. If the key matches a registered SqlOS client id, SqlOS also links the event to that client row.
 

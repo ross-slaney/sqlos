@@ -21,7 +21,12 @@ public sealed record SqlOSSsoPortalDomainRequest(string Domain);
 
 public sealed record SqlOSSsoPortalMetadataRequest(string MetadataXml);
 
-public sealed record SqlOSSsoPortalTestRequest(string? ClientId = null, string? RedirectUri = null);
+public sealed record SqlOSSsoPortalTestRequest(
+    string? ClientId = null,
+    string? RedirectUri = null,
+    string? State = null,
+    string? CodeChallenge = null,
+    string? CodeChallengeMethod = null);
 
 public sealed record SqlOSSsoPortalSessionResult(
     string Id,

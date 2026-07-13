@@ -79,7 +79,7 @@ public sealed class SqlOSExamplePublicAuthErrorsIntegrationTests
             .AsNoTracking()
             .OrderByDescending(x => x.OccurredAt)
             .FirstOrDefaultAsync(x =>
-                x.EventType == SqlOSPublicAuthErrorAudit.EventType
+                x.EventType == "auth.public_error.mapped"
                 && x.MetadataJson != null
                 && x.MetadataJson.Contains(marker));
 

@@ -102,6 +102,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "providerType": "github",
@@ -114,11 +115,14 @@ curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections \
   }'
 ```
 
-Enable the connection:
+Creation enables the connection. Use this endpoint only to re-enable one that an operator disabled:
 
 ```bash
-curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/oidc-connections/{id}/enable \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+See [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls) before using an Admin API example.
 
 ## Runtime behavior
 

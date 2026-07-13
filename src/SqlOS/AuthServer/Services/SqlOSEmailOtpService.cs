@@ -103,7 +103,13 @@ public sealed class SqlOSEmailOtpService
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
         if (existingEmail != null)
         {
-            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+            await RecordExistingEmailSignupAuditAsync(
+                trimmedEmail,
+                authorizationRequest?.Id,
+                authorizationRequest?.ClientApplicationId,
+                authorizationRequest?.OrganizationId,
+                httpContext,
+                cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(authorizationRequest?.InvitationId))
@@ -183,7 +189,13 @@ public sealed class SqlOSEmailOtpService
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
         if (existingEmail != null)
         {
-            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+            await RecordExistingEmailSignupAuditAsync(
+                trimmedEmail,
+                authorizationRequestId: null,
+                client.Id,
+                request.OrganizationId,
+                httpContext,
+                cancellationToken);
         }
 
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
@@ -322,7 +334,19 @@ public sealed class SqlOSEmailOtpService
 
         if (challenge.User != null)
         {
-            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+            await RecordOtpAuditAsync(
+                "email_otp.signup_existing_email_rejected",
+                MaskEmail(challenge.Email),
+                "signup",
+                challenge.IpAddress,
+                new
+                {
+                    challenge.ClientApplicationId,
+                    challenge.AuthorizationRequestId,
+                    reason = "challenge_bound_to_existing_user"
+                },
+                cancellationToken);
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
         var existingEmail = await _context.Set<SqlOSUserEmail>()
@@ -330,7 +354,19 @@ public sealed class SqlOSEmailOtpService
             .FirstOrDefaultAsync(x => x.NormalizedEmail == challenge.NormalizedEmail, cancellationToken);
         if (existingEmail != null)
         {
-            throw new InvalidOperationException("An account already exists for this email. Sign in with an email code instead.");
+            await RecordOtpAuditAsync(
+                "email_otp.signup_existing_email_rejected",
+                MaskEmail(challenge.Email),
+                "signup",
+                challenge.IpAddress,
+                new
+                {
+                    challenge.ClientApplicationId,
+                    challenge.AuthorizationRequestId,
+                    reason = "email_claimed_after_challenge_started"
+                },
+                cancellationToken);
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
 
         return new SqlOSEmailOtpSignupVerificationResult(
@@ -819,6 +855,27 @@ public sealed class SqlOSEmailOtpService
                 details = data
             },
             cancellationToken: cancellationToken);
+
+    private async Task RecordExistingEmailSignupAuditAsync(
+        string email,
+        string? authorizationRequestId,
+        string? clientApplicationId,
+        string? requestedOrganizationId,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+        => await RecordOtpAuditAsync(
+            "email_otp.signup_existing_email",
+            MaskEmail(email),
+            "signup",
+            httpContext?.Connection.RemoteIpAddress?.ToString(),
+            new
+            {
+                clientApplicationId,
+                authorizationRequestId,
+                requestedOrganizationId,
+                reason = "existing_email"
+            },
+            cancellationToken);
 
     private sealed record EmailOtpSignupPayload(
         string ChallengeTokenHash,

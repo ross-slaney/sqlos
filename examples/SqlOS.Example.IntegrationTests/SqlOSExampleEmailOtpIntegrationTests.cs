@@ -79,7 +79,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var userId = await CreateUserAsync(client, email, "Headless OTP User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId, "member");
 
-        const string verifier = "headless-email-otp-verifier-123456789";
+        const string verifier = "headless-email-otp-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -142,7 +142,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
 
         var email = $"headless-otp-signup-{Guid.NewGuid():N}@example.com";
-        const string verifier = "headless-email-otp-signup-verifier-123456789";
+        const string verifier = "headless-email-otp-signup-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -221,6 +221,48 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
     }
 
     [TestMethod]
+    public async Task HeadlessEmailOtpSignupStart_ExistingAndUnknownEmails_ReturnUniformPublicResponse()
+    {
+        using var factory = CreateOtpFactory(enableHeadlessAuthPage: true);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+
+        const string existingEmail = "aa-existing@example.com";
+        const string unknownEmail = "aa-unknown@example.com";
+        await CreateUserAsync(client, existingEmail, "Existing OTP User", "P@ssword123!");
+
+        var existingResponse = await StartHeadlessSignupAsync(client, existingEmail, state: "existing");
+        var unknownResponse = await StartHeadlessSignupAsync(client, unknownEmail, state: "unknown");
+
+        existingResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        unknownResponse.StatusCode.Should().Be(existingResponse.StatusCode);
+        var existingBody = await existingResponse.Content.ReadAsStringAsync();
+        var unknownBody = await unknownResponse.Content.ReadAsStringAsync();
+        existingBody.Should().NotContain("already exists");
+        unknownBody.Should().NotContain("already exists");
+
+        using var existingJson = JsonDocument.Parse(existingBody);
+        using var unknownJson = JsonDocument.Parse(unknownBody);
+        existingJson.RootElement.GetProperty("type").GetString()
+            .Should().Be(unknownJson.RootElement.GetProperty("type").GetString());
+
+        var existingView = existingJson.RootElement.GetProperty("viewModel");
+        var unknownView = unknownJson.RootElement.GetProperty("viewModel");
+        existingView.GetProperty("view").GetString().Should().Be("email-otp-signup-verify");
+        existingView.GetProperty("view").GetString().Should().Be(unknownView.GetProperty("view").GetString());
+        existingView.GetProperty("info").GetString().Should().Be(unknownView.GetProperty("info").GetString());
+        existingView.GetProperty("challengeToken").GetString().Should().NotBeNullOrWhiteSpace();
+        existingView.GetProperty("signupToken").GetString().Should().NotBeNullOrWhiteSpace();
+        unknownView.GetProperty("challengeToken").GetString().Should().NotBeNullOrWhiteSpace();
+        unknownView.GetProperty("signupToken").GetString().Should().NotBeNullOrWhiteSpace();
+        sender.GetLatestCode(existingEmail).Should().NotBeNullOrWhiteSpace();
+        sender.GetLatestCode(unknownEmail).Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
     public async Task HostedEmailOtpLogin_CompletesAuthorizationCodeFlow()
     {
         using var factory = CreateOtpFactory(enableHeadlessAuthPage: false);
@@ -235,7 +277,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         var userId = await CreateUserAsync(client, email, "Hosted OTP User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId, "member");
 
-        const string verifier = "hosted-email-otp-verifier-123456789";
+        const string verifier = "hosted-email-otp-verifier-123456789-rfc7636-secure";
         var challenge = CreateCodeChallenge(verifier);
 
         var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
@@ -300,6 +342,40 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
                 services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<TestAuthEmailSender>());
             });
         });
+
+    private static async Task<HttpResponseMessage> StartHeadlessSignupAsync(HttpClient client, string email, string state)
+    {
+        const string verifier = "headless-email-otp-uniform-verifier-123456789";
+        var challenge = CreateCodeChallenge(verifier);
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = $"headless-email-otp-uniform-{state}",
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["view"] = "signup"
+        }));
+        authorizeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var requestId = QueryHelpers.ParseQuery(authorizeResponse.Headers.Location!.Query)["request"].ToString();
+        requestId.Should().NotBeNullOrWhiteSpace();
+
+        return await client.PostAsJsonAsync("/sqlos/auth/headless/signup/email-otp/start", new
+        {
+            requestId,
+            displayName = "Uniform Signup User",
+            email,
+            organizationName = "Uniform OTP Org",
+            customFields = new
+            {
+                referralSource = "docs",
+                firstName = "Uniform",
+                lastName = "Signup"
+            }
+        });
+    }
 
     private static async Task<string> CreateOrganizationAsync(HttpClient client, string name)
     {

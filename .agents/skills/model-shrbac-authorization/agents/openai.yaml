@@ -1,0 +1,4 @@
+interface:
+  display_name: "Model SHRBAC Authorization"
+  short_description: "Design SqlOS hierarchical FGA before coding"
+  default_prompt: "Use $model-shrbac-authorization to model roles, permissions, and grants for this app before implementation:"

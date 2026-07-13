@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Calendar.Configuration;
 using SqlOS.Email.Configuration;
 using SqlOS.Fga.Configuration;
 
@@ -15,6 +16,7 @@ public static class ModelBuilderExtensions
     {
         SqlOSAuthServerModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions());
         SqlOSEmailModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema);
+        SqlOSCalendarModelConfiguration.Configure(modelBuilder, new SqlOSAuthServerOptions().Schema);
         SqlOSFgaModelConfiguration.Configure(modelBuilder, new SqlOSFgaOptions(), contextType);
         return modelBuilder;
     }

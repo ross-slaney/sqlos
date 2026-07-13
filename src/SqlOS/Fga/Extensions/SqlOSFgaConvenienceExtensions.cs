@@ -14,12 +14,14 @@ public static class SqlOSFgaConvenienceExtensions
     private const int DefaultMaxResourceHierarchyDepth = 10;
 
     /// <summary>
-    /// Creates a <see cref="SqlOSFgaResource"/> and adds it to the context (not yet saved).
-    /// Returns the generated resource ID so you can assign it to your domain entity.
+    /// Lower-level/manual helper that creates a <see cref="SqlOSFgaResource"/> and adds it to
+    /// the context (not yet saved). Use this for manual or ad hoc resource lifecycles. For
+    /// protected application rows, prefer <see cref="ISqlOSResourceEntity"/> on the domain
+    /// entity and <c>SqlOSDbContext&lt;TContext&gt;</c> resource synchronization.
     /// <example>
     /// <code>
     /// var resourceId = context.CreateResource("retail_root", request.Name, "chain");
-    /// chain.ResourceId = resourceId;
+    /// chain.ResourceId = resourceId; // manual lifecycle sample
     /// await context.SaveChangesAsync();
     /// </code>
     /// </example>

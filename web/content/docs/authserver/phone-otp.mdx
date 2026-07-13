@@ -1,0 +1,441 @@
+---
+title: "Phone OTP with Twilio Verify"
+description: "Passwordless SMS sign-in and signup for hosted, headless, and .NET SDK flows."
+order: 10.5
+section: authserver
+---
+
+Phone OTP lets a user sign in or create an account with a one-time code delivered by SMS. SqlOS owns phone-number normalization, challenge state, rate limits, user and session creation, organization selection, MFA continuation, and audit events. [Twilio Verify](https://www.twilio.com/docs/verify/api) sends the SMS and decides whether the submitted code is valid.
+
+<Callout type="warning" title="SMS is not phishing-resistant MFA">
+  Phone OTP is a convenient primary credential, but phone numbers can be reassigned and SMS can be exposed through SIM-swap, carrier, device, or support-channel attacks. `SatisfiesMfa` defaults to `false`. Leave it false unless your security model explicitly accepts SMS as satisfying ordinary MFA policy; SqlOS never lets phone OTP satisfy the stronger owner/admin MFA check.
+</Callout>
+
+## What SqlOS and Twilio each do
+
+| Responsibility | Owner |
+| --- | --- |
+| Parse national or international input and normalize it to E.164 | SqlOS |
+| Apply country allow/deny policy and per-phone, account, IP, and client limits | SqlOS |
+| Create, supersede, expire, consume, and audit the challenge | SqlOS |
+| Deliver the SMS and validate the code | Twilio Verify |
+| Finish login, organization selection, MFA, session, and token issuance | SqlOS |
+| Protect the OAuth authorization request with client, redirect, PKCE, and state validation | SqlOS |
+
+The built-in adapter uses Twilio Verify's `sms` channel. It does not send SMS through a Twilio Messaging Service, and it does not expose the Verify voice, WhatsApp, or email channels.
+
+## 1. Create a Twilio Verify service
+
+In the Twilio Console:
+
+1. Create or choose a Twilio project.
+2. Open **Verify > Services** and create a Verify service.
+3. Keep the SMS channel enabled and copy the service SID, which starts with `VA`.
+4. Copy the project Account SID (`AC...`) and Auth Token. The current built-in SqlOS adapter authenticates with this pair.
+5. Review the service's [Fraud Guard](https://www.twilio.com/docs/verify/preventing-toll-fraud/sms-fraud-guard) and [geographic permissions](https://www.twilio.com/docs/verify/verify-countries-and-regions-deliverability) before enabling public signup.
+
+Twilio trial projects can send only to destinations allowed by the trial account. If local testing works for one phone but not another, check the trial destination restrictions before changing SqlOS.
+
+<Callout type="tip" title="Use two country controls">
+  Limit destinations in both Twilio and SqlOS. Twilio geo permissions stop delivery at the provider. SqlOS `CountryAllowList` and `CountryDenyList` reject the request before a Verify call and before provider spend.
+</Callout>
+
+## 2. Keep credentials out of source control
+
+Use .NET user secrets locally:
+
+```bash
+dotnet user-secrets set "SqlOS:PhoneOtp:Enabled" "true"
+dotnet user-secrets set "SqlOS:PhoneOtp:TwilioAccountSid" "AC..."
+dotnet user-secrets set "SqlOS:PhoneOtp:TwilioAuthToken" "..."
+dotnet user-secrets set "SqlOS:PhoneOtp:TwilioVerifyServiceSid" "VA..."
+dotnet user-secrets set "SqlOS:PhoneOtp:DefaultRegion" "US"
+```
+
+Run those commands in the host project, which must define a `UserSecretsId`. In production, map the same keys from your platform's secret store. Do not put the Account SID and Auth Token in `appsettings.json`, source control, container images, browser configuration, or client-side environment variables.
+
+The example hosts also recognize these aliases:
+
+| SqlOS configuration key | Example-host alias |
+| --- | --- |
+| `SqlOS:PhoneOtp:TwilioAccountSid` | `TWILIO_ACCOUNT_SID` |
+| `SqlOS:PhoneOtp:TwilioAuthToken` | `TWILIO_AUTH_TOKEN` |
+| `SqlOS:PhoneOtp:TwilioVerifyServiceSid` | `TWILIO_VERIFY_SERVICE_SID` |
+| `SqlOS:PhoneOtp:DefaultRegion` | `TWILIO_DEFAULT_REGION` |
+
+Those aliases are sample application behavior, not automatic configuration binding in the SqlOS package. Your host still maps configuration into `ConfigurePhoneOtp`, as shown next.
+
+## 3. Configure the runtime
+
+```csharp
+var phoneOtpSection = builder.Configuration.GetSection("SqlOS:PhoneOtp");
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigurePhoneOtp(phone =>
+    {
+        phone.Enabled = phoneOtpSection.GetValue<bool>("Enabled");
+        phone.TwilioAccountSid = phoneOtpSection["TwilioAccountSid"];
+        phone.TwilioAuthToken = phoneOtpSection["TwilioAuthToken"];
+        phone.TwilioVerifyServiceSid = phoneOtpSection["TwilioVerifyServiceSid"];
+        phone.DefaultRegion = phoneOtpSection["DefaultRegion"] ?? "US";
+
+        phone.CountryAllowList = ["US", "CA"];
+        phone.CountryDenyList = [];
+    });
+});
+```
+
+When `Enabled` is `true`, startup validation requires all three Twilio values. An incomplete configuration fails startup with a direct validation error instead of exposing a broken login button.
+
+### Runtime defaults
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `Enabled` | `false` | Enables the provider runtime after complete Twilio configuration is present |
+| `DefaultRegion` | `US` | Region used to parse a phone number that does not begin with `+` |
+| `ChallengeLifetime` | 10 minutes | SqlOS challenge lifetime; Twilio can impose its own verification lifecycle too |
+| `ResendCooldown` | 30 seconds | Minimum wait before another challenge in the same phone/client/purpose context |
+| `RateLimitWindow` | 1 hour | Lookback window for all four send limits |
+| `MaxSendsPerPhone` | 5 | Challenge starts for one normalized phone number |
+| `MaxSendsPerAccount` | 5 | Challenge starts across verified numbers on one known user |
+| `MaxSendsPerIp` | 60 | Challenge starts observed from one client IP |
+| `MaxSendsPerClient` | 300 | Challenge starts for one SqlOS client application |
+| `CountryAllowList` | empty | Empty permits any valid country not denied; otherwise only listed countries pass |
+| `CountryDenyList` | empty | Countries rejected even when also present in the allow list |
+| `SatisfiesMfa` | `false` | Whether `phone_otp` can satisfy ordinary strong-MFA evaluation |
+
+All country-list values must be two-letter ISO 3166-1 alpha-2 codes. Validation is case-insensitive; use uppercase in configuration for readability.
+
+## 4. Enable the hosted credential
+
+Runtime configuration does not automatically add a button to AuthPage. Include `phone_otp` in the persisted AuthPage credential list:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    // ConfigurePhoneOtp(...) as above.
+
+    options.AuthServer.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["password", "phone_otp"];
+        page.EnablePasswordSignup = true;
+    });
+});
+```
+
+These are deliberately separate gates:
+
+- `PhoneOtp.Enabled` plus complete Twilio credentials makes the runtime available.
+- `EnabledCredentialTypes` containing `phone_otp` makes it an effective hosted or headless credential.
+
+If either gate is closed, phone sign-in is unavailable. A startup AuthPage seed is reapplied when SqlOS starts and is the right choice when configuration should be code-owned. If you manage AuthPage settings through the dashboard instead, enable the phone credential there only after the runtime is configured.
+
+Hosted AuthPage then owns the complete interaction:
+
+1. Render phone-code sign-in and, when no email invitation is bound, phone-code signup.
+2. Normalize and policy-check the number.
+3. Start a Twilio verification.
+4. Render the code form without issuing an OAuth code.
+5. Check the code with Twilio.
+6. Continue through organization selection and MFA when required.
+7. Issue the OAuth authorization code only after the flow is complete.
+
+<Callout type="info" title="Phone signup does not accept email invitations">
+  The current hosted and headless phone-signup paths reject an email-bound invitation. Use the email invitation flow, email OTP, or trusted backend provisioning to join an existing organization. Self-service phone signup may create a new organization by name; it cannot use `OrganizationId` to join an existing one.
+</Callout>
+
+## Phone number parsing and country policy
+
+Prefer collecting and displaying an international number such as `+12025550123`. SqlOS accepts national formatting too:
+
+```text
+(202) 555-0123  + DefaultRegion=US  ->  +12025550123
+020 7946 0018   + DefaultRegion=GB  ->  +442079460018
+```
+
+SqlOS uses Google's libphonenumber data to parse the input, requires the parsed number to be valid, resolves its region, applies country policy, and sends the normalized E.164 value to Twilio. `DefaultRegion` affects numbers without a `+` country code; it does not constrain international input. Use the allow/deny lists for policy.
+
+The deny list wins when a country appears in both lists:
+
+```csharp
+options.AuthServer.ConfigurePhoneOtp(phone =>
+{
+    phone.CountryAllowList = ["US", "CA", "GB"];
+    phone.CountryDenyList = ["GB"]; // GB is rejected.
+});
+```
+
+Store the normalized number returned by SqlOS in application state rather than re-normalizing it in JavaScript. Treat phone numbers as personal data: verified user phone records are stored in your application database in normalized E.164 form, and OTP challenge records contain a hash, masked value, and Data Protection-protected destination.
+
+## Headless AuthPage flow
+
+Headless mode still starts with a normal OAuth authorization request. After SqlOS redirects to your UI with a `requestId`, post the phone actions to the default headless base path:
+
+| Endpoint | Request | Next state |
+| --- | --- | --- |
+| `POST /sqlos/auth/headless/phone-otp/start` | `requestId`, `phoneNumber` | `phone-otp-verify` view with `challengeToken` |
+| `POST /sqlos/auth/headless/phone-otp/verify` | `requestId`, `challengeToken`, `code` | redirect, organization selection, MFA, or validation view |
+| `POST /sqlos/auth/headless/signup/phone-otp/start` | `requestId`, `displayName`, `phoneNumber`, optional `organizationName` and `customFields` | `phone-otp-signup-verify` with `signupToken` and `challengeToken` |
+| `POST /sqlos/auth/headless/signup/phone-otp/verify` | `requestId`, `signupToken`, `challengeToken`, `code` | redirect, organization selection, MFA, or validation view |
+
+Example sign-in actions:
+
+```ts
+const started = await postSqlOS("/sqlos/auth/headless/phone-otp/start", {
+  requestId: model.requestId,
+  phoneNumber,
+});
+
+// Render started.viewModel.phoneNumber and keep this opaque token in page state.
+const challengeToken = started.viewModel.challengeToken;
+
+const completed = await postSqlOS("/sqlos/auth/headless/phone-otp/verify", {
+  requestId: model.requestId,
+  challengeToken,
+  code,
+});
+
+if (completed.type === "redirect") {
+  window.location.assign(completed.redirectUrl);
+} else {
+  renderSqlOSView(completed.viewModel); // Includes org and MFA continuation states.
+}
+```
+
+```ts
+async function postSqlOS(path: string, body: unknown) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return response.json();
+}
+```
+
+Do not mint a session, authorization code, or application cookie in this UI. Render the `SqlOSHeadlessActionResult` until SqlOS returns the final redirect. Keep `requestId`, `challengeToken`, and `signupToken` only for the active interaction; do not put them in analytics, logs, or durable browser storage.
+
+See [Headless Auth How-To](/docs/authserver/headless-auth-how-to) for the initial PKCE authorization request and the shared organization/MFA views.
+
+## .NET SDK sign-in
+
+Use `SqlOSAuthService` from a trusted server endpoint. Pass `HttpContext` so SqlOS can apply IP-aware limits and create the session correctly:
+
+```csharp
+var started = await authService.RequestPhoneOtpAsync(
+    new SqlOSPhoneOtpStartRequest(
+        PhoneNumber: phoneNumber,
+        ClientId: "my-app",
+        OrganizationId: null),
+    httpContext,
+    ct);
+
+// Return only what the code-entry step needs.
+return Results.Ok(new
+{
+    started.ChallengeToken,
+    started.MaskedPhoneNumber,
+    started.ExpiresAt,
+    started.NextAllowedSendAt,
+});
+```
+
+Then verify the code and branch on the same login result used by password and email OTP:
+
+```csharp
+var outcome = await authService.VerifyPhoneOtpAsync(
+    new SqlOSPhoneOtpVerifyRequest(challengeToken, code),
+    httpContext,
+    ct);
+
+if (outcome.RequiresOrganizationSelection)
+{
+    return Results.Ok(new
+    {
+        step = "organization",
+        outcome.PendingAuthToken,
+        outcome.Organizations,
+    });
+}
+
+if (outcome.RequiresMfa)
+{
+    return Results.Ok(new
+    {
+        step = outcome.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
+        outcome.MfaToken,
+        outcome.MfaMethods,
+    });
+}
+
+var tokens = outcome.Tokens
+    ?? throw new InvalidOperationException("Phone login returned no next state.");
+```
+
+Use `SelectOrganizationForLoginAsync` for the organization step, then handle a possible MFA result before assuming `Tokens` is present. See [Organizations](/docs/authserver/organizations#multi-org-login) and [MFA and TOTP](/docs/authserver/mfa-totp#direct-api-login-behavior).
+
+### .NET SDK signup
+
+```csharp
+var started = await authService.RequestPhoneOtpSignupAsync(
+    new SqlOSPhoneOtpSignupStartRequest(
+        DisplayName: "Jane Doe",
+        PhoneNumber: phoneNumber,
+        ClientId: "my-app",
+        OrganizationName: "Acme",
+        OrganizationId: null,
+        CustomFields: null),
+    httpContext,
+    ct);
+
+var outcome = await authService.VerifyPhoneOtpSignupAsync(
+    new SqlOSPhoneOtpSignupVerifyRequest(
+        SignupToken: started.SignupToken,
+        ChallengeToken: started.ChallengeToken,
+        Code: code),
+    httpContext,
+    ct);
+```
+
+Verification creates a passwordless user with a verified phone number and returns `SqlOSLoginResult`. Handle organization selection and MFA exactly as in sign-in. An existing active phone number is rejected and directed to phone-code sign-in.
+
+## Enumeration resistance and resend behavior
+
+Existing-user sign-in intentionally returns the same public start message for known and unknown phone numbers:
+
+```text
+If an account exists for that phone number, check your messages for a sign-in code.
+```
+
+SqlOS calls Twilio only for a verified phone belonging to an active user, but it still creates and rate-limits the unknown-number challenge so response content does not reveal whether the account exists. Do not replace the generic message with “user not found,” and do not expose provider-start state to the browser.
+
+Each new start in the same context supersedes an older active challenge. A failed provider check invalidates the SqlOS challenge, so the user must request a new code after entering an incorrect or expired code. A successful challenge is consumed and cannot be replayed.
+
+Use `NextAllowedSendAt` to disable the resend control and show an accurate countdown. Do not rely on the UI timer for enforcement; SqlOS applies the cooldown and rate limits on the server.
+
+## Tune abuse controls before launch
+
+The defaults are a baseline, not a traffic forecast. Set limits from your expected login volume, customer distribution, reverse-proxy topology, and provider budget:
+
+```csharp
+options.AuthServer.ConfigurePhoneOtp(phone =>
+{
+    phone.ChallengeLifetime = TimeSpan.FromMinutes(10);
+    phone.ResendCooldown = TimeSpan.FromSeconds(45);
+    phone.RateLimitWindow = TimeSpan.FromHours(1);
+    phone.MaxSendsPerPhone = 4;
+    phone.MaxSendsPerAccount = 4;
+    phone.MaxSendsPerIp = 30;
+    phone.MaxSendsPerClient = 500;
+});
+```
+
+Limits are counted from persisted challenge rows, so they work across application instances that share the SqlOS database. IP limits depend on `HttpContext.Connection.RemoteIpAddress`. Behind a reverse proxy, configure ASP.NET Core Forwarded Headers with trusted proxies or networks; otherwise every request can appear to come from the proxy or an untrusted client can spoof forwarding headers. See [Production Readiness](/docs/guides/production-readiness#reverse-proxies-and-forwarded-headers).
+
+Monitor these audit event types:
+
+| Event | Meaning |
+| --- | --- |
+| `phone_otp.challenge_started` | SqlOS created a login, signup, or enrollment challenge; audit data says whether a provider send occurred |
+| `phone_otp.send_failed` | Twilio rejected or failed the send |
+| `phone_otp.verify_succeeded` | Twilio approved the code and SqlOS consumed the challenge |
+| `phone_otp.verify_failed` | The provider rejected the check or the challenge could not be accepted |
+| `phone_otp.rate_limit_rejected` | Phone, account, IP, or client limit stopped the request |
+| `user.signup.phone_otp` | A verified phone signup created the user |
+
+Audit data uses the masked phone value. Keep application and proxy logs free of raw phone numbers, OTP codes, challenge tokens, Auth Tokens, and signup tokens.
+
+## Test without sending SMS
+
+Replace `ISqlOSOtpDeliveryChannel` in integration tests. The fake should record the normalized number, accept a known code, and never call Twilio:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SqlOS.AuthServer.Interfaces;
+
+services.RemoveAll<ISqlOSOtpDeliveryChannel>();
+services.AddSingleton<TestOtpDeliveryChannel>();
+services.AddSingleton<ISqlOSOtpDeliveryChannel>(sp =>
+    sp.GetRequiredService<TestOtpDeliveryChannel>());
+```
+
+```csharp
+private sealed class TestOtpDeliveryChannel : ISqlOSOtpDeliveryChannel
+{
+    public const string ApprovedCode = "123456";
+    public List<string> Destinations { get; } = [];
+
+    public Task<SqlOSOtpDeliveryStartResult> StartAsync(
+        string e164PhoneNumber,
+        SqlOSOtpDeliveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        Destinations.Add(e164PhoneNumber);
+        return Task.FromResult(new SqlOSOtpDeliveryStartResult(
+            true, "test_verify", "verify-1", "pending"));
+    }
+
+    public Task<SqlOSOtpDeliveryCheckResult> CheckAsync(
+        string e164PhoneNumber,
+        string code,
+        SqlOSOtpDeliveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var approved = code == ApprovedCode;
+        return Task.FromResult(new SqlOSOtpDeliveryCheckResult(
+            approved,
+            "test_verify",
+            "verify-1",
+            approved ? "approved" : "denied"));
+    }
+}
+```
+
+Keep structurally valid placeholder Twilio settings in the test host because SqlOS validates enabled options at startup; the fake prevents those values from being used. Assert that no authorization code or token exists before verification, the fake receives E.164, the wrong code is rejected, replay fails, and the final access token has the intended audience.
+
+The repository's [hosted Todo phone-signup test](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.IntegrationTests/TodoSampleIntegrationTests.cs) and [phone service tests](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.Tests/SqlOSPhoneOtpServiceTests.cs) are copyable examples.
+
+## Production checklist
+
+- Store Twilio credentials in a secret manager and rotate them through a controlled deployment.
+- Restrict destination countries in both SqlOS and Twilio; enable and monitor Twilio Fraud Guard.
+- Configure trusted forwarded headers so IP limits use the real client address.
+- Keep `SatisfiesMfa = false` unless a documented risk decision says otherwise.
+- Require TOTP for owner/admin policy; phone OTP cannot satisfy that stronger check.
+- Review rate limits against your provider budget and alert on send failures and limit rejections.
+- Treat verified phone numbers as database PII and exclude numbers and codes from logs and analytics.
+- Keep the hosted or headless flow on HTTPS and use PKCE for browser/public clients.
+- Exercise known, unknown, blocked-country, throttled, wrong-code, expired, replay, organization-selection, and MFA paths before rollout.
+- Test a real production-like number in every country you intend to support; carrier deliverability cannot be proven by a fake adapter.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Startup says Phone OTP requires Twilio configuration | `Enabled=true` requires Account SID, Auth Token, and Verify Service SID; check the secret names and host mapping |
+| Phone-code option does not appear | Confirm both runtime configuration and `phone_otp` in `EnabledCredentialTypes`; a startup seed can overwrite dashboard edits on restart |
+| `Phone sign-in is unavailable` | The resolved AuthPage credential list or provider runtime gate is closed |
+| National-format number resolves to the wrong country | Set `DefaultRegion` to the market whose local format you accept, or require `+` E.164 input |
+| `Phone number country is not allowed` | Check both lists; deny takes precedence, and the parsed number must resolve to a region |
+| Twilio rejects a send | Confirm the `VA...` service belongs to the configured account, trial destination rules, Verify geo permissions, Fraud Guard, and the Twilio Debugger |
+| Every user appears to share one IP limit | Configure trusted forwarded headers before SqlOS so `RemoteIpAddress` is the actual client |
+| Resend is rejected | Respect `NextAllowedSendAt`; also inspect phone/account/IP/client counts in the active `RateLimitWindow` |
+| Correct-looking code fails after an earlier typo | A failed verification invalidates that SqlOS challenge; request a new code and use its new challenge token |
+| Code succeeds but no tokens are present | `SqlOSLoginResult` may require organization selection or MFA before tokens are issued |
+| Trial works for your phone only | Verify additional destination numbers in the Twilio trial project or move to a production-capable account |
+
+## Related
+
+- [AuthServer API: Phone OTP](/docs/reference/authserver-api#phone-otp-sign-in-and-signup)
+- [.NET SDK Map](/docs/reference/sdk-reference#phone-otp)
+- [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+- [MFA and TOTP](/docs/authserver/mfa-totp)
+- [Security Settings](/docs/authserver/security-settings)
+- [Test Your Integration](/docs/guides/test-your-integration)

@@ -3,7 +3,7 @@ using SqlOS.AuthServer.Services;
 
 namespace SqlOS.AuthServer.Errors;
 
-public static class SqlOSPublicAuthErrorAudit
+internal static class SqlOSPublicAuthErrorAudit
 {
     public const string EventType = "auth.public_error.mapped";
 

@@ -1369,8 +1369,9 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         try
         {
-            var enrollment = await RequireAuthService().StartTotpEnrollmentForChallengeAsync(
+            var enrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
                 request.MfaToken,
+                request.RequestId,
                 new SqlOSTotpEnrollmentStartRequest(request.DisplayName),
                 cancellationToken);
             return View(await BuildViewModelAsync(
@@ -1414,13 +1415,11 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         try
         {
-            await RequireAuthService().VerifyTotpEnrollmentAsync(
-                new SqlOSTotpEnrollmentVerifyRequest(request.EnrollmentToken, request.Code),
-                httpContext,
-                cancellationToken);
-            return Redirect(await _authorizationServerService.CompleteMfaChallengeWithoutCodeAsync(
+            return Redirect(await _authorizationServerService.VerifyMfaTotpEnrollmentAsync(
                 request.MfaToken,
-                SqlOSMfaFactorTypes.Totp,
+                request.EnrollmentToken,
+                request.Code,
+                request.RequestId,
                 httpContext,
                 cancellationToken));
         }
@@ -1663,8 +1662,9 @@ public sealed class SqlOSHeadlessAuthService
             SqlOSTotpEnrollmentStartResult? totpEnrollment = null;
             if (completion.RequiresMfaEnrollment && !string.IsNullOrWhiteSpace(completion.MfaToken))
             {
-                totpEnrollment = await RequireAuthService().StartTotpEnrollmentForChallengeAsync(
+                totpEnrollment = await RequireAuthService().StartTotpEnrollmentForAuthorizationChallengeAsync(
                     completion.MfaToken,
+                    authorizationRequest.Id,
                     new SqlOSTotpEnrollmentStartRequest(),
                     cancellationToken);
             }

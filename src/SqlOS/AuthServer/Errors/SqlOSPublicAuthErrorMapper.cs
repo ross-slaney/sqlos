@@ -90,6 +90,24 @@ public static class SqlOSPublicAuthErrorMapper
         };
     }
 
+    public static async Task<SqlOSPublicAuthError> MapAndAuditAsync(
+        SqlOSAdminService adminService,
+        HttpContext httpContext,
+        Exception exception,
+        SqlOSPublicAuthErrorSurface surface,
+        CancellationToken cancellationToken = default)
+    {
+        var error = Map(exception, surface);
+        await SqlOSPublicAuthErrorAudit.RecordIfDiagnosticAsync(
+            adminService,
+            httpContext,
+            surface,
+            exception,
+            error,
+            cancellationToken);
+        return error;
+    }
+
     public static SqlOSPublicAuthException ProviderCallbackError(string? providerError, string? providerErrorDescription)
     {
         var diagnostic = string.IsNullOrWhiteSpace(providerErrorDescription)

@@ -1,27 +1,117 @@
 ---
 title: "Todo Sample"
-description: "Run the SqlOS AuthPage email OTP sample with simple FGA, protected-resource metadata, and public-client onboarding paths."
+description: "Run hosted password login, an ASP.NET Core PKCE client, protected APIs, EF authorization, and optional OTP providers."
 order: 8
 section: authserver
 ---
 
-The Todo sample is the canonical "ship hosted AuthPage plus simple FGA fast" walkthrough.
+The Todo sample is the canonical "ship hosted AuthPage plus simple FGA fast" walkthrough. Its default path is deliberately provider-free: local password sign-in and signup work without an email, SMS, or external identity account.
 
 It keeps the model intentionally small:
 
-- hosted AuthPage first
-- passwordless email-code sign in/sign up when `TodoSample__EnableEmailOtp=true`
-- seeded email branding for the built-in OTP and invitation templates
-- one user = one tenant boundary
-- one tenant resource with child todo resources
-- SQL-backed FGA list filtering and simple auth checks in minimal APIs
-- a protected resource with audience enforcement
-- protected-resource metadata for MCP clients
-- preregistered local development with `todo-local`
-- a `todo-cli` device-flow client and runnable .NET CLI
-- portable public-client onboarding with `CIMD` and optional `DCR`
+- hosted AuthPage first;
+- a Razor Pages client using ASP.NET Core OAuth, PKCE, and cookies;
+- one user = one tenant boundary;
+- one tenant resource with child Todo resources;
+- SQL-backed FGA list filtering and permission checks in minimal APIs;
+- exact-audience access-token validation;
+- protected-resource metadata for MCP clients;
+- preregistered browser, local development, and CLI clients;
+- portable public-client onboarding with CIMD and optional DCR;
+- optional email OTP and SMS OTP when you deliberately configure providers.
 
-## Run it
+## Run the provider-free sample
+
+From the repository root:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+Use the authenticated Aspire dashboard URL printed in the terminal (its configured listener is `https://localhost:18890`). When `todo-api` and `aspnet-web` show **Running**, choose the experience that matches what you are evaluating:
+
+| URL | Experience |
+| --- | --- |
+| `http://localhost:5090` | ASP.NET Core OAuth + PKCE, secure application cookie, `/api/me`, and revoking logout |
+| `http://localhost:5080` | Hosted-login Todo CRUD client and FGA-filtered data |
+| `http://localhost:5080/sqlos` | Auth, FGA, client, session, and audit administration |
+
+Create a password account and organization through the hosted AuthPage. No provider secrets are needed.
+
+![Hosted password authentication in the SqlOS Todo sample](/docs/auth-password-step.png)
+
+If you already ran an older version of the sample, allow startup schema upgrades to complete before testing. The AppHost uses a persistent SQL Server data volume; discard it only when you intentionally want to lose the existing local data.
+
+## ASP.NET Core web client
+
+The `example-aspnet` client is the shortest all-.NET proof:
+
+- `client_id`: `example-aspnet`;
+- redirect URI: `http://localhost:5090/signin-sqlos`;
+- client type: public PKCE;
+- audience: `http://localhost:5080/api/todos`;
+- scopes: `openid profile email offline_access todos.read todos.write`.
+
+ASP.NET Core's generic OAuth handler owns correlation state, the PKCE verifier, and the callback. SqlOS owns hosted credential collection, the code exchange, tokens, and persisted session. The application then stores its identity in an encrypted ASP.NET Core cookie and proves the access token with `GET /api/me`.
+
+See [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login) for the annotated implementation and production tradeoffs.
+
+## Hosted Todo client
+
+The Todo CRUD path uses the seeded browser client `todo-web` and callback `http://localhost:5080/callback.html`.
+
+Use the landing page to:
+
+- start password sign-in or signup;
+- return through the PKCE callback;
+- create, read, update, and delete Todo items;
+- compare the API result with resources and grants in the embedded dashboard.
+
+The browser only starts the OAuth request. SqlOS AuthPage owns credential collection, user creation, organization selection, and the redirect with an authorization code.
+
+## Simple FGA
+
+The sample models every Todo as an FGA resource.
+
+Hierarchy:
+
+- `root`;
+- `tenant::{userId}`;
+- `todo::{todoId}`.
+
+Role and permission matrix:
+
+- `tenant_owner`;
+- `TENANT_CREATE_TODO`;
+- `TODO_READ`;
+- `TODO_WRITE`.
+
+The app grants `tenant_owner` on the user tenant node. Child Todo resources inherit access from that node, so the sample can:
+
+- list Todos with `GetAuthorizationFilterAsync<TodoItem>(...)`;
+- authorize create against the tenant node;
+- authorize toggle and delete against each Todo resource.
+
+That keeps the endpoint code small while populating the FGA dashboard with a real hierarchy and real grants.
+
+## Protected resource behavior
+
+The sample protects `/api/todos` and `/api/me` with audience-aware token validation. It also exposes:
+
+```text
+GET /.well-known/oauth-protected-resource
+```
+
+When a caller presents no token or the wrong audience, the API returns:
+
+- `401 Unauthorized`;
+- a `WWW-Authenticate` header with `resource_metadata`.
+
+This demonstrates both sides of the resource boundary: discovery for MCP and other public clients, then signature, issuer, expiry, audience, and persisted-session existence/revocation/absolute-expiry validation at the API. The validated result also carries the client ID claim.
+
+## Optional email OTP
+
+Email OTP is an extension, not a startup requirement. Enable it only after you have an Azure Communication Services Email resource and a verified sender.
 
 ```bash
 ACS_COMMUNICATION_SERVICE_NAME=<acs-communication-service-name>
@@ -40,96 +130,50 @@ SqlOS__EmailOtp__FromAddress="$ACS_FROM_ADDRESS" \
 dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
-Open `http://localhost:5080/`.
+With email OTP enabled, the sample selects `email_otp` instead of the default password credential. SqlOS sends and verifies the code, creates the user during signup, and redirects back through the same OAuth flow. The Todo seed also supplies application name and colors for OTP and invitation email branding.
 
-If you already ran an older version of the Todo sample, reset the Todo sample SQL database or persistent volume once before rerunning. Existing rows are not backfilled into the FGA graph.
+Do not put the ACS connection string in source or a committed launch profile. For repeated local use, store the same keys as user secrets on `examples/SqlOS.Todo.AppHost`.
 
-## What the sample includes
+```bash
+dotnet user-secrets --project examples/SqlOS.Todo.AppHost set \
+  "TodoSample:EnableEmailOtp" "true"
+dotnet user-secrets --project examples/SqlOS.Todo.AppHost set \
+  "SqlOS:EmailOtp:AzureCommunicationServicesConnectionString" "$ACS_CONN"
+dotnet user-secrets --project examples/SqlOS.Todo.AppHost set \
+  "SqlOS:EmailOtp:FromAddress" "$ACS_FROM_ADDRESS"
+```
 
-### Hosted AuthPage first
+## Optional SMS OTP
 
-The default path is a seeded browser client called `todo-web`.
-
-Use the landing page to:
-
-- start email-code sign in
-- start email-code sign up
-- land in a tiny Todo UI backed by the sample API
-
-The Todo app only starts the OAuth request. SqlOS AuthPage owns credential collection, OTP delivery, OTP verification, user creation on signup, and the redirect back with an authorization code.
-
-The sample also seeds email branding with `SeedAuthEmails(...)`, so the default OTP emails use the Todo application name and colors without a custom template.
-
-### Simple FGA
-
-The Todo sample now models every todo as an FGA resource.
-
-Hierarchy:
-
-- `root`
-- `tenant::{userId}`
-- `todo::{todoId}`
-
-Role and permission matrix:
-
-- `tenant_owner`
-- `TENANT_CREATE_TODO`
-- `TODO_READ`
-- `TODO_WRITE`
-
-The app grants `tenant_owner` on the user tenant node. Child todo resources inherit access from that node, so the sample can:
-
-- list todos with `GetAuthorizationFilterAsync<TodoItem>(...)`
-- authorize create against the tenant node
-- authorize toggle/delete against the todo resource
-
-That keeps the controller code small while still populating the FGA dashboard with a real tree.
-
-## Protected resource behavior
-
-The sample API protects `/api/todos` with audience-aware token validation.
-
-It also exposes:
-
-- `GET /.well-known/oauth-protected-resource`
-
-And when a caller presents no token or the wrong audience, the API returns:
-
-- `401 Unauthorized`
-- a `WWW-Authenticate` header with `resource_metadata`
-
-That means the sample demonstrates both sides at once:
-
-- protected-resource metadata for MCP/public-client flows
-- simple FGA subject sync, grants, hierarchy, and SQL-backed authorization
+SMS OTP is likewise disabled by default. Configure `TodoSample:EnablePhoneOtp` plus the Twilio Verify account, token, service SID, and default region settings in [Phone OTP with Twilio Verify](/docs/authserver/phone-otp). Enabling an OTP provider changes the credential buttons shown by the hosted AuthPage; it does not change the OAuth callback or API audience.
 
 ## Local preregistered client
 
-For localhost development, use the seeded client:
+For localhost MCP development, use the seeded client:
 
-- `client_id`: `todo-local`
-- redirect URI: `http://localhost:3100/oauth/callback`
-- auth method: public PKCE only
+- `client_id`: `todo-local`;
+- redirect URI: `http://localhost:3100/oauth/callback`;
+- auth method: public PKCE only.
 
-This is the easiest local loop before you publish the sample on a stable HTTPS origin.
+This is the easiest local loop before publishing the sample on a stable HTTPS origin.
 
 ## Local Emcy broker client
 
 For the Emcy-hosted local Todo MCP flow, use the additional seeded client:
 
-- `client_id`: `todo-mcp-local`
-- redirect URI: `http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback`
-- auth method: public PKCE only
+- `client_id`: `todo-mcp-local`;
+- redirect URI: `http://localhost:5150/api/v1/hosted-mcp/todo-local/oauth/callback`;
+- auth method: public PKCE only.
 
-This client exists so Emcy can broker the downstream Todo authorization flow while the Todo API itself keeps the same OAuth and audience behavior.
+This client lets Emcy broker the downstream Todo authorization flow while the Todo API keeps the same OAuth and audience behavior.
 
 ## Todo CLI device flow
 
 The sample also seeds a public CLI client:
 
-- `client_id`: `todo-cli`
-- grant types: device code + refresh token
-- audience/resource: the Todo API resource
+- `client_id`: `todo-cli`;
+- grant types: device code and refresh token;
+- audience/resource: the Todo API resource.
 
 Run the AppHost, then in another terminal:
 
@@ -141,13 +185,13 @@ dotnet run --project examples/SqlOS.Todo.Cli -- list
 dotnet run --project examples/SqlOS.Todo.Cli -- toggle <todo-id>
 ```
 
-`login` prints and opens `verification_uri_complete`. Sign in through SqlOS AuthPage, approve the CLI request, then return to the terminal. Tokens are stored under `~/.sqlos/todo-cli/tokens.json` for the demo.
+`login` prints and opens `verification_uri_complete`. Sign in through SqlOS AuthPage, approve the CLI request, then return to the terminal. The demo stores tokens under `~/.sqlos/todo-cli/tokens.json`.
 
 More detail: [CLI OAuth](/docs/authserver/cli-oauth).
 
 ## Portable public clients
 
-Once the sample is reachable on public HTTPS, you can use both public-client onboarding paths.
+Once the sample is reachable on public HTTPS, it supports both public-client onboarding paths.
 
 ### CIMD
 
@@ -157,33 +201,31 @@ The sample publishes a metadata document at:
 /clients/portable-client.json
 ```
 
-That document is useful as:
-
-- a working reference for the shape of a `client_id` metadata document
-- a starter path when you want to point a portable client at a stable HTTPS URL
+Use it as a working reference for the client metadata document shape and as a starting point for a portable client hosted at a stable HTTPS URL.
 
 ### DCR
 
-`DCR` stays off by default. Enable it when you need compatibility clients:
+DCR remains off by default. Enable it only for a deliberate local compatibility test:
 
 ```bash
-TodoSample__EnableDcr=true
+TodoSample__EnableDcr=true \
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
-Then use:
+The AppHost reads the setting and forwards it to `todo-api`; omitting it keeps registration disabled.
+
+The registration endpoint is:
 
 ```text
 POST /sqlos/auth/register
 ```
 
-This is the compatibility path for clients that still expect dynamic client registration.
-
-## Why this sample exists
+## Which sample should I use?
 
 Use the Todo sample when your question is:
 
-> "How do I ship hosted auth, simple FGA, and protected-resource metadata with very little app code?"
+> "How do I ship hosted auth, an ASP.NET Core login, simple FGA, and protected-resource metadata with very little app code?"
 
-Use the broader Example stack when your question is:
+Use the [full Example stack](/docs/quickstarts/run-example-stack) when your question is:
 
-> "How do I explore all of SqlOS, including OIDC, SAML, org workflows, and richer multi-tenant FGA?"
+> "How do I explore the broader SqlOS surface, including headless auth, OIDC, SAML, organization workflows, and richer multi-tenant FGA?"

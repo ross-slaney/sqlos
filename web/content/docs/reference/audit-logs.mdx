@@ -1,7 +1,7 @@
 ---
 title: "Audit Logs Reference"
 description: "Record, query, inspect, and export SqlOS and application audit events."
-order: 12
+order: 13
 section: reference
 ---
 
@@ -36,31 +36,70 @@ Audit events are not debug logs, traces, metrics, or product analytics. Keep the
 `AddSqlOS<TContext>()` registers `ISqlOSAuditLogService`.
 
 ```csharp
-builder.Services.AddSqlOS<ExampleAppDbContext>(options =>
-{
-    options.UseSqlServer(connectionString);
-});
+builder.AddSqlOS<ExampleAppDbContext>(
+    db => db.UseSqlServer(connectionString));
 ```
 
 Inject the service into server-side application code. Frontends should not write audit rows directly.
 
+The actor and organization are security context, not client input. For endpoints protected with `RequireSqlOSAccessToken`, derive them from `GetSqlOSValidatedToken()`. For cookie, API-key, or service authentication, resolve the equivalent identity from the authenticated server-side principal or credential mapping. Authorize the requested mutation before changing state or recording a success event.
+
 ```csharp
-app.MapPost("/api/documents/{id}/share", async (
+var documentsApi = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+documentsApi.MapPost("/documents/{id}/share", async (
     string id,
     ShareDocumentRequest request,
+    WorkspaceDbContext db,
+    IAuthorizationService authorization,
     ISqlOSAuditLogService auditLogs,
     HttpContext httpContext,
     CancellationToken ct) =>
 {
+    var token = httpContext.GetSqlOSValidatedToken();
+    if (token?.UserId is not { Length: > 0 } userId)
+    {
+        return Results.Unauthorized();
+    }
+
+    if (token.OrganizationId is not { Length: > 0 } organizationId)
+    {
+        return Results.Forbid();
+    }
+
+    var document = await db.Documents.SingleOrDefaultAsync(
+        x => x.Id == id && x.OrganizationId == organizationId,
+        ct);
+    if (document is null)
+    {
+        return Results.NotFound();
+    }
+
+    var authorized = await authorization.AuthorizeAsync(
+        token.Principal,
+        document,
+        "document.share");
+    if (!authorized.Succeeded)
+    {
+        return Results.Forbid();
+    }
+
+    document.SharedRole = request.Role;
+    await db.SaveChangesAsync(ct);
+
     await auditLogs.RecordAsync(new SqlOSAuditLogRecordRequest(
         Action: "document.shared",
-        OrganizationId: request.OrganizationId,
+        OrganizationId: organizationId,
         ApplicationKey: "workspace-web",
         Source: "application",
-        Actor: new SqlOSAuditActor("user", request.UserId, request.UserDisplayName),
+        Actor: new SqlOSAuditActor(
+            "user",
+            userId,
+            token.Principal.Identity?.Name),
         Targets:
         [
-            new SqlOSAuditTarget("document", id, request.DocumentName)
+            new SqlOSAuditTarget("document", document.Id, document.Name)
         ],
         Context: SqlOSAuditContext.FromHttpContext(httpContext),
         Metadata: new Dictionary<string, object?>
@@ -68,12 +107,20 @@ app.MapPost("/api/documents/{id}/share", async (
             ["result"] = "success",
             ["role"] = request.Role
         },
-        IdempotencyKey: $"document:{id}:shared:{request.UserId}:{httpContext.TraceIdentifier}"),
+        IdempotencyKey: $"document:{id}:shared:{userId}:{httpContext.TraceIdentifier}"),
         ct);
 
     return Results.NoContent();
 });
+
+public sealed record ShareDocumentRequest(string Role);
 ```
+
+This example assumes the application defines the `document.share` authorization policy. The request DTO contains only the requested business value; document, actor, and tenant details come from trusted server-side state.
+
+<Callout type="warning" title="Recording after save is not atomic">
+  The straightforward `SaveChangesAsync` then `RecordAsync` sequence can lose the audit event if the process fails between those calls. When an audit event must be guaranteed, either enlist the mutation and audit insert in one application transaction when they share a database context, or write an outbox message in the mutation transaction and have a worker call `RecordAsync` with a stable idempotency key.
+</Callout>
 
 ## Record request
 

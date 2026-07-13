@@ -12,34 +12,36 @@ section: guides
   actionLabel="Getting Started"
 />
 
-You'll learn the three integration points: host registration, EF model registration, and route mapping.
+You'll learn the recommended SqlOS host setup first, followed by optional FGA, token-validation, and client-onboarding configuration.
+
+![Configured SqlOS dashboard showing AuthServer and FGA resources](/docs/guides-configuration.png)
 
 ## Wire SqlOS in three places
 
-1. **Host registration** — `builder.AddSqlOS<AppDbContext>(...)`
-2. **EF model** — `modelBuilder.UseSqlOS(GetType())` in `OnModelCreating`
+1. **Host registration** — `builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(...), options => ...)`
+2. **EF model** — derive from `SqlOSDbContext<AppDbContext>` and put app entities in `OnApplicationModelCreating`
 3. **Routes** — `app.MapSqlOS()` after `Build()`
+
+Only add `ISqlOSResourceEntity`, FGA seeds, and grants when you are ready to authorize application data.
 
 ## Minimal owned-app setup
 
 ```csharp
-builder.AddSqlOS<AppDbContext>(options =>
-{
-    options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
-    options.AuthServer.PublicOrigin = "https://app.example.com";
-
-    options.AuthServer.SeedAuthPage(page =>
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
     {
-        page.PageTitle = "Sign in";
-        page.PageSubtitle = "Secure your owned app first.";
+        options.AuthServer.Issuer = "https://app.example.com/sqlos/auth";
+        options.AuthServer.PublicOrigin = "https://app.example.com";
+        options.UseSingleApplication("Main Web App", app =>
+        {
+            app.Origin = "https://app.example.com";
+            app.Audience = "https://app.example.com/api";
+        });
     });
-
-    options.AuthServer.SeedOwnedWebApp(
-        "web",
-        "Main Web App",
-        "https://app.example.com/auth/callback");
-});
 ```
+
+Single-application mode creates one first-party PKCE client and keeps CIMD, DCR, resource indicators, and multi-application policy out of the starting path.
 
 ## FGA seeding
 
@@ -49,11 +51,101 @@ Keep auth and FGA seeding in the same `AddSqlOS` call:
 options.Fga.Seed(seed =>
 {
     seed.ResourceType("workspace", "Workspace");
-    seed.Permission("perm_workspace_view", "workspace.view", "View workspace", "workspace");
-    seed.Role("role_workspace_admin", "workspace_admin", "Workspace Admin");
-    seed.RolePermission("workspace_admin", "workspace.view");
+    seed.Permission("workspace.read", "Read workspace", "workspace");
+    seed.Permission("workspace.write", "Write workspace", "workspace");
+    seed.Role("workspace_admin", "Workspace Admin").Can("workspace.read", "workspace.write");
 });
 ```
+
+Use the explicit-ID overloads when you need stable IDs that differ from public permission or role keys.
+
+## Entity-backed FGA resources
+
+For protected application data, make the domain entity describe its FGA resource. `SqlOSDbContext<TContext>` syncs the backing `SqlOSFgaResource` row when EF saves the entity.
+
+```csharp
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string? ParentResourceId => "root";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+```
+
+Keep `ResourceId` stable and set it before saving the entity. If you use SqlOS authorized list queries, keep `ResourceId` as an EF-visible property so it can be translated in SQL.
+
+```csharp
+var workspaceId = Guid.NewGuid();
+var workspace = new Workspace
+{
+    Id = workspaceId,
+    ResourceId = $"workspace::{workspaceId:D}",
+    Name = request.Name.Trim()
+};
+
+db.Workspaces.Add(workspace);
+await db.SaveChangesAsync();
+```
+
+Manual resource APIs such as `CreateResourceAsync(...)`, `CreateResourceWithIdAsync(...)`, `ProvisionResourceWithIdAsync(...)`, and `DeleteResourceAsync(...)` are still available for resources that are not backed by an application entity.
+
+## Protected API token validation
+
+Protect a route group with SqlOS access-token validation when your API accepts SqlOS-issued tokens. The middleware validates the token and populates `HttpContext.User`; your endpoint still resolves the application subject explicitly.
+
+```csharp
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(options =>
+    {
+        options.ExpectedAudience = "https://api.example.com";
+        options.ResourceMetadataUrl = "https://api.example.com/.well-known/oauth-protected-resource";
+    });
+
+api.MapPost("/workspaces", async (
+    CreateWorkspace request,
+    AppDbContext db,
+    ISqlOSFgaAuthService fga,
+    HttpContext http,
+    CancellationToken ct) =>
+{
+    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
+    var workspaceId = Guid.NewGuid();
+
+    var workspace = new Workspace
+    {
+        Id = workspaceId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        Name = request.Name.Trim()
+    };
+
+    db.Workspaces.Add(workspace);
+
+    await db.ProvisionUserSubjectAsync(
+        subjectId,
+        displayName: subjectId,
+        cancellationToken: ct);
+
+    await db.GrantRoleAsync(
+        subjectId,
+        workspace,
+        "workspace_admin",
+        ct);
+
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
+});
+```
+
+Grant helpers never create subjects implicitly. Provision users, agents, or service accounts explicitly with `ProvisionUserSubjectAsync(...)`, `ProvisionAgentSubjectAsync(...)`, or `ProvisionServiceAccountSubjectAsync(...)` before granting roles. Grants stay explicit; resource rows for `ISqlOSResourceEntity` instances are synced by `SaveChangesAsync()`.
 
 ## Client onboarding modes
 
@@ -68,6 +160,13 @@ options.AuthServer.EnablePortableMcpClients(registration =>
 {
     registration.Cimd.TrustedHosts.Add("clients.example.com");
 });
+
+options.AuthServer.SeedDeviceFlowClient(
+    "myapp-cli",
+    "CLI",
+    "https://api.example.com",
+    "workspace.read",
+    "workspace.write");
 ```
 
 ## Email OTP and invitations
@@ -84,16 +183,16 @@ options.AuthServer.ConfigureEmailOtp(email =>
 
 ## Dashboard password
 
-```json
-{
-  "SqlOS": {
-    "Dashboard": {
-      "AuthMode": "Password",
-      "Password": "your-strong-password"
-    }
-  }
-}
+Read the secret from your normal ASP.NET Core configuration providers and assign it in the `AddSqlOS` callback:
+
+```csharp
+options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+options.Dashboard.Password =
+    builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException("SqlOS dashboard password is required.");
 ```
+
+For local development, `dotnet user-secrets set "SqlOS:Dashboard:Password" "..."` keeps it out of source control. In production, use your platform's secret provider. SqlOS does not automatically bind a `SqlOS` configuration section.
 
 Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict network access in production.
 
