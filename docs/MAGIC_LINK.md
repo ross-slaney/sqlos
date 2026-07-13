@@ -2,6 +2,8 @@
 
 SqlOS magic links provide passwordless email sign-in with a short-lived, single-use token. They use the same AuthServer user, client, organization, email branding, transactional email, session, and audit infrastructure as Email OTP.
 
+Magic-link sign-in is off by default. Adding SqlOS does not change password sign-in and does not require an email provider; the feature appears only after `magic_link` is explicitly added to the credential list.
+
 Magic links are a primary local credential, not an MFA factor. If tenant MFA policy requires TOTP, SqlOS still returns the normal MFA challenge after the link is completed.
 
 ## Enable AuthPage magic links
@@ -19,12 +21,12 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-To make Email OTP primary while still allowing password fallback:
+To add magic links without removing password fallback:
 
 ```csharp
 options.AuthServer.SeedAuthPage(page =>
 {
-    page.EnabledCredentialTypes = ["email_otp", "password"];
+    page.EnabledCredentialTypes = ["magic_link", "password"];
     page.EnablePasswordSignup = false;
 });
 ```
@@ -66,6 +68,7 @@ Complete requires the token from the email link:
 
 ```json
 {
+  "requestId": "sar_...",
   "token": "..."
 }
 ```
@@ -104,6 +107,10 @@ var login = await authService.CompleteMagicLinkAsync(
 ## Email delivery and templates
 
 SqlOS creates the built-in `auth.magic-link` transactional template automatically. It uses the same Email Branding settings as Email OTP and invitations. Rendered bodies are suppressed in delivery history because they contain token-bearing links.
+
+The default link authority comes from `AuthServer.PublicOrigin`, or from the configured issuer when `PublicOrigin` is omitted. SqlOS never builds an emailed link from the incoming `Host` header. Set `PublicOrigin` during production readiness when the public address differs from the issuer host.
+
+The shared example keeps magic links disabled by default. Set `SqlOS:EnableMagicLink=true` in the example API only when you want to exercise its hosted, headless, and direct API flows with a configured or test email sender.
 
 For complete control, configure the message builder:
 
