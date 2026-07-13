@@ -172,6 +172,10 @@ public static class SqlOSAuthServerModelConfiguration
                 .IsUnique()
                 .HasFilter("[TokenHash] IS NOT NULL");
             entity.HasIndex(x => new { x.OrganizationId, x.IsEnabled });
+            entity.HasIndex(x => x.OrganizationId)
+                .IsUnique()
+                .HasDatabaseName("UX_SqlOSScimConnections_OneEnabledPerOrganization")
+                .HasFilter("[IsEnabled] = 1");
             entity.Property(x => x.DisplayName).HasMaxLength(200);
             entity.Property(x => x.SeedKey).HasMaxLength(160);
             entity.Property(x => x.TokenHash).HasMaxLength(128);
@@ -187,13 +191,23 @@ public static class SqlOSAuthServerModelConfiguration
         {
             entity.ToTable("SqlOSScimExternalIds", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.ExternalId }).IsUnique();
-            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.EntityId });
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.ExternalId })
+                .IsUnique()
+                .HasFilter("[ExternalId] IS NOT NULL");
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.EntityId }).IsUnique();
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.UserName })
+                .IsUnique()
+                .HasFilter("[UserName] IS NOT NULL");
             entity.Property(x => x.ResourceType).HasMaxLength(20);
-            entity.Property(x => x.ExternalId).HasMaxLength(450);
+            entity.Property(x => x.ExternalId).HasMaxLength(450).UseCollation("Latin1_General_100_BIN2");
             entity.Property(x => x.EntityId).HasMaxLength(128);
             entity.Property(x => x.FgaSubjectId).HasMaxLength(128);
-            entity.Property(x => x.DisplayName).HasMaxLength(300);
+            entity.Property(x => x.UserName).HasMaxLength(450).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.PrimaryEmail).HasMaxLength(320).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.DisplayName).HasMaxLength(300).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.FormattedName).HasMaxLength(300);
+            entity.Property(x => x.GivenName).HasMaxLength(150);
+            entity.Property(x => x.FamilyName).HasMaxLength(150);
             entity.HasOne(x => x.Connection)
                 .WithMany(x => x.ExternalIds)
                 .HasForeignKey(x => x.ConnectionId)
@@ -269,6 +283,13 @@ public static class SqlOSAuthServerModelConfiguration
                 .WithMany()
                 .HasForeignKey(x => x.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimOperationCommit>(entity =>
+        {
+            entity.ToTable("SqlOSScimOperationCommits", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OccurredAt);
         });
 
         modelBuilder.Entity<SqlOSSsoPortalSession>(entity =>

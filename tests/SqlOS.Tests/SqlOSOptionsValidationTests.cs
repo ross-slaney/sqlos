@@ -56,6 +56,27 @@ public sealed class SqlOSOptionsValidationTests
             .WithMessage("*AuthServer.Issuer must be 'https://app.example.com/sqlos/auth' when AuthServer.PublicOrigin is set.*");
     }
 
+    [DataTestMethod]
+    [DataRow("/")]
+    [DataRow("sqlos/scim/v2")]
+    [DataRow("/sqlos/scim/v2?tenant=acme")]
+    [DataRow("/sqlos/auth/scim")]
+    [DataRow("/SQLos/Auth/scim")]
+    [DataRow("/sqlos/admin/auth/api/scim")]
+    public void AddSqlOS_Throws_WhenScimBasePathIsUnsafe(string path)
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.EnableScim = true;
+            options.AuthServer.ScimBasePath = path;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.ScimBasePath*");
+    }
+
     [TestMethod]
     public void AddSqlOS_AllowsHeadlessApiBasePathWithoutBuildUiUrl()
     {

@@ -1657,27 +1657,68 @@ Admin HTTP endpoints:
 
 ## SCIM Directory Sync
 
-SCIM provisioning endpoints are mounted separately from the admin API and authenticate with an organization-scoped bearer token:
+SCIM service-provider endpoints are mounted separately from the admin API. The enterprise IdP is the SCIM client and authenticates every request with the bearer token returned when the organization connection is created or rotated.
 
-```text
-/sqlos/scim/v2/Users
-/sqlos/scim/v2/Groups
-```
+Set `AuthServer.PublicOrigin` to the host's absolute public HTTPS origin before creating a connection, and keep `AuthServer.Issuer` at `{PublicOrigin}{AuthServer.BasePath}`. The returned Base URL is `{PublicOrigin}{ScimBasePath}`. Without `PublicOrigin`, setup responses can contain only a relative path, which is not a valid Entra Tenant URL or Okta connector URL. For local provider testing, follow the [Aspire Dev Tunnels recipe](/docs/guides/scim-directory-sync#local-entra-or-okta-testing-with-aspire-dev-tunnels).
+
+### Service-provider API
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /sqlos/scim/v2/ServiceProviderConfig` | Discover supported PATCH, filter, authentication, and optional protocol features |
+| `GET /sqlos/scim/v2/ResourceTypes` | List User and Group resource types |
+| `GET /sqlos/scim/v2/ResourceTypes/{id}` | Read one resource type |
+| `GET /sqlos/scim/v2/Schemas` | List supported schemas |
+| `GET /sqlos/scim/v2/Schemas/{schema-uri}` | Read one supported schema |
+| `GET, POST /sqlos/scim/v2/Users` | Query or create users |
+| `GET, PUT, PATCH, DELETE /sqlos/scim/v2/Users/{id}` | Read, replace, partially update, or soft-deprovision one user |
+| `GET, POST /sqlos/scim/v2/Groups` | Query or create groups |
+| `GET, PUT, PATCH, DELETE /sqlos/scim/v2/Groups/{id}` | Read, replace, partially update, or delete one group |
+
+SqlOS supports exact `eq` filters only:
+
+- Users: `id`, `userName`, `externalId`, and `emails.value`
+- Groups: `id`, `displayName`, and `externalId`
+
+User PATCH accepts pathless provider values plus `active`, display/name fields, `userName`, and emails. Group PATCH accepts display-name changes, full member replacement, member add/remove, pathless values, and filtered removal with `members[value eq "..."]`; it returns `204 No Content` unless the caller requests a projected response with `attributes` or `excludedAttributes`. Bulk, sort, ETags, and password changes are not advertised.
+
+The bearer token scopes every resource operation to one connection and organization. SqlOS allows one enabled connection per organization. `active: false` and User DELETE soft-deprovision only that organization's membership, sessions, and SCIM-managed group access; another organization's membership for the same SqlOS user remains active.
+
+### Admin setup API
 
 Admin setup endpoints are available under `/sqlos/admin/auth/api`:
 
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /organizations/{organizationId}/scim-connections` | List organization SCIM connections |
-| `POST /organizations/{organizationId}/scim-connections` | Create a SCIM connection |
-| `GET /scim-connections/{connectionId}` | Read setup URLs and token metadata |
-| `POST /scim-connections/{connectionId}/token/rotate` | Generate a new bearer token |
+| `POST /organizations/{organizationId}/scim-connections` | Create the connection and return its Base URL plus initial one-time token |
+| `GET /scim-connections/{connectionId}` | Read setup URLs and token metadata; never returns the raw token |
+| `PUT /scim-connections/{connectionId}` | Update display name and enabled state |
+| `POST /scim-connections/{connectionId}/enable` | Enable a connection when no other connection is enabled for the organization |
+| `POST /scim-connections/{connectionId}/disable` | Disable a connection, reject its token, and immediately revoke its managed FGA grants |
+| `POST /scim-connections/{connectionId}/token/rotate` | Replace the token and return the new raw value once |
 | `GET /scim-connections/{connectionId}/mappings` | List group-to-grant mapping rules |
 | `POST /scim-connections/{connectionId}/mappings` | Create a mapping rule |
-| `PUT /scim-mappings/{mappingId}` | Update a mapping rule |
-| `GET /scim-connections/{connectionId}/sync-events` | Read recent SCIM sync activity |
+| `PUT /scim-mappings/{mappingId}` | Update a mapping rule and immediately revoke the grants owned by its previous state |
+| `POST /scim-mappings/{mappingId}/enable` | Enable a mapping rule |
+| `POST /scim-mappings/{mappingId}/disable` | Disable a mapping rule and immediately revoke its managed grants |
+| `GET /scim-connections/{connectionId}/sync-events` | Read persisted SCIM activity and reconciliation errors |
 
-See [SCIM Directory Sync](/docs/authserver/scim-directory-sync) for the full endpoint list, SDK calls, dashboard workflow, and FGA group mapping behavior.
+The shortest setup is: enable SCIM in AuthServer, create one enabled organization connection, copy the returned Base URL and one-time token into Okta or Entra, then validate one user before enabling group push. Google Workspace does not provide a public generic SCIM push client; its Admin SDK is a separate integration.
+
+Re-enabling a dashboard-owned connection or mapping accepts future provisioning but does not recreate revoked grants until the IdP pushes or resynchronizes the affected groups. Code-seeded state is configuration-owned and read-only in the dashboard: every enabled seed must resolve exactly one configured `Token` or `TokenSecretName` on every startup. Rotate it by replacing the 32+ character, whitespace-free deployment secret and restarting. Removing or renaming a seed disables the orphan, clears its credential, and revokes its SCIM-managed grants.
+
+Repository contributors can run the complete focused SCIM surface with:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter 'FullyQualifiedName~SqlOSScim'
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~ScimProtocolIntegrationTests'
+./scripts/docs-check.sh
+```
+
+See [SCIM Directory Sync](/docs/authserver/scim-directory-sync) for the exact filter and PATCH profile, validation commands, error behavior, dashboard workflow, token rotation, and tenant-isolated deprovisioning. See [SCIM group mapping](/docs/fga/scim-group-mapping) for FGA behavior.
 
 ---
 

@@ -31,7 +31,11 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
         // startup filter must do this before dashboard middleware so dashboard
         // throttling and audit events see the external client IP and scheme.
         app.UseForwardedHeaders();
-        app.UseMiddleware<RootDashboardMiddleware>(prefix, environment, hostOptions.Dashboard);
+        app.UseMiddleware<RootDashboardMiddleware>(
+            prefix,
+            environment,
+            hostOptions.Dashboard,
+            hostOptions.AuthServer.EnableScim);
         app.UseMiddleware<SqlOSFgaDashboardMiddleware>($"{prefix}/admin/fga", environment, hostOptions.Dashboard);
 
         next(app);

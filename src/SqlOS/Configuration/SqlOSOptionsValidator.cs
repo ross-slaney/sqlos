@@ -12,6 +12,15 @@ internal static class SqlOSOptionsValidator
 
         var dashboardBasePath = ValidateRootPath(options.DashboardBasePath, nameof(options.DashboardBasePath), errors);
         var authBasePath = ValidateRootPath(options.AuthServer.BasePath, "AuthServer.BasePath", errors);
+        string? scimBasePath = null;
+        if (options.AuthServer.EnableScim)
+        {
+            scimBasePath = ValidateRootPath(options.AuthServer.ScimBasePath, "AuthServer.ScimBasePath", errors);
+            if (scimBasePath == "/")
+            {
+                errors.Add("AuthServer.ScimBasePath cannot be '/'.");
+            }
+        }
 
         if (dashboardBasePath != null && authBasePath != null)
         {
@@ -19,6 +28,19 @@ internal static class SqlOSOptionsValidator
             if (!string.Equals(authBasePath, expectedAuthBasePath, StringComparison.Ordinal))
             {
                 errors.Add($"AuthServer.BasePath must be '{expectedAuthBasePath}' when DashboardBasePath is '{dashboardBasePath}'.");
+            }
+        }
+
+        if (scimBasePath != null && dashboardBasePath != null && authBasePath != null)
+        {
+            var adminBasePath = dashboardBasePath == "/" ? "/admin/auth" : $"{dashboardBasePath}/admin/auth";
+            if (string.Equals(scimBasePath, dashboardBasePath, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(scimBasePath, authBasePath, StringComparison.OrdinalIgnoreCase)
+                || scimBasePath.StartsWith(authBasePath + "/", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(scimBasePath, adminBasePath, StringComparison.OrdinalIgnoreCase)
+                || scimBasePath.StartsWith(adminBasePath + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add("AuthServer.ScimBasePath must not overlap the dashboard, auth server, or admin API root.");
             }
         }
 

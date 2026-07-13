@@ -11,174 +11,270 @@ section: guides
   href="/docs/authserver/scim-directory-sync"
   actionLabel="SCIM reference"
 >
-  Use SCIM when customer IT wants Okta, Microsoft Entra, or another IdP to own user lifecycle and group membership while SqlOS keeps authorization in your application database.
+  Give an IT administrator one Base URL and one bearer token, then let Okta, Microsoft Entra, or another SCIM 2.0 client own user lifecycle and group membership.
 </Banner>
 
-You'll learn how to turn on SCIM for an organization, connect an IdP, sync users and groups, and map selected IdP groups into FGA grants.
+This guide follows the common setup path first. A developer enables SCIM once, creates one connection for the customer organization, and gives the customer's IT administrator two values to paste into their identity provider.
 
 <Callout type="info" title="Prerequisites">
   - AuthServer is enabled and the customer organization already exists
-  - FGA is enabled when you want group-based authorization mappings
-  - You have dashboard admin access or a server-side workflow that can call the admin SDK
-  - Your IdP supports SCIM 2.0 bearer-token provisioning
+  - You have dashboard admin access
+  - FGA is enabled if you want directory groups to participate in authorization
+  - The identity provider can send SCIM 2.0 requests with a bearer token
 </Callout>
 
-## How SqlOS models SCIM
+## The five-minute setup
 
-SqlOS treats SCIM as an organization-scoped provisioning pipeline, not a separate identity store.
+### 1. Enable SCIM
 
-| SCIM object | SqlOS AuthServer object | SqlOS FGA object |
-| --- | --- | --- |
-| SCIM user | `SqlOSUser`, email, external identity, organization membership | FGA subject/user for authorization checks |
-| SCIM group | Directory group linked to the organization | `SqlOSFgaUserGroup` with source metadata |
-| SCIM group member | Active organization member | `SqlOSFgaUserGroupMembership` |
-| Optional group mapping | Mapping rule on the SCIM connection | `SqlOSFgaGrant` for the mapped group subject |
-
-That keeps SSO, organization membership, group membership, application access, and FGA checks on the same local data model.
-
-## Configuration model
-
-Use the same surface that fits the customer lifecycle:
-
-| Surface | Best use | Important rule |
-| --- | --- | --- |
-| Code-first seed | Default mappings for known tenants, tests, and repeatable infrastructure | Startup seed reconciles by stable keys and should be safe to re-run |
-| Admin SDK / API | Your product's setup wizard, tenant automation, and support tooling | Exposes every field the dashboard can edit |
-| Dashboard | Operator setup, token rotation, rule review, and sync log inspection | Writes the same connection and mapping records as code and SDK |
-
-Feature parity matters. If a setting exists for SCIM in code, it should be visible through the admin API and understandable in the dashboard. If an operator changes a setting in the dashboard, startup reconciliation should preserve or intentionally override it according to the setting's source-of-truth mode.
-
-## 1. Define the authorization model in code
-
-Start by seeding the FGA resources, roles, and permissions that SCIM groups may grant. SCIM should feed this model; it should not invent a second authorization system.
+SCIM is off by default. A provider must be able to call an absolute public HTTPS URL, so configure the externally reachable origin at the same time:
 
 ```csharp
+var publicOrigin = builder.Configuration["SqlOS:PublicOrigin"]
+    ?? throw new InvalidOperationException("SqlOS:PublicOrigin is required for SCIM.");
+
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.Fga.Seed(seed =>
-    {
-        seed.ResourceType("organization", "Organization");
-        seed.ResourceType("workspace", "Workspace");
-
-        seed.Permission("perm_workspace_read", "workspace.read", "Read workspaces", "workspace");
-        seed.Permission("perm_workspace_manage", "workspace.manage", "Manage workspaces", "workspace");
-
-        seed.Role("role_org_admin", "org_admin", "Organization Admin");
-        seed.Role("role_workspace_manager", "workspace_manager", "Workspace Manager");
-
-        seed.RolePermission("org_admin", "workspace.read");
-        seed.RolePermission("org_admin", "workspace.manage");
-        seed.RolePermission("workspace_manager", "workspace.read");
-        seed.RolePermission("workspace_manager", "workspace.manage");
-    });
+    options.AuthServer.PublicOrigin = publicOrigin;
+    options.AuthServer.Issuer = $"{publicOrigin.TrimEnd('/')}/sqlos/auth";
+    options.AuthServer.EnableScim = true;
 });
 ```
 
-Then decide which IdP groups are allowed to create grants. Most groups should only become FGA user groups. Only groups that represent product authorization should be mapped to roles on resources.
+`PublicOrigin` must be an absolute HTTPS origin only, such as `https://identity.example.com`, with no path, query, or fragment. The default service-provider path is `/sqlos/scim/v2`, so the resulting Base URL is `https://identity.example.com/sqlos/scim/v2`. Set `ScimBasePath` only when the host application needs a different public path.
 
-## 2. Seed the SCIM connection for repeatable tenants
+If `PublicOrigin` is omitted, SqlOS can return only a relative path. That is useful for same-origin local curl requests but cannot be pasted into Entra or Okta.
 
-For tenants you manage in code, seed the SCIM connection and any expected mapping rules at startup:
+#### Local Entra or Okta testing with Aspire Dev Tunnels
+
+[Aspire Dev Tunnels](https://aspire.dev/integrations/devtools/dev-tunnels/) can give a local SqlOS host a temporary TLS-terminated public endpoint. On a current Aspire AppHost, add the integration:
+
+```bash
+aspire add devtunnels
+```
+
+Then expose the SqlOS-enabled project from the AppHost:
+
+```csharp
+var app = builder.AddProject<Projects.App>("app");
+
+builder.AddDevTunnel("sqlos-scim")
+    .WithReference(app)
+    .WithAnonymousAccess();
+```
+
+Run the AppHost and copy the tunnel's public `https://...devtunnels.ms` endpoint from the Aspire dashboard. Configure that exact origin as `SqlOS:PublicOrigin`, keep `Issuer` at `{PublicOrigin}/sqlos/auth`, and restart the host before creating the connection. Use the resulting `{PublicOrigin}/sqlos/scim/v2` value as the provider's Base or Tenant URL.
+
+<Callout type="warning" title="Temporary development ingress">
+  Anonymous access makes the tunneled application endpoint reachable from the internet; the SCIM path still requires its bearer token. Use a dedicated test tenant and test identities, keep dashboard authentication enabled, do not reuse production secrets, and stop or remove the tunnel after the provider test. Dev Tunnels are for development, not production.
+</Callout>
+
+### 2. Create the organization's connection
+
+Open `/sqlos/admin/auth/`, select the organization, and open **SCIM**. Create an enabled connection.
+
+The create action returns:
+
+- the SCIM Base URL
+- the Users and Groups URLs
+- a new bearer token, shown in plaintext only once
+
+Copy the token before leaving the result. SqlOS stores its hash, not the plaintext value, so it cannot show the token again.
+
+<Callout type="warning" title="Use one enabled connection">
+  SqlOS allows one enabled SCIM connection per organization. Keep that connection for the directory's lifetime. If you must replace it, disable the old connection before enabling another one.
+</Callout>
+
+The Base URL does not need an organization ID. The bearer token identifies both the connection and its organization, which keeps provider setup simple and prevents a client from choosing another tenant in its request.
+
+### 3. Paste the values into the identity provider
+
+| Provider field | SqlOS value |
+| --- | --- |
+| Base URL, Tenant URL, or SCIM connector URL | The Base URL returned by SqlOS |
+| API token or Secret Token | The one-time bearer token |
+| Authentication mode | Bearer token |
+| Unique user field | `userName`, normally the user's work email |
+| Supported resources | Users and Groups |
+
+For **Okta**, enable API integration, paste the Base URL and token, test the credentials, then enable Create Users, Update User Attributes, Deactivate Users, and group push as needed.
+
+For **Microsoft Entra**, paste the Base URL into **Tenant URL**, paste the bearer token into **Secret Token**, test the connection, and start with a small assigned user or group before enabling the full provisioning scope.
+
+<Callout type="info" title="Google Workspace">
+  Google Workspace does not provide a public generic SCIM push client. Do not paste these values into the Google Admin SDK or treat its pull-based directory API as SCIM. Use a supported IdP, a purpose-built Google connector, or your own SCIM 2.0 client.
+</Callout>
+
+### 4. Provision one user, then one group
+
+Start with a single test user. Confirm that the IdP can query, create, update, deactivate, and reactivate that user. Then push one small group and verify member add and remove before assigning the whole directory.
+
+SqlOS supports the provider behaviors needed for this flow:
+
+| Operation | Supported behavior |
+| --- | --- |
+| User lookup | Exact `eq` filters on `id`, `userName`, `externalId`, and `emails.value` |
+| Group lookup | Exact `eq` filters on `id`, `displayName`, and `externalId` |
+| User PATCH | Pathless Okta-style values and paths for `active`, `displayName`, name parts, `userName`, and emails |
+| Group PATCH | Full member replacement, member add, member remove, and `members[value eq "..."]` removal |
+| Discovery | Service provider configuration plus collection and item reads for resource types and schemas |
+
+Other filter operators such as `co`, `sw`, `pr`, `and`, and `or` are not accepted. Unsupported filters return a SCIM `invalidFilter` error instead of being silently ignored.
+
+SqlOS bounds one PATCH document to 100 operations and one Group resource to 10,000 distinct members. An oversized request fails atomically with `413` and `scimType: "tooMany"`; partition a larger directory group into smaller application-specific groups rather than retrying the same payload.
+
+### 5. Verify the result
+
+Check these surfaces after the first sync:
+
+1. **Auth Server > Organizations > Users** shows the user and active organization membership.
+2. **Fine-Grained Auth > User Groups** shows the mirrored group and its members.
+3. The organization's **SCIM** tab shows applied sync events, mapping reconciliation failures, and the token's last-used time.
+4. **Audit Logs** contains SCIM user, group, membership, and managed-grant changes. Administrative mapping changes appear as AuthServer admin events.
+5. The access tester explains any access inherited through a mapped directory group.
+
+You can also validate discovery and lookup without changing data:
+
+```bash
+export SCIM_BASE_URL="https://app.example.com/sqlos/scim/v2"
+export SCIM_TOKEN="paste-the-token-shown-by-sqlos"
+
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  "$SCIM_BASE_URL/ServiceProviderConfig"
+
+curl --fail-with-body --silent --show-error --get \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  --data-urlencode 'filter=userName eq "ada@example.com"' \
+  "$SCIM_BASE_URL/Users"
+```
+
+## Pair SCIM provisioning with SAML sign-in
+
+The most predictable enterprise setup gives each protocol one job: SCIM decides who has organization access, while SAML authenticates those already-provisioned people. Use one stable work-email source in the IdP for every identity field that SqlOS links:
+
+| IdP value | Destination |
+| --- | --- |
+| Stable work email, commonly `user.userprincipalname` in Entra | SCIM `userName` |
+| The same work email | SCIM `emails[type eq "work"].value` |
+| The same work email | SAML attribute named `email`, or the attribute configured as the SAML connection's email field |
+| IdP object identifier | SCIM `externalId`; preserve its exact casing |
+
+Use `user.mail` instead only when that tenant guarantees it is populated and stable. The important rule is that the SCIM primary email and SAML email claim normalize to the same address.
+
+Create the SAML connection with linking enabled and JIT provisioning disabled:
+
+```csharp
+var draft = await adminService.CreateSsoConnectionDraftAsync(
+    new SqlOSCreateSsoConnectionDraftRequest(
+        OrganizationId: organizationId,
+        DisplayName: "Acme Entra SSO",
+        PrimaryDomain: "acme.com",
+        AutoProvisionUsers: false,
+        AutoLinkByEmail: true));
+```
+
+In the dashboard or delegated SSO portal, the equivalent policy is **Require SSO for existing members = on** and **Allow JIT provisioning = off**. Provision the test user through SCIM before attempting the first SAML sign-in. SqlOS marks the SCIM primary email verified; the SAML callback can then link the IdP subject to that existing user without creating a new user or membership.
+
+<Callout type="warning" title="Keep SCIM authoritative">
+  Do not enable SAML JIT provisioning when IdP assignment and SCIM deprovisioning are supposed to control access. Otherwise a valid SAML assertion for a not-yet-provisioned person can create a user or membership outside the SCIM assignment lifecycle. Enable email linking only for a trusted enterprise connection whose email claim is controlled by the same organization.
+</Callout>
+
+## What SqlOS creates
+
+SqlOS is the SCIM service provider and the IdP is the SCIM client. The IdP sends provisioning requests to SqlOS; SqlOS does not poll the IdP through these endpoints.
+
+| SCIM object | SqlOS AuthServer object | SqlOS FGA object |
+| --- | --- | --- |
+| User | `SqlOSUser`, external identity, and organization membership | user subject used for authorization checks |
+| Group | connection-owned external link | mirrored `SqlOSFgaUserGroup` |
+| Group member | active organization member | `SqlOSFgaUserGroupMembership` |
+| Optional mapping | connection mapping rule | SCIM-managed `SqlOSFgaGrant` for the group subject |
+
+Directory groups mirror even when no authorization mapping exists. Add mapping rules only for groups that should grant a product role on a known FGA resource.
+
+## Soft deprovisioning and shared users
+
+Okta commonly deactivates a user with `PATCH` or `PUT` and `active: false`; Entra and other clients may send `DELETE`. SqlOS treats both as soft deprovisioning for that organization:
+
+- the organization's membership becomes inactive
+- sessions for that organization are revoked
+- SCIM-managed group memberships are removed
+- access inherited from those groups disappears
+- the user row, external link, and audit history remain available for safe reactivation and investigation
+
+A SqlOS user can belong to more than one organization. Deprovisioning from Acme must not deactivate the same person's membership or sessions in Contoso. The bearer token, resource lookup, membership updates, group changes, and session revocation all stay within the token's organization.
+
+Manual grants, non-SCIM groups, and memberships in other organizations are not deleted by SCIM. Review those separate access paths if a person still has access after directory deprovisioning.
+
+## Rotate a compromised or lost token
+
+Open the connection and choose **Rotate token**. Copy the replacement immediately and update the IdP before its next provisioning run.
+
+Rotation invalidates the previous token. There is no recovery path for a lost plaintext token; rotate it again. A disabled connection also rejects its token until the connection is re-enabled.
+
+Disabling a connection immediately revokes the FGA grants managed by that connection. It does not delete mirrored groups, directory membership history, manual grants, or unrelated FGA state. Re-enabling accepts the token again, but managed grants return only after the IdP pushes or resynchronizes the affected groups.
+
+## Advanced: code-seeded setup
+
+Use code-first seeding for platform-owned tenants and repeatable authorization mappings. Keep token material in a secret store:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.AuthServer.EnableScim = true;
-    options.AuthServer.ScimBasePath = "/sqlos/scim/v2";
-
     options.AuthServer.SeedScimConnection("acme", scim =>
     {
         scim.OrganizationSlug = "acme";
         scim.DisplayName = "Acme directory sync";
-        scim.Enabled = true;
-        scim.TokenSecretName = "Acme:ScimBearerToken";
+        scim.TokenSecretName = "ACME_SCIM_BEARER_TOKEN";
 
         scim.MapGroup("Acme-Admins", mapping =>
         {
             mapping.RoleKey = "org_admin";
             mapping.ResourceId = "organization::acme";
-            mapping.Description = "Directory-managed Acme administrators";
-        });
-
-        scim.MapGroupPattern("Workspace-(?<workspaceId>.+)-Managers", mapping =>
-        {
-            mapping.RoleKey = "workspace_manager";
-            mapping.ResourceIdTemplate = "workspace::{workspaceId}";
-            mapping.Description = "Workspace managers from Entra groups";
         });
     });
 });
 ```
 
-Code-first seeding is the right default for platform-owned mappings because it is reviewable, repeatable, and testable. The dashboard should still show the connection, token status, source metadata, and mapping rules so support can explain the live configuration.
+`TokenSecretName` is the name of a process environment variable; SqlOS reads its value during startup reconciliation. Populate `ACME_SCIM_BEARER_TOKEN` from your deployment secret system. Token values must contain at least 32 characters and cannot contain whitespace. Generate a high-entropy value, store it as a secret, and never commit it to source control.
 
-<Callout type="warning" title="Keep secrets out of source">
-  Store bearer token values in your host application's secret store. Code should reference a secret name, environment variable, or vault reference. The persisted SqlOS record should store only a protected token hash and rotation metadata.
-</Callout>
+Startup configuration is authoritative for seeded connections and seeded mapping rules. Each restart reapplies the configured display name, enabled state, token secret, and mappings. Rotate a seeded credential by replacing the deployment secret and restarting SqlOS, then update the IdP with that same value. The dashboard intentionally makes seeded lifecycle, token, and mapping controls read-only so a later restart cannot silently restore an older credential.
 
-## 3. Enable SCIM from the dashboard
+To stage a connection before its secret is available, set `scim.Enabled = false`. Before connecting the IdP, generate and store the secret, keep `TokenSecretName` pointed at it, change `scim.Enabled = true`, and restart. Do not rotate or enable a seeded connection from the dashboard; those values belong in startup configuration.
 
-Open `/sqlos/admin/auth/`, choose the organization, then open **SCIM**.
-
-Use the dashboard to:
-
-- enable or disable SCIM for the organization
-- generate or rotate the bearer token
-- copy the SCIM base URL, Users URL, and Groups URL for the IdP
-- view setup notes for Okta, Microsoft Entra, and generic SCIM 2.0 clients
-- review code-seeded and dashboard-created mapping rules
-- inspect recent sync operations and failures
-
-Dashboard changes should write the same connection and mapping records used by code-first seeding. That gives operators a support surface without creating a separate configuration model.
-
-## 4. Configure the IdP
-
-In Okta, Microsoft Entra, or another SCIM 2.0 IdP:
-
-| IdP field | Value |
-| --- | --- |
-| SCIM base URL / tenant URL | The connection base URL from the SqlOS dashboard, usually `/sqlos/scim/v2` |
-| Users endpoint | `{baseUrl}/Users` |
-| Groups endpoint | `{baseUrl}/Groups` |
-| Authentication mode | Bearer token |
-| Bearer token | The current SCIM token copied during generation or rotation |
-| Supported resources | Users and Groups |
-| Unique user key | Stable IdP user ID or email, depending on the IdP |
-
-Enable user provisioning first, confirm creates and updates, then enable group push for the groups you want SqlOS to mirror.
-
-## 5. Verify the first sync
-
-After the IdP pushes users and groups, check:
-
-1. **Users**: the AuthServer users list shows the provisioned user with the expected email and active state.
-2. **Memberships**: the user has an active organization membership only for the SCIM-managed organization.
-3. **FGA user groups**: the pushed IdP group appears in Fine-Grained Auth > User Groups.
-4. **Group members**: the user's FGA subject is a member of the mirrored group.
-5. **Mapped grants**: mapped groups have the expected role on the expected resource.
-6. **Audit logs**: SCIM creates, updates, deactivations, group changes, grant mapping, and failures are visible in Audit Logs.
-
-## 6. Deprovision safely
-
-When the IdP deactivates or deletes a user, SqlOS should:
-
-- mark the organization membership inactive
-- remove SCIM-managed FGA group memberships
-- revoke active AuthServer sessions for that organization
-- keep audit history and external identity links for traceability
-- leave manually managed memberships or grants untouched unless they are explicitly SCIM-owned
-
-Use the sync log and Audit Logs together during customer rollout. The sync log is operational: what came from the IdP and whether it succeeded. Audit Logs are governance history: what changed in SqlOS and who or what caused it.
+Removing or renaming a seed disables the orphaned persisted connection, clears its bearer credential, and revokes its SCIM-managed grants during reconciliation. The dashboard remains the support surface for status, token metadata, read-only seeded state, optional dashboard-owned mappings, and persisted sync activity.
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| IdP receives `401` | Token was copied incorrectly, rotated, disabled, or sent to the wrong organization SCIM URL |
-| Users sync but groups do not | Group push is disabled in the IdP or the IdP app only assigned users |
-| Group exists but access is missing | The group mirrored successfully, but no mapping rule grants a role on the target resource |
-| Mapping rule does nothing | Role key, resource ID, or pattern capture does not match the seeded FGA model |
-| User still has access after deactivation | Look for manual grants or non-SCIM group memberships that were intentionally left intact |
+| Symptom | What it means | Resolution |
+| --- | --- | --- |
+| `401 Unauthorized` | Missing, incorrect, rotated, disabled-connection, or wrong-environment token | Rotate or recopy the token and confirm the IdP is using the matching Base URL |
+| `404 Not Found` | Resource is not part of this token's organization, or SCIM is disabled | Check the organization, connection state, resource ID, and `EnableScim` configuration |
+| `400` with `invalidFilter` | The client sent an unsupported filter or operator | Use an exact supported `eq` filter from the table above |
+| `400` with `invalidSyntax` or `invalidPath` | The PATCH body, operation, or path is not supported | Inspect the SCIM error response and compare the request with the SCIM reference |
+| `409` with `uniqueness` | The requested username, email, or external ID conflicts with an existing connection resource | Correct the IdP identity values before retrying |
+| Users sync but groups do not | Group push or group assignment is not enabled | Enable the provider's group provisioning and start with one small test group |
+| Group mirrors but grants no access | Mirroring does not automatically create authorization | Add and enable a mapping rule for the correct FGA role and existing resource |
+| User still has access after deactivation | Access comes from another organization or a non-SCIM source | Inspect organization memberships, manual grants, and non-SCIM groups |
+| Dashboard shows only `/sqlos/scim/v2` | `PublicOrigin` is missing | Configure the absolute public HTTPS origin and matching issuer, then restart before copying the provider URL |
+| Host fails while reconciling a seeded connection | An enabled seed's configured `Token` or `TokenSecretName` did not resolve on this startup | Provide a 32+ character whitespace-free configured secret, or keep the seed disabled until the secret is available |
+
+The sync log records operations that reached persistence and application-level reconciliation failures. Request parsing, authentication, filter, and PATCH validation errors are returned directly to the IdP and may not create a sync event. Audit Logs record resulting security changes. Use the IdP provisioning log, SCIM response, SqlOS sync activity, and Audit Logs together when debugging a rollout.
+
+## Repository validation
+
+Run the provider-shaped HTTP suite, service tests, real-SQL protocol tests, and docs gate:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter 'FullyQualifiedName~SqlOSScim'
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~ScimProtocolIntegrationTests'
+./scripts/docs-check.sh
+```
 
 ## Next steps
 

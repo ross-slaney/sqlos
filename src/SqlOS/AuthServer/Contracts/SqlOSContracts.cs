@@ -391,6 +391,18 @@ public sealed record SqlOSRotateScimTokenResult(
     string TokenPrefix,
     DateTime TokenRotatedAt);
 
+public sealed record SqlOSCreateScimConnectionResult(
+    string ConnectionId,
+    string OrganizationId,
+    string DisplayName,
+    bool IsEnabled,
+    string Token,
+    string TokenPrefix,
+    DateTime TokenRotatedAt,
+    string BaseUrl,
+    string UsersUrl,
+    string GroupsUrl);
+
 public sealed record SqlOSCreateScimGroupMappingRequest(
     string MatchType,
     string? GroupDisplayName,

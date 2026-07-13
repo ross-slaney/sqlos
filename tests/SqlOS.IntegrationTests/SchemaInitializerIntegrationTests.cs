@@ -46,6 +46,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSScimGroupMappings",
                      "SqlOSScimManagedGrants",
                      "SqlOSScimSyncEvents",
+                     "SqlOSScimOperationCommits",
                      "SqlOSPhoneOtpChallenges",
                      "SqlOSCalendarConnections",
                      "SqlOSCalendarSyncStates",
@@ -172,6 +173,7 @@ public sealed class SchemaInitializerIntegrationTests
 
             await using var context = new TestSqlOSDbContext(dbOptions);
             await SeedVersion22AuditEventsSchemaAsync(context);
+            await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
                 context,
@@ -185,7 +187,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(29, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -208,6 +210,7 @@ public sealed class SchemaInitializerIntegrationTests
 
             await using var context = new TestSqlOSDbContext(dbOptions);
             await SeedVersion23WithoutApplicationAssignmentsSchemaAsync(context);
+            await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
                 context,
@@ -224,7 +227,136 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
-            Assert.AreEqual(29, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(databaseName);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_UpgradesVersion29ScimSchemaInPlace()
+    {
+        var databaseName = $"SqlOSScimUpgrade_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString)
+                .Options;
+
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            await SeedVersion29ScimSchemaAsync(context);
+
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+            await initializer.EnsureSchemaAsync();
+
+            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            foreach (var column in new[] { "UserName", "PrimaryEmail", "FormattedName", "GivenName", "FamilyName", "DeletedAt", "OwnsUserLifecycle" })
+            {
+                Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSScimExternalIds", column));
+            }
+
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([is_nullable] AS INT) FROM sys.columns WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'ExternalId'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_External'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([has_filter] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_External'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_Entity'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimExternalIds') AND [name] = 'IX_SqlOSScimExternalIds_Connection_Resource_UserName'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(
+                    context,
+                    "SELECT CAST([is_unique] AS INT) FROM sys.indexes WHERE [object_id] = OBJECT_ID('dbo.SqlOSScimConnections') AND [name] = 'UX_SqlOSScimConnections_OneEnabledPerOrganization'"));
+
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "alice-new",
+                await ScalarStringAsync(context, "SELECT [ExternalId] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "alice@example.test",
+                await ScalarStringAsync(context, "SELECT [UserName] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "alice@example.test",
+                await ScalarStringAsync(context, "SELECT [PrimaryEmail] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "Alice Example",
+                await ScalarStringAsync(context, "SELECT [DisplayName] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "Alice Example",
+                await ScalarStringAsync(context, "SELECT [FormattedName] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_alice'"));
+            Assert.AreEqual(
+                "sqlos-migrated-link_bob",
+                await ScalarStringAsync(context, "SELECT [UserName] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_bob'"));
+            Assert.AreEqual(
+                0,
+                await ScalarIntAsync(context, "SELECT CAST([OwnsUserLifecycle] AS INT) FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_bob'"));
+            Assert.AreEqual(
+                "shared@example.test",
+                await ScalarStringAsync(context, "SELECT [UserName] FROM [dbo].[SqlOSScimExternalIds] WHERE [EntityId] = 'user_carol'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimConnections] WHERE [OrganizationId] = 'org_upgrade' AND [IsEnabled] = 1"));
+            Assert.AreEqual(
+                "conn_new",
+                await ScalarStringAsync(context, "SELECT [Id] FROM [dbo].[SqlOSScimConnections] WHERE [OrganizationId] = 'org_upgrade' AND [IsEnabled] = 1"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = 'grant_disabled'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimManagedGrants] WHERE [GrantId] = 'grant_disabled' AND [RevokedAt] IS NULL"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSFgaGrants] WHERE [Id] = 'grant_enabled'"));
+            Assert.AreEqual(
+                1,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimManagedGrants] WHERE [GrantId] = 'grant_enabled' AND [RevokedAt] IS NULL"));
+
+            await context.Database.ExecuteSqlRawAsync("""
+                INSERT INTO [dbo].[SqlOSScimExternalIds] (
+                    [Id], [ConnectionId], [ResourceType], [ExternalId], [EntityId],
+                    [FgaSubjectId], [DisplayName], [IsActive], [CreatedAt], [UpdatedAt], [LastSyncedAt])
+                VALUES
+                    ('ext_null_1', 'conn_new', 'User', NULL, 'user_null_1', NULL, NULL, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME()),
+                    ('ext_null_2', 'conn_new', 'User', NULL, 'user_null_2', NULL, NULL, 1, SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME());
+                """);
+            Assert.AreEqual(
+                2,
+                await ScalarIntAsync(context, "SELECT COUNT(*) FROM [dbo].[SqlOSScimExternalIds] WHERE [ExternalId] IS NULL"));
+
+            await Assert.ThrowsExceptionAsync<SqlException>(async () =>
+                await context.Database.ExecuteSqlRawAsync(
+                    "UPDATE [dbo].[SqlOSScimConnections] SET [IsEnabled] = 1 WHERE [Id] = 'conn_old'"));
         }
         finally
         {
@@ -247,6 +379,7 @@ public sealed class SchemaInitializerIntegrationTests
 
             await using var context = new TestSqlOSDbContext(dbOptions);
             await SeedVersion26OAuthStateSchemaAsync(context);
+            await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
                 context,
@@ -271,7 +404,7 @@ public sealed class SchemaInitializerIntegrationTests
                     context,
                     "SELECT [State] FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_upgrade'"));
             Assert.AreEqual(
-                28,
+                30,
                 await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
@@ -295,6 +428,7 @@ public sealed class SchemaInitializerIntegrationTests
 
             await using var context = new TestSqlOSDbContext(dbOptions);
             await SeedVersion26WideOAuthStateSchemaAsync(context);
+            await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
                 context,
@@ -319,7 +453,7 @@ public sealed class SchemaInitializerIntegrationTests
                     context,
                     "SELECT LEN([State]) FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_wide'"));
             Assert.AreEqual(
-                28,
+                30,
                 await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
@@ -368,6 +502,7 @@ public sealed class SchemaInitializerIntegrationTests
                     {SecurityAlgorithms.RsaSha256}, {publicKeyPem}, {privateKeyPem},
                     {true}, {DateTime.UtcNow}, NULL);
                 """);
+            await SeedScimMigrationPrerequisitesAsync(context);
 
             var initializer = new SqlOSSchemaInitializer(
                 context,
@@ -543,6 +678,30 @@ public sealed class SchemaInitializerIntegrationTests
             """);
     }
 
+    private static async Task SeedScimMigrationPrerequisitesAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            IF OBJECT_ID('dbo.SqlOSOrganizations', 'U') IS NULL
+            BEGIN
+                CREATE TABLE [dbo].[SqlOSOrganizations] (
+                    [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
+                );
+            END
+
+            IF OBJECT_ID('dbo.SqlOSUsers', 'U') IS NULL
+            BEGIN
+                CREATE TABLE [dbo].[SqlOSUsers] (
+                    [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                    [DisplayName] NVARCHAR(200) NOT NULL,
+                    [DefaultEmail] NVARCHAR(320) NULL,
+                    [IsActive] BIT NOT NULL,
+                    [CreatedAt] DATETIME2 NOT NULL,
+                    [UpdatedAt] DATETIME2 NOT NULL
+                );
+            END
+            """);
+    }
+
     private static async Task SeedVersion23WithoutApplicationAssignmentsSchemaAsync(DbContext context)
     {
         await context.Database.ExecuteSqlRawAsync("""
@@ -560,6 +719,180 @@ public sealed class SchemaInitializerIntegrationTests
             CREATE TABLE [dbo].[SqlOSSessions] (
                 [Id] NVARCHAR(64) NOT NULL PRIMARY KEY
             );
+            """);
+    }
+
+    private static async Task SeedVersion29ScimSchemaAsync(DbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE [dbo].[SqlOSSchema] ([Version] INT NOT NULL);
+            INSERT INTO [dbo].[SqlOSSchema] ([Version]) VALUES (29);
+
+            CREATE TABLE [dbo].[SqlOSOrganizations] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [Slug] NVARCHAR(120) NOT NULL,
+                [Name] NVARCHAR(200) NOT NULL,
+                [PrimaryDomain] NVARCHAR(255) NULL,
+                [IsActive] BIT NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL
+            );
+
+            CREATE TABLE [dbo].[SqlOSUsers] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [DisplayName] NVARCHAR(200) NOT NULL,
+                [DefaultEmail] NVARCHAR(320) NULL,
+                [IsActive] BIT NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [UpdatedAt] DATETIME2 NOT NULL
+            );
+
+            CREATE TABLE [dbo].[SqlOSScimConnections] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [OrganizationId] NVARCHAR(64) NOT NULL,
+                [SeedKey] NVARCHAR(160) NULL,
+                [DisplayName] NVARCHAR(200) NOT NULL,
+                [IsEnabled] BIT NOT NULL,
+                [TokenHash] NVARCHAR(128) NULL,
+                [TokenPrefix] NVARCHAR(24) NULL,
+                [TokenRotatedAt] DATETIME2 NULL,
+                [TokenLastUsedAt] DATETIME2 NULL,
+                [LastSyncAt] DATETIME2 NULL,
+                [Source] NVARCHAR(40) NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [UpdatedAt] DATETIME2 NOT NULL
+            );
+
+            CREATE UNIQUE INDEX [IX_SqlOSScimConnections_OrganizationId_SeedKey]
+                ON [dbo].[SqlOSScimConnections]([OrganizationId], [SeedKey])
+                WHERE [SeedKey] IS NOT NULL;
+            CREATE UNIQUE INDEX [IX_SqlOSScimConnections_TokenHash]
+                ON [dbo].[SqlOSScimConnections]([TokenHash])
+                WHERE [TokenHash] IS NOT NULL;
+            CREATE INDEX [IX_SqlOSScimConnections_OrganizationId_IsEnabled]
+                ON [dbo].[SqlOSScimConnections]([OrganizationId], [IsEnabled]);
+            ALTER TABLE [dbo].[SqlOSScimConnections]
+                ADD CONSTRAINT [FK_SqlOSScimConnections_Organizations_OrganizationId]
+                    FOREIGN KEY ([OrganizationId]) REFERENCES [dbo].[SqlOSOrganizations]([Id]);
+
+            CREATE TABLE [dbo].[SqlOSScimExternalIds] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [ConnectionId] NVARCHAR(64) NOT NULL,
+                [ResourceType] NVARCHAR(20) NOT NULL,
+                [ExternalId] NVARCHAR(450) NOT NULL,
+                [EntityId] NVARCHAR(128) NOT NULL,
+                [FgaSubjectId] NVARCHAR(128) NULL,
+                [DisplayName] NVARCHAR(300) NULL,
+                [IsActive] BIT NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [UpdatedAt] DATETIME2 NOT NULL,
+                [LastSyncedAt] DATETIME2 NOT NULL
+            );
+
+            CREATE UNIQUE INDEX [IX_SqlOSScimExternalIds_Connection_Resource_External]
+                ON [dbo].[SqlOSScimExternalIds]([ConnectionId], [ResourceType], [ExternalId]);
+            CREATE INDEX [IX_SqlOSScimExternalIds_Connection_Resource_Entity]
+                ON [dbo].[SqlOSScimExternalIds]([ConnectionId], [ResourceType], [EntityId]);
+            ALTER TABLE [dbo].[SqlOSScimExternalIds]
+                ADD CONSTRAINT [FK_SqlOSScimExternalIds_Connections_ConnectionId]
+                    FOREIGN KEY ([ConnectionId]) REFERENCES [dbo].[SqlOSScimConnections]([Id]);
+
+            CREATE TABLE [dbo].[SqlOSScimGroupMappings] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [ConnectionId] NVARCHAR(64) NOT NULL,
+                [SourceKey] NVARCHAR(300) NULL,
+                [Source] NVARCHAR(40) NOT NULL,
+                [MatchType] NVARCHAR(40) NOT NULL,
+                [GroupDisplayName] NVARCHAR(300) NULL,
+                [GroupExternalId] NVARCHAR(450) NULL,
+                [GroupPattern] NVARCHAR(500) NULL,
+                [RoleKey] NVARCHAR(120) NOT NULL,
+                [ResourceId] NVARCHAR(256) NULL,
+                [ResourceIdTemplate] NVARCHAR(500) NULL,
+                [Description] NVARCHAR(500) NULL,
+                [IsEnabled] BIT NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [UpdatedAt] DATETIME2 NOT NULL
+            );
+            ALTER TABLE [dbo].[SqlOSScimGroupMappings]
+                ADD CONSTRAINT [FK_SqlOSScimGroupMappings_Connections_ConnectionId]
+                    FOREIGN KEY ([ConnectionId]) REFERENCES [dbo].[SqlOSScimConnections]([Id]);
+
+            CREATE TABLE [dbo].[SqlOSScimManagedGrants] (
+                [Id] NVARCHAR(64) NOT NULL PRIMARY KEY,
+                [ConnectionId] NVARCHAR(64) NOT NULL,
+                [MappingId] NVARCHAR(64) NOT NULL,
+                [GroupExternalId] NVARCHAR(450) NOT NULL,
+                [FgaGroupId] NVARCHAR(128) NOT NULL,
+                [FgaGroupSubjectId] NVARCHAR(128) NOT NULL,
+                [GrantId] NVARCHAR(128) NOT NULL,
+                [RoleId] NVARCHAR(128) NOT NULL,
+                [ResourceId] NVARCHAR(256) NOT NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [RevokedAt] DATETIME2 NULL
+            );
+            ALTER TABLE [dbo].[SqlOSScimManagedGrants]
+                ADD CONSTRAINT [FK_SqlOSScimManagedGrants_Connections_ConnectionId]
+                    FOREIGN KEY ([ConnectionId]) REFERENCES [dbo].[SqlOSScimConnections]([Id]);
+            ALTER TABLE [dbo].[SqlOSScimManagedGrants]
+                ADD CONSTRAINT [FK_SqlOSScimManagedGrants_Mappings_MappingId]
+                    FOREIGN KEY ([MappingId]) REFERENCES [dbo].[SqlOSScimGroupMappings]([Id]);
+
+            CREATE TABLE [dbo].[SqlOSFgaGrants] (
+                [Id] NVARCHAR(450) NOT NULL PRIMARY KEY,
+                [SubjectId] NVARCHAR(450) NOT NULL,
+                [ResourceId] NVARCHAR(450) NOT NULL,
+                [RoleId] NVARCHAR(450) NOT NULL,
+                [EffectiveFrom] DATETIME2 NULL,
+                [EffectiveTo] DATETIME2 NULL,
+                [CreatedAt] DATETIME2 NOT NULL,
+                [UpdatedAt] DATETIME2 NOT NULL
+            );
+
+            INSERT INTO [dbo].[SqlOSOrganizations] (
+                [Id], [Slug], [Name], [IsActive], [CreatedAt])
+            VALUES (
+                'org_upgrade', 'upgrade', 'Upgrade organization', 1, '2026-01-01');
+
+            INSERT INTO [dbo].[SqlOSUsers] (
+                [Id], [DefaultEmail], [DisplayName], [IsActive], [CreatedAt], [UpdatedAt])
+            VALUES
+                ('user_alice', ' alice@example.test ', 'Alice Example', 1, '2026-01-01', '2026-01-01'),
+                ('user_bob', 'shared@example.test', 'Bob Example', 1, '2026-01-01', '2026-01-01'),
+                ('user_carol', 'shared@example.test', 'Carol Example', 1, '2026-01-01', '2026-01-01');
+
+            INSERT INTO [dbo].[SqlOSScimConnections] (
+                [Id], [OrganizationId], [DisplayName], [IsEnabled], [Source], [CreatedAt], [UpdatedAt])
+            VALUES
+                ('conn_old', 'org_upgrade', 'Older connection', 1, 'api', '2026-01-01', '2026-01-02'),
+                ('conn_new', 'org_upgrade', 'Newer connection', 1, 'api', '2026-01-03', '2026-01-04');
+
+            INSERT INTO [dbo].[SqlOSScimGroupMappings] (
+                [Id], [ConnectionId], [Source], [MatchType], [RoleKey], [IsEnabled], [CreatedAt], [UpdatedAt])
+            VALUES
+                ('mapping_old', 'conn_old', 'api', 'externalId', 'member', 1, '2026-01-01', '2026-01-01'),
+                ('mapping_new', 'conn_new', 'api', 'externalId', 'member', 1, '2026-01-01', '2026-01-01');
+
+            INSERT INTO [dbo].[SqlOSFgaGrants] (
+                [Id], [SubjectId], [ResourceId], [RoleId], [CreatedAt], [UpdatedAt])
+            VALUES
+                ('grant_disabled', 'group_subject_old', 'root', 'role_member', '2026-01-01', '2026-01-01'),
+                ('grant_enabled', 'group_subject_new', 'root', 'role_member', '2026-01-01', '2026-01-01');
+
+            INSERT INTO [dbo].[SqlOSScimManagedGrants] (
+                [Id], [ConnectionId], [MappingId], [GroupExternalId], [FgaGroupId],
+                [FgaGroupSubjectId], [GrantId], [RoleId], [ResourceId], [CreatedAt])
+            VALUES
+                ('managed_disabled', 'conn_old', 'mapping_old', 'group-old', 'group_old', 'group_subject_old', 'grant_disabled', 'role_member', 'root', '2026-01-01'),
+                ('managed_enabled', 'conn_new', 'mapping_new', 'group-new', 'group_new', 'group_subject_new', 'grant_enabled', 'role_member', 'root', '2026-01-01');
+
+            INSERT INTO [dbo].[SqlOSScimExternalIds] (
+                [Id], [ConnectionId], [ResourceType], [ExternalId], [EntityId],
+                [FgaSubjectId], [DisplayName], [IsActive], [CreatedAt], [UpdatedAt], [LastSyncedAt])
+            VALUES
+                ('link_alice_old', 'conn_new', 'User', 'alice-old', 'user_alice', NULL, NULL, 1, '2026-01-01', '2026-01-01', '2026-01-01'),
+                ('link_alice_new', 'conn_new', 'User', 'alice-new', 'user_alice', NULL, NULL, 1, '2026-01-02', '2026-01-02', '2026-01-02'),
+                ('link_bob', 'conn_new', 'User', 'bob-external', 'user_bob', NULL, NULL, 1, '2026-01-03', '2026-01-03', '2026-01-03'),
+                ('link_carol', 'conn_new', 'User', 'carol-external', 'user_carol', NULL, NULL, 1, '2026-01-04', '2026-01-04', '2026-01-04');
             """);
     }
 

@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -3495,6 +3497,14 @@ public static class EndpointRouteBuilderExtensions
             await HandleScimAsync(context, scimService, connection =>
                 Task.FromResult<IResult>(ScimJson(scimService.GetResourceTypes())), cancellationToken));
 
+        scim.MapGet("/ResourceTypes/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, connection =>
+                Task.FromResult<IResult>(ScimResourceJson(context, scimService.GetResourceType(id))), cancellationToken));
+
         scim.MapGet("/Schemas", async (
             HttpContext context,
             SqlOSScimService scimService,
@@ -3502,55 +3512,75 @@ public static class EndpointRouteBuilderExtensions
             await HandleScimAsync(context, scimService, connection =>
                 Task.FromResult<IResult>(ScimJson(scimService.GetSchemas())), cancellationToken));
 
+        scim.MapGet("/Schemas/{id}", async (
+            HttpContext context,
+            string id,
+            SqlOSScimService scimService,
+            CancellationToken cancellationToken) =>
+            await HandleScimAsync(context, scimService, connection =>
+                Task.FromResult<IResult>(ScimResourceJson(context, scimService.GetSchema(id))), cancellationToken));
+
         scim.MapGet("/Users", async (
             HttpContext context,
             int? startIndex,
             int? count,
             string? filter,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
-                ScimJson(await scimService.ListUsersAsync(connection, startIndex, count, filter, cancellationToken)), cancellationToken));
+                ScimJson(await scimService.ListUsersAsync(connection, startIndex, count, filter, attributes, excludedAttributes, cancellationToken)), cancellationToken));
 
         scim.MapPost("/Users", async (
             HttpContext context,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                return ScimJson(await scimService.UpsertUserAsync(connection, payload, replace: false, cancellationToken), StatusCodes.Status201Created);
+                var resource = await scimService.CreateUserAsync(connection, payload, attributes, excludedAttributes, cancellationToken);
+                return ScimCreated(context, resource, scimService.GetResourceLocation("Users", resource));
             }, cancellationToken));
 
         scim.MapGet("/Users/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
-                ScimJson(await scimService.GetUserAsync(connection, id, cancellationToken)), cancellationToken));
+                ScimResourceJson(context, await scimService.GetUserAsync(connection, id, attributes, excludedAttributes, cancellationToken)), cancellationToken));
 
         scim.MapPut("/Users/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                payload["id"] = id;
-                return ScimJson(await scimService.UpsertUserAsync(connection, payload, replace: true, cancellationToken));
+                var resource = await scimService.ReplaceUserAsync(connection, id, payload, attributes, excludedAttributes, cancellationToken);
+                return ScimResourceJson(context, resource, location: scimService.GetResourceLocation("Users", resource));
             }, cancellationToken));
 
         scim.MapPatch("/Users/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                return ScimJson(await scimService.PatchUserAsync(connection, id, payload, cancellationToken));
+                var resource = await scimService.PatchUserAsync(connection, id, payload, attributes, excludedAttributes, cancellationToken);
+                return ScimResourceJson(context, resource, location: scimService.GetResourceLocation("Users", resource));
             }, cancellationToken));
 
         scim.MapDelete("/Users/{id}", async (
@@ -3569,50 +3599,64 @@ public static class EndpointRouteBuilderExtensions
             int? startIndex,
             int? count,
             string? filter,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
-                ScimJson(await scimService.ListGroupsAsync(connection, startIndex, count, filter, cancellationToken)), cancellationToken));
+                ScimJson(await scimService.ListGroupsAsync(connection, startIndex, count, filter, attributes, excludedAttributes, cancellationToken)), cancellationToken));
 
         scim.MapPost("/Groups", async (
             HttpContext context,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                return ScimJson(await scimService.UpsertGroupAsync(connection, payload, replace: false, cancellationToken), StatusCodes.Status201Created);
+                var resource = await scimService.CreateGroupAsync(connection, payload, attributes, excludedAttributes, cancellationToken);
+                return ScimCreated(context, resource, scimService.GetResourceLocation("Groups", resource));
             }, cancellationToken));
 
         scim.MapGet("/Groups/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
-                ScimJson(await scimService.GetGroupAsync(connection, id, cancellationToken)), cancellationToken));
+                ScimResourceJson(context, await scimService.GetGroupAsync(connection, id, attributes, excludedAttributes, cancellationToken)), cancellationToken));
 
         scim.MapPut("/Groups/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                payload["id"] = id;
-                return ScimJson(await scimService.UpsertGroupAsync(connection, payload, replace: true, cancellationToken));
+                var resource = await scimService.ReplaceGroupAsync(connection, id, payload, attributes, excludedAttributes, cancellationToken);
+                return ScimResourceJson(context, resource, location: scimService.GetResourceLocation("Groups", resource));
             }, cancellationToken));
 
         scim.MapPatch("/Groups/{id}", async (
             HttpContext context,
             string id,
+            string? attributes,
+            string? excludedAttributes,
             SqlOSScimService scimService,
             CancellationToken cancellationToken) =>
             await HandleScimAsync(context, scimService, async connection =>
             {
                 var payload = await ReadScimPayloadAsync(context, cancellationToken);
-                return ScimJson(await scimService.PatchGroupAsync(connection, id, payload, cancellationToken));
+                var resource = await scimService.PatchGroupAsync(connection, id, payload, attributes, excludedAttributes, cancellationToken);
+                return string.IsNullOrWhiteSpace(attributes) && string.IsNullOrWhiteSpace(excludedAttributes)
+                    ? Results.NoContent()
+                    : ScimResourceJson(context, resource, location: scimService.GetResourceLocation("Groups", resource));
             }, cancellationToken));
 
         scim.MapDelete("/Groups/{id}", async (
@@ -3654,7 +3698,7 @@ public static class EndpointRouteBuilderExtensions
                 var connection = await adminService.CreateScimConnectionAsync(
                     new SqlOSCreateScimConnectionRequest(organizationId, request.DisplayName, request.Enabled),
                     cancellationToken);
-                return Results.Ok(ToScimConnectionAdminResponse(connection));
+                return SensitiveJson(context, connection);
             }));
 
         api.MapGet("/scim-connections/{connectionId}", async (
@@ -3712,7 +3756,7 @@ public static class EndpointRouteBuilderExtensions
             IHostEnvironment environment,
             CancellationToken cancellationToken) =>
             await HandleAdminApiAsync(context, options, environment, async () =>
-                Results.Ok(await adminService.RotateScimTokenAsync(connectionId, cancellationToken))));
+                SensitiveJson(context, await adminService.RotateScimTokenAsync(connectionId, cancellationToken))));
 
         api.MapGet("/scim-connections/{connectionId}/mappings", async (
             HttpContext context,
@@ -5253,7 +5297,25 @@ public static class EndpointRouteBuilderExtensions
         }
         catch (SqlOSScimException ex)
         {
+            if (ex.StatusCode == StatusCodes.Status401Unauthorized)
+            {
+                context.Response.Headers.WWWAuthenticate = "Bearer realm=\"SqlOS SCIM\"";
+            }
             return ScimError(ex.StatusCode, ex.Message, ex.ScimType);
+        }
+        catch (Exception ex) when (IsSqlServerDeadlock(ex))
+        {
+            context.Response.Headers.RetryAfter = "1";
+            return ScimError(StatusCodes.Status503ServiceUnavailable, "The SCIM request encountered a transient concurrency conflict. Retry the request.");
+        }
+        catch (DbUpdateException ex) when (IsSqlServerUniqueConstraintViolation(ex))
+        {
+            return ScimError(StatusCodes.Status409Conflict, "The SCIM resource conflicts with an existing resource.", "uniqueness");
+        }
+        catch (DbUpdateException)
+        {
+            context.Response.Headers.RetryAfter = "1";
+            return ScimError(StatusCodes.Status503ServiceUnavailable, "The SCIM request could not be persisted. Retry the request.");
         }
         catch (JsonException ex)
         {
@@ -5263,6 +5325,38 @@ public static class EndpointRouteBuilderExtensions
         {
             return ScimError(StatusCodes.Status400BadRequest, ex.Message);
         }
+    }
+
+    private static bool IsSqlServerDeadlock(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException!)
+        {
+            if (current is SqlException { Number: 1205 })
+            {
+                return true;
+            }
+            if (current.InnerException == null)
+            {
+                break;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsSqlServerUniqueConstraintViolation(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException!)
+        {
+            if (current is SqlException { Number: 2601 or 2627 })
+            {
+                return true;
+            }
+            if (current.InnerException == null)
+            {
+                break;
+            }
+        }
+        return false;
     }
 
     private static async Task<IResult> HandleAdminApiAsync(
@@ -5289,14 +5383,50 @@ public static class EndpointRouteBuilderExtensions
     private static IResult ScimJson(JsonObject payload, int statusCode = StatusCodes.Status200OK)
         => Results.Json(payload, statusCode: statusCode, contentType: "application/scim+json");
 
+    private static IResult ScimResourceJson(
+        HttpContext context,
+        JsonObject payload,
+        int statusCode = StatusCodes.Status200OK,
+        string? location = null)
+    {
+        location ??= payload["meta"]?["location"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            context.Response.Headers.ContentLocation = location;
+        }
+        return ScimJson(payload, statusCode);
+    }
+
+    private static IResult ScimCreated(HttpContext context, JsonObject payload, string? location = null)
+    {
+        location ??= payload["meta"]?["location"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            context.Response.Headers.Location = location;
+        }
+        return ScimResourceJson(context, payload, StatusCodes.Status201Created, location);
+    }
+
     private static IResult ScimError(int statusCode, string message, string? scimType = null)
         => Results.Json(
             SqlOSScimService.CreateError(statusCode, message, scimType),
             statusCode: statusCode,
             contentType: "application/scim+json");
 
+    private static IResult SensitiveJson(HttpContext context, object payload)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        context.Response.Headers.Pragma = "no-cache";
+        return Results.Ok(payload);
+    }
+
     private static async Task<JsonObject> ReadScimPayloadAsync(HttpContext context, CancellationToken cancellationToken)
     {
+        if (!context.Request.HasJsonContentType())
+        {
+            throw new SqlOSScimException(StatusCodes.Status415UnsupportedMediaType, "SCIM requests require application/scim+json or application/json.");
+        }
+
         if (context.Request.ContentLength is > MaxScimPayloadBytes)
         {
             throw new SqlOSScimException(StatusCodes.Status413PayloadTooLarge, "SCIM JSON body exceeds the allowed size.", "tooMany");

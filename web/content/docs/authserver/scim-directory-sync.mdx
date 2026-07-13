@@ -5,36 +5,103 @@ order: 5
 section: authserver
 ---
 
-SCIM 2.0 lets enterprise customers use their identity provider as the source of truth for user lifecycle and directory groups. In SqlOS, SCIM belongs to AuthServer for identity and organization membership, then mirrors groups into FGA for authorization.
+SCIM 2.0 lets an enterprise identity provider provision users and groups into SqlOS. The identity provider is the SCIM client. SqlOS is the SCIM service provider and receives the client's HTTP requests.
 
-SCIM complements SSO. SAML or OIDC answers "how does this user sign in?" SCIM answers "which users and groups should exist, and who should lose access when the directory changes?"
+SCIM complements SSO rather than replacing it. SAML or OIDC authenticates a person at sign-in. SCIM maintains the organization's user lifecycle and directory groups even when nobody is signing in.
 
-## What SCIM manages
+For the common SCIM-authoritative setup, provision the work email through SCIM, send that same value in the SAML `email` attribute, enable `AutoLinkByEmail`, and leave `AutoProvisionUsers` disabled. The first SAML sign-in then links to the already-provisioned user instead of creating access outside the directory assignment. See the [SCIM plus SAML recipe](/docs/guides/scim-directory-sync#pair-scim-provisioning-with-saml-sign-in).
 
-| Area | Behavior |
-| --- | --- |
-| Connection | One SCIM connection per organization, with an org-scoped bearer token |
-| Users | Create, update, activate, deactivate, and link IdP users to SqlOS users |
-| Memberships | Maintain organization membership based on the IdP assignment |
-| Groups | Mirror IdP groups into FGA user groups |
-| Group members | Keep FGA group membership aligned with IdP group membership |
-| Optional mappings | Grant or revoke FGA roles when selected IdP groups match rules |
-| Audit | Record provisioning, deprovisioning, group changes, mapping changes, and failures |
+## Enable the service provider
 
-## Endpoint shape
+SCIM is disabled by default. Provider setup also requires an absolute public HTTPS origin:
 
-SCIM endpoints should be tenant-scoped by the bearer token. The IdP should not need an operator dashboard session.
+```csharp
+var publicOrigin = builder.Configuration["SqlOS:PublicOrigin"]
+    ?? throw new InvalidOperationException("SqlOS:PublicOrigin is required for SCIM.");
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.PublicOrigin = publicOrigin;
+    options.AuthServer.Issuer = $"{publicOrigin.TrimEnd('/')}/sqlos/auth";
+    options.AuthServer.EnableScim = true;
+    // Optional; this is the default.
+    options.AuthServer.ScimBasePath = "/sqlos/scim/v2";
+});
+```
+
+`PublicOrigin` is an origin only, such as `https://identity.example.com`, without a path, query, or fragment. After startup, create one connection from the organization's **SCIM** dashboard tab. The create action generates the initial bearer token and returns the public Base URL, Users URL, and Groups URL together. The raw token is shown only in that response.
+
+For local provider testing, use the [Aspire Dev Tunnels recipe in the setup guide](/docs/guides/scim-directory-sync#local-entra-or-okta-testing-with-aspire-dev-tunnels). Configure the temporary tunnel's HTTPS origin as `PublicOrigin` before creating the connection. A relative `/sqlos/scim/v2` path works for same-origin curl requests but is not a valid Entra Tenant URL or Okta connector Base URL.
+
+SqlOS permits only one enabled SCIM connection per organization. Disabled historical connections may remain for audit and support, but an organization cannot accept provisioning from two enabled connections at the same time.
+
+## Connection and token model
+
+The Base URL is stable and does not contain an organization identifier:
 
 ```text
-GET    /sqlos/scim/v2/ServiceProviderConfig
-GET    /sqlos/scim/v2/ResourceTypes
-GET    /sqlos/scim/v2/Schemas
+https://app.example.com/sqlos/scim/v2
+```
+
+Every request includes the connection's token:
+
+```http
+Authorization: Bearer scim_...
+Accept: application/scim+json
+```
+
+The token resolves exactly one enabled connection and organization. Resource reads and writes are then constrained to that organization. A resource ID from another organization returns `404`, even if the same underlying SqlOS user belongs to both organizations.
+
+SqlOS stores a token hash and a displayable prefix. It never stores or returns the raw token after creation or rotation. Rotating a token immediately invalidates the previous token; update the IdP with the replacement before its next provisioning run.
+
+Disabling a connection immediately rejects its token and revokes the FGA grants tracked as managed by that connection. Mirrored groups, history, manual grants, and unrelated FGA state remain. Re-enabling the connection does not recreate managed grants until the IdP pushes or resynchronizes the affected groups.
+
+## Protocol endpoints
+
+All endpoints require the connection bearer token.
+
+### Discovery
+
+```text
+GET /sqlos/scim/v2/ServiceProviderConfig
+GET /sqlos/scim/v2/ResourceTypes
+GET /sqlos/scim/v2/ResourceTypes/{id}
+GET /sqlos/scim/v2/Schemas
+GET /sqlos/scim/v2/Schemas/{schema-uri}
+```
+
+`ServiceProviderConfig` truthfully advertises this profile:
+
+| Capability | Value |
+| --- | --- |
+| PATCH | supported |
+| Filter | supported, up to 200 returned resources |
+| Bulk | not supported |
+| Sort | not supported |
+| ETags | not supported |
+| Change password | not supported |
+| Authentication | organization-scoped bearer token |
+
+Collection discovery responses use the SCIM `ListResponse` schema. Item endpoints return one resource type or schema and return `404` for an unknown ID or schema URI.
+
+### Users
+
+```text
 GET    /sqlos/scim/v2/Users
 POST   /sqlos/scim/v2/Users
 GET    /sqlos/scim/v2/Users/{id}
 PUT    /sqlos/scim/v2/Users/{id}
 PATCH  /sqlos/scim/v2/Users/{id}
 DELETE /sqlos/scim/v2/Users/{id}
+```
+
+Supported user fields include `externalId`, `userName`, `displayName`, `name`, `emails`, and `active`. SqlOS returns its immutable user ID as `id` and uses the IdP's `externalId` as the connection-scoped correlation value when one is supplied.
+
+On create, SqlOS first searches the connection's links for the supplied `userName` or `externalId`. If there is no link, it may reuse a global SqlOS user with the same normalized primary email, or with an email-like `userName`. The organization membership and SCIM external link remain connection and tenant scoped.
+
+### Groups
+
+```text
 GET    /sqlos/scim/v2/Groups
 POST   /sqlos/scim/v2/Groups
 GET    /sqlos/scim/v2/Groups/{id}
@@ -43,132 +110,159 @@ PATCH  /sqlos/scim/v2/Groups/{id}
 DELETE /sqlos/scim/v2/Groups/{id}
 ```
 
-The bearer token resolves the organization and connection. Prefer that over putting an organization ID in the URL, because it keeps IdP setup simpler and reduces cross-tenant routing mistakes.
+Groups support `externalId`, `displayName`, and `members`. Membership references may use the SqlOS SCIM user `id` or the connection's user `externalId`.
 
-## Data model
+Mutate membership through `Group.members`. SqlOS does not accept `User.groups` as a writable attribute.
 
-Use one persisted model across code, SDK/API, and dashboard:
+## Filtering and pagination
 
-| Model | Purpose |
+SqlOS intentionally supports the exact-match filters used for provider reconciliation:
+
+| Resource | Supported filters |
 | --- | --- |
-| `SqlOSScimConnection` | Organization connection, enabled state, token hash, token rotation timestamps, and setup metadata |
-| `SqlOSScimExternalId` | Link from SCIM resource type and external ID to a SqlOS user, membership, or FGA group |
-| `SqlOSScimGroupMapping` | Rule that maps an IdP group name, external ID, or pattern to an FGA role and resource |
-| `SqlOSScimManagedGrant` | Link from a mapping rule to the FGA grant it created, used for precise revocation |
-| `SqlOSScimSyncEvent` | Recent operational sync log with request ID, action, result, and error details |
+| Users | `id eq "..."`, `userName eq "..."`, `externalId eq "..."`, `emails.value eq "..."` |
+| Groups | `id eq "..."`, `displayName eq "..."`, `externalId eq "..."` |
 
-Store durable authorization state in the existing AuthServer and FGA tables. SCIM-specific tables should explain source, ownership, external IDs, and operational history.
+Attribute names are case-insensitive. String comparisons are case-insensitive except for `externalId`, which is case-exact in filters, uniqueness checks, and group mappings; preserve the IdP's original casing. Only one exact `eq` expression is supported. Other operators and compound expressions return `400` with `scimType: "invalidFilter"`; they are not ignored or evaluated approximately.
 
-## User provisioning
-
-SCIM user create and update should:
-
-- normalize and verify the primary email according to the IdP payload
-- create or update `SqlOSUser`
-- link the SCIM external ID to the user
-- create or update the organization's membership
-- maintain active/inactive state for the SCIM-managed membership
-- sync a corresponding FGA user subject when FGA is enabled
-
-If a user already exists by verified email or previous external identity, link to the existing user instead of creating a duplicate.
-
-## Deprovisioning
-
-When a SCIM user is deactivated or deleted:
-
-- mark the SCIM-managed organization membership inactive
-- revoke active sessions for that organization
-- remove SCIM-managed FGA group memberships
-- revoke access inherited through SCIM-managed groups by removing the user's group memberships
-- keep the user row, external ID link, and audit records for history
-
-Do not remove manually created organization memberships, manually assigned FGA grants, or non-SCIM groups unless a mapping rule explicitly owns them.
-
-## Group provisioning
-
-SCIM group create and update should:
-
-- create or update the mirrored `SqlOSFgaUserGroup`
-- keep the group subject stable across renames
-- store the IdP external ID and display name
-- replace SCIM-managed group membership with the IdP's current membership set
-- apply mapping rules after membership changes
-
-SCIM groups should remain useful even when no mapping rule exists. A mirrored group can still be selected in application access assignments, direct grants, and the access tester.
-
-## Group mapping rules
-
-A mapping rule turns an IdP group into an FGA grant.
-
-| Rule input | Output |
-| --- | --- |
-| group external ID or exact display name | role on a fixed resource |
-| display-name pattern | role on a resource derived from pattern captures |
-| disabled rule | no grant changes, but the group still mirrors |
+List endpoints accept the 1-based `startIndex` and `count` parameters. The default count is 100 and the maximum is 200. Responses include `totalResults`, `startIndex`, `itemsPerPage`, and `Resources` in a SCIM `ListResponse`.
 
 Example:
 
-```csharp
-scim.MapGroup("Acme-Admins", mapping =>
-{
-    mapping.RoleKey = "org_admin";
-    mapping.ResourceId = "organization::acme";
-});
-
-scim.MapGroupPattern("Store-(?<storeId>.+)-Managers", mapping =>
-{
-    mapping.RoleKey = "store_manager";
-    mapping.ResourceIdTemplate = "store::{storeId}";
-});
+```http
+GET /sqlos/scim/v2/Users?filter=userName%20eq%20%22ada%40example.com%22&startIndex=1&count=100
+Authorization: Bearer scim_...
+Accept: application/scim+json
 ```
 
-Mapped grants should be marked as SCIM-managed so later group membership changes, group deletion, rule disabling, or user deprovisioning can revoke only the access created by SCIM.
+## PATCH behavior
 
-## Code, SDK, API, and dashboard parity
+PATCH requests use the standard schema:
 
-SCIM configuration follows the SqlOS pattern: define the system in code, expose the same persisted model through the SDK and admin APIs, and give operators a dashboard surface for setup and support.
-
-| Capability | Code-first | Admin SDK / API | Dashboard |
-| --- | --- | --- | --- |
-| Enable or disable SCIM | `EnableScim`, `SeedScimConnection(...).Enabled` | update connection enabled state | organization SCIM toggle |
-| Base path | `ScimBasePath` | connection detail returns base, Users, and Groups URLs | copy base URL, Users URL, and Groups URL |
-| Token lifecycle | reference a secret or request rotation | rotate token and read token metadata | rotate and copy setup token once |
-| IdP setup values | derive from configured public origin | read connection setup URLs | copy base URL and provider setup notes |
-| Mapping rules | seed exact and pattern rules | create, update, enable, disable rules | mapping rules table and editor |
-| Sync log | read operational events for tests or support | list sync events | recent activity and error details |
-| Audit | record via audit log service | query audit events | Audit Logs filters and detail view |
-
-If a field cannot be represented on all three surfaces, treat that as a product gap before shipping the feature.
-
-## Admin SDK shape
-
-Host apps should be able to build their own setup screens on top of the same server-side API used by the bundled dashboard:
-
-```csharp
-var connection = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnectionRequest(
-    OrganizationId: organization.Id,
-    DisplayName: "Acme Entra SCIM",
-    Enabled: true));
-
-var token = await admin.RotateScimTokenAsync(connection.Id);
-
-await admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
-    MatchType: SqlOSScimGroupMappingMatchTypes.DisplayName,
-    GroupDisplayName: "Acme-Admins",
-    GroupExternalId: null,
-    GroupPattern: null,
-    RoleKey: "org_admin",
-    ResourceId: $"organization::{organization.Id}",
-    ResourceIdTemplate: null,
-    Description: "Directory-managed Acme admins",
-    Enabled: true));
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": []
+}
 ```
 
-The SDK should return setup URLs, token metadata, mapping rule state, and sync log entries without requiring the caller to know dashboard internals.
+A PATCH document may contain at most 100 operations. A Group write may contain at most 10,000 distinct member references. Requests beyond either bound return `413` with `scimType: "tooMany"` before any part of the resource is changed.
 
-## Admin API endpoints
+### User PATCH
 
-The bundled dashboard uses the same admin API you can call from trusted setup tools. These routes are protected by dashboard admin authorization and return `404` when the caller is not authorized.
+SqlOS supports these user paths:
+
+| Path | `add` / `replace` | `remove` |
+| --- | --- | --- |
+| `active` | set a Boolean value | restore the default active state |
+| `userName` | set the required identifier | rejected with `mutability` because `userName` is required |
+| `externalId` | set the connection correlation value | clear the value |
+| `displayName`, `name.formatted` | set the display value | fall back to the remaining name or `userName` |
+| `name` | apply a complex name object | clear given/family name and fall back to `userName` |
+| `name.givenName`, `name.familyName` | set the name part | clear the name part |
+| `emails`, `emails.value`, or a filtered email value path | set the primary email | clear the primary email |
+
+`id`, `meta`, `groups`, and `password` are not writable and return `mutability`. Unknown paths return `invalidPath`.
+
+Pathless operations are supported when the operation `value` is an object. This covers the Okta shape that sends several changed attributes together:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "replace",
+      "value": {
+        "active": false,
+        "displayName": "Ada Lovelace"
+      }
+    }
+  ]
+}
+```
+
+Unsupported or malformed paths return a SCIM error rather than being silently accepted.
+
+### Group PATCH
+
+Groups accept:
+
+- `displayName` add/replace; remove is rejected because the field is required
+- `externalId` add/replace/remove
+- full `members` replacement
+- one or more member additions
+- one or more member removals, or remove without a value to clear all members
+- filtered removal with `members[value eq "{user-id}"]`; other operations on a filtered member path return `invalidPath`
+- pathless provider payloads containing `displayName`, `externalId`, or `members`
+
+`id` and `meta` are not writable.
+
+Example removal:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "remove",
+      "path": "members[value eq \"usr_123\"]"
+    }
+  ]
+}
+```
+
+Adding an existing member and removing an absent member are idempotent successes. Group writes affect only groups and users linked to the authenticated connection.
+
+## Response and error behavior
+
+Send `Content-Type: application/scim+json` for POST, PUT, and PATCH. Successful creates return `201`; reads, PUT, and User PATCH return `200`; successful DELETE returns `204`. Group PATCH returns `204 No Content` by default so large directory groups are not echoed after every delta. Add `attributes` or `excludedAttributes` to a Group PATCH only when the caller explicitly needs a projected `200` resource response.
+
+When a request reaches the mapped SCIM handler, errors use the standard SCIM error schema:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+  "status": "400",
+  "scimType": "invalidFilter",
+  "detail": "Unsupported SCIM filter."
+}
+```
+
+| Status | Typical cause |
+| --- | --- |
+| `400` | `invalidFilter`, `invalidSyntax`, `invalidPath`, `invalidValue`, `mutability`, or another unsupported request shape |
+| `401` | Missing, incorrect, rotated, or disabled-connection token |
+| `404` | Resource does not exist in this connection's organization or a discovery item is unknown |
+| `409` | Username, email, or external-correlation uniqueness conflict |
+| `413` | `tooMany` operations or group members |
+
+When `EnableScim` is false, the SCIM routes are not mapped; the host returns its ordinary `404` response rather than a SCIM Error document.
+
+Persisted sync events retain the action, result, resource identifiers, and application-level reconciliation error detail. Authentication, parsing, filter, and PATCH validation failures are returned as SCIM errors and may not create a sync event. Audit events record security-relevant state changes that SqlOS applies.
+
+## Soft deprovisioning
+
+`active: false` and `DELETE /Users/{id}` both soft-deprovision the user from the token's organization:
+
+- mark that organization membership inactive
+- revoke active sessions for that organization
+- remove SCIM-managed FGA group memberships
+- remove access inherited through those groups
+- retain the SqlOS user, external ID link, and audit history
+
+This preserves a stable record for reactivation and compliance. It also protects shared identities: if the same SqlOS user belongs to another organization, that other membership, its sessions, and its non-SCIM authorization remain active.
+
+Deleting a Group removes its SCIM-owned memberships and mapped grants and marks the connection's external group link inactive. It does not delete unrelated manual groups or grants.
+
+## FGA group mapping
+
+Every provisioned directory group mirrors into an FGA user group. Mirroring alone does not grant a role. Optional mapping rules match an exact display name, exact external ID, or a display-name pattern and create a SCIM-managed group grant for a known role and resource.
+
+See [SCIM group mapping](/docs/fga/scim-group-mapping) for ownership and revocation behavior.
+
+## Admin API
+
+The bundled dashboard uses these trusted admin routes:
 
 ```text
 GET  /sqlos/admin/auth/api/organizations/{organizationId}/scim-connections
@@ -186,75 +280,53 @@ POST /sqlos/admin/auth/api/scim-mappings/{mappingId}/disable
 GET  /sqlos/admin/auth/api/scim-connections/{connectionId}/sync-events
 ```
 
-Create connection request:
+Creating an enabled connection returns its setup URLs and initial raw token once. Reading the connection later returns URL and token metadata, never the raw token. Rotation returns a replacement raw token once.
 
-```json
-{
-  "displayName": "Acme Entra SCIM",
-  "enabled": true
-}
+Disabling a connection through either the dedicated route or the `PUT` enabled state immediately revokes that connection's managed FGA grants. Disabling or changing a mapping immediately revokes the grants owned by that mapping. Enabling again accepts future provisioning, but an affected group must be pushed or resynchronized before its managed grant is recreated.
+
+These routes require dashboard administrator authorization. The SCIM service-provider routes use the connection token and do not require an administrator browser session.
+
+## Provider notes
+
+- **Okta** commonly queries by `userName`, uses pathless PATCH values, and deactivates with `active: false` instead of DELETE.
+- **Microsoft Entra** uses the Base URL as its Tenant URL and the bearer token as its Secret Token. Start with a small assigned scope before provisioning the entire directory.
+- **Generic SCIM clients** should discover capabilities and use only the filters and PATCH paths described above.
+- **Google Workspace** does not expose a public generic SCIM push client. Its Admin SDK is a separate pull-based integration and is not supported by these service-provider endpoints.
+
+## Validate a deployment
+
+Use read-only discovery and lookup checks before enabling a full sync:
+
+```bash
+export SCIM_BASE_URL="https://app.example.com/sqlos/scim/v2"
+export SCIM_TOKEN="paste-the-token-shown-by-sqlos"
+
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  "$SCIM_BASE_URL/ServiceProviderConfig"
+
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  "$SCIM_BASE_URL/ResourceTypes/User"
+
+curl --fail-with-body --silent --show-error --get \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  --data-urlencode 'filter=emails.value eq "ada@example.com"' \
+  "$SCIM_BASE_URL/Users"
 ```
 
-Create mapping request:
+When working in the SqlOS repository, run the focused SCIM tests and the docs gate:
 
-```json
-{
-  "matchType": "display_name",
-  "groupDisplayName": "Acme-Admins",
-  "roleKey": "org_admin",
-  "resourceId": "organization::acme",
-  "enabled": true
-}
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter 'FullyQualifiedName~SqlOSScim'
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~ScimProtocolIntegrationTests'
+./scripts/docs-check.sh
 ```
-
-## Dashboard
-
-Open **Auth Server > Organizations > SCIM** for a tenant.
-
-The dashboard should include:
-
-- connection status and last sync time
-- SCIM base URL and provider-specific setup notes for Okta, Entra, and generic SCIM clients
-- rotate bearer tokens and copy the newly generated token once
-- code-seeded mapping rules with source labels
-- dashboard-created mapping rules
-- recent user, group, membership, grant, and failure events
-- links into Audit Logs filtered to the organization and `source=scim`
-
-Use source labels such as `seeded`, `dashboard`, and `api` so operators understand whether a value may be overwritten at startup.
-
-## Audit events
-
-Recommended event types:
-
-| Event type | When it is written |
-| --- | --- |
-| `scim.connection.enabled` | SCIM is enabled for an organization |
-| `scim.connection.disabled` | SCIM is disabled |
-| `scim.token.rotated` | A bearer token is generated or rotated |
-| `scim.user.created` | A SCIM user creates a SqlOS user |
-| `scim.user.updated` | SCIM updates user profile or active state |
-| `scim.user.deactivated` | SCIM removes organization access |
-| `scim.group.created` | A SCIM group creates a mirrored FGA group |
-| `scim.group.updated` | Group display name or source metadata changes |
-| `scim.group.deleted` | Group is removed or marked inactive |
-| `scim.group.member_added` | A subject is added to a mirrored group |
-| `scim.group.member_removed` | A subject is removed from a mirrored group |
-| `scim.grant.mapped` | A mapping rule creates a managed grant |
-| `scim.grant.revoked` | A managed grant is removed |
-| `scim.sync.failed` | Any SCIM operation fails after request validation |
-
-Include organization ID, connection ID, SCIM resource type, external ID, SqlOS target IDs, and correlation/request ID where available.
-
-## Security notes
-
-- Hash SCIM bearer tokens before storage.
-- Show the raw token only once during generation or rotation.
-- Scope each token to one organization and one connection.
-- Rate limit invalid token attempts.
-- Accept only SCIM media types and JSON payload sizes appropriate for provisioning.
-- Treat IdP-provided display names as untrusted input.
-- Never let a SCIM request name a different organization than the token's organization.
 
 ## Related
 

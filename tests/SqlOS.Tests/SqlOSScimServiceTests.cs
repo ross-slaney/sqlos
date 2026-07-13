@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
@@ -16,6 +17,8 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSScimServiceTests
 {
+    private const string StrongSeedToken = "scim_seed_token_0123456789abcdef";
+
     [TestMethod]
     public async Task SeededScimConnections_ReconcileConnectionTokenAndMappings()
     {
@@ -29,7 +32,7 @@ public sealed class SqlOSScimServiceTests
         {
             seed.OrganizationSlug = "acme";
             seed.DisplayName = "Acme Directory";
-            seed.Token = "scim_seed_token";
+            seed.Token = StrongSeedToken;
             seed.MapGroup("Store 100 Managers", mapping =>
             {
                 mapping.RoleKey = "store_manager";
@@ -47,16 +50,301 @@ public sealed class SqlOSScimServiceTests
         connection.DisplayName.Should().Be("Acme Directory");
         connection.Source.Should().Be(SqlOSScimSources.Seeded);
         connection.TokenPrefix.Should().Be("scim_seed_to");
-        connection.TokenHash.Should().NotBe("scim_seed_token");
+        connection.TokenHash.Should().NotBe(StrongSeedToken);
         mapping.Source.Should().Be(SqlOSScimSources.Seeded);
         mapping.SourceKey.Should().Be("name:Store 100 Managers");
         mapping.RoleKey.Should().Be("store_manager");
         mapping.ResourceId.Should().Be("store_100");
 
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.Headers.Authorization = "Bearer scim_seed_token";
+        httpContext.Request.Headers.Authorization = $"Bearer {StrongSeedToken}";
         var authenticated = await harness.Scim.AuthenticateAsync(httpContext);
         authenticated.Id.Should().Be(connection.Id);
+    }
+
+    [TestMethod]
+    public async Task SeededScimConnection_RejectsWeakBearerTokenBeforeTrackingConnection()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = "too-short";
+        });
+        var harness = CreateHarness(context, optionsValue);
+
+        var act = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*at least 32 characters*");
+        context.ChangeTracker.Entries<SqlOSScimConnection>().Should().BeEmpty();
+        (await context.Set<SqlOSScimConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SeededScimConnection_RejectsBearerTokenContainingWhitespace()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = "scim_seed_token_with forbidden_space_0123456789";
+        });
+        var harness = CreateHarness(context, optionsValue);
+
+        var act = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot contain whitespace*");
+        (await context.Set<SqlOSScimConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SeededScimConnection_RejectsAmbiguousInlineAndSecretTokenSources()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = StrongSeedToken;
+            seed.TokenSecretName = "ACME_SCIM_TOKEN";
+        });
+        var harness = CreateHarness(context, optionsValue);
+
+        var act = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*either Token or TokenSecretName, not both*");
+        (await context.Set<SqlOSScimConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SeededConnection_ConfigOwnsTokenAndDashboardLifecycle()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = StrongSeedToken;
+        });
+        var harness = CreateHarness(context, optionsValue);
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+        var connection = await context.Set<SqlOSScimConnection>().SingleAsync();
+
+        var rotate = async () => await harness.Admin.RotateScimTokenAsync(connection.Id);
+        var disable = async () => await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, false);
+        await rotate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*startup configuration*");
+        await disable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*startup configuration*");
+
+        var configuredSeed = optionsValue.ScimConnectionSeeds.Single();
+        configuredSeed.Token = null;
+        var missingConfiguredToken = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+        await missingConfiguredToken.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled*did not provide a token*");
+
+        const string replacement = "scim_replacement_seed_token_0123456789abcdef";
+        configuredSeed.Token = replacement;
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        var oldContext = new DefaultHttpContext();
+        oldContext.Request.Headers.Authorization = $"Bearer {StrongSeedToken}";
+        var oldAuth = async () => await harness.Scim.AuthenticateAsync(oldContext);
+        var error = await oldAuth.Should().ThrowAsync<SqlOSScimException>();
+        error.Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        var replacementContext = new DefaultHttpContext();
+        replacementContext.Request.Headers.Authorization = $"Bearer {replacement}";
+        (await harness.Scim.AuthenticateAsync(replacementContext)).Id.Should().Be(connection.Id);
+
+        optionsValue.ScimConnectionSeeds.Clear();
+        optionsValue.SeedScimConnection("acme-renamed", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = replacement;
+        });
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+        var renamedConnections = await context.Set<SqlOSScimConnection>().OrderBy(item => item.CreatedAt).ToListAsync();
+        renamedConnections.Should().HaveCount(2);
+        renamedConnections[0].IsEnabled.Should().BeFalse();
+        renamedConnections[0].TokenHash.Should().BeNull();
+        renamedConnections[1].IsEnabled.Should().BeTrue();
+        (await harness.Scim.AuthenticateAsync(replacementContext)).Id.Should().Be(renamedConnections[1].Id);
+
+        optionsValue.ScimConnectionSeeds.Clear();
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+        var orphanedAuth = async () => await harness.Scim.AuthenticateAsync(replacementContext);
+        var orphanedError = await orphanedAuth.Should().ThrowAsync<SqlOSScimException>();
+        orphanedError.Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        (await context.Set<SqlOSScimConnection>().CountAsync(item => item.IsEnabled)).Should().Be(0);
+
+        optionsValue.SeedScimConnection("acme-renamed", seed => seed.OrganizationSlug = "acme");
+        var resurrectWithoutSecret = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+        await resurrectWithoutSecret.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled*did not provide a token*");
+    }
+
+    [TestMethod]
+    public async Task SeededScimConnection_EnabledWithoutToken_FailsBeforeCreatingConnection()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Enabled = true;
+        });
+        var harness = CreateHarness(context, optionsValue);
+
+        var act = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled*did not provide a token*");
+        context.ChangeTracker.Entries<SqlOSScimConnection>().Should().BeEmpty();
+        (await context.Set<SqlOSScimConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SeededScimConnection_DisabledWithoutToken_IsPersistedForLaterRotation()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Enabled = false;
+        });
+        var harness = CreateHarness(context, optionsValue);
+
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        var connection = await context.Set<SqlOSScimConnection>().SingleAsync();
+        connection.IsEnabled.Should().BeFalse();
+        connection.TokenHash.Should().BeNull();
+        connection.TokenPrefix.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task SeedReconciliation_RevokesAuthorizationForRemovedMappingsAndDisabledConnections()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedScimConnection("acme", seed =>
+        {
+            seed.OrganizationSlug = "acme";
+            seed.Token = StrongSeedToken;
+            seed.MapGroup("Store 100 Managers", mapping =>
+            {
+                mapping.RoleKey = "store_manager";
+                mapping.ResourceId = "store_100";
+            });
+        });
+        var harness = CreateHarness(context, optionsValue);
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+        var connection = await context.Set<SqlOSScimConnection>().SingleAsync();
+        var user = await harness.Scim.UpsertUserAsync(connection, new JsonObject
+        {
+            ["externalId"] = "seed-user",
+            ["userName"] = "seed.user@example.test",
+            ["displayName"] = "Seed User",
+            ["active"] = true
+        }, replace: false);
+        await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "seed-group",
+            ["displayName"] = "Store 100 Managers",
+            ["members"] = new JsonArray(new JsonObject { ["value"] = user["id"]!.GetValue<string>() })
+        }, replace: false);
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(1);
+
+        var seed = optionsValue.ScimConnectionSeeds.Single();
+        seed.GroupMappings.Clear();
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSScimManagedGrant>().CountAsync(item => item.RevokedAt != null)).Should().Be(1);
+        (await context.Set<SqlOSScimGroupMapping>().SingleAsync()).IsEnabled.Should().BeFalse();
+
+        seed.MapGroup("Store 100 Managers", mapping =>
+        {
+            mapping.RoleKey = "store_manager";
+            mapping.ResourceId = "store_100";
+        });
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+        await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "seed-group",
+            ["displayName"] = "Store 100 Managers",
+            ["members"] = new JsonArray(new JsonObject { ["value"] = user["id"]!.GetValue<string>() })
+        }, replace: true);
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(1);
+
+        seed.Enabled = false;
+        await harness.Admin.UpsertSeededScimConnectionsAsync();
+
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSScimConnection>().SingleAsync()).IsEnabled.Should().BeFalse();
+        (await context.Set<SqlOSScimManagedGrant>().CountAsync(item => item.RevokedAt != null)).Should().Be(2);
+    }
+
+    [TestMethod]
+    public async Task CreateScimConnection_ReturnsStrongOneTimeTokenAndPartialPrefix()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+
+        var result = await harness.Admin.CreateScimConnectionAsync(
+            new SqlOSCreateScimConnectionRequest("org_acme", "Acme SCIM", true));
+
+        result.Token.Length.Should().BeGreaterThanOrEqualTo(32);
+        result.TokenPrefix.Length.Should().Be(12);
+        result.TokenPrefix.Should().NotBe(result.Token);
+        result.Token.Should().StartWith(result.TokenPrefix);
+        var connection = await context.Set<SqlOSScimConnection>().SingleAsync();
+        connection.TokenHash.Should().NotBe(result.Token);
+        connection.TokenPrefix.Should().Be(result.TokenPrefix);
+    }
+
+    [TestMethod]
+    public async Task LowLevelConnectionCreation_CannotEnableAConnectionWithoutIssuingAToken()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+
+        var act = async () => await harness.Admin.CreateScimConnectionDraftAsync(
+            new SqlOSCreateScimConnectionRequest("org_acme", "Unsafe SCIM", true));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*CreateScimConnectionAsync*");
+        (await context.Set<SqlOSScimConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task DisabledConnection_CannotBeEnabledUntilATokenHasBeenRotated()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await harness.Admin.CreateScimConnectionDraftAsync(
+            new SqlOSCreateScimConnectionRequest("org_acme", "Draft SCIM", false));
+
+        var act = async () => await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, true);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Rotate a bearer token*");
+        (await context.Set<SqlOSScimConnection>().SingleAsync()).IsEnabled.Should().BeFalse();
     }
 
     [TestMethod]
@@ -103,6 +391,7 @@ public sealed class SqlOSScimServiceTests
 
         await harness.Scim.PatchUserAsync(connection, userId, new JsonObject
         {
+            ["schemas"] = new JsonArray("urn:ietf:params:scim:api:messages:2.0:PatchOp"),
             ["Operations"] = new JsonArray(new JsonObject
             {
                 ["op"] = "replace",
@@ -185,6 +474,232 @@ public sealed class SqlOSScimServiceTests
         (await context.Set<SqlOSFgaGrant>().AnyAsync()).Should().BeFalse();
         (await context.Set<SqlOSScimManagedGrant>().SingleAsync()).RevokedAt.Should().NotBeNull();
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.Action == "scim.grant.revoked" && x.Source == "scim")).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task GroupSync_MediumMembershipBatch_UsesConstantPersistenceAndSummarizedAudit()
+    {
+        const int memberCount = 128;
+        var saveCounter = new CountingSaveChangesInterceptor();
+        using var context = CreateContext(saveCounter);
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+        var members = new JsonArray();
+        for (var index = 0; index < memberCount; index++)
+        {
+            var externalId = $"idp-user-{index:D3}";
+            await harness.Scim.UpsertUserAsync(connection, new JsonObject
+            {
+                ["externalId"] = externalId,
+                ["userName"] = $"person-{index:D3}@example.test",
+                ["displayName"] = $"Person {index:D3}",
+                ["active"] = true
+            }, replace: false);
+            members.Add(new JsonObject { ["value"] = externalId });
+        }
+
+        saveCounter.Reset();
+        var group = await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "idp-group-medium",
+            ["displayName"] = "Medium Directory Group",
+            ["members"] = members
+        }, replace: false);
+
+        saveCounter.Count.Should().Be(3, "membership persistence should not grow with the number of members");
+        (await context.Set<SqlOSFgaUserGroupMembership>().CountAsync()).Should().Be(memberCount);
+
+        var memberAudit = await context.Set<SqlOSAuditEvent>()
+            .Where(item => item.Action == "scim.group.member_added" && item.Source == "scim")
+            .SingleAsync();
+        var memberEvent = await context.Set<SqlOSScimSyncEvent>()
+            .Where(item => item.Action == "scim.group.member_added")
+            .SingleAsync();
+        memberAudit.MetadataJson.Should().NotBeNullOrWhiteSpace();
+        var eventData = JsonNode.Parse(memberEvent.DataJson!).Should().BeOfType<JsonObject>().Subject;
+        eventData["groupId"]!.GetValue<string>().Should().Be(group["id"]!.GetValue<string>());
+        eventData["memberCount"]!.GetValue<int>().Should().Be(memberCount);
+        eventData["subjectIds"]!.AsArray().Should().HaveCount(100);
+        eventData["truncated"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ProtocolMutation_OpportunisticallyCleansOneDeterministicBoundedBatchOfExpiredCommitMarkers()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+        var expiredAt = DateTime.UtcNow.AddDays(-2);
+        context.Set<SqlOSScimOperationCommit>().AddRange(Enumerable.Range(0, 300).Select(index =>
+            new SqlOSScimOperationCommit
+            {
+                Id = $"expired_{index:D4}",
+                OccurredAt = expiredAt
+            }));
+        context.Set<SqlOSScimOperationCommit>().Add(new SqlOSScimOperationCommit
+        {
+            Id = "recent_marker",
+            OccurredAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        await harness.Scim.UpsertUserAsync(connection, new JsonObject
+        {
+            ["externalId"] = "cleanup-user",
+            ["userName"] = "cleanup@example.test",
+            ["displayName"] = "Cleanup User",
+            ["active"] = true
+        }, replace: false);
+
+        var remainingExpiredIds = await context.Set<SqlOSScimOperationCommit>()
+            .Where(marker => marker.OccurredAt == expiredAt)
+            .OrderBy(marker => marker.Id)
+            .Select(marker => marker.Id)
+            .ToListAsync();
+        remainingExpiredIds.Should().Equal(
+            Enumerable.Range(256, 44).Select(index => $"expired_{index:D4}"),
+            "normal protocol traffic should retire only the oldest 256-row batch");
+        (await context.Set<SqlOSScimOperationCommit>().AnyAsync(marker => marker.Id == "recent_marker"))
+            .Should().BeTrue();
+
+        await harness.Scim.UpsertUserAsync(connection, new JsonObject
+        {
+            ["externalId"] = "cleanup-user",
+            ["userName"] = "cleanup@example.test",
+            ["displayName"] = "Cleanup User Updated",
+            ["active"] = true
+        }, replace: false);
+
+        (await context.Set<SqlOSScimOperationCommit>().AnyAsync(marker => marker.OccurredAt == expiredAt))
+            .Should().BeFalse("later protocol operations should continue draining an old backlog");
+        (await context.Set<SqlOSScimOperationCommit>().AnyAsync(marker => marker.Id == "recent_marker"))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ExternalIdMapping_IsCaseExactForAuthorization()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+        await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.ExternalId,
+            GroupDisplayName: null,
+            GroupExternalId: "Admin",
+            GroupPattern: null,
+            RoleKey: "store_manager",
+            ResourceId: "store_100",
+            ResourceIdTemplate: null,
+            Enabled: true));
+
+        await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "admin",
+            ["displayName"] = "Case-different group",
+            ["members"] = new JsonArray()
+        }, replace: false);
+
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSScimManagedGrant>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task PatternMapping_RenameToMissingResource_RevokesPreviousGrantAndRecordsFailure()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+        await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.Pattern,
+            GroupDisplayName: null,
+            GroupExternalId: null,
+            GroupPattern: "^Store (?<store>.+) Managers$",
+            RoleKey: "store_manager",
+            ResourceId: null,
+            ResourceIdTemplate: "store_{store}",
+            Enabled: true));
+
+        var group = await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "idp-group-pattern",
+            ["displayName"] = "Store 100 Managers",
+            ["members"] = new JsonArray()
+        }, replace: false);
+        (await context.Set<SqlOSFgaGrant>().SingleAsync()).ResourceId.Should().Be("store_100");
+
+        await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "idp-group-pattern",
+            ["displayName"] = "Store 200 Managers",
+            ["members"] = new JsonArray()
+        }, replace: false);
+
+        (await context.Set<SqlOSFgaGrant>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSScimManagedGrant>().SingleAsync()).RevokedAt.Should().NotBeNull();
+        (await context.Set<SqlOSScimSyncEvent>().AnyAsync(x =>
+            x.ResourceId == group["id"]!.GetValue<string>()
+            && x.Action == "scim.grant.resource_missing"
+            && x.Result == "failed")).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UpdateScimGroupMapping_InvalidRegex_DoesNotRevokeExistingGrantOrMutateMapping()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        await SeedFgaRoleAndResourceAsync(context);
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+        var mapping = await harness.Admin.CreateScimGroupMappingAsync(connection.Id, new SqlOSCreateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.DisplayName,
+            "Store 100 Managers",
+            GroupExternalId: null,
+            GroupPattern: null,
+            RoleKey: "store_manager",
+            ResourceId: "store_100",
+            ResourceIdTemplate: null,
+            Enabled: true));
+        var user = await harness.Scim.UpsertUserAsync(connection, new JsonObject
+        {
+            ["externalId"] = "idp-user-regex",
+            ["userName"] = "regex.user@example.test",
+            ["displayName"] = "Regex User",
+            ["active"] = true
+        }, replace: false);
+        await harness.Scim.UpsertGroupAsync(connection, new JsonObject
+        {
+            ["externalId"] = "idp-group-regex",
+            ["displayName"] = "Store 100 Managers",
+            ["members"] = new JsonArray(new JsonObject { ["value"] = user["id"]!.GetValue<string>() })
+        }, replace: false);
+        var grantId = (await context.Set<SqlOSFgaGrant>().SingleAsync()).Id;
+
+        var act = async () => await harness.Admin.UpdateScimGroupMappingAsync(mapping.Id, new SqlOSUpdateScimGroupMappingRequest(
+            SqlOSScimGroupMappingMatchTypes.Pattern,
+            GroupDisplayName: null,
+            GroupExternalId: null,
+            GroupPattern: "(",
+            RoleKey: "store_manager",
+            ResourceId: "store_100",
+            ResourceIdTemplate: null,
+            Description: "invalid replacement",
+            Enabled: true));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not a valid regular expression*");
+        (await context.Set<SqlOSFgaGrant>().SingleAsync()).Id.Should().Be(grantId);
+        (await context.Set<SqlOSScimManagedGrant>().SingleAsync()).RevokedAt.Should().BeNull();
+        var persisted = await context.Set<SqlOSScimGroupMapping>().SingleAsync(x => x.Id == mapping.Id);
+        persisted.MatchType.Should().Be(SqlOSScimGroupMappingMatchTypes.DisplayName);
+        persisted.GroupDisplayName.Should().Be("Store 100 Managers");
+        persisted.GroupPattern.Should().BeNull();
+        persisted.IsEnabled.Should().BeTrue();
     }
 
     [TestMethod]
@@ -276,7 +791,6 @@ public sealed class SqlOSScimServiceTests
         });
         context.Set<SqlOSMembership>().Add(new SqlOSMembership
         {
-            Id = "mem_other",
             OrganizationId = "org_other",
             UserId = "usr_other",
             Role = "member",
@@ -324,8 +838,9 @@ public sealed class SqlOSScimServiceTests
 
     private static async Task<SqlOSScimConnection> CreateConnectionAsync(SqlOSAdminService admin)
     {
-        var connection = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnectionRequest("org_acme", "Acme SCIM", true));
-        return connection;
+        var connection = await admin.CreateScimConnectionDraftAsync(new SqlOSCreateScimConnectionRequest("org_acme", "Acme SCIM", false));
+        await admin.RotateScimTokenAsync(connection.Id);
+        return await admin.SetScimConnectionEnabledAsync(connection.Id, true);
     }
 
     private static async Task SeedOrganizationAsync(TestSqlOSInMemoryDbContext context)
@@ -365,12 +880,31 @@ public sealed class SqlOSScimServiceTests
         await context.SaveChangesAsync();
     }
 
-    private static TestSqlOSInMemoryDbContext CreateContext()
+    private static TestSqlOSInMemoryDbContext CreateContext(CountingSaveChangesInterceptor? saveCounter = null)
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-            .Options;
-        return new TestSqlOSInMemoryDbContext(options);
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"));
+        if (saveCounter != null)
+        {
+            options.AddInterceptors(saveCounter);
+        }
+        return new TestSqlOSInMemoryDbContext(options.Options);
+    }
+
+    private sealed class CountingSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        public int Count { get; private set; }
+
+        public void Reset() => Count = 0;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Count++;
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     private sealed record Harness(SqlOSAdminService Admin, SqlOSScimService Scim);

@@ -201,11 +201,18 @@ public sealed class SqlOSScimExternalId
     public string Id { get; set; } = string.Empty;
     public string ConnectionId { get; set; } = string.Empty;
     public string ResourceType { get; set; } = "User";
-    public string ExternalId { get; set; } = string.Empty;
+    public string? ExternalId { get; set; }
     public string EntityId { get; set; } = string.Empty;
     public string? FgaSubjectId { get; set; }
+    public string? UserName { get; set; }
+    public string? PrimaryEmail { get; set; }
     public string? DisplayName { get; set; }
+    public string? FormattedName { get; set; }
+    public string? GivenName { get; set; }
+    public string? FamilyName { get; set; }
+    public bool OwnsUserLifecycle { get; set; }
     public bool IsActive { get; set; } = true;
+    public DateTime? DeletedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime LastSyncedAt { get; set; }
@@ -270,6 +277,12 @@ public sealed class SqlOSScimSyncEvent
 
     public SqlOSScimConnection? Connection { get; set; }
     public SqlOSOrganization? Organization { get; set; }
+}
+
+public sealed class SqlOSScimOperationCommit
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime OccurredAt { get; set; }
 }
 
 public sealed class SqlOSSsoPortalSession

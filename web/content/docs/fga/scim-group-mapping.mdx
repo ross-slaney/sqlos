@@ -5,128 +5,161 @@ order: 15
 section: fga
 ---
 
-SCIM group sync is most useful when it feeds the same authorization model your application already uses. SqlOS mirrors IdP groups into FGA user groups, then optionally maps selected groups to roles on resources.
+SCIM group sync feeds the same authorization model your application already uses. The identity provider is the SCIM client: it writes Group resources and membership to SqlOS. SqlOS mirrors those groups into FGA and can optionally map selected groups to roles on existing resources.
 
-## Default behavior
+## Mirroring is the default
 
-Every synced SCIM group should become an FGA user group:
+Every provisioned Group becomes an FGA user group:
 
 | SCIM input | FGA result |
 | --- | --- |
-| group external ID | stable source link for the mirrored group |
-| group display name | `SqlOSFgaUserGroup.Name` |
-| group member | `SqlOSFgaUserGroupMembership` for the member subject |
-| group deletion | remove or deactivate SCIM-owned memberships and mark source state |
+| `externalId` | stable, connection-scoped source link |
+| `displayName` | mirrored group name |
+| `members[].value` | membership for the linked SqlOS user subject |
+| Group rename | update the existing group rather than create a duplicate |
+| Group deletion | remove directory-owned memberships and mapped grants; mark the external link inactive |
 
-This default does not grant access by itself. It makes directory groups visible to the normal FGA and application access tools.
+Mirroring does not grant a role by itself. It makes the directory group available to FGA grants, application access assignments, the dashboard, and the access tester.
 
-## Why mapping is separate
+<Callout type="info" title="Membership source of truth">
+  Manage membership through `Group.members`; SqlOS does not accept `User.groups` as a writable attribute. Manual edits to a mirrored SCIM group's membership may be replaced by the next IdP PUT, PATCH, deactivation, or resync. Memberships in unrelated, non-SCIM FGA groups are not touched.
+</Callout>
 
-Most IdP groups are directory structure, not product authorization. Mapping every group to a grant would create accidental access. SqlOS keeps the steps separate:
+## Supported group protocol
 
-1. Mirror SCIM groups into FGA user groups.
-2. Match only selected groups against mapping rules.
-3. Create or revoke SCIM-managed grants for matched groups.
-4. Leave unmatched groups available for manual grants, application assignments, and access testing.
+Group collections support only the exact reconciliation filters used by enterprise IdPs:
+
+```text
+id eq "grp_123"
+displayName eq "Acme-Admins"
+externalId eq "00g123"
+```
+
+The operator is `eq`; compound filters and operators such as `co`, `sw`, or `pr` return `invalidFilter`.
+
+Group PUT and PATCH support:
+
+- replacing `displayName`
+- replacing the full `members` collection
+- adding one or more members
+- removing one or more members
+- removing one member with `members[value eq "{user-id}"]`
+- pathless Okta-style values containing `displayName` or `members`
+
+Add a member:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "add",
+      "path": "members",
+      "value": [
+        { "value": "usr_123" }
+      ]
+    }
+  ]
+}
+```
+
+Remove the same member:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  "Operations": [
+    {
+      "op": "remove",
+      "path": "members[value eq \"usr_123\"]"
+    }
+  ]
+}
+```
+
+Membership values may be the SqlOS SCIM User `id` or the user's external ID on the same connection. References from another connection or organization are not resolved. Adding an existing member or removing an absent member succeeds without creating duplicate state.
+
+## Why authorization mapping is separate
+
+Most enterprise directory groups describe departments, mailing lists, or assignments—not application permissions. Automatically granting every synced group would create accidental access. SqlOS keeps the safe sequence explicit:
+
+1. Mirror every pushed directory group into an FGA user group.
+2. Match only approved groups against enabled mapping rules.
+3. Create a role grant for the matched group subject on a known resource.
+4. Track that grant as SCIM managed so SqlOS can revoke only the access it created.
+
+Unmatched groups remain available for deliberate manual grants and application assignments.
 
 ## Exact group mapping
 
-Use exact mappings when the IdP group has a stable name or external ID:
+Use an exact mapping when the IdP group has a stable display name:
 
 ```csharp
 scim.MapGroup("Acme-Admins", mapping =>
 {
     mapping.RoleKey = "org_admin";
     mapping.ResourceId = "organization::acme";
-    mapping.Description = "Directory-managed organization admins";
+    mapping.Description = "Directory-managed organization administrators";
 });
 ```
 
-The mapped grant should use the group subject, not each user directly. FGA already expands group membership during access checks, so membership changes do not need to rewrite every per-user grant.
+Use `MapGroupExternalId` instead when the provider's group ID is stable but administrators may rename its display name.
+
+The resulting FGA grant uses the mirrored group subject, not one grant per user. FGA expands membership during access checks, so an IdP membership change updates authorization without rewriting each user's grants.
 
 ## Pattern mapping
 
-Use pattern mappings for repeatable tenant resources:
+Use pattern mappings for a controlled family of resources:
 
 ```csharp
-scim.MapGroupPattern("Store-(?<storeId>.+)-Managers", mapping =>
+scim.MapGroupPattern("^Store-(?<storeId>[^-]+)-Managers$", mapping =>
 {
     mapping.RoleKey = "store_manager";
     mapping.ResourceIdTemplate = "store::{storeId}";
 });
 ```
 
-When the IdP pushes `Store-123-Managers`, SqlOS can resolve:
+For `Store-123-Managers`, the mapping resolves `storeId` to `123` and targets `store::123`.
 
-| Captured value | Grant field |
-| --- | --- |
-| `storeId = 123` | `ResourceId = store::123` |
-| `RoleKey = store_manager` | matching FGA role |
-| mirrored group subject | grant subject |
-
-Validate that every rendered resource ID already exists or can be created by your application's resource sync. A mapping rule should not silently create authorization roots that do not match your product model.
+Keep patterns anchored and narrow. SqlOS bounds regular-expression evaluation, but a broad pattern can still map an unintended group. The target role and resource must already exist; a mapping does not invent new authorization roots.
 
 ## Ownership and revocation
 
-SCIM-managed grants need source metadata:
+Managed-grant metadata records the connection, mapping, external group ID, FGA group, role, resource, and grant. SqlOS uses that ownership to revoke only the access it created when:
 
-| Field | Reason |
-| --- | --- |
-| connection ID | revoke grants when a connection is disabled |
-| mapping rule ID | update grants when a rule changes |
-| group external ID | reconcile grant state after group rename |
-| source type | distinguish SCIM-managed grants from manual grants |
+- a group no longer matches the mapping during reconciliation
+- a mapping is disabled or changed through the admin service
+- its SCIM connection is disabled
+- the IdP deletes the group
 
-That metadata lets SqlOS revoke only the access it owns:
+User membership changes do not delete the group grant. They add or remove the user's subject from the group, and FGA access changes through the existing group grant.
 
-- group no longer matches the rule
-- rule is disabled or replaced
-- group is deleted in the IdP
-- user leaves the IdP group
-- user is deprovisioned from the organization
-- SCIM connection is disabled
+Changing or disabling a mapping immediately revokes the grants owned by that mapping. Disabling a connection immediately rejects its bearer token and revokes every managed grant owned by the connection. Mirrored groups, memberships, history, manual grants, non-SCIM groups, and unrelated FGA state remain intact.
 
-Manual grants and dashboard-created non-SCIM group memberships should remain intact.
+Re-enabling a connection or mapping allows future provisioning but does not recreate revoked grants by itself. Push or resynchronize the affected groups after re-enabling so SqlOS can evaluate the current mapping and recreate the grants that should exist.
+
+Manual grants and non-SCIM groups remain intact. Disabling or changing a mapping must not remove a grant that was not created and tracked by that mapping.
+
+## Deprovisioning and tenant isolation
+
+When the IdP sends `active: false` or deletes a User, SqlOS removes that user's memberships from the connection's mirrored groups and deactivates the user's organization membership. The person immediately loses group-derived access in that organization.
+
+The same SqlOS user can still be active in another organization. SCIM does not remove that other tenant's membership, sessions, FGA groups, or grants. Bearer-token scope, external IDs, Group resources, and membership resolution all remain within one connection and organization.
 
 ## Dashboard workflow
 
-Open **Fine-Grained Auth > User Groups** to inspect mirrored groups and group membership. Open the organization's **Auth Server > SCIM** tab to manage mapping rules.
+1. Open **Auth Server > Organizations > SCIM** and confirm the connection is receiving groups.
+2. Open **Fine-Grained Auth > User Groups** to inspect the mirrored group and members.
+3. Add an exact-name, external-ID, or pattern mapping on the organization's SCIM tab.
+4. Enter the exact existing FGA role key and resource ID, or a resource template.
+5. Push or update the group from the IdP.
+6. Use the access tester to verify the user's explanation includes the group and mapped role.
 
-The mapping editor should show:
-
-- source group name or external ID
-- match mode: exact name, external ID, or pattern
-- target role
-- target resource or resource template
-- source: seeded, API, or dashboard
-- last applied result
-- warnings for missing roles, missing resources, or ambiguous pattern matches
-
-Use the access tester to verify a synced user receives access through the mapped group.
-
-## Access check behavior
-
-FGA checks already resolve a subject to:
-
-- the user subject
-- any FGA groups the user belongs to
-- roles granted directly to the user
-- roles granted to those groups
-
-That means a SCIM user can inherit access through a group grant without adding application-specific join logic.
-
-```text
-user:ada
-  member of group:Acme-Admins
-    grant role org_admin on organization::acme
-      permission workspace.manage on descendant workspaces
-```
+The mapping editor shows the match mode, source group value, target role/resource, source (`seeded` or `dashboard`), enabled state, and active managed-grant count. Persisted sync events report missing roles and missing resources; patterns that exceed the bounded evaluation time are returned to the SCIM client as request errors.
 
 ## Application access
 
-Application assignments can also use FGA groups. If a SCIM group is mirrored into FGA, the same group can be assigned to a client application in `selected_users_groups_roles` mode.
-
-Use this for app availability:
+A mirrored FGA group can also be assigned to a client application in `selected_users_groups_roles` mode:
 
 ```json
 {
@@ -136,18 +169,59 @@ Use this for app availability:
 }
 ```
 
-Use FGA grants for permissions inside the app. Keep those two decisions separate: application access decides whether the app can be used; FGA decides what the user can do after they are inside.
+Application access and FGA permissions are separate decisions. The application assignment controls whether a user can use the client. The FGA grant controls what the user can do inside the application.
+
+## Validate group sync
+
+Query a group without changing it:
+
+```bash
+export SCIM_BASE_URL="https://app.example.com/sqlos/scim/v2"
+export SCIM_TOKEN="paste-the-token-shown-by-sqlos"
+
+curl --fail-with-body --silent --show-error --get \
+  -H "Authorization: Bearer $SCIM_TOKEN" \
+  -H "Accept: application/scim+json" \
+  --data-urlencode 'filter=displayName eq "Acme-Admins"' \
+  "$SCIM_BASE_URL/Groups"
+```
+
+For repository validation, run the focused SCIM suite and docs gate:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter 'FullyQualifiedName~SqlOSScim'
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~ScimProtocolIntegrationTests'
+./scripts/docs-check.sh
+```
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| IdP cannot find a group | Use one supported exact `eq` filter and confirm the token belongs to the group's organization |
+| Member add returns `invalidValue` | Provision the user first and send that connection's User `id` or `externalId` |
+| Filtered remove fails | Use `members[value eq "..."]` with a User identifier, not `User.groups` |
+| Group mirrors but no grant appears | Confirm the mapping is enabled and its role and target resource already exist |
+| Rename creates unexpected authorization | Prefer an external-ID mapping when provider group names are mutable |
+| Deprovisioned user still has access | Inspect non-SCIM groups, direct grants, application assignments, and memberships in other organizations |
+| Mapping failure appears in sync events | Correct the role, resource, or template capture, then resend the group |
+| Group request fails during pattern matching | Correct or simplify the pattern from the SCIM error response, then resend the group |
 
 ## Testing checklist
 
 - group is mirrored with a stable subject ID
-- group rename does not create a duplicate FGA group
-- member add creates one membership and is idempotent
-- member removal removes only SCIM-owned membership
-- exact mapping creates one group grant
-- pattern mapping renders the expected resource ID
-- disabled mapping revokes SCIM-managed grants
-- deprovisioned user loses group-derived access
+- rename updates rather than duplicates the group
+- exact `eq` lookup works for ID, display name, and external ID
+- full replacement produces exactly the requested membership set
+- add and filtered remove are idempotent
+- cross-connection and cross-organization members are rejected with `invalidValue`
+- exact and pattern mappings create one tracked group grant
+- disabling a mapping immediately revokes only its managed grant
+- disabling a connection immediately revokes all grants managed by that connection
+- re-enabling requires an affected-group push or resync before managed grants return
+- User deprovisioning removes group-derived access only in the connection's organization
 - access tester explains the group path
 
 ## Related
