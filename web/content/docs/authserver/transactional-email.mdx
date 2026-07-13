@@ -7,6 +7,10 @@ section: authserver
 
 Transactional email is the audited template system for operational messages and built-in AuthServer email. Every SqlOS implementation automatically gets templates for Email OTP, organization invitations, and password reset emails during startup.
 
+<Callout type="tip" title="Build one application email end to end">
+  Follow [Send transactional email](/docs/guides/transactional-email) to create, preview, send, retry, and inspect a real product template. This page remains the compact contract and operations reference.
+</Callout>
+
 ## Configure ACS Email
 
 SqlOS ships an Azure Communication Services sender:
@@ -71,3 +75,8 @@ Email OTP, organization invitations, and password reset emails use the built-in 
 Upgrade behavior is additive for normal AuthServer email configuration. Existing `AuthServer.ConfigureEmailOtp(...)` ACS settings continue to work; configuring `options.Email` is optional unless you want separate transactional email credentials.
 
 Existing custom `BuildMessage` hooks still send through `ISqlOSAuthEmailSender`. Existing custom `ISqlOSAuthEmailSender` implementations also remain usable as the default rendered-template sender when no `options.Email` ACS sender is configured. Hosts that want a separate provider for all transactional templates can register `ISqlOSEmailSender` directly.
+
+## Next steps
+
+- [Send transactional email](/docs/guides/transactional-email)
+- [Email Branding](/docs/authserver/email-branding)

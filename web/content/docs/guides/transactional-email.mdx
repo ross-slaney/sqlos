@@ -1,0 +1,230 @@
+---
+title: "Send transactional email"
+description: "Create, preview, send, retry, and inspect an application-owned email template."
+order: 18
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Send a retry-safe product email"
+  href="/docs/authserver/transactional-email"
+  actionLabel="Transactional email reference"
+>
+  Build an `order-shipped` template, send it from trusted server code, and inspect the persisted delivery record without creating a second email subsystem.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - SqlOS is registered with `AddSqlOS<TContext>()` and mapped with `MapSqlOS()`
+  - The host can open the password-protected SqlOS dashboard
+  - Azure Communication Services Email is configured, or the host has registered its own `ISqlOSEmailSender`
+</Callout>
+
+## Goal
+
+When an order ships, your application should:
+
+1. render one stored template with server-owned order data;
+2. submit the message once even when the operation is retried;
+3. record the template version and provider outcome;
+4. let an operator inspect the result without storing the original variables object.
+
+![An order event rendered through a versioned template into one retry-safe email delivery](/docs/guides-transactional-email.svg)
+
+## 1. Configure delivery
+
+SqlOS includes an Azure Communication Services Email sender. Read its credentials from user secrets in development and a managed secret store in production:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.ConfigureEmail(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"];
+        email.FromAddress =
+            builder.Configuration["SqlOS:Email:FromAddress"];
+
+        email.EnableIdempotency = true;
+        email.PersistRenderedHtmlPreview = false;
+        email.DeliveryRetention = TimeSpan.FromDays(90);
+    });
+});
+```
+
+Never commit the connection string. `scripts/azure/setup-acs-email.sh` can provision the Azure resources and DNS verification records.
+
+If Azure Communication Services is not the right provider, register an application-owned `ISqlOSEmailSender`. The template, validation, idempotency, delivery-history, and dashboard behavior remain the same.
+
+<Callout type="warning" title="Retention is a policy value, not a cleanup job">
+  `DeliveryRetention` records the host's intended retention period. SqlOS does not currently delete old delivery rows automatically. Implement a reviewed cleanup job if the policy must be enforced automatically.
+</Callout>
+
+## 2. Create the template
+
+Open **SqlOS Dashboard > Communications > Email Templates** and create:
+
+| Field | Value |
+| --- | --- |
+| Key | `order-shipped` |
+| Display name | `Order shipped` |
+| Subject | `Order {orderId} has shipped` |
+| HTML | `<p>Order <strong>{orderId}</strong> has shipped.</p><p><a href="{trackingUrl}">Track your order</a></p>` |
+| Text | `Order {orderId} has shipped. Track it at {trackingUrl}` |
+
+Template keys are unique. Content changes increment the stored template version, so each delivery records the exact version it rendered. An inactive template cannot be previewed or sent.
+
+Deleting an unused template removes it. Once a template has delivery history, the dashboard deactivates it instead so past deliveries keep their template relationship.
+
+## 3. Preview with representative values
+
+Use the dashboard preview before sending. You can also make preview part of an internal publishing or smoke-test workflow:
+
+```csharp
+var preview = await email.PreviewAsync(
+    "order-shipped",
+    new Dictionary<string, object?>
+    {
+        ["orderId"] = "A-1042",
+        ["trackingUrl"] = "https://tracking.example.test/A-1042"
+    },
+    ct);
+```
+
+The renderer has deliberately small semantics:
+
+- `{variable}` is the only placeholder syntax;
+- substitutions in HTML are HTML-encoded;
+- subject and text substitutions are plain text;
+- a missing variable fails preview and send;
+- extra variables are ignored.
+
+HTML encoding prevents a value from becoming injected markup. It does **not** decide whether an order exists, whether a recipient may see it, or whether a URL scheme is safe. Generate `trackingUrl` on the trusted server from an allowlisted HTTPS origin.
+
+<Callout type="warning" title="Preview is an operator surface">
+  Do not expose a public endpoint that accepts an arbitrary template key and variables and returns rendered output. Keep preview, template management, and test sends behind the same operator authorization as the dashboard.
+</Callout>
+
+## 4. Send from a trusted business workflow
+
+Inject `ISqlOSTransactionalEmailService` into the application service or endpoint that owns the shipment transition. Resolve the recipient and tracking URL from authorized server-side data rather than accepting them as trusted browser input:
+
+```csharp
+public sealed class ShipmentNotifier(
+    OrdersDbContext db,
+    ISqlOSTransactionalEmailService email)
+{
+    public async Task<SqlOSSendEmailResult> NotifyAsync(
+        string orderId,
+        string organizationId,
+        CancellationToken ct)
+    {
+        var order = await db.Orders.SingleAsync(
+            x => x.Id == orderId && x.OrganizationId == organizationId,
+            ct);
+
+        if (order.ShippedAt is null)
+        {
+            throw new InvalidOperationException("The order has not shipped.");
+        }
+
+        var trustedTrackingUrl =
+            $"https://tracking.example.com/orders/{Uri.EscapeDataString(order.Id)}";
+
+        return await email.SendAsync(new SqlOSSendEmailRequest(
+            TemplateKey: "order-shipped",
+            To: order.CustomerEmail,
+            Variables: new Dictionary<string, object?>
+            {
+                ["orderId"] = order.Id,
+                ["trackingUrl"] = trustedTrackingUrl
+            },
+            IdempotencyKey: $"order:{order.Id}:shipped"),
+            ct);
+    }
+}
+```
+
+The key describes the business event, not the HTTP attempt. Calling `NotifyAsync` again with `order:A-1042:shipped` returns the existing delivery and does not submit a second message. A random GUID on every retry defeats that protection.
+
+Choose the event boundary carefully. If a later reshipment should send another email, give it a distinct stable event identifier such as `order:A-1042:shipment:2`.
+
+<Callout type="warning" title="A transaction still needs application design">
+  Updating the order and calling `SendAsync` are not automatically one atomic operation. If the shipment commit and notification must never diverge, persist an outbox event with the shipment and process it with the same stable idempotency key.
+</Callout>
+
+## 5. Interpret the result correctly
+
+`SendAsync` returns the delivery id, status, template key/version, provider message id, and a sanitized error when submission fails.
+
+| Status | Meaning |
+| --- | --- |
+| `queued` | The configured provider accepted the submission |
+| `failed` | Configuration or provider submission failed; the sanitized outcome was persisted |
+
+`queued` does not prove that the recipient's mail server or inbox accepted the message. SqlOS does not currently process delivery webhooks, bounces, or open events.
+
+Template lookup and rendering happen before a delivery is submitted. A missing or inactive template and a missing required variable raise an error instead of contacting the provider.
+
+## 6. Inspect delivery history
+
+Open **SqlOS Dashboard > Communications > Email Messages**. Filter by status, template key, recipient, or date range.
+
+For each custom-template delivery SqlOS records:
+
+- recipient;
+- template key and version;
+- pending, queued, or failed status and timestamps;
+- provider message id when available;
+- sanitized failure detail;
+- rendered subject and rendered text preview;
+- rendered HTML only when `PersistRenderedHtmlPreview` is enabled.
+
+SqlOS does not store the arbitrary variables dictionary. That does not make variables consequence-free: their substituted values can appear in the stored subject and text preview.
+
+<Callout type="warning" title="Do not render secrets">
+  Never place passwords, access or refresh tokens, API keys, reset tokens, private URLs, or other credentials in a custom template. Keep secret-bearing auth flows on the built-in templates or another purpose-built protected channel.
+</Callout>
+
+Provider errors are sanitized before they are returned, logged as delivery detail, or added to the audit event. Treat sanitized output as operational context, not a complete provider trace.
+
+## 7. Understand built-in auth email
+
+SqlOS seeds three built-in templates:
+
+- `auth.email-otp`
+- `auth.invitation`
+- `auth.password-reset`
+
+You can edit their copy in **Communications > Email Templates**. Their rendered text and HTML are suppressed from delivery history because they contain codes or token-bearing links.
+
+Use [Email Branding](/docs/authserver/email-branding) for shared product identity and colors. Existing `BuildMessage` callbacks and custom `ISqlOSAuthEmailSender` implementations remain the advanced escape hatch for auth-specific layouts or provider behavior.
+
+This subsystem is for operational product email. It does not provide campaigns, subscriber lists, preference management, or marketing-email compliance workflows.
+
+## 8. Verify the integration
+
+Before production, prove each boundary:
+
+- a complete preview renders the expected subject, HTML, and text;
+- omitting `trackingUrl` fails before provider submission;
+- two sends with `order:A-1042:shipped` return one delivery and perform one provider submission;
+- a distinct shipment event produces a new delivery;
+- an inactive template cannot be sent;
+- provider failures store only sanitized detail;
+- the three built-in templates suppress secret-bearing rendered content;
+- the dashboard shows the exact template version used.
+
+The repository's focused regression suite exercises these semantics:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter FullyQualifiedName~SqlOSTransactionalEmailTests
+```
+
+## Next steps
+
+- [Transactional Email reference](/docs/authserver/transactional-email)
+- [Email Branding](/docs/authserver/email-branding)
+- [Audit Logs](/docs/guides/audit-logs)
+- [Production Readiness](/docs/guides/production-readiness)
