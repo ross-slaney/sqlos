@@ -1295,4 +1295,3 @@ public sealed class SqlOSExampleApiIntegrationTests
         }
     }
 }
-

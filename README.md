@@ -162,4 +162,3 @@ dotnet build SqlOS.sln
 ```
 
 SqlOS is MIT licensed. Issues and contributions are welcome in this repository.
-

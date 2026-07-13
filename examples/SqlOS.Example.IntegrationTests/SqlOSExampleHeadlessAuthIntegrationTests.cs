@@ -228,4 +228,3 @@ public sealed class SqlOSExampleHeadlessAuthIntegrationTests
         return WebEncoders.Base64UrlEncode(bytes);
     }
 }
-
