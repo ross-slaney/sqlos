@@ -299,7 +299,7 @@ public sealed class SqlOSCimdClientServiceTests
             "https://client.example.test/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*redirect*not allowed*");
+            .WithMessage("*fetch failed*");
         httpFactory.RequestCount.Should().Be(1);
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.fetch-failed"
             && (x.DataJson ?? string.Empty).Contains("redirect"))).Should().BeTrue();

@@ -120,7 +120,7 @@ public sealed class SqlOSCimdClientService
                     redirect_location = response.Headers.Location?.ToString()
                 },
                 cancellationToken);
-            throw new InvalidOperationException("Client metadata document redirect is not allowed.");
+            throw new InvalidOperationException("Client metadata document fetch failed.");
         }
 
         if (response.StatusCode != HttpStatusCode.OK)
