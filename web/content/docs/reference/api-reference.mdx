@@ -294,7 +294,7 @@ Actions return `SqlOSHeadlessActionResult`. This abridged response shows the con
 
 Keep `requestId` from the view model and send it in subsequent action requests. A completed action returns `type: "redirect"` with the registered client redirect URL; organization selection and MFA instead return another `view`. Validation failures currently use route-specific `400` bodies rather than one universal error object.
 
-For browser clients on a different origin, send credentialed requests so the reusable AuthPage session cookie is preserved. The cookie is HttpOnly; the response view model and action result are the UI contract. See [Headless Auth](/docs/authserver/headless-auth) for request/response walkthroughs.
+For browser clients on a different origin, send credentialed requests so the reusable AuthPage session cookie is preserved. The cookie is HttpOnly; the response view model and action result are the UI contract. See [Build your own login and signup UI](/docs/guides/custom-login-ui) for the complete browser, PKCE, callback, CORS, and cookie walkthrough, or [Headless Auth](/docs/authserver/headless-auth) for feature details.
 
 ## Social OIDC and SAML callbacks
 
