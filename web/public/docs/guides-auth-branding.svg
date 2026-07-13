@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Consistent branding across hosted authentication and email</title>
+  <desc id="desc">Acme product colors and logo appear on a hosted sign-in page and a password reset email, with startup or dashboard ownership feeding both surfaces.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1021"/>
+      <stop offset="1" stop-color="#22164a"/>
+    </linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="15" stdDeviation="18" flood-color="#020617" flood-opacity=".5"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="675" rx="28" fill="url(#bg)"/>
+  <circle cx="1090" cy="80" r="210" fill="#8b5cf6" opacity=".12"/>
+  <circle cx="30" cy="650" r="230" fill="#4f46e5" opacity=".10"/>
+  <text x="70" y="79" fill="#c4b5fd" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" font-weight="700">AUTH BRANDING</text>
+  <text x="70" y="127" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="39" font-weight="750">One identity across every auth touchpoint</text>
+
+  <g filter="url(#shadow)">
+    <rect x="68" y="192" width="425" height="360" rx="25" fill="#f5f3ff"/>
+    <rect x="68" y="192" width="145" height="360" rx="25" fill="#4f46e5"/>
+    <rect x="183" y="192" width="30" height="360" fill="#4f46e5"/>
+    <rect x="96" y="226" width="88" height="38" rx="12" fill="#fff" opacity=".95"/>
+    <path d="M115 246h15l8-13 8 26 8-13h14" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="96" y="310" fill="#fff" font-family="Inter, ui-sans-serif, system-ui" font-size="22" font-weight="750">Acme</text>
+    <text x="96" y="342" fill="#ddd6fe" font-family="Inter, ui-sans-serif, system-ui" font-size="14">Team workspaces,</text>
+    <text x="96" y="364" fill="#ddd6fe" font-family="Inter, ui-sans-serif, system-ui" font-size="14">beautifully secure.</text>
+    <text x="253" y="253" fill="#111827" font-family="Inter, ui-sans-serif, system-ui" font-size="25" font-weight="750">Sign in to Acme</text>
+    <text x="253" y="282" fill="#6b7280" font-family="Inter, ui-sans-serif, system-ui" font-size="14">Access your team's workspace</text>
+    <rect x="253" y="317" width="197" height="51" rx="12" fill="#fff" stroke="#c7d2fe"/>
+    <text x="271" y="348" fill="#6b7280" font-family="Inter, ui-sans-serif, system-ui" font-size="15">you@company.com</text>
+    <rect x="253" y="389" width="197" height="51" rx="12" fill="#4f46e5"/>
+    <text x="310" y="421" fill="#fff" font-family="Inter, ui-sans-serif, system-ui" font-size="16" font-weight="700">Continue</text>
+    <text x="253" y="493" fill="#7c3aed" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">HOSTED AUTH PAGE</text>
+
+    <rect x="707" y="192" width="425" height="360" rx="25" fill="#fff"/>
+    <rect x="707" y="192" width="425" height="18" rx="9" fill="#4f46e5"/>
+    <rect x="748" y="239" width="102" height="43" rx="12" fill="#ede9fe"/>
+    <path d="M769 261h15l8-13 8 26 8-13h20" fill="none" stroke="#4f46e5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="748" y="331" fill="#111827" font-family="Inter, ui-sans-serif, system-ui" font-size="25" font-weight="750">Reset your password</text>
+    <text x="748" y="368" fill="#6b7280" font-family="Inter, ui-sans-serif, system-ui" font-size="16">A password reset was requested</text>
+    <text x="748" y="392" fill="#6b7280" font-family="Inter, ui-sans-serif, system-ui" font-size="16">for your Acme account.</text>
+    <rect x="748" y="425" width="169" height="47" rx="12" fill="#4f46e5"/>
+    <text x="772" y="455" fill="#fff" font-family="Inter, ui-sans-serif, system-ui" font-size="15" font-weight="700">Reset password</text>
+    <text x="748" y="514" fill="#7c3aed" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">BUILT-IN AUTH EMAIL</text>
+  </g>
+
+  <rect x="401" y="583" width="398" height="56" rx="17" fill="#111827" stroke="#4f46e5"/>
+  <circle cx="438" cy="611" r="13" fill="#4f46e5"/>
+  <text x="469" y="617" fill="#e0e7ff" font-family="Inter, ui-sans-serif, system-ui" font-size="17" font-weight="650">Startup seed or dashboard owner</text>
+  <path d="M600 576V556" stroke="#818cf8" stroke-width="4" stroke-linecap="round"/>
+</svg>

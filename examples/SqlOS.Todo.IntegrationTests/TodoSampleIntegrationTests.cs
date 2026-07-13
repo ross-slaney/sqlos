@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Email.Interfaces;
 using SqlOS.Todo.IntegrationTests.Infrastructure;
@@ -154,7 +155,7 @@ public sealed class TodoSampleIntegrationTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync())
-            .Should().Contain("State cannot exceed 2048 characters.");
+            .Should().Contain(SqlOSPublicAuthErrorMapper.DefaultAuthorizationRequestMessage);
     }
 
     [TestMethod]
