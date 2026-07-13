@@ -1936,6 +1936,30 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task MagicLink_Start_EnforcesLocalRateLimitForUnknownAccounts()
+    {
+        var harness = await MagicLinkHarness.CreateAsync(options =>
+        {
+            options.MagicLink.ResendCooldown = TimeSpan.Zero;
+            options.MagicLink.MaxLinksPerEmailPerWindow = 1;
+        });
+        var context = new DefaultHttpContext();
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("unknown-rate@example.com", "test-client", OrganizationId: null),
+            context);
+        var act = async () => await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("unknown-rate@example.com", "test-client", OrganizationId: null),
+            context);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in link requests. Try again later.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "magic_link.rate_limit_rejected"))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task MagicLink_Complete_ValidToken_IssuesSessionWithMagicLinkMethod()
     {
         var harness = await MagicLinkHarness.CreateAsync();
