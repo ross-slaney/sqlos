@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -9,6 +10,22 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSPublicAuthErrorMapperTests
 {
+    [TestMethod]
+    public void PublicError_DefaultJsonSerialization_ExcludesDiagnosticFields()
+    {
+        var error = SqlOSPublicAuthErrorMapper.Map(
+            new InvalidOperationException("provider_secret=do-not-return"),
+            SqlOSPublicAuthErrorSurface.HeadlessApi);
+
+        var json = JsonSerializer.Serialize(error);
+        var lowerJson = json.ToLowerInvariant();
+
+        json.Should().Contain("The request could not be completed.");
+        json.Should().NotContain("provider_secret");
+        lowerJson.Should().NotContain("diagnosticmessage");
+        lowerJson.Should().NotContain("auditreason");
+    }
+
     [TestMethod]
     public void PublicErrorMapper_RejectsUnsafeInvalidOperationMessages()
     {
