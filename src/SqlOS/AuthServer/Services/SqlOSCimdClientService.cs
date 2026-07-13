@@ -48,7 +48,7 @@ public sealed class SqlOSCimdClientService
             throw new InvalidOperationException($"Client '{clientId}' is inactive.");
         }
 
-        await EnforceFetchPolicyAsync(clientIdUri, clientId, httpContext, cancellationToken);
+        await EnforceFetchPolicyAsync(clientIdUri, clientId, cancellationToken);
 
         if (existingClient != null && !ShouldRefreshMetadata(existingClient))
         {
@@ -211,7 +211,6 @@ public sealed class SqlOSCimdClientService
     private async Task EnforceFetchPolicyAsync(
         Uri clientIdUri,
         string clientId,
-        HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
         if (IsUnsafeMetadataHost(clientIdUri.Host))
@@ -226,28 +225,6 @@ public sealed class SqlOSCimdClientService
             await ThrowFetchPolicyFailureAsync(clientId, "Client metadata host is not trusted.", cancellationToken);
         }
 
-        var trustPolicy = cimdOptions.TrustPolicy;
-        if (trustPolicy == null)
-        {
-            return;
-        }
-
-        var decision = await trustPolicy(
-            new SqlOSCimdTrustContext
-            {
-                HttpContext = httpContext ?? new DefaultHttpContext(),
-                ClientId = clientId,
-                ClientIdUri = clientIdUri
-            },
-            cancellationToken);
-
-        if (!decision.Allowed)
-        {
-            await ThrowFetchPolicyFailureAsync(
-                clientId,
-                decision.Reason ?? "Client metadata host was rejected by trust policy.",
-                cancellationToken);
-        }
     }
 
     private async Task ThrowFetchPolicyFailureAsync(string clientId, string error, CancellationToken cancellationToken)

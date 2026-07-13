@@ -166,8 +166,12 @@ public sealed class SqlOSCimdClientServiceTests
     {
         using var context = CreateContext();
         var options = CreateOptions();
-        options.ClientRegistration.Cimd.TrustPolicy = (_, _) =>
-            Task.FromResult(SqlOSClientRegistrationPolicyDecision.Deny("Trust policy rejected client."));
+        SqlOSCimdTrustContext? observedContext = null;
+        options.ClientRegistration.Cimd.TrustPolicy = (trustContext, _) =>
+        {
+            observedContext = trustContext;
+            return Task.FromResult(SqlOSClientRegistrationPolicyDecision.Deny("Trust policy rejected client."));
+        };
         var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
             """
             {
@@ -186,7 +190,10 @@ public sealed class SqlOSCimdClientServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*validation failed*");
-        httpFactory.RequestCount.Should().Be(0);
+        httpFactory.RequestCount.Should().Be(1);
+        observedContext.Should().NotBeNull();
+        observedContext!.ClientName.Should().Be("Example MCP Client");
+        observedContext.RedirectUris.Should().Equal("https://client.example.test/callback");
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
             && (x.DataJson ?? string.Empty).Contains("Trust policy rejected client."))).Should().BeTrue();
     }
