@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
@@ -54,6 +55,36 @@ public sealed class SqlOSOptionsValidationTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*AuthServer.Issuer must be 'https://app.example.com/sqlos/auth' when AuthServer.PublicOrigin is set.*");
+    }
+
+    [DataTestMethod]
+    [DataRow("issuer")]
+    [DataRow("public-origin")]
+    [DataRow("single-application")]
+    public void AddSqlOS_Throws_WhenTrustedAuthorityIncludesUserInformation(string source)
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            if (source == "issuer")
+            {
+                options.AuthServer.Issuer = "https://trusted.example@attacker.example/sqlos/auth";
+            }
+            else if (source == "public-origin")
+            {
+                options.AuthServer.PublicOrigin = "https://trusted.example@attacker.example";
+                options.AuthServer.Issuer = "https://trusted.example@attacker.example/sqlos/auth";
+            }
+            else
+            {
+                options.UseSingleApplication("Acme", application =>
+                    application.Origin = "https://trusted.example@attacker.example");
+            }
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*cannot include user information.*");
     }
 
     [DataTestMethod]
@@ -119,6 +150,21 @@ public sealed class SqlOSOptionsValidationTests
         });
 
         act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_SingleApplicationOriginDerivesIssuerWithoutPublicOriginSetup()
+    {
+        var services = new ServiceCollection();
+
+        services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.UseSingleApplication("Acme", application =>
+                application.Origin = "http://localhost:5050"));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
+        options.PublicOrigin.Should().BeNull();
+        options.Issuer.Should().Be("http://localhost:5050/sqlos/auth");
     }
 
     [TestMethod]

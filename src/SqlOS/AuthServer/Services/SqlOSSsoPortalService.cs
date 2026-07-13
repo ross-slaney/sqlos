@@ -1038,21 +1038,7 @@ public sealed class SqlOSSsoPortalService
     }
 
     private string GetOrigin(HttpContext? httpContext)
-    {
-        if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
-        {
-            return _options.PublicOrigin.TrimEnd('/');
-        }
-
-        if (httpContext != null && httpContext.Request.Host.HasValue)
-        {
-            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
-        }
-
-        return Uri.TryCreate(_options.Issuer, UriKind.Absolute, out var issuer)
-            ? issuer.GetLeftPart(UriPartial.Authority).TrimEnd('/')
-            : string.Empty;
-    }
+        => SqlOSPublicOriginResolver.Resolve(_options);
 
     private void SetPortalCookie(HttpContext httpContext, string rawSessionToken, DateTime expiresAt)
         => httpContext.Response.Cookies.Append(GetCookieName(), rawSessionToken, new CookieOptions

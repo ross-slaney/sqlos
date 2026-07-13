@@ -9,5 +9,12 @@ internal static class SqlOSPathDefaults
     {
         var root = options.DashboardBasePath.TrimEnd('/');
         options.AuthServer.BasePath = $"{root}/auth";
+
+        if (string.Equals(options.AuthServer.Issuer, "https://localhost/sqlos/auth", StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(options.AuthServer.PublicOrigin)
+            && Uri.TryCreate(options.AuthServer.SingleApplication?.Origin, UriKind.Absolute, out var applicationOrigin))
+        {
+            options.AuthServer.Issuer = $"{applicationOrigin.GetLeftPart(UriPartial.Authority).TrimEnd('/')}{options.AuthServer.BasePath}";
+        }
     }
 }

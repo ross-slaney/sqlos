@@ -629,6 +629,12 @@ internal static class SqlOSOptionsValidator
             return null;
         }
 
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            errors.Add($"{name} cannot include user information.");
+            return null;
+        }
+
         return uri;
     }
 

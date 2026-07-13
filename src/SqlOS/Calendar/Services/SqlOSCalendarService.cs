@@ -806,11 +806,7 @@ public sealed class SqlOSCalendarService
 
     private string BuildCallbackUri(HttpContext? httpContext)
     {
-        var origin = !string.IsNullOrWhiteSpace(_authOptions.PublicOrigin)
-            ? _authOptions.PublicOrigin!.TrimEnd('/')
-            : httpContext != null
-                ? $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/')
-                : throw new InvalidOperationException("Set AuthServer.PublicOrigin (or pass an HttpContext) so the calendar callback URI can be built.");
+        var origin = SqlOSPublicOriginResolver.Resolve(_authOptions);
 
         return $"{origin}{_authOptions.BasePath.TrimEnd('/')}/calendar/callback";
     }
