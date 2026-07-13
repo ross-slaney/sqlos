@@ -103,6 +103,7 @@ internal static class SqlOSOptionsValidator
         ValidateEmailOptions(options.Email, errors);
         ValidateCalendarOptions(options.Calendar, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
+        ValidateMfaOptions(options.AuthServer.Mfa, errors);
         ValidateAccessTokenValidationOptions(options.AuthServer, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
         ValidateSigningKeyOptions(options.AuthServer, errors);
@@ -111,6 +112,29 @@ internal static class SqlOSOptionsValidator
         {
             throw new InvalidOperationException(
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
+        }
+    }
+
+    private static void ValidateMfaOptions(SqlOSMfaOptions options, List<string> errors)
+    {
+        if (options.Totp.MaxFailedAttemptsPerChallenge <= 0)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerChallenge must be greater than zero.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerUser < options.Totp.MaxFailedAttemptsPerChallenge)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerUser must be at least MaxFailedAttemptsPerChallenge.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerIp < options.Totp.MaxFailedAttemptsPerChallenge)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerIp must be at least MaxFailedAttemptsPerChallenge.");
+        }
+
+        if (options.Totp.FailedAttemptWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.Mfa.Totp.FailedAttemptWindow must be greater than zero.");
         }
     }
 

@@ -166,6 +166,40 @@ amr: password
 amr: recovery_code
 ```
 
+## Guessing protection
+
+MFA guessing protection is automatic. You do not need to configure a cache,
+rate-limiting service, or hosted dependency. SqlOS stores the enforcement state
+in the same database as the rest of AuthServer and applies it consistently to
+hosted, headless, and direct API verification.
+
+By default, SqlOS:
+
+- consumes a challenge after 5 failed TOTP or recovery-code attempts;
+- rejects new challenges after 10 recent failures for the same user;
+- rejects verification after 25 recent failures from the same IP address; and
+- counts user and IP failures over a 10-minute window.
+
+Failures remain deliberately generic. A rejected code does not reveal whether
+the factor exists, was previously used, or was blocked by a limit. TOTP codes
+and recovery codes also remain single-use.
+
+The defaults are suitable for most applications. Deployments with a documented
+abuse model can tune them without replacing the built-in enforcement:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureMfa(mfa =>
+    {
+        mfa.Totp.MaxFailedAttemptsPerChallenge = 5;
+        mfa.Totp.MaxFailedAttemptsPerUser = 10;
+        mfa.Totp.MaxFailedAttemptsPerIp = 25;
+        mfa.Totp.FailedAttemptWindow = TimeSpan.FromMinutes(10);
+    });
+});
+```
+
 ## Headless auth behavior
 
 Headless auth uses the same state machine. Your UI must render the new views.

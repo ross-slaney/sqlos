@@ -33,6 +33,7 @@ public static class SqlOSPublicAuthErrorMapper
         "Local password authentication is disabled.",
         "MFA challenge is invalid.",
         "MFA challenge is invalid or expired.",
+        SqlOSAuthService.MfaChallengeFailureMessage,
         "Magic-link sign-in is unavailable.",
         "Only authorization code requests are supported.",
         "Only S256 PKCE is supported.",
