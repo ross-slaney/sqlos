@@ -1642,21 +1642,55 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
-    public async Task RequestEmailOtpSignupAsync_RejectsExistingUser()
+    public async Task RequestEmailOtpSignupAsync_ReturnsUniformStartForExistingAndUnknownEmails()
     {
         var harness = await EmailOtpHarness.CreateAsync();
-        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing User", "existing@example.com", "P@ssword123!"));
+        const string existingEmail = "aa-existing@example.com";
+        const string unknownEmail = "aa-unknown@example.com";
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing User", existingEmail, "P@ssword123!"));
 
-        var act = async () => await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+        var existingStart = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
             "Existing User",
-            "existing@example.com",
+            existingEmail,
             "test-client",
-            "Existing Org",
+            "Uniform Org",
+            OrganizationId: null,
+            CustomFields: null));
+        var unknownStart = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Unknown User",
+            unknownEmail,
+            "test-client",
+            "Uniform Org",
             OrganizationId: null,
             CustomFields: null));
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("An account already exists for this email. Sign in with an email code instead.");
+        existingStart.ChallengeToken.Should().NotBeNullOrWhiteSpace();
+        existingStart.SignupToken.Should().NotBeNullOrWhiteSpace();
+        existingStart.MaskedEmail.Should().Be(unknownStart.MaskedEmail);
+        existingStart.Message.Should().Be(unknownStart.Message);
+        existingStart.Message.Should().NotContain("already exists");
+        harness.EmailSender.Messages.Select(static message => message.To)
+            .Should().BeEquivalentTo(existingEmail, unknownEmail);
+
+        var existingVerify = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(
+                existingStart.SignupToken,
+                existingStart.ChallengeToken,
+                GetLatestCode(harness.EmailSender, existingEmail)),
+            new DefaultHttpContext());
+
+        await existingVerify.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(existingEmail))).Should().Be(1);
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(unknownEmail))).Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>()
+            .AnyAsync(x => x.EventType == "email_otp.signup_existing_email"
+                && (x.DataJson ?? string.Empty).Contains("existing_email"))).Should().BeTrue();
+        (await harness.Context.Set<SqlOSAuditEvent>()
+            .AnyAsync(x => x.EventType == "email_otp.signup_existing_email_rejected"
+                && (x.DataJson ?? string.Empty).Contains("challenge_bound_to_existing_user"))).Should().BeTrue();
     }
 
     [TestMethod]
