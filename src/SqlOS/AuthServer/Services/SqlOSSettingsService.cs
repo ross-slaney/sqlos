@@ -393,11 +393,15 @@ public sealed class SqlOSSettingsService
             _options.Headless.BuildUiUrl != null,
             _options.EnableLocalPasswordAuth,
             IsAuthEmailRuntimeConfigured,
+            IsMagicLinkRuntimeConfigured,
             _options.PhoneOtp.IsConfigured);
     }
 
     private bool IsAuthEmailRuntimeConfigured
         => _options.EmailOtp.BuildMessage == null || _emailSender.IsConfigured;
+
+    private bool IsMagicLinkRuntimeConfigured
+        => _options.MagicLink.BuildMessage == null || _emailSender.IsConfigured;
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
     {
@@ -485,11 +489,13 @@ public sealed class SqlOSSettingsService
             .Where(value =>
                 (string.Equals(value, "password", StringComparison.OrdinalIgnoreCase) && settings.LocalPasswordRuntimeEnabled)
                 || (string.Equals(value, "email_otp", StringComparison.OrdinalIgnoreCase) && settings.EmailOtpRuntimeConfigured)
+                || (string.Equals(value, "magic_link", StringComparison.OrdinalIgnoreCase) && settings.MagicLinkRuntimeConfigured)
                 || (string.Equals(value, "phone_otp", StringComparison.OrdinalIgnoreCase) && settings.PhoneOtpRuntimeConfigured))
             .ToArray();
 
         var passwordEnabled = effectiveTypes.Contains("password", StringComparer.OrdinalIgnoreCase);
         var emailOtpEnabled = effectiveTypes.Contains("email_otp", StringComparer.OrdinalIgnoreCase);
+        var magicLinkEnabled = effectiveTypes.Contains("magic_link", StringComparer.OrdinalIgnoreCase);
         var phoneOtpEnabled = effectiveTypes.Contains("phone_otp", StringComparer.OrdinalIgnoreCase);
 
         return new SqlOSResolvedCredentialSettings(
@@ -497,6 +503,7 @@ public sealed class SqlOSSettingsService
             passwordEnabled,
             passwordEnabled && settings.EnablePasswordSignup,
             emailOtpEnabled,
+            magicLinkEnabled,
             phoneOtpEnabled);
     }
 

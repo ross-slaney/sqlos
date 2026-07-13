@@ -79,6 +79,8 @@ Your UI calls these SqlOS endpoints:
 | `POST /sqlos/auth/headless/password/login` | Submit email + password |
 | `POST /sqlos/auth/headless/email-otp/start` | Send an existing-user email code |
 | `POST /sqlos/auth/headless/email-otp/verify` | Verify an existing-user email code |
+| `POST /sqlos/auth/headless/magic-link/start` | Send an existing-user sign-in link |
+| `POST /sqlos/auth/headless/magic-link/complete` | Consume the sign-in link token |
 | `POST /sqlos/auth/headless/phone-otp/start` | Send an existing-user phone code through Twilio Verify |
 | `POST /sqlos/auth/headless/phone-otp/verify` | Verify an existing-user phone code |
 | `POST /sqlos/auth/headless/signup` | Create account with optional custom fields |

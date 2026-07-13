@@ -3237,9 +3237,12 @@
                             ${settings.emailOtpRuntimeConfigured
                                 ? `<div class="callout"><strong>Email OTP uses transactional templates.</strong> Add <code>email_otp</code> to enabled credential types to let users sign in with a one-time code.</div>`
                                 : `<div class="callout"><strong>Custom Email OTP delivery is not configured.</strong> Configure the custom auth email sender before enabling <code>email_otp</code>.</div>`}
+                            ${settings.magicLinkRuntimeConfigured
+                                ? `<div class="callout"><strong>Magic links use transactional templates.</strong> Add <code>magic_link</code> to enabled credential types to let users sign in from a one-time email link.</div>`
+                                : `<div class="callout"><strong>Custom magic-link delivery is not configured.</strong> Configure the custom auth email sender before enabling <code>magic_link</code>.</div>`}
                             <label><input type="checkbox" name="enablePasswordSignup" ${settings.enablePasswordSignup ? "checked" : ""}> Allow password signup</label>
-                            <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp)" value="${esc(enabledCredentialTypes || "password")}" required>
-                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>.</p>
+                            <input name="enabledCredentialTypes" placeholder="Enabled credential types (password email_otp magic_link)" value="${esc(enabledCredentialTypes || "password")}" required>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Space or comma separate values. Supported first-party types today: <code>password</code>, <code>email_otp</code>, <code>magic_link</code>, <code>phone_otp</code>.</p>
                             <label>Logo upload<input id="auth-page-logo-file" type="file" accept="image/*"></label>
                             <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL">${esc(settings.logoBase64 || "")}</textarea>
                             <button type="submit">Save Auth Page</button>

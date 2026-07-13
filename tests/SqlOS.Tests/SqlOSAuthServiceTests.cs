@@ -1879,6 +1879,197 @@ public sealed class SqlOSAuthServiceTests
         message.TextBody.Should().Contain("Your Acme Portal sign-up code");
     }
 
+    [TestMethod]
+    public async Task MagicLink_Start_ReturnsGenericResponseForUnknownEmail()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+
+        var start = await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("unknown@example.com", "test-client", OrganizationId: null),
+            new DefaultHttpContext());
+
+        start.Message.Should().Be("If an account exists for un***@example.com, check your email for a sign-in link.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        var token = await harness.Context.Set<SqlOSTemporaryToken>().SingleAsync();
+        token.Purpose.Should().Be(SqlOSMagicLinkService.TokenPurpose);
+        token.UserId.Should().BeNull();
+        token.PayloadJson.Should().Contain("\"Sent\":false");
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Start_StoresOnlyTokenHash()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "magic@example.com", "P@ssword123!"));
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("magic@example.com", "test-client", OrganizationId: null),
+            new DefaultHttpContext());
+
+        var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
+        var stored = await harness.Context.Set<SqlOSTemporaryToken>().SingleAsync();
+        stored.TokenHash.Should().Be(harness.Crypto.HashToken(rawToken));
+        stored.TokenHash.Should().NotBe(rawToken);
+        stored.PayloadJson.Should().NotContain(rawToken);
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Start_DoesNotUseRequestHostForEmailedLink()
+    {
+        var harness = await MagicLinkHarness.CreateAsync(options =>
+        {
+            options.PublicOrigin = null;
+            options.Issuer = "https://identity.example.test/sqlos/auth";
+        });
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "magic@example.com", "P@ssword123!"));
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "https";
+        httpContext.Request.Host = new HostString("attacker.example");
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("magic@example.com", "test-client", OrganizationId: null),
+            httpContext);
+
+        var message = harness.EmailSender.Messages.Single();
+        message.TextBody.Should().Contain("https://identity.example.test/sqlos/auth/login/magic-link/complete?token=");
+        message.TextBody.Should().NotContain("attacker.example");
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Start_EnforcesLocalRateLimitForUnknownAccounts()
+    {
+        var harness = await MagicLinkHarness.CreateAsync(options =>
+        {
+            options.MagicLink.ResendCooldown = TimeSpan.Zero;
+            options.MagicLink.MaxLinksPerEmailPerWindow = 1;
+        });
+        var context = new DefaultHttpContext();
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("unknown-rate@example.com", "test-client", OrganizationId: null),
+            context);
+        var act = async () => await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("unknown-rate@example.com", "test-client", OrganizationId: null),
+            context);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in link requests. Try again later.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "magic_link.rate_limit_rejected"))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Complete_ValidToken_IssuesSessionWithMagicLinkMethod()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "valid-magic@example.com", "P@ssword123!"));
+        var organization = await harness.Admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Magic Org", null));
+        await harness.Admin.CreateMembershipAsync(organization.Id, new SqlOSCreateMembershipRequest(user.Id, "member"));
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("valid-magic@example.com", "test-client", organization.Id),
+            new DefaultHttpContext());
+        var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
+
+        var result = await harness.Auth.CompleteMagicLinkAsync(
+            new SqlOSMagicLinkCompleteRequest(rawToken),
+            new DefaultHttpContext());
+
+        result.RequiresOrganizationSelection.Should().BeFalse();
+        result.Tokens.Should().NotBeNull();
+        result.Tokens!.OrganizationId.Should().Be(organization.Id);
+        var session = await harness.Context.Set<SqlOSSession>().SingleAsync();
+        session.AuthenticationMethod.Should().Be("magic_link");
+        session.UserId.Should().Be(user.Id);
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Complete_ReplayedToken_IsRejected()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Replay User", "replay-magic@example.com", "P@ssword123!"));
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("replay-magic@example.com", "test-client", OrganizationId: null),
+            new DefaultHttpContext());
+        var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
+
+        await harness.Auth.CompleteMagicLinkAsync(new SqlOSMagicLinkCompleteRequest(rawToken), new DefaultHttpContext());
+
+        var act = async () => await harness.Auth.CompleteMagicLinkAsync(
+            new SqlOSMagicLinkCompleteRequest(rawToken),
+            new DefaultHttpContext());
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in link is invalid or expired.");
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Complete_ExpiredToken_IsRejectedGenerically()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "expired-magic@example.com", "P@ssword123!"));
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("expired-magic@example.com", "test-client", OrganizationId: null),
+            new DefaultHttpContext());
+        var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
+        var stored = await harness.Context.Set<SqlOSTemporaryToken>().SingleAsync();
+        stored.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Auth.CompleteMagicLinkAsync(
+            new SqlOSMagicLinkCompleteRequest(rawToken),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in link is invalid or expired.");
+    }
+
+    [TestMethod]
+    public async Task MagicLink_Complete_WrongOAuthRequestBinding_IsRejected()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            options.EnableLocalPasswordAuth = false;
+            options.SeedAuthPage(page =>
+            {
+                page.EnabledCredentialTypes = ["magic_link"];
+                page.EnablePasswordSignup = false;
+            });
+        });
+        await CreateEmailAdmin(harness.Context, harness.Crypto).EnsureBuiltInTemplatesAsync();
+        var emailSender = new TestAuthEmailSender { IsConfigured = true };
+        var magicLink = new SqlOSMagicLinkService(
+            harness.Context,
+            harness.Admin,
+            harness.Crypto,
+            harness.Settings,
+            emailSender,
+            Options.Create(harness.Options),
+            CreateTransactionalEmailService(harness.Context, harness.Crypto, emailSender));
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Bound Magic", "bound-magic@example.com", "P@ssword123!"));
+        var first = await CreateHeadlessAuthorizationRequestAsync(harness, "magic-first", user.DefaultEmail);
+        var second = await CreateHeadlessAuthorizationRequestAsync(harness, "magic-second", user.DefaultEmail);
+
+        await magicLink.StartForAuthorizationRequestAsync(first, user.DefaultEmail!, CreatePasswordHttpContext("203.0.113.240"));
+        var rawToken = ExtractMagicLinkToken(emailSender.Messages.Single().TextBody);
+
+        var act = async () => await magicLink.CompleteAsync(
+            new SqlOSMagicLinkCompleteRequest(rawToken),
+            second.Id,
+            requireAuthorizationRequestMatch: true);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in link is invalid or expired.");
+    }
+
+    [TestMethod]
+    public void MagicLink_DoesNotSatisfyMfaByDefault()
+    {
+        var policy = new SqlOSMfaPolicyService(Options.Create(new SqlOSAuthServerOptions()));
+
+        policy.SatisfiesStrongMfa("magic_link").Should().BeFalse();
+    }
+
     /* ─────────────────────────────────────────────────────────────────────────
        Refresh token grace window tests (issue #18)
        ───────────────────────────────────────────────────────────────────────── */
@@ -2538,6 +2729,13 @@ public sealed class SqlOSAuthServiceTests
         return match.Groups[1].Value;
     }
 
+    private static string ExtractMagicLinkToken(string? textBody)
+    {
+        var match = Regex.Match(textBody ?? string.Empty, @"token=([A-Za-z0-9_-]+)");
+        match.Success.Should().BeTrue();
+        return match.Groups[1].Value;
+    }
+
     private static SqlOSTransactionalEmailService CreateTransactionalEmailService(
         TestSqlOSInMemoryDbContext context,
         SqlOSCryptoService crypto,
@@ -2661,6 +2859,69 @@ public sealed class SqlOSAuthServiceTests
                 Context = context,
                 Auth = auth,
                 Admin = admin,
+                EmailSender = emailSender
+            };
+        }
+
+        public void Dispose()
+            => Context.Dispose();
+    }
+
+    private sealed class MagicLinkHarness : IDisposable
+    {
+        public required TestSqlOSInMemoryDbContext Context { get; init; }
+        public required SqlOSAuthService Auth { get; init; }
+        public required SqlOSAdminService Admin { get; init; }
+        public required SqlOSCryptoService Crypto { get; init; }
+        public required TestAuthEmailSender EmailSender { get; init; }
+
+        public static async Task<MagicLinkHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
+        {
+            var context = new TestSqlOSInMemoryDbContext(
+                new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
+                    .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                    .Options);
+
+            var authOptions = new SqlOSAuthServerOptions();
+            authOptions.EnableLocalPasswordAuth = false;
+            authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+            authOptions.SeedAuthPage(page =>
+            {
+                page.EnabledCredentialTypes = ["magic_link"];
+                page.EnablePasswordSignup = false;
+            });
+            configure?.Invoke(authOptions);
+
+            var options = Options.Create(authOptions);
+            var emailSender = new TestAuthEmailSender { IsConfigured = true };
+            var crypto = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+            var admin = new SqlOSAdminService(context, options, crypto);
+            var settings = new SqlOSSettingsService(context, options, emailSender);
+            var transactionalEmailService = CreateTransactionalEmailService(context, crypto, emailSender);
+            var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var magicLink = new SqlOSMagicLinkService(context, admin, crypto, settings, emailSender, options, transactionalEmailService);
+            var auth = new SqlOSAuthService(
+                context,
+                options,
+                admin,
+                crypto,
+                settings,
+                emailOtp,
+                transactionalEmailService: transactionalEmailService,
+                magicLinkService: magicLink);
+
+            await crypto.EnsureActiveSigningKeyAsync();
+            await admin.UpsertSeededClientsAsync();
+            await settings.UpsertSeededAuthPageSettingsAsync();
+            await settings.UpsertSeededAuthEmailSettingsAsync();
+            await CreateEmailAdmin(context, crypto).EnsureBuiltInTemplatesAsync();
+
+            return new MagicLinkHarness
+            {
+                Context = context,
+                Auth = auth,
+                Admin = admin,
+                Crypto = crypto,
                 EmailSender = emailSender
             };
         }

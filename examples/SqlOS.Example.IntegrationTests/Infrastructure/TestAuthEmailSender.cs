@@ -41,4 +41,8 @@ public sealed class TestAuthEmailSender : ISqlOSAuthEmailSender, ISqlOSEmailSend
 
         return match.Value;
     }
+
+    public SqlOSAuthEmailMessage GetLatestMessage(string email)
+        => _messages.LastOrDefault(message => string.Equals(message.To, email, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"No email was captured for '{email}'.");
 }

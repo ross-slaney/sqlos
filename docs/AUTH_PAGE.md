@@ -33,7 +33,7 @@ When enabled, SqlOS can also expose:
 - `POST /sqlos/auth/register` for dynamic client registration
 - `GET /sqlos/auth/headless/*` and `POST /sqlos/auth/headless/*` for headless UI flows
 
-Email OTP, SMS OTP, and invitations are first-class AuthPage flows. Invite acceptance fixes the email to the invited address, runs the same configured credential methods, and only consumes the invitation when the final session or authorization redirect is issued. SMS OTP uses Twilio Verify and remains disabled until configured; see [SMS OTP](SMS_OTP.md).
+Email OTP, magic links, SMS OTP, and invitations are first-class AuthPage flows. Invite acceptance fixes the email to the invited address, runs the same configured credential methods, and only consumes the invitation when the final session or authorization redirect is issued. Magic-link completion uses a passive GET confirmation page followed by POST token consumption so mailbox scanners cannot sign users in by fetching the link. SMS OTP uses Twilio Verify and remains disabled until configured; see [Magic Link](MAGIC_LINK.md) and [SMS OTP](SMS_OTP.md).
 
 ## Fastest hosted setup
 

@@ -11,6 +11,7 @@ import {
   headlessPasswordLogin,
   headlessRequestPasswordResetEmail,
   headlessRequestEmailOtp,
+  headlessRequestMagicLink,
   headlessRequestPhoneOtp,
   headlessRequestPhoneOtpSignup,
   headlessResetPassword,
@@ -319,6 +320,15 @@ export function SqlOSHeadlessAuthPanel() {
     finally { setLoading(false); }
   };
 
+  const onRequestMagicLink = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!requestId) return;
+    setLoading(true); setError(null); setFieldErrors({});
+    try { await handleResult(await headlessRequestMagicLink(requestId, email)); }
+    catch (err) { setError(err instanceof Error ? err.message : "We could not send a sign-in link."); }
+    finally { setLoading(false); }
+  };
+
   const onVerifyEmailOtp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId) return;
@@ -456,6 +466,8 @@ export function SqlOSHeadlessAuthPanel() {
     && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("password");
   const supportsEmailOtp = !!viewModel?.settings?.emailOtpRuntimeConfigured
     && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("email_otp");
+  const supportsMagicLink = !!viewModel?.settings?.magicLinkRuntimeConfigured
+    && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("magic_link");
   const supportsPhoneOtp = !!viewModel?.settings?.phoneOtpRuntimeConfigured
     && (viewModel?.settings?.enabledCredentialTypes ?? []).includes("phone_otp");
 
@@ -583,6 +595,7 @@ export function SqlOSHeadlessAuthPanel() {
                   <div className="ha-alt">
                     Don&apos;t have an account?{" "}
                     <button type="button" className="ha-link-btn" onClick={() => setView("signup")}>Sign up</button>
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link</button>}
                     {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Use phone instead</button>}
                   </div>
                 </form>
@@ -606,6 +619,7 @@ export function SqlOSHeadlessAuthPanel() {
                     <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
                     <button type="button" className="ha-link-btn" onClick={() => { setResetEmail(email); setView("forgot-password"); }}>Forgot password?</button>
                     {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Email me a code instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
                     {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
                   </div>
                 </form>
@@ -666,6 +680,7 @@ export function SqlOSHeadlessAuthPanel() {
                   </button>
                   <div className="ha-alt">
                     {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
                     {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
                     <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
                   </div>
@@ -684,9 +699,41 @@ export function SqlOSHeadlessAuthPanel() {
                   <div className="ha-alt">
                     <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Send a new code</button>
                     {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
                     {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Use phone instead</button>}
                   </div>
                 </form>
+              )}
+
+              {view === "magic-link" && (
+                <form className="ha-form" onSubmit={onRequestMagicLink}>
+                  <div className="ha-field">
+                    <label htmlFor="ha-magic-email">Email</label>
+                    <input id="ha-magic-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
+                  </div>
+                  <button type="submit" className="ha-submit" disabled={loading}>
+                    {loading ? "Sending link..." : "Email me a link"}
+                  </button>
+                  <div className="ha-alt">
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use an email code instead</button>}
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                    {supportsPhoneOtp && <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Text me a code instead</button>}
+                    <button type="button" className="ha-link-btn" onClick={() => setView("login")}>Use a different email</button>
+                  </div>
+                </form>
+              )}
+
+              {view === "magic-link-sent" && (
+                <div className="ha-form">
+                  <div className="ha-success">If the account exists, a sign-in link is on the way.</div>
+                  <button type="button" className="ha-submit" disabled={loading} onClick={() => setView("magic-link")}>
+                    Request another link
+                  </button>
+                  <div className="ha-alt">
+                    {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use an email code instead</button>}
+                    {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
+                  </div>
+                </div>
               )}
 
               {view === "phone-otp" && (
@@ -719,6 +766,7 @@ export function SqlOSHeadlessAuthPanel() {
                     <button type="button" className="ha-link-btn" onClick={() => setView("phone-otp")}>Send a new code</button>
                     {supportsPassword && <button type="button" className="ha-link-btn" onClick={() => setView("password")}>Use password instead</button>}
                     {supportsEmailOtp && <button type="button" className="ha-link-btn" onClick={() => setView("email-otp")}>Use email instead</button>}
+                    {supportsMagicLink && <button type="button" className="ha-link-btn" onClick={() => setView("magic-link")}>Email me a link instead</button>}
                   </div>
                 </form>
               )}

@@ -420,6 +420,7 @@ The core transition rule stays the same. Add only the views your enabled policy 
 | Returned view or branch | What the UI must do | Focused documentation |
 | --- | --- | --- |
 | `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
+| `magic-link`, `magic-link-confirm` | Send or consume an opt-in sign-in link, then continue any returned organization or MFA branch | [Magic-link login](/docs/authserver/magic-link) |
 | `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
 | `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/guides/password-login) |
 | `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |

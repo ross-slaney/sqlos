@@ -323,6 +323,7 @@ public sealed class SqlOSTransactionalEmailTests
         keys.Should().Contain([
             SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
             SqlOSBuiltInEmailTemplates.AuthInvitationKey,
+            SqlOSBuiltInEmailTemplates.AuthMagicLinkKey,
             SqlOSBuiltInEmailTemplates.AuthPasswordResetKey
         ]);
     }

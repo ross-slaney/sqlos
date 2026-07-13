@@ -75,6 +75,7 @@ internal static class SqlOSOptionsValidator
         ValidateHeadlessOptions(options.AuthServer.Headless, errors);
         ValidateSsoPortalOptions(options.AuthServer.SsoPortal, errors);
         ValidateEmailOtpOptions(options.AuthServer.EmailOtp, errors);
+        ValidateMagicLinkOptions(options.AuthServer.MagicLink, errors);
         ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
         ValidatePasswordResetOptions(options.AuthServer.PasswordReset, errors);
         ValidateEmailOptions(options.Email, errors);
@@ -358,6 +359,44 @@ internal static class SqlOSOptionsValidator
         if (string.IsNullOrWhiteSpace(options.ApplicationName))
         {
             errors.Add("AuthServer.EmailOtp.ApplicationName is required.");
+        }
+    }
+
+    private static void ValidateMagicLinkOptions(SqlOSMagicLinkOptions options, List<string> errors)
+    {
+        if (options.TokenLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.MagicLink.TokenLifetime must be greater than zero.");
+        }
+
+        if (options.ResendCooldown < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.MagicLink.ResendCooldown must be zero or greater.");
+        }
+
+        if (options.RateLimitWindow <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.MagicLink.RateLimitWindow must be greater than zero.");
+        }
+
+        if (options.MaxLinksPerEmailPerWindow <= 0)
+        {
+            errors.Add("AuthServer.MagicLink.MaxLinksPerEmailPerWindow must be greater than zero.");
+        }
+
+        if (options.MaxLinksPerIpPerWindow <= 0)
+        {
+            errors.Add("AuthServer.MagicLink.MaxLinksPerIpPerWindow must be greater than zero.");
+        }
+
+        if (options.MaxLinksPerClientPerWindow <= 0)
+        {
+            errors.Add("AuthServer.MagicLink.MaxLinksPerClientPerWindow must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ApplicationName))
+        {
+            errors.Add("AuthServer.MagicLink.ApplicationName is required.");
         }
     }
 
