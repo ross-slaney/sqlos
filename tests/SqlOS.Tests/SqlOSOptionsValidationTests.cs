@@ -187,6 +187,22 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenAccessTokenValidationIntervalsAreNegative()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.AccessTokenValidationSigningKeyCacheTtl = TimeSpan.FromSeconds(-1);
+            options.AuthServer.AccessTokenValidationLastSeenDebounceInterval = TimeSpan.FromSeconds(-1);
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.AccessTokenValidationSigningKeyCacheTtl must be zero or greater.*")
+            .WithMessage("*AuthServer.AccessTokenValidationLastSeenDebounceInterval must be zero or greater.*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_Throws_WhenDcrRateLimitWindowIsNotPositive()
     {
         var services = new ServiceCollection();
