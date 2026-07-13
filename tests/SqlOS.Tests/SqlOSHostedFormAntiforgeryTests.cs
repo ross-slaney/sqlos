@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -83,30 +84,62 @@ public sealed class SqlOSHostedFormAntiforgeryTests
     [TestMethod]
     public void AntiforgeryCookies_AreIsolatedByMountedAuthPath()
     {
-        var first = BuildAntiforgeryOptions("/identity-one");
-        var second = BuildAntiforgeryOptions("/identity-two");
+        var first = CreateAntiforgery("/identity-one/auth");
+        var second = CreateAntiforgery("/identity-two/auth");
 
-        first.Cookie.Path.Should().Be("/identity-one/auth");
-        second.Cookie.Path.Should().Be("/identity-two/auth");
-        first.Cookie.Name.Should().NotBe(second.Cookie.Name);
-        first.Cookie.HttpOnly.Should().BeTrue();
-        first.Cookie.SameSite.Should().Be(Microsoft.AspNetCore.Http.SameSiteMode.Strict);
-        first.Cookie.MaxAge.Should().Be(SqlOSAntiforgeryAdditionalDataProvider.TokenLifetime);
+        first.CookiePath.Should().Be("/identity-one/auth");
+        second.CookiePath.Should().Be("/identity-two/auth");
+        first.CookieName.Should().NotBe(second.CookieName);
     }
 
     [TestMethod]
-    public void AntiforgeryAdditionalData_ExpiresAfterDocumentedLifetime()
+    public void AntiforgeryToken_HasShortExpiryAndBoundedClockSkew()
     {
-        var provider = new SqlOSAntiforgeryAdditionalDataProvider();
-        var context = new DefaultHttpContext();
-        var now = DateTimeOffset.UtcNow;
+        var now = new DateTimeOffset(2026, 7, 13, 12, 0, 0, TimeSpan.Zero);
+        var time = new MutableTimeProvider(now);
+        var antiforgery = CreateAntiforgery("/sqlos/auth", time);
 
-        provider.ValidateAdditionalData(
-            context,
-            now.Subtract(TimeSpan.FromMinutes(14)).ToUnixTimeSeconds().ToString()).Should().BeTrue();
-        provider.ValidateAdditionalData(
-            context,
-            now.Subtract(TimeSpan.FromMinutes(16)).ToUnixTimeSeconds().ToString()).Should().BeFalse();
+        var valid = IssueToken(antiforgery);
+        time.UtcNow = now.AddMinutes(14);
+        antiforgery.ValidateToken(valid.CookieSecret, valid.RequestToken).Should().BeTrue();
+        time.UtcNow = now.AddMinutes(16);
+        antiforgery.ValidateToken(valid.CookieSecret, valid.RequestToken).Should().BeFalse();
+
+        time.UtcNow = now.AddSeconds(30);
+        var withinSkew = IssueToken(antiforgery);
+        time.UtcNow = now;
+        antiforgery.ValidateToken(withinSkew.CookieSecret, withinSkew.RequestToken).Should().BeTrue();
+
+        time.UtcNow = now.AddMinutes(2);
+        var beyondSkew = IssueToken(antiforgery);
+        time.UtcNow = now;
+        antiforgery.ValidateToken(beyondSkew.CookieSecret, beyondSkew.RequestToken).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_DoesNotChangeHostAntiforgeryConfigurationOrProvider()
+    {
+        var services = new ServiceCollection();
+        var hostAdditionalData = new HostAntiforgeryAdditionalDataProvider();
+        services.AddAntiforgery(options =>
+        {
+            options.Cookie.Name = "host_app_csrf";
+            options.Cookie.Path = "/";
+            options.FormFieldName = "host_app_token";
+        });
+        services.AddSingleton<IAntiforgeryAdditionalDataProvider>(hostAdditionalData);
+        services.AddDbContext<TestSqlOSInMemoryDbContext>(database =>
+            database.UseInMemoryDatabase($"csrf-host-{Guid.NewGuid():N}"));
+        services.AddSqlOS<TestSqlOSInMemoryDbContext>();
+
+        using var provider = services.BuildServiceProvider();
+        var hostOptions = provider.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
+        hostOptions.Cookie.Name.Should().Be("host_app_csrf");
+        hostOptions.Cookie.Path.Should().Be("/");
+        hostOptions.FormFieldName.Should().Be("host_app_token");
+        provider.GetRequiredService<IAntiforgeryAdditionalDataProvider>().Should().BeSameAs(hostAdditionalData);
+        provider.GetRequiredService<IAntiforgery>().Should().NotBeNull();
+        provider.GetRequiredService<SqlOSHostedFormAntiforgery>().Should().NotBeNull();
     }
 
     private static async Task<WebApplication> CreateAppAsync()
@@ -131,17 +164,41 @@ public sealed class SqlOSHostedFormAntiforgeryTests
         return app;
     }
 
-    private static AntiforgeryOptions BuildAntiforgeryOptions(string dashboardBasePath)
+    private static SqlOSHostedFormAntiforgery CreateAntiforgery(
+        string authBasePath,
+        TimeProvider? timeProvider = null)
     {
-        var services = new ServiceCollection();
-        services.AddDbContext<TestSqlOSInMemoryDbContext>(database =>
-            database.UseInMemoryDatabase($"csrf-options-{Guid.NewGuid():N}"));
-        services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        var options = Options.Create(new SqlOS.AuthServer.Configuration.SqlOSAuthServerOptions
         {
-            options.DashboardBasePath = dashboardBasePath;
-            options.AuthServer.Issuer = $"https://localhost{dashboardBasePath}/auth";
+            BasePath = authBasePath,
+            Issuer = $"https://auth.example.test{authBasePath}"
         });
-        using var provider = services.BuildServiceProvider();
-        return provider.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
+        return new SqlOSHostedFormAntiforgery(
+            new EphemeralDataProtectionProvider(),
+            options,
+            timeProvider ?? TimeProvider.System);
+    }
+
+    private static (string CookieSecret, string RequestToken) IssueToken(SqlOSHostedFormAntiforgery antiforgery)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "https";
+        var requestToken = antiforgery.IssueRequestToken(context);
+        var cookie = context.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        return (cookie.Split('=', 2)[1], requestToken);
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
+
+    private sealed class HostAntiforgeryAdditionalDataProvider : IAntiforgeryAdditionalDataProvider
+    {
+        public string GetAdditionalData(HttpContext context) => "host-app";
+        public bool ValidateAdditionalData(HttpContext context, string additionalData)
+            => additionalData == "host-app";
     }
 }
