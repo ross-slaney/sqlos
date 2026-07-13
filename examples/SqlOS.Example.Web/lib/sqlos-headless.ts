@@ -164,31 +164,6 @@ export async function headlessCompleteMagicLink(token: string, requestId?: strin
   return headlessPost("/magic-link/complete", { token, requestId });
 }
 
-export async function headlessRequestEmailOtpSignup(
-  requestId: string,
-  displayName: string,
-  email: string,
-  organizationName: string,
-  customFields?: Record<string, string>,
-): Promise<HeadlessActionResult> {
-  return headlessPost("/signup/email-otp/start", {
-    requestId,
-    displayName,
-    email,
-    organizationName,
-    customFields,
-  });
-}
-
-export async function headlessVerifyEmailOtpSignup(
-  requestId: string,
-  signupToken: string,
-  challengeToken: string,
-  code: string,
-): Promise<HeadlessActionResult> {
-  return headlessPost("/signup/email-otp/verify", { requestId, signupToken, challengeToken, code });
-}
-
 export async function headlessRequestPhoneOtp(requestId: string, phoneNumber: string): Promise<HeadlessActionResult> {
   return headlessPost("/phone-otp/start", { requestId, phoneNumber });
 }

@@ -123,11 +123,11 @@ builder.AddSqlOS<ExampleAppDbContext>(
             page.AccentColor = "#0f172a";
             page.BackgroundColor = "#f8fafc";
             page.Layout = "split";
-            page.EnablePasswordSignup = false;
+            page.EnablePasswordSignup = true;
             page.EnabledCredentialTypes = new[]
                 {
-                    "email_otp",
                     "password",
+                    "email_otp",
                     enablePhoneOtp ? "phone_otp" : null,
                     enableMagicLink ? "magic_link" : null
                 }
