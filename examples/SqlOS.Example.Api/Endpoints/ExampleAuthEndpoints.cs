@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Configuration;
@@ -186,7 +187,7 @@ public static class ExampleAuthEndpoints
                 });
             }));
 
-        auth.MapMethods("/oidc/callback/{connectionId}", ["GET", "POST"], (string connectionId, IOptions<ExampleWebOptions> webOptions, SqlOSOidcAuthService oidcAuthService, SqlOSCryptoService cryptoService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        auth.MapMethods("/oidc/callback/{connectionId}", ["GET", "POST"], (string connectionId, IOptions<ExampleWebOptions> webOptions, SqlOSOidcAuthService oidcAuthService, SqlOSCryptoService cryptoService, SqlOSAdminService adminService, HttpContext httpContext, CancellationToken cancellationToken) =>
             TryAsync(async () =>
             {
                 var callbackUrl = webOptions.Value.CallbackUrl;
@@ -198,8 +199,15 @@ public static class ExampleAuthEndpoints
 
                 if (!string.IsNullOrWhiteSpace(error))
                 {
+                    var providerException = SqlOSPublicAuthErrorMapper.ProviderCallbackError(error, null);
+                    var mapped = await SqlOSPublicAuthErrorMapper.MapAndAuditAsync(
+                        adminService,
+                        httpContext,
+                        providerException,
+                        SqlOSPublicAuthErrorSurface.OidcCallback,
+                        cancellationToken);
                     ClearOidcCookies(httpContext.Response, httpContext);
-                    return Results.Redirect(QueryHelpers.AddQueryString(callbackUrl, "error", error));
+                    return Results.Redirect(QueryHelpers.AddQueryString(callbackUrl, "error", mapped.PublicMessage));
                 }
 
                 var storedState = httpContext.Request.Cookies[OidcStateCookie];
@@ -259,8 +267,14 @@ public static class ExampleAuthEndpoints
                 }
                 catch (InvalidOperationException ex)
                 {
+                    var mapped = await SqlOSPublicAuthErrorMapper.MapAndAuditAsync(
+                        adminService,
+                        httpContext,
+                        ex,
+                        SqlOSPublicAuthErrorSurface.OidcCallback,
+                        cancellationToken);
                     ClearOidcCookies(httpContext.Response, httpContext);
-                    return Results.Redirect(QueryHelpers.AddQueryString(callbackUrl, "error", ex.Message));
+                    return Results.Redirect(QueryHelpers.AddQueryString(callbackUrl, "error", mapped.PublicMessage));
                 }
             }));
 
@@ -534,7 +548,12 @@ public static class ExampleAuthEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { message = ex.Message });
+            var error = SqlOSPublicAuthErrorMapper.Map(ex, SqlOSPublicAuthErrorSurface.HeadlessApi);
+            return Results.Json(new
+            {
+                error = error.Error,
+                message = error.PublicMessage
+            }, statusCode: error.StatusCode);
         }
     }
 

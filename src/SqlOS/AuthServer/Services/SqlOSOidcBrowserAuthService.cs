@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 
@@ -182,12 +183,16 @@ public sealed class SqlOSOidcBrowserAuthService
 
         if (!string.IsNullOrWhiteSpace(callbackInput.Error))
         {
+            var error = await MapCallbackErrorAsync(
+                httpContext,
+                SqlOSPublicAuthErrorMapper.ProviderCallbackError(callbackInput.Error, callbackInput.ErrorDescription),
+                cancellationToken);
             return Results.Redirect(BuildAppRedirectUri(
                 payload.RedirectUri,
                 new Dictionary<string, string?>
                 {
                     ["state"] = payload.State,
-                    ["error"] = callbackInput.ErrorDescription ?? callbackInput.Error
+                    ["error"] = error.PublicMessage
                 }));
         }
 
@@ -241,12 +246,13 @@ public sealed class SqlOSOidcBrowserAuthService
         }
         catch (InvalidOperationException ex)
         {
+            var error = await MapCallbackErrorAsync(httpContext, ex, cancellationToken);
             return Results.Redirect(BuildAppRedirectUri(
                 payload.RedirectUri,
                 new Dictionary<string, string?>
                 {
                     ["state"] = payload.State,
-                    ["error"] = ex.Message
+                    ["error"] = error.PublicMessage
                 }));
         }
     }
@@ -266,11 +272,15 @@ public sealed class SqlOSOidcBrowserAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         if (!string.IsNullOrWhiteSpace(callbackInput.Error))
         {
+            var error = await MapCallbackErrorAsync(
+                httpContext,
+                SqlOSPublicAuthErrorMapper.ProviderCallbackError(callbackInput.Error, callbackInput.ErrorDescription),
+                cancellationToken);
             var headlessErrorRedirect = await TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
                 httpContext,
                 authorizationRequest.Id,
                 "login",
-                callbackInput.ErrorDescription ?? callbackInput.Error,
+                error.PublicMessage,
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -285,7 +295,7 @@ public sealed class SqlOSOidcBrowserAuthService
                 new Dictionary<string, string?>
                 {
                     ["state"] = authorizationRequest.State,
-                    ["error"] = callbackInput.ErrorDescription ?? callbackInput.Error
+                    ["error"] = error.PublicMessage
                 }));
         }
 
@@ -342,11 +352,12 @@ public sealed class SqlOSOidcBrowserAuthService
         }
         catch (InvalidOperationException ex)
         {
+            var error = await MapCallbackErrorAsync(httpContext, ex, cancellationToken);
             var headlessErrorRedirect = await TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
                 httpContext,
                 authorizationRequest.Id,
                 "login",
-                ex.Message,
+                error.PublicMessage,
                 pendingToken: null,
                 email: authorizationRequest.LoginHintEmail,
                 displayName: null,
@@ -361,7 +372,7 @@ public sealed class SqlOSOidcBrowserAuthService
                 new Dictionary<string, string?>
                 {
                     ["state"] = authorizationRequest.State,
-                    ["error"] = ex.Message
+                    ["error"] = error.PublicMessage
                 }));
         }
     }
@@ -444,6 +455,22 @@ public sealed class SqlOSOidcBrowserAuthService
 
     private static string BuildAppRedirectUri(string redirectUri, IDictionary<string, string?> parameters)
         => QueryHelpers.AddQueryString(redirectUri, parameters);
+
+    private async Task<SqlOSPublicAuthError> MapCallbackErrorAsync(
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var error = SqlOSPublicAuthErrorMapper.Map(exception, SqlOSPublicAuthErrorSurface.OidcCallback);
+        await SqlOSPublicAuthErrorAudit.RecordIfDiagnosticAsync(
+            _adminService,
+            httpContext,
+            SqlOSPublicAuthErrorSurface.OidcCallback,
+            exception,
+            error,
+            cancellationToken);
+        return error;
+    }
 
     private async Task<string?> TryBuildHeadlessUiUrlForAuthorizationRequestAsync(
         HttpContext httpContext,
