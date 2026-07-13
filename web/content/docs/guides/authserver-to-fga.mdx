@@ -152,6 +152,17 @@ public sealed class MembershipFgaSyncService(AppDbContext db)
             return false;
         }
 
+        var desiredRole = MapMembershipRole(membership!.Role);
+        if (desiredRole is null)
+        {
+            await RevokeMembershipRolesIfProvisionedAsync(
+                trustedSubjectId,
+                trustedOrganizationId,
+                ct);
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
         await db.ProvisionUserSubjectAsync(
             trustedSubjectId,
             displayName: user!.DisplayName,
@@ -170,10 +181,6 @@ public sealed class MembershipFgaSyncService(AppDbContext db)
             parentResourceId: "root",
             isActive: true,
             cancellationToken: ct);
-
-        var desiredRole = IsElevated(membership!.Role)
-            ? OrgAdminRole
-            : OrgMemberRole;
 
         foreach (var mappedRole in MembershipManagedRoles)
         {
@@ -225,9 +232,13 @@ public sealed class MembershipFgaSyncService(AppDbContext db)
     private static string OrganizationResourceId(string organizationId)
         => $"org::{organizationId}";
 
-    private static bool IsElevated(string role)
-        => role.Equals("owner", StringComparison.OrdinalIgnoreCase)
-            || role.Equals("admin", StringComparison.OrdinalIgnoreCase);
+    private static string? MapMembershipRole(string role)
+        => role.Trim().ToLowerInvariant() switch
+        {
+            "owner" or "admin" => OrgAdminRole,
+            "member" => OrgMemberRole,
+            _ => null
+        };
 }
 ```
 
@@ -246,6 +257,8 @@ An add-only sync is unsafe during role changes:
 - inactive or removed membership: leaving either mapped role keeps authorizing through FGA.
 
 The allowlist makes ownership explicit. An active reconciliation removes only the other mapped role and grants the desired one. An inactive reconciliation removes both mapped roles.
+
+The role-name switch also fails closed. An unexpected active membership role removes the membership-managed grants and returns `false` instead of silently treating an unknown value as `org_member`. Extend the explicit switch when your application defines additional trusted membership roles.
 
 ## 3. Use only trusted identity and organization state
 
@@ -351,6 +364,7 @@ Login-time reconciliation keeps the common path fresh, but it is not an offboard
 | Organization deactivated | Reconcile every membership in that organization |
 | User switches organizations | Reconcile the selected pair; do not revoke valid grants in the user's other organizations |
 | Membership reactivated | Re-read the current role and grant only its mapping |
+| Unexpected/custom role | Remove the mapped grants unless that exact role is deliberately added to the mapping allowlist |
 
 <Callout type="danger" title="Do not rely on FGA IsActive for revocation yet">
   AuthServer rejects inactive users, organizations, and memberships at its session and token boundaries. FGA lifecycle enforcement is tracked separately in open [issue #132](https://github.com/ross-slaney/sqlos/issues/132): current FGA point checks and query filters can still honor an existing grant even when an FGA subject or resource has `IsActive = false`. Remove the mapped grants explicitly during offboarding.
@@ -386,6 +400,7 @@ Automate these cases with separate users and organizations:
 | User or organization deactivated | Every affected membership pair is reconciled and mapped grants are gone |
 | Organization switch | Each valid tenant keeps its own grant; metadata does not act as policy |
 | Request tampering | Body/query `subjectId` and `organizationId` cannot change the actor or tenant |
+| Unknown membership role | Both mapped grants are absent until the role is explicitly supported |
 | Cross-tenant list | A token for Acme cannot return Globex rows even if malformed grants exist |
 | Cross-tenant detail/mutation | Tenant ownership is checked before FGA and returns no foreign object |
 
