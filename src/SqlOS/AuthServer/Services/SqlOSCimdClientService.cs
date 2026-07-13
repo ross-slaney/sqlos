@@ -220,11 +220,6 @@ public sealed class SqlOSCimdClientService
         }
 
         var cimdOptions = _options.ClientRegistration.Cimd;
-        if (cimdOptions.TrustedHosts.Count == 0 && cimdOptions.TrustPolicy == null)
-        {
-            await ThrowFetchPolicyFailureAsync(clientId, "CIMD metadata fetch requires a trusted host or trust policy.", cancellationToken);
-        }
-
         if (cimdOptions.TrustedHosts.Count > 0
             && !cimdOptions.TrustedHosts.Contains(clientIdUri.Host, StringComparer.OrdinalIgnoreCase))
         {

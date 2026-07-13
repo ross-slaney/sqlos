@@ -265,13 +265,6 @@ internal static class SqlOSOptionsValidator
 
     private static void ValidateClientRegistrationOptions(SqlOSAuthServerOptions options, List<string> errors)
     {
-        if (options.ClientRegistration.Cimd.Enabled
-            && options.ClientRegistration.Cimd.TrustedHosts.Count == 0
-            && options.ClientRegistration.Cimd.TrustPolicy == null)
-        {
-            errors.Add("AuthServer.ClientRegistration.Cimd requires at least one TrustedHosts entry or a TrustPolicy when Enabled is true.");
-        }
-
         if (options.ClientRegistration.Cimd.DefaultCacheTtl <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.ClientRegistration.Cimd.DefaultCacheTtl must be greater than zero.");

@@ -58,6 +58,31 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_PortableModeDoesNotRequireHostAllowlist()
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        options.ClientRegistration.Cimd.TrustedHosts.Clear();
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://portable.example.test/oauth/client.json",
+              "client_name": "Portable Client",
+              "redirect_uris": ["https://portable.example.test/callback"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(
+            "https://portable.example.test/oauth/client.json",
+            "https://portable.example.test/callback");
+
+        resolved.ResolutionKind.Should().Be("cimd");
+        httpFactory.RequestCount.Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_UsesFreshCachedCimdClientWithoutRefetch()
     {
         using var context = CreateContext();
