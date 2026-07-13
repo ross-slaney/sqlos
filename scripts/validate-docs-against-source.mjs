@@ -157,12 +157,12 @@ const requiredSourceContracts = [
   ],
   [
     "src/SqlOS/AuthServer/Services/SqlOSCimdClientService.cs",
-    /EnforceTrustedHost\(clientIdUri\);/,
+    /await EnforceFetchPolicyAsync\(clientIdUri, clientId, cancellationToken\);[\s\S]*TrustedHosts\.Count > 0/,
     "CIMD pre-fetch host allowlist",
   ],
   [
-    "src/SqlOS/Extensions/ServiceCollectionExtensions.cs",
-    /AddHttpClient\(nameof\(SqlOSCimdClientService\)\)[\s\S]*AllowAutoRedirect = false/,
+    "src/SqlOS/AuthServer/Services/SqlOSCimdHttpHandlerFactory.cs",
+    /AllowAutoRedirect = false,[\s\S]*UseProxy = false,[\s\S]*ConnectCallback/,
     "CIMD redirect-disabled HTTP client",
   ],
 ];

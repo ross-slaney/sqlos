@@ -10,7 +10,7 @@ public sealed class SqlOSClientRegistrationOptions
 
 public sealed class SqlOSCimdOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
     public TimeSpan DefaultCacheTtl { get; set; } = TimeSpan.FromHours(12);
     public TimeSpan HttpTimeout { get; set; } = TimeSpan.FromSeconds(10);
     public int MaxMetadataBytes { get; set; } = 256 * 1024;
