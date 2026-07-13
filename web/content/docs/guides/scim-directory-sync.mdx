@@ -101,6 +101,11 @@ For **Okta**, enable API integration, paste the Base URL and token, test the cre
 
 For **Microsoft Entra**, paste the Base URL into **Tenant URL**, paste the bearer token into **Secret Token**, test the connection, and start with a small assigned user or group before enabling the full provisioning scope.
 
+Continue with the provider-specific setup after the connection test:
+
+- [Set up SCIM with Microsoft Entra ID](/docs/guides/scim-microsoft-entra) — attribute mappings, assigned scope, on-demand provisioning, groups, and the recurring job
+- [Set up SCIM with Okta](/docs/guides/scim-okta) — app integration, outbound lifecycle switches, assignments, and Group Push
+
 <Callout type="info" title="Google Workspace">
   Google Workspace does not provide a public generic SCIM push client. Do not paste these values into the Google Admin SDK or treat its pull-based directory API as SCIM. Use a supported IdP, a purpose-built Google connector, or your own SCIM 2.0 client.
 </Callout>
@@ -153,6 +158,8 @@ curl --fail-with-body --silent --show-error --get \
 
 ## Pair SCIM provisioning with SAML sign-in
 
+For a production rollout, follow the complete [SCIM plus SAML access-lifecycle guide](/docs/guides/scim-saml-access-lifecycle). The short version is that SCIM decides who belongs to the organization, SAML authenticates those already-provisioned people, and SAML JIT provisioning stays off.
+
 The most predictable enterprise setup gives each protocol one job: SCIM decides who has organization access, while SAML authenticates those already-provisioned people. Use one stable work-email source in the IdP for every identity field that SqlOS links:
 
 | IdP value | Destination |
@@ -177,6 +184,8 @@ var draft = await adminService.CreateSsoConnectionDraftAsync(
 ```
 
 In the dashboard or delegated SSO portal, the equivalent policy is **Require SSO for existing members = on** and **Allow JIT provisioning = off**. Provision the test user through SCIM before attempting the first SAML sign-in. SqlOS marks the SCIM primary email verified; the SAML callback can then link the IdP subject to that existing user without creating a new user or membership.
+
+That setting gives the smoothest email-first routing for a trusted organization domain. For a narrower policy, leave `AutoLinkByEmail` / **Require SSO for existing members** off and have the application start the organization's SAML connection explicitly. SqlOS can still complete the first subject link when the signed assertion email exactly matches an active, same-organization SCIM record; it does not treat this as general email auto-linking.
 
 <Callout type="warning" title="Keep SCIM authoritative">
   Do not enable SAML JIT provisioning when IdP assignment and SCIM deprovisioning are supposed to control access. Otherwise a valid SAML assertion for a not-yet-provisioned person can create a user or membership outside the SCIM assignment lifecycle. Enable email linking only for a trusted enterprise connection whose email claim is controlled by the same organization.
@@ -278,6 +287,9 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
 
 ## Next steps
 
+- [Set up SCIM with Microsoft Entra ID](/docs/guides/scim-microsoft-entra)
+- [Set up SCIM with Okta](/docs/guides/scim-okta)
+- [Pair SCIM provisioning with SAML sign-in](/docs/guides/scim-saml-access-lifecycle)
 - [SCIM Directory Sync reference](/docs/authserver/scim-directory-sync)
 - [SCIM group mapping](/docs/fga/scim-group-mapping)
 - [SAML SSO](/docs/authserver/saml-sso)
