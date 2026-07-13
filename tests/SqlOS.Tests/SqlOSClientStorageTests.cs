@@ -19,7 +19,7 @@ public sealed class SqlOSClientStorageTests
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions();
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
@@ -41,7 +41,7 @@ public sealed class SqlOSClientStorageTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("seeded-client", "Seeded Client", "https://client.example.test/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication

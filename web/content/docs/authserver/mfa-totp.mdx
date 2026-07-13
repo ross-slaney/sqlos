@@ -89,6 +89,7 @@ Organization MFA policies inherit global settings until overridden. Use the admi
 
 ```bash
 curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "isEnabled": true,
@@ -108,9 +109,14 @@ Use role-based enforcement for privileged users:
   "isEnabled": true,
   "requireMfaForAllUsers": false,
   "requireMfaForOwnersAndAdmins": true,
-  "requiredRoles": ["owner", "admin"]
+  "userSelfEnrollmentEnabled": true,
+  "recoveryCodesEnabled": true,
+  "requiredRoles": ["owner", "admin"],
+  "availableFactors": ["totp", "recovery_code"]
 }
 ```
+
+`PUT` replaces the whole organization policy. Always send every field, preferably by reading the current policy and changing only the intended values in your operator code. Omitting a Boolean binds it to `false`; a partial payload could require MFA while accidentally disabling enrollment or recovery. The Admin API also requires an [operator session](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 ## Dashboard settings
 
@@ -140,6 +146,11 @@ After password, Email OTP, OIDC, SAML, signup, or organization selection:
 3. If the user has TOTP or recovery codes, SqlOS renders `Two-step verification`.
 4. If the user must enroll, SqlOS renders `Add authenticator app` with a QR code and manual setup secret.
 5. Successful MFA appends the second factor to the authentication methods.
+
+These states are intentionally separate. A normal `mfa` challenge never grants
+authenticator enrollment, even if the caller has completed the password step.
+Only a challenge whose stored policy decision requires first-time enrollment
+can start `mfa-enroll`.
 
 Issued tokens include `amr` claims for the primary and second factor:
 
@@ -193,6 +204,11 @@ POST /sqlos/auth/headless/mfa/totp/enroll/verify
 
 On success SqlOS returns the same redirect result shape used by the rest of headless auth.
 
+Send the `requestId`, `mfaToken`, and `enrollmentToken` from the same returned
+view model. SqlOS binds all three to the user, organization, client, flow, and
+authorization request. Mixing values from parallel tabs or separate sign-in
+attempts is rejected before recovery codes or login artifacts change.
+
 ## Direct API login behavior
 
 Direct password and signup APIs return MFA state instead of tokens when policy requires it.
@@ -241,6 +257,11 @@ POST /sqlos/auth/mfa/challenge/totp/enroll/verify
 }
 ```
 
+Call the forced-enrollment endpoints only when the same result has
+`requiresMfaEnrollment: true`. A result with `requiresMfaEnrollment: false`
+must use `/mfa/challenge/verify` with the user's existing authenticator or
+recovery code; the first factor does not authorize factor replacement.
+
 ## Account self-enrollment
 
 SqlOS exposes service methods for account pages in your app. The Retail example wires these through `/api/mfa/*` endpoints.
@@ -261,6 +282,12 @@ var result = await authService.VerifyTotpEnrollmentAsync(
 ```
 
 After enrollment, show `result.RecoveryCodes` once and tell the user to store them. Recovery codes are single-use.
+
+Account self-enrollment is deliberately separate from login-time required
+enrollment. Protect the account endpoint with an authenticated session and any
+recent-authentication rule your product requires. Its enrollment token cannot
+be paired with an MFA challenge, and a challenge-bound enrollment token cannot
+be verified as account self-enrollment.
 
 ## Device changes and recovery
 

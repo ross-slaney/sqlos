@@ -7,6 +7,10 @@ section: fga
 
 Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action on this resource?
 
+<Callout type="warning" title="Authenticate before you authorize">
+  FGA checks a subject ID; it does not validate bearer tokens. Protect the route group for this API's exact audience first, then derive the subject ID from `GetSqlOSValidatedToken()`. Never trust a subject ID supplied by the client.
+</Callout>
+
 ## CheckAccessAsync
 
 ```csharp
@@ -26,7 +30,7 @@ Use this for:
 
 ## HasCapabilityAsync
 
-Check if a subject has a permission anywhere in the tree:
+Check if a subject has a permission on the configured root resource:
 
 ```csharp
 var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKSPACE_MANAGE");
@@ -34,8 +38,10 @@ var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKS
 
 Use this for:
 
-- **Global UI toggles** -- show/hide "Create workspace" button.
-- **Broad capability gates** -- "can this user create anything at all?"
+- **Global UI toggles** -- show a create action backed by a root-level grant.
+- **Platform gates** -- enforce capabilities intentionally assigned at the root.
+
+This method calls `CheckAccessAsync` for `RootResourceId`; it does not scan descendant resources to answer whether the subject has that permission somewhere.
 
 ## Access Tester (dashboard)
 
@@ -50,14 +56,22 @@ Select a subject, permission, and resource to see whether access is allowed and 
 Create a protected entity after checking access to its parent resource. `SqlOSDbContext<TContext>` syncs the backing FGA resource row when the entity is saved.
 
 ```csharp
-app.MapPost("/api/workspaces", async (
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapPost("/workspaces", async (
     CreateWorkspaceRequest request,
     AppDbContext db,
     ISqlOSFgaAuthService authService,
     HttpContext http,
     CancellationToken ct) =>
 {
-    var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 

@@ -1,0 +1,145 @@
+---
+title: "Run the full example stack"
+description: "Explore the broad SqlOS surface across ASP.NET Core, Next.js, Angular, and the Todo sample."
+order: 10
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Optional deep dive"
+  title="Use the broad example after the first quickstart"
+  href="/docs/quickstarts/run-todo"
+  actionLabel="Start with Todo"
+>
+  The full Aspire stack is a feature explorer, not the recommended first integration. It runs two .NET APIs, a Razor Pages login client, Next.js, Angular, and two isolated SqlOS databases together.
+</Banner>
+
+## Goal
+
+Compare hosted and headless auth, organization workflows, SSO, sessions, audit logs, and FGA across several clients without assembling the stack yourself.
+
+## Prerequisites
+
+- SqlOS repository checked out at version 3.18.0;
+- .NET 9 SDK;
+- Node.js and npm;
+- Docker running with enough memory for SQL Server;
+- ports `1434`, `3010`, `4200`, `5062`, `5080`, `5090`, `18888`, and `18889` available.
+
+If you only want to see the normal hosted-login path, use [Run the Todo sample](/docs/quickstarts/run-todo). The full stack intentionally contains advanced surfaces.
+
+## Install frontend dependencies
+
+From the repository root:
+
+```bash
+npm install --prefix examples/SqlOS.Example.Web
+npm install --prefix examples/SqlOS.Example.AngularWeb
+```
+
+## Run
+
+```bash
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Use the authenticated Aspire dashboard URL printed in the terminal (its configured listener is `https://localhost:18888`), wait for SQL Server to become healthy, and confirm `api`, `todo-api`, `aspnet-web`, `web`, and `angular-web` show **Running**.
+
+## Open the stack
+
+| URL | Application |
+| --- | --- |
+| Authenticated URL printed by Aspire (`https://localhost:18888`) | Aspire resources, endpoints, logs, and traces |
+| `http://localhost:5090` | Razor Pages login client backed by the Todo SqlOS host |
+| `http://localhost:3010` | Next.js example client |
+| `http://localhost:4200` | Angular example client |
+| `http://localhost:5062/swagger` | Example .NET API |
+| `http://localhost:5062/sqlos` | Example-stack SqlOS dashboard |
+| `http://localhost:5080` | Narrow Todo sample |
+
+The AppHost creates separate `sqlos-example` and `sqlos-todo` databases in one persistent local SQL Server container. The examples do not share identity or authorization rows accidentally.
+
+## Pick one flow
+
+Avoid testing everything at once. Choose the flow that answers your current question:
+
+### Native ASP.NET Core authentication
+
+1. Open `http://localhost:5090`.
+2. Challenge the built-in ASP.NET Core OAuth handler.
+3. Create a password account through the hosted AuthPage.
+4. Return to an encrypted ASP.NET Core application cookie.
+5. Inspect the protected `/api/me` response, then sign out and revoke the session.
+
+The `example-aspnet` client uses the Todo issuer at `http://localhost:5080/sqlos/auth`, not the broader Example API at port `5062`. This keeps the runnable .NET login identical in both AppHosts.
+
+### Hosted authentication in Next.js
+
+1. Open the Next.js client.
+2. Start hosted sign-up.
+3. Create a password user and organization.
+4. Complete the PKCE callback.
+5. Inspect the session and claims returned to the client.
+
+### Headless authentication
+
+Use the headless route in the Next.js example to compare app-owned screens with the same SqlOS request, credential, organization-selection, and token state machine.
+
+### Organization administration
+
+Open the dashboard, then inspect users, organizations, memberships, invitations, sessions, applications, and audit events. Create an invitation if email delivery is configured, or copy its acceptance link for a local flow.
+
+### Fine-grained authorization
+
+Use the Retail/workspace surfaces to create protected data, then inspect resources, grants, roles, permissions, and the Access Tester in the FGA dashboard.
+
+![Retail administration backed by the full SqlOS example stack](/docs/retail-app-admin-dashboard.png)
+
+### Enterprise identity
+
+Configure social login or a SAML connection only when you have provider credentials. The stack runs without them. The delegated SSO example at `http://localhost:3010/retail/sso` demonstrates how a host application can create a customer-scoped setup session.
+
+## Optional provider secrets
+
+Provider-backed features are disabled until configured. Store local values on the AppHost project rather than committing them:
+
+```bash
+dotnet user-secrets --project examples/SqlOS.Example.AppHost set \
+  "SqlOS:Oidc:Microsoft:ClientId" "<client-id>"
+
+dotnet user-secrets --project examples/SqlOS.Example.AppHost set \
+  "SqlOS:Oidc:Microsoft:ClientSecret" "<client-secret>"
+```
+
+Email OTP, SMS OTP, transactional email, and calendar consent likewise require their documented provider settings. They are optional extensions, not startup requirements.
+
+## Common failures
+
+### A frontend resource exits immediately
+
+Install that frontend's npm dependencies from the repository root, then restart the AppHost. The AppHost runs the existing `dev` scripts; it does not replace `npm install`.
+
+### One of the fixed ports is occupied
+
+Stop the conflicting local process. The seeded issuer, audience, and callback URLs use the documented local ports, so changing only one endpoint will cause issuer, audience, or redirect mismatches. Port `18889` is also used by the Aspire OTLP endpoint.
+
+### SQL Server starts with old state
+
+The AppHost uses a persistent data volume. Preserve it when the data matters; use a clean development volume when intentionally resetting an obsolete local schema or seed model.
+
+### A provider button is missing
+
+The corresponding OIDC/social connection is enabled only when its credentials are present or it has been configured in the dashboard.
+
+## Production notes
+
+This stack demonstrates integration boundaries; it is not a production topology recommendation. A production app should choose only the required clients, use HTTPS origins, persist secrets and Data Protection keys correctly, restrict admin routes, and test its own organization and authorization rules.
+
+## Next steps
+
+- [Add SqlOS to one app](/docs/quickstarts/add-to-app)
+- [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login)
+- [Hosted vs headless auth](/docs/authserver/hosted-vs-headless)
+- [Social sign-in](/docs/guides/social-oidc)
+- [SAML SSO](/docs/guides/saml-sso)
+- [Model authorization](/docs/guides/model-fga)

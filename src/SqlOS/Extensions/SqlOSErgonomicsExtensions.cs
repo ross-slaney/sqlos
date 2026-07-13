@@ -19,6 +19,15 @@ public static class SqlOSErgonomicsExtensions
 {
     private const int DefaultMaxResourceHierarchyDepth = 10;
 
+    /// <summary>
+    /// Requires every endpoint in a route group to present a valid SqlOS bearer access token
+    /// containing the specified audience.
+    /// </summary>
+    /// <param name="group">The Minimal API route group to protect.</param>
+    /// <param name="expectedAudience">The exact audience required in a valid access token.</param>
+    /// <returns>The same <paramref name="group"/> instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="group"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="expectedAudience"/> is empty or contains only whitespace.</exception>
     public static RouteGroupBuilder RequireSqlOSAccessToken(this RouteGroupBuilder group, string expectedAudience)
     {
         ArgumentNullException.ThrowIfNull(group);
@@ -26,6 +35,21 @@ public static class SqlOSErgonomicsExtensions
         return group.RequireSqlOSAccessToken(options => options.ExpectedAudience = expectedAudience);
     }
 
+    /// <summary>
+    /// Requires endpoints in a route group to satisfy the configured SqlOS bearer access-token validation policy.
+    /// </summary>
+    /// <param name="group">The Minimal API route group to protect.</param>
+    /// <param name="configure">A callback that configures token validation.</param>
+    /// <returns>The same <paramref name="group"/> instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="group"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The configured <see cref="SqlOSAccessTokenValidationOptions.ExpectedAudience"/> is empty.
+    /// </exception>
+    /// <remarks>
+    /// Successful validation sets <see cref="HttpContext.User"/> and stores the validated token for
+    /// <see cref="SqlOSAccessTokenValidationExtensions.GetSqlOSValidatedToken(HttpContext)"/>.
+    /// Failed validation returns HTTP 401 with a Bearer challenge without invoking the endpoint.
+    /// </remarks>
     public static RouteGroupBuilder RequireSqlOSAccessToken(
         this RouteGroupBuilder group,
         Action<SqlOSAccessTokenValidationOptions> configure)
@@ -43,6 +67,15 @@ public static class SqlOSErgonomicsExtensions
         return group;
     }
 
+    /// <summary>
+    /// Checks whether a subject has a permission on a resource and returns only the allow/deny decision.
+    /// </summary>
+    /// <param name="authService">The SqlOS FGA authorization service.</param>
+    /// <param name="subjectId">The subject to authorize.</param>
+    /// <param name="permissionKey">The permission key to require.</param>
+    /// <param name="resourceId">The target resource identifier.</param>
+    /// <returns><see langword="true"/> when access is allowed; otherwise, <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="authService"/> is <see langword="null"/>.</exception>
     public static async Task<bool> Allows(
         this ISqlOSFgaAuthService authService,
         string subjectId,
@@ -55,6 +88,20 @@ public static class SqlOSErgonomicsExtensions
         return result.Allowed;
     }
 
+    /// <summary>
+    /// Creates a new manually managed FGA resource with a generated identifier and adds it to the context.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="resourceTypeId">The identifier of an existing FGA resource type.</param>
+    /// <param name="name">The resource display name.</param>
+    /// <param name="parentResourceId">The optional identifier of the resource's parent.</param>
+    /// <param name="description">An optional resource description.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The new tracked resource. Call <see cref="ISqlOSFgaDbContext.SaveChangesAsync(CancellationToken)"/> to persist it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, the resource type or parent does not exist, or the requested hierarchy is invalid.
+    /// </exception>
     public static Task<SqlOSFgaResource> CreateResourceAsync(
         this ISqlOSFgaDbContext context,
         string resourceTypeId,
@@ -73,6 +120,22 @@ public static class SqlOSErgonomicsExtensions
             cancellationToken);
     }
 
+    /// <summary>
+    /// Creates a new manually managed FGA resource with an explicit identifier and adds it to the context.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="resourceId">The stable identifier for the new resource.</param>
+    /// <param name="resourceTypeId">The identifier of an existing FGA resource type.</param>
+    /// <param name="name">The resource display name.</param>
+    /// <param name="parentResourceId">The optional identifier of the resource's parent.</param>
+    /// <param name="description">An optional resource description.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The new tracked resource. Call <see cref="ISqlOSFgaDbContext.SaveChangesAsync(CancellationToken)"/> to persist it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A resource with the same identifier already exists, a required value is empty, the resource type
+    /// or parent does not exist, or the requested hierarchy is invalid.
+    /// </exception>
     public static async Task<SqlOSFgaResource> CreateResourceWithIdAsync(
         this ISqlOSFgaDbContext context,
         string resourceId,
@@ -111,6 +174,28 @@ public static class SqlOSErgonomicsExtensions
         return resource;
     }
 
+    /// <summary>
+    /// Idempotently creates or updates a manually managed FGA resource with an explicit identifier.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="resourceId">The stable resource identifier.</param>
+    /// <param name="resourceTypeId">The identifier of an existing FGA resource type.</param>
+    /// <param name="name">The resource display name.</param>
+    /// <param name="parentResourceId">
+    /// The optional parent identifier. For an existing resource, <see langword="null"/> preserves its current parent.
+    /// </param>
+    /// <param name="description">
+    /// The optional description. For an existing resource, <see langword="null"/> preserves its current description.
+    /// </param>
+    /// <param name="isActive">
+    /// The optional active state. For an existing resource, <see langword="null"/> preserves its current state.
+    /// </param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The added or updated tracked resource. Call <see cref="ISqlOSFgaDbContext.SaveChangesAsync(CancellationToken)"/> to persist it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, the resource type or parent does not exist, or the requested hierarchy is invalid.
+    /// </exception>
     public static async Task<SqlOSFgaResource> ProvisionResourceWithIdAsync(
         this ISqlOSFgaDbContext context,
         string resourceId,
@@ -171,6 +256,21 @@ public static class SqlOSErgonomicsExtensions
         return resource;
     }
 
+    /// <summary>
+    /// Marks a manually managed FGA resource and all of its direct grants for deletion.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="resourceId">The identifier of the resource to delete.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>A task that completes when the resource and grants have been marked for deletion.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The resource does not exist, has child resources, or <paramref name="resourceId"/> is empty.
+    /// </exception>
+    /// <remarks>
+    /// Child resources are not deleted or reparented. Call
+    /// <see cref="ISqlOSFgaDbContext.SaveChangesAsync(CancellationToken)"/> to persist the deletion.
+    /// </remarks>
     public static async Task DeleteResourceAsync(
         this ISqlOSFgaDbContext context,
         string resourceId,
@@ -189,6 +289,24 @@ public static class SqlOSErgonomicsExtensions
         context.Set<SqlOSFgaResource>().Remove(resource);
     }
 
+    /// <summary>
+    /// Idempotently grants a role to an existing subject on an entity-backed FGA resource.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The identifier of an explicitly provisioned subject.</param>
+    /// <param name="resource">The protected application entity that identifies the target resource.</param>
+    /// <param name="roleKeyOrId">The key or identifier of an existing FGA role.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The existing or newly added tracked grant.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> or <paramref name="resource"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or the subject, role, or target resource cannot be resolved.
+    /// </exception>
+    /// <remarks>
+    /// A newly tracked <paramref name="resource"/> is supported when the context derives from
+    /// <c>SqlOSDbContext&lt;TContext&gt;</c>; the backing FGA resource is synchronized during save.
+    /// This method does not provision subjects or save changes.
+    /// </remarks>
     public static async Task<SqlOSFgaGrant> GrantRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -207,6 +325,20 @@ public static class SqlOSErgonomicsExtensions
             cancellationToken);
     }
 
+    /// <summary>
+    /// Idempotently grants a role to an existing subject on an FGA resource.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The identifier of an explicitly provisioned subject.</param>
+    /// <param name="resourceId">The target resource identifier.</param>
+    /// <param name="roleKeyOrId">The key or identifier of an existing FGA role.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The existing or newly added tracked grant.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or the subject, role, or target resource cannot be resolved.
+    /// </exception>
+    /// <remarks>This method does not provision subjects or save changes.</remarks>
     public static async Task<SqlOSFgaGrant> GrantRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -221,6 +353,19 @@ public static class SqlOSErgonomicsExtensions
             description: null,
             cancellationToken);
 
+    /// <summary>
+    /// Removes a subject's role grant from an entity-backed FGA resource when the grant exists.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The identifier of an existing subject.</param>
+    /// <param name="resource">The protected application entity that identifies the target resource.</param>
+    /// <param name="roleKeyOrId">The key or identifier of an existing FGA role.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>A task that completes when the matching grant has been marked for deletion, if present.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> or <paramref name="resource"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or the subject, role, or target resource cannot be resolved.
+    /// </exception>
     public static async Task RevokeRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -233,6 +378,20 @@ public static class SqlOSErgonomicsExtensions
         await RevokeRoleAsync(context, subjectId, resource.ResourceId, roleKeyOrId, cancellationToken);
     }
 
+    /// <summary>
+    /// Removes a subject's role grant from an FGA resource when the grant exists.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The identifier of an existing subject.</param>
+    /// <param name="resourceId">The target resource identifier.</param>
+    /// <param name="roleKeyOrId">The key or identifier of an existing FGA role.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>A task that completes when the matching grant has been marked for deletion, if present.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or the subject, role, or target resource cannot be resolved.
+    /// </exception>
+    /// <remarks>When no matching grant exists, this method makes no change. It does not save changes.</remarks>
     public static async Task RevokeRoleAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -308,6 +467,23 @@ public static class SqlOSErgonomicsExtensions
         return grant;
     }
 
+    /// <summary>
+    /// Idempotently provisions an FGA subject of type <c>user</c> and its typed user record.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The stable identifier used for authorization checks and grants.</param>
+    /// <param name="displayName">The subject's display name.</param>
+    /// <param name="email">An optional email address. When omitted for an existing user, the current value is preserved.</param>
+    /// <param name="organizationId">An optional organization identifier. When omitted for an existing subject, the current value is preserved.</param>
+    /// <param name="externalRef">An optional external identifier. New subjects default it to <paramref name="subjectId"/>.</param>
+    /// <param name="isActive">An optional active state. When omitted for an existing user, the current value is preserved.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The added or updated tracked user record.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or <paramref name="subjectId"/> already belongs to a different subject type.
+    /// </exception>
+    /// <remarks>This method tracks changes but does not save them.</remarks>
     public static async Task<SqlOSFgaUser> ProvisionUserSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -360,6 +536,23 @@ public static class SqlOSErgonomicsExtensions
         return user;
     }
 
+    /// <summary>
+    /// Idempotently provisions an FGA subject of type <c>agent</c> and its typed agent record.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The stable identifier used for authorization checks and grants.</param>
+    /// <param name="displayName">The subject's display name.</param>
+    /// <param name="agentType">An optional application-defined agent type. When omitted for an existing agent, the current value is preserved.</param>
+    /// <param name="description">An optional description. When omitted for an existing agent, the current value is preserved.</param>
+    /// <param name="organizationId">An optional organization identifier. When omitted for an existing subject, the current value is preserved.</param>
+    /// <param name="externalRef">An optional external identifier. New subjects default it to <paramref name="subjectId"/>.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The added or updated tracked agent record.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or <paramref name="subjectId"/> already belongs to a different subject type.
+    /// </exception>
+    /// <remarks>This method tracks changes but does not save them.</remarks>
     public static async Task<SqlOSFgaAgent> ProvisionAgentSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,
@@ -412,6 +605,25 @@ public static class SqlOSErgonomicsExtensions
         return agent;
     }
 
+    /// <summary>
+    /// Idempotently provisions an FGA subject of type <c>service_account</c> and its typed service-account record.
+    /// </summary>
+    /// <param name="context">The application FGA context.</param>
+    /// <param name="subjectId">The stable identifier used for authorization checks and grants.</param>
+    /// <param name="displayName">The subject's display name.</param>
+    /// <param name="clientId">The service account's client identifier.</param>
+    /// <param name="clientSecretHash">The application-provided hash of the service account secret.</param>
+    /// <param name="description">An optional description. When omitted for an existing account, the current value is preserved.</param>
+    /// <param name="expiresAt">An optional expiration time. When omitted for an existing account, the current value is preserved.</param>
+    /// <param name="organizationId">An optional organization identifier. When omitted for an existing subject, the current value is preserved.</param>
+    /// <param name="externalRef">An optional external identifier. New subjects default it to <paramref name="subjectId"/>.</param>
+    /// <param name="cancellationToken">A token that can cancel database lookups.</param>
+    /// <returns>The added or updated tracked service-account record.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A required value is empty, or <paramref name="subjectId"/> already belongs to a different subject type.
+    /// </exception>
+    /// <remarks>This method tracks changes but does not save them.</remarks>
     public static async Task<SqlOSFgaServiceAccount> ProvisionServiceAccountSubjectAsync(
         this ISqlOSFgaDbContext context,
         string subjectId,

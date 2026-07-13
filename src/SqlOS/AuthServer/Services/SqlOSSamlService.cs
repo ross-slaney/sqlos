@@ -68,41 +68,49 @@ public sealed class SqlOSSamlService
 
     public async Task<string> CreateAuthorizationUrlAsync(SqlOSAuthorizationUrlRequest request, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(request.State))
+        {
+            throw new InvalidOperationException("A state value is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CodeChallenge)
+            || !string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SAML authorization requires an S256 PKCE code challenge.");
+        }
+
+        if (!_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge))
+        {
+            throw new InvalidOperationException(
+                "SAML authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+        }
+
         var connection = await _context.Set<SqlOSSsoConnection>()
             .FirstOrDefaultAsync(x => x.Id == request.ConnectionId && x.IsEnabled, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");
         var client = await _adminService.RequireClientAsync(request.ClientId, request.RedirectUri, cancellationToken);
 
-        var requestToken = await _cryptoService.CreateTemporaryTokenAsync(
-            "sso_request",
-            null,
-            client.Id,
-            connection.OrganizationId,
-            new SsoRequestPayload(client.ClientId, request.RedirectUri, connection.Id, null, null),
-            TimeSpan.FromMinutes(10),
-            cancellationToken);
-
-        return $"{_options.BasePath.TrimEnd('/')}/saml/login/{connection.Id}?requestToken={Uri.EscapeDataString(requestToken)}";
-    }
-
-    public async Task<string> BuildIdentityProviderRedirectAsync(string connectionId, string requestToken, CancellationToken cancellationToken = default)
-    {
-        var connection = await _context.Set<SqlOSSsoConnection>().FirstOrDefaultAsync(x => x.Id == connectionId && x.IsEnabled, cancellationToken)
-            ?? throw new InvalidOperationException("SAML connection not found or disabled.");
-        var requestState = await _cryptoService.FindTemporaryTokenAsync("sso_request", requestToken, cancellationToken)
-            ?? throw new InvalidOperationException("SSO request token is invalid or expired.");
-        var requestPayload = _cryptoService.DeserializePayload<SsoRequestPayload>(requestState)
-            ?? throw new InvalidOperationException("SSO request payload is invalid.");
-        var samlRequest = BuildAuthnRequest(connection);
-
-        requestState.PayloadJson = JsonSerializer.Serialize(requestPayload with
+        var authorizationRequest = new SqlOSAuthorizationRequest
         {
-            SamlRequestId = samlRequest.Id,
-            AssertionConsumerServiceUrl = samlRequest.AssertionConsumerServiceUrl
-        });
+            Id = _cryptoService.GenerateId("req"),
+            ClientApplicationId = client.Id,
+            OrganizationId = connection.OrganizationId,
+            ConnectionId = connection.Id,
+            PresentationMode = "hosted",
+            RedirectUri = request.RedirectUri,
+            State = request.State,
+            Scope = "openid profile email",
+            CodeChallenge = request.CodeChallenge,
+            CodeChallengeMethod = "S256",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        };
+        _context.Set<SqlOSAuthorizationRequest>().Add(authorizationRequest);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return BuildIdentityProviderRedirectUrl(connection, requestToken, samlRequest.EncodedRequest);
+        return await BuildIdentityProviderRedirectForAuthorizationRequestAsync(
+            authorizationRequest.Id,
+            cancellationToken);
     }
 
     public async Task<string> BuildIdentityProviderRedirectForAuthorizationRequestAsync(string authorizationRequestId, CancellationToken cancellationToken = default)
@@ -155,21 +163,7 @@ public sealed class SqlOSSamlService
             return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, principal, httpContext, cancellationToken);
         }
 
-        var requestToken = await _cryptoService.ConsumeTemporaryTokenAsync("sso_request", relayState, cancellationToken)
-            ?? throw new InvalidOperationException("SSO request token is invalid or expired.");
-        var requestPayload = _cryptoService.DeserializePayload<SsoRequestPayload>(requestToken)
-            ?? throw new InvalidOperationException("SSO request payload is invalid.");
-        if (string.IsNullOrWhiteSpace(requestPayload.SamlRequestId) || string.IsNullOrWhiteSpace(requestPayload.AssertionConsumerServiceUrl))
-        {
-            throw new InvalidOperationException("SAML request state is missing.");
-        }
-
-        var requestPrincipal = ParseAndValidateAssertion(
-            samlResponse,
-            connection,
-            new SamlValidationContext(requestPayload.SamlRequestId, requestPayload.AssertionConsumerServiceUrl, _adminService.GetServiceProviderEntityId()));
-
-        return await HandleRequestTokenAcsAsync(connection, requestToken, requestPayload, requestPrincipal, cancellationToken);
+        throw new InvalidOperationException("SAML authorization request is invalid or expired.");
     }
 
     private async Task<string> HandleAuthorizationRequestAcsAsync(
@@ -252,31 +246,6 @@ public sealed class SqlOSSamlService
         await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: organizationId, cancellationToken: cancellationToken);
         var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
-    }
-
-    private async Task<string> HandleRequestTokenAcsAsync(
-        SqlOSSsoConnection connection,
-        SqlOSTemporaryToken requestToken,
-        SsoRequestPayload requestPayload,
-        SqlOSSamlPrincipal principal,
-        CancellationToken cancellationToken)
-    {
-        var email = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue) ? emailValue : null;
-        var user = await ResolveUserAsync(connection, principal, email, connection.OrganizationId, cancellationToken)
-            ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
-
-        var code = await _cryptoService.CreateTemporaryTokenAsync(
-            "auth_code",
-            user.Id,
-            requestToken.ClientApplicationId,
-            connection.OrganizationId,
-            new AuthCodePayload(requestPayload.ClientId, requestPayload.RedirectUri, "saml"),
-            TimeSpan.FromMinutes(5),
-            cancellationToken: cancellationToken);
-
-        await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: connection.OrganizationId, cancellationToken: cancellationToken);
-        var separator = requestPayload.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return $"{requestPayload.RedirectUri}{separator}code={Uri.EscapeDataString(code)}";
     }
 
     private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection)
@@ -656,6 +625,19 @@ public sealed class SqlOSSamlService
         string organizationId,
         CancellationToken cancellationToken)
     {
+        var organizationIsActive = await _context.Set<SqlOSOrganization>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == organizationId && x.IsActive, cancellationToken);
+        if (!organizationIsActive)
+        {
+            await RecordFederatedLifecycleDenialAsync(
+                SqlOSAuthLifecycleDecision.Denied("organization_inactive"),
+                userId: null,
+                organizationId: organizationId,
+                cancellationToken: cancellationToken);
+            return null;
+        }
+
         var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
             .FirstOrDefaultAsync(x => x.SsoConnectionId == connection.Id && x.Subject == principal.Subject, cancellationToken);
         SqlOSUser? user = externalIdentity == null
@@ -665,8 +647,23 @@ public sealed class SqlOSSamlService
 
         if (user != null)
         {
-            var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
-            if (!hasMembership)
+            if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
+            {
+                return null;
+            }
+
+            var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
+            if (membership is { IsActive: false })
+            {
+                await RecordFederatedLifecycleDenialAsync(
+                    SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
+                    user.Id,
+                    organizationId,
+                    cancellationToken);
+                return null;
+            }
+
+            if (membership == null)
             {
                 if (!connection.AutoProvisionUsers)
                 {
@@ -683,8 +680,23 @@ public sealed class SqlOSSamlService
             if (existingEmail != null)
             {
                 user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
-                var hasMembership = await UserHasActiveMembershipAsync(user.Id, organizationId, cancellationToken);
-                if (hasMembership)
+                if (!await IsActiveFederatedUserAsync(user.Id, organizationId, cancellationToken))
+                {
+                    return null;
+                }
+
+                var membership = await FindMembershipAsync(user.Id, organizationId, cancellationToken);
+                if (membership is { IsActive: false })
+                {
+                    await RecordFederatedLifecycleDenialAsync(
+                        SqlOSAuthLifecycleDecision.Denied("membership_inactive"),
+                        user.Id,
+                        organizationId,
+                        cancellationToken);
+                    return null;
+                }
+
+                if (membership != null)
                 {
                     if (!connection.AutoLinkByEmail || !existingEmail.IsVerified)
                     {
@@ -762,12 +774,55 @@ public sealed class SqlOSSamlService
         return user;
     }
 
-    private async Task<bool> UserHasActiveMembershipAsync(
+    private async Task<SqlOSMembership?> FindMembershipAsync(
         string userId,
         string organizationId,
         CancellationToken cancellationToken)
         => await _context.Set<SqlOSMembership>()
-            .AnyAsync(x => x.UserId == userId && x.OrganizationId == organizationId && x.IsActive, cancellationToken);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, cancellationToken);
+
+    private async Task<bool> IsActiveFederatedUserAsync(
+        string userId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId: null,
+            cancellationToken: cancellationToken);
+        if (lifecycle.IsActive)
+        {
+            return true;
+        }
+
+        await RecordFederatedLifecycleDenialAsync(lifecycle, userId, organizationId, cancellationToken);
+        return false;
+    }
+
+    private async Task RecordFederatedLifecycleDenialAsync(
+        SqlOSAuthLifecycleDecision lifecycle,
+        string? userId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId,
+            organizationId,
+            lifecycle,
+            DateTime.UtcNow,
+            cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            "saml_callback",
+            lifecycle,
+            userId,
+            organizationId);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
 
     private async Task EnsureMembershipAsync(
         string organizationId,
@@ -778,8 +833,11 @@ public sealed class SqlOSSamlService
             .FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
         if (existing != null)
         {
-            existing.IsActive = true;
-            existing.Role = "member";
+            if (!existing.IsActive)
+            {
+                throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
+            }
+
             return;
         }
 
@@ -793,17 +851,9 @@ public sealed class SqlOSSamlService
         });
     }
 
-    private sealed record SsoRequestPayload(
-        string ClientId,
-        string RedirectUri,
-        string ConnectionId,
-        string? SamlRequestId,
-        string? AssertionConsumerServiceUrl);
-
     private sealed record SamlAuthnRequest(string Id, string AssertionConsumerServiceUrl, string EncodedRequest);
     private sealed record SamlRequestState(string RequestId, string AssertionConsumerServiceUrl);
     private sealed record SamlValidationContext(string RequestId, string AssertionConsumerServiceUrl, string Audience);
-    private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
     private sealed record SqlOSSamlPrincipal(string Issuer, string Subject, Dictionary<string, string> Attributes);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)

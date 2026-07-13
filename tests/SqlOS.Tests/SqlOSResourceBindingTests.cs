@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -517,7 +518,7 @@ public sealed class SqlOSResourceBindingTests
             PublicOrigin = "https://app.example.com"
         };
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -542,7 +543,7 @@ public sealed class SqlOSResourceBindingTests
         optionsValue.ClientSeeds[0].Audience = "sqlos-api";
 
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);

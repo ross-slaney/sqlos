@@ -28,12 +28,38 @@ public sealed class SqlOSOptions
     public SqlOSEmailOptions Email { get; } = new();
     public SqlOSCalendarOptions Calendar { get; } = new();
 
+    /// <summary>
+    /// Configures SqlOS for one first-party public PKCE application.
+    /// </summary>
+    /// <param name="name">The application display name. It is also used to derive the client ID when one is not configured.</param>
+    /// <param name="configure">An optional callback that overrides the single-application defaults.</param>
+    /// <returns>The same options instance so that additional configuration can be chained.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="name"/> is empty or contains only whitespace.</exception>
+    /// <remarks>
+    /// Single-application mode disables dynamic client registration and resource indicators, and
+    /// can apply the application name to the hosted sign-in page and transactional email branding.
+    /// It cannot be combined with explicit startup client seeds.
+    /// </remarks>
     public SqlOSOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)
     {
         AuthServer.UseSingleApplication(name, configure);
         return this;
     }
 
+    /// <summary>
+    /// Configures SqlOS for one first-party public PKCE application using a configuration section.
+    /// </summary>
+    /// <param name="configuration">The application configuration containing the single-application settings.</param>
+    /// <param name="sectionName">The path of the configuration section to bind.</param>
+    /// <returns>The same options instance so that additional configuration can be chained.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The requested configuration section does not exist or does not contain a non-empty application name.
+    /// </exception>
+    /// <remarks>
+    /// The section supports <c>Name</c>, <c>Origin</c>, <c>ClientId</c>, <c>Audience</c>,
+    /// <c>RedirectPath</c>, <c>RedirectUris</c>, <c>AllowedScopes</c>,
+    /// <c>EnabledCredentialTypes</c>, and the single-application branding switches.
+    /// </remarks>
     public SqlOSOptions UseSingleApplication(IConfiguration configuration, string sectionName = "SqlOS:Application")
     {
         AuthServer.UseSingleApplication(configuration, sectionName);

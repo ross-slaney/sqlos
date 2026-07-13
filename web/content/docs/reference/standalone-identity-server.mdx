@@ -1,7 +1,7 @@
 ---
 title: "Standalone Identity Server Reference"
 description: "Reference tables for using SqlOS as a dedicated identity host for multiple applications."
-order: 13
+order: 14
 section: reference
 ---
 
@@ -80,7 +80,7 @@ auth.SeedCliClient(
 
 | Mode | Behavior |
 | --- | --- |
-| `all_organizations` | Any authenticated user with active organization context can use the app. |
+| `all_organizations` | Any authenticated user can use the app; organization context is optional. Explicit deny assignments still win. |
 | `selected_organizations` | Only directly assigned organizations can use the app. |
 | `selected_users_groups_roles` | User, FGA user group, organization role, service account, or agent assignment required. |
 | `internal_only` | Explicit trusted assignment required. |

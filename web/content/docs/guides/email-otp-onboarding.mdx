@@ -1,0 +1,326 @@
+---
+title: "Passwordless email-code onboarding"
+description: "Create a verified user and workspace through headless Email OTP signup and PKCE."
+order: 2
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Create an account with a short-lived inbox code"
+  href="/docs/authserver/email-otp"
+  actionLabel="Email OTP"
+>
+  Keep the first-run UI in your product while SqlOS verifies the inbox, creates the identity, and finishes the OAuth request.
+</Banner>
+
+![ParcelPilot passwordless email-code account creation screens](/docs/guides-email-otp-onboarding.svg)
+
+This guide builds **ParcelPilot**, a fictional logistics app. A new customer enters a name, work email, and workspace name; SqlOS sends a six-digit code; successful verification creates a passwordless user, verifies the primary email, creates the organization, and returns to ParcelPilot with an OAuth authorization code.
+
+## Goal
+
+The user sees two product-owned steps:
+
+1. **Create your workspace** — name, email, workspace, and app-owned onboarding fields.
+2. **Check your inbox** — one-time code with a controlled resend state.
+
+SqlOS owns challenge generation, delivery, rate limits, attempts, signup-token state, user and organization creation, the signup hook transaction, and OAuth completion.
+
+## 1. Configure delivery, policy, and branding
+
+Use the transactional email sender for the built-in `auth.email-otp` template, then configure OTP policy separately:
+
+```csharp
+const string publicOrigin = "https://identity.parcelpilot.test";
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.ConfigureEmail(email =>
+    {
+        email.AzureCommunicationServicesConnectionString =
+            builder.Configuration["SqlOS:Email:AzureCommunicationServicesConnectionString"];
+        email.FromAddress = builder.Configuration["SqlOS:Email:FromAddress"];
+    });
+
+    var auth = options.AuthServer;
+    auth.PublicOrigin = publicOrigin;
+    auth.Issuer = $"{publicOrigin}/sqlos/auth";
+    auth.ConfigureEmailOtp(otp =>
+    {
+        otp.ApplicationName = "ParcelPilot";
+        otp.ChallengeLifetime = TimeSpan.FromMinutes(10);
+        otp.ResendCooldown = TimeSpan.FromSeconds(30);
+        otp.MaxAttempts = 5;
+        otp.MaxChallengesPerHour = 5;
+        otp.MaxChallengesPerIpPerHour = 60;
+        otp.MaxChallengesPerClientPerHour = 300;
+    });
+
+    auth.EnableLocalPasswordAuth = false;
+    auth.SeedAuthPage(page =>
+    {
+        page.EnabledCredentialTypes = ["email_otp"];
+        page.EnablePasswordSignup = false;
+    });
+
+    auth.SeedAuthEmails(email =>
+    {
+        email.ApplicationName = "ParcelPilot";
+        email.PrimaryColor = "#4f46e5";
+        email.AccentColor = "#0f172a";
+        email.BackgroundColor = "#f5f3ff";
+    });
+});
+```
+
+Create and verify the ACS Email domain and sender before enabling the flow in production. Customize the stored template in **Dashboard > Communications > Templates**; keep the code placeholder intact.
+
+## 2. Register the web client and headless page
+
+```csharp
+using Microsoft.AspNetCore.WebUtilities;
+
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "parcelpilot-web";
+    client.Name = "ParcelPilot Web";
+    client.Audience = "https://api.parcelpilot.test";
+    client.RedirectUris = ["https://app.parcelpilot.test/auth/callback"];
+    client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+});
+
+options.AuthServer.UseHeadlessAuthPage(headless =>
+{
+    headless.BuildUiUrl = context => QueryHelpers.AddQueryString(
+        "https://app.parcelpilot.test/join",
+        new Dictionary<string, string?>
+        {
+            ["request"] = context.RequestId,
+            ["view"] = context.View
+        });
+
+    headless.OnHeadlessSignupAsync = async (context, ct) =>
+    {
+        if (!string.Equals(
+            context.AuthorizationRequest?.ClientApplication?.ClientId,
+            "parcelpilot-web",
+            StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var teamSize = context.CustomFields["teamSize"]?.GetValue<string>()?.Trim();
+        if (teamSize is not ("1" or "2-10" or "11-50" or "51+"))
+        {
+            throw new SqlOSHeadlessValidationException(
+                "Choose a team size.",
+                new Dictionary<string, string>
+                {
+                    ["teamSize"] = "Choose one of the available team sizes."
+                });
+        }
+
+        await onboarding.SaveAsync(
+            context.User.Id,
+            context.Organization?.Id,
+            teamSize,
+            ct);
+    };
+});
+```
+
+If the signup hook throws `SqlOSHeadlessValidationException`, SqlOS rolls back its new user and organization and returns field errors while preserving retryable OTP state. The hook is global, so the client guard prevents ParcelPilot's required fields from breaking other clients on the same identity host. SqlOS owns auth records; `onboarding` owns ParcelPilot's product profile.
+
+<Callout type="warning" title="The hook is not a distributed transaction">
+  Writes through a different DbContext, database, or external API do not automatically roll back with SqlOS. Share the transaction where possible; otherwise make provisioning idempotent by SqlOS user ID and compensatable or outbox-driven. Do not trigger an irreversible side effect before OAuth completion and call the whole sequence atomic.
+</Callout>
+
+Because the UI and identity host use different origins, allow only the product origin and credentials on the SqlOS host:
+
+```csharp
+builder.Services.AddCors(cors =>
+{
+    cors.AddPolicy("parcelpilot-auth", policy =>
+    {
+        policy.WithOrigins("https://app.parcelpilot.test")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+var app = builder.Build();
+app.UseCors("parcelpilot-auth");
+app.MapSqlOS();
+```
+
+Do not combine `AllowAnyOrigin` with credentials. A same-origin backend-for-frontend proxy can avoid browser CORS, but it must preserve the SqlOS request cookie and keep the flow tokens out of logs.
+
+## 3. Start a normal OAuth signup request
+
+Generate `state`, a PKCE verifier, and its `S256` challenge, save the verifier and state in `sessionStorage`, then navigate the browser to SqlOS:
+
+```ts
+const authorize = new URL("https://identity.parcelpilot.test/sqlos/auth/authorize");
+authorize.searchParams.set("response_type", "code");
+authorize.searchParams.set("client_id", "parcelpilot-web");
+authorize.searchParams.set(
+  "redirect_uri",
+  "https://app.parcelpilot.test/auth/callback",
+);
+authorize.searchParams.set("scope", "openid profile email offline_access");
+authorize.searchParams.set("state", state);
+authorize.searchParams.set("code_challenge", codeChallenge);
+authorize.searchParams.set("code_challenge_method", "S256");
+authorize.searchParams.set("resource", "https://api.parcelpilot.test");
+authorize.searchParams.set("view", "signup");
+
+window.location.replace(authorize.toString());
+```
+
+SqlOS saves the authorization request and redirects to `BuildUiUrl`, for example:
+
+```text
+https://app.parcelpilot.test/join?request=req_...&view=signup
+```
+
+Load `/sqlos/auth/headless/requests/{requestId}` with `credentials: "include"` and render the returned view instead of treating the query string as authoritative auth state.
+
+## 4. Send the signup code
+
+Post the visible fields and app-owned data to the signup-specific endpoint:
+
+```ts
+const AUTH = "https://identity.parcelpilot.test/sqlos/auth";
+
+async function postAction(path: string, body: unknown) {
+  const response = await fetch(`${AUTH}/headless${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) throw new Error("Onboarding could not continue.");
+  return response.json();
+}
+
+const started = await postAction("/signup/email-otp/start", {
+  requestId,
+  displayName: "Avery Chen",
+  email: "avery@northwind.test",
+  organizationName: "Northwind Dispatch",
+  customFields: {
+    teamSize: "2-10",
+    plan: "starter",
+  },
+});
+
+const challengeToken = started.viewModel?.challengeToken;
+const signupToken = started.viewModel?.signupToken;
+if (!challengeToken || !signupToken) {
+  throw new Error(started.viewModel?.error ?? "The code could not be sent.");
+}
+```
+
+Keep both tokens in component state or `sessionStorage` only. Never place them in a URL, analytics event, durable browser storage, or log.
+
+The actual headless view model includes values like:
+
+```json
+{
+  "view": "email-otp-signup-verify",
+  "email": "avery@northwind.test",
+  "info": "Check av***@northwind.test for a sign-up code.",
+  "challengeToken": "...",
+  "signupToken": "..."
+}
+```
+
+<Callout type="warning" title="Do not read timers that are not in the response">
+  The headless action result does not currently expose `expiresAt`, `nextAllowedSendAt`, or a separate `maskedEmail`. The masked address is embedded in `info`. Configure the same 30-second cooldown in the UI, but keep the server rate limit authoritative. The direct backend SDK result does expose timestamps.
+</Callout>
+
+## 5. Verify and follow the returned view
+
+```ts
+const verified = await postAction("/signup/email-otp/verify", {
+  requestId,
+  signupToken,
+  challengeToken,
+  code,
+});
+
+if (verified.type === "redirect" && verified.redirectUrl) {
+  window.location.replace(verified.redirectUrl);
+} else {
+  renderHeadlessView(verified.viewModel);
+}
+```
+
+Do not assume verification always goes straight to the app callback. SqlOS may return another view for organization selection, MFA, or validation errors. Render the returned state machine.
+
+On success, SqlOS transactionally:
+
+- creates a user with no password;
+- marks the primary email verified;
+- creates `Northwind Dispatch` and an owner membership;
+- runs `OnHeadlessSignupAsync`;
+- consumes the signup token;
+- records `user.signup.email_otp`;
+- issues the final authorization-code redirect.
+
+At `/auth/callback`, verify the original `state`, read the code, and exchange it at `/sqlos/auth/token` using the original PKCE verifier, exact redirect URI, and `resource=https://api.parcelpilot.test`. Because the authorization request was resource-bound, omitting or changing `resource` at the token exchange fails the request.
+
+## 6. Implement resend as replacement
+
+Disable resend locally for the configured cooldown. When the user requests another code, call `/signup/email-otp/start` again with the same signup fields and replace **both** returned tokens:
+
+```ts
+const resent = await postAction("/signup/email-otp/start", signupDraft);
+setChallengeToken(resent.viewModel.challengeToken);
+setSignupToken(resent.viewModel.signupToken);
+```
+
+A new challenge supersedes the previous active challenge in that signup context. A code from the older email must fail even if it has not reached its nominal expiry.
+
+## Routing edge cases
+
+- Existing accounts are rejected from signup with an explicit “account already exists” error; send legitimate users to `/headless/email-otp/start` and `/verify` instead.
+- An SSO-governed email domain redirects to its identity provider before SqlOS creates an OTP challenge.
+- Self-service signup cannot join an existing organization by supplying `organizationId`; use an invitation.
+- A new invited user uses `/headless/invitations/signup`, not a second signup OTP challenge.
+- Built-in OTP message bodies are intentionally suppressed from delivery-history previews because they contain codes.
+
+<Callout type="warning" title="Public signup reveals an existing account">
+  The current signup-start endpoint explicitly tells the caller when an account already exists for the email. Treat that as an enumeration surface: enforce the configured email/IP/client limits, add bot controls at the edge, monitor abuse, and confirm the disclosure fits your product's threat model.
+</Callout>
+
+## Production checklist
+
+- Use HTTPS, PKCE S256, high-entropy state, and an exact redirect URI.
+- Keep signup and challenge tokens in ephemeral state and clear them after completion.
+- Treat existing-account disclosure as an explicit threat-model decision: the current signup endpoint is not account-enumeration resistant, so add bot controls, rate limits, and monitoring rather than claiming a generic response.
+- Tune per-email, IP, and client limits; alert on abuse and delivery failure rates.
+- Support paste and one-time-code autofill without auto-submitting an incomplete code.
+- Replace both flow tokens on resend and test that the old code fails.
+- Test wrong codes, max attempts, expiry, replay, superseded codes, existing accounts, SSO domains, and signup-hook rollback.
+- Make the callback idempotent and store refresh tokens according to the client platform's security model.
+- Add Authenticator MFA or step-up for privileged actions after onboarding.
+
+## Expected outcome
+
+ParcelPilot gets a polished two-step onboarding experience without storing a password or implementing its own identity state machine. One successful inbox verification drives the SqlOS user, organization, owner membership, session, and OAuth redirect; the guarded, idempotent hook provisions the product profile without pretending an external store participates in the SqlOS transaction.
+
+## Next steps
+
+- [Email OTP](/docs/authserver/email-otp)
+- [Headless auth how-to](/docs/authserver/headless-auth-how-to)
+- [Email branding](/docs/authserver/email-branding)
+- [Transactional email](/docs/authserver/transactional-email)
+- [Invite teammates](/docs/guides/invite-only-b2b-onboarding)
+- [Authenticator MFA](/docs/guides/mfa-totp)

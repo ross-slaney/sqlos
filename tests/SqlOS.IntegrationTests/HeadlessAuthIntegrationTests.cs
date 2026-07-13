@@ -22,6 +22,7 @@ public sealed class HeadlessAuthIntegrationTests
 {
     private const string UnauthorizedOrganizationJoinMessage =
         "Joining an existing organization requires an invitation or approved join policy.";
+    private const string ValidPkceCodeChallenge = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     [TestMethod]
     public async Task CreateAuthorizationRequestAsync_PersistsHeadlessPresentationAndUiContext()
@@ -35,7 +36,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-123",
                 "openid profile email",
-                "challenge-123",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 "alice@example.com",
@@ -92,7 +93,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-456",
                 "openid",
-                "challenge-456",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -137,7 +138,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-signup",
                 "openid profile email",
-                "challenge-signup",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -187,7 +188,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-org-probe",
                 "openid profile email",
-                "challenge-org-probe",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -244,7 +245,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-validation",
                 "openid profile email",
-                "challenge-validation",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -299,7 +300,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-otp-validation",
                 "openid profile email",
-                "challenge-otp-validation",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -374,7 +375,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-invite-login-otp",
                 "openid profile email",
-                "challenge-invite-login-otp",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -431,7 +432,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-invite-direct-signup",
                 "openid profile email",
-                "challenge-invite-direct-signup",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -494,7 +495,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-invite-sso-signup",
                 "openid profile email",
-                "challenge-invite-sso-signup",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -536,7 +537,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-sso-otp",
                 "openid profile email",
-                "challenge-sso-otp",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -573,7 +574,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-sso-signup",
                 "openid profile email",
-                "challenge-sso-signup",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -610,7 +611,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "state-session",
                 "openid profile email",
-                "challenge-session",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 null,
@@ -695,7 +696,7 @@ public sealed class HeadlessAuthIntegrationTests
                 fixture.RedirectUri,
                 "headless-lockout",
                 "openid profile email",
-                "challenge-headless-lockout",
+                ValidPkceCodeChallenge,
                 "S256",
                 null,
                 user.DefaultEmail,
@@ -745,7 +746,7 @@ public sealed class HeadlessAuthIntegrationTests
         configureOptions?.Invoke(optionsValue);
 
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);

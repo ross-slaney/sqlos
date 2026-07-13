@@ -59,6 +59,15 @@ public sealed record SqlOSLoginResult(
     bool RequiresMfaEnrollment = false,
     IReadOnlyList<string>? MfaMethods = null);
 
+/// <summary>
+/// Represents the claims and SqlOS identifiers recovered from a successfully validated access token.
+/// </summary>
+/// <param name="Principal">The authenticated claims principal created from the token.</param>
+/// <param name="SessionId">The active SqlOS session identifier associated with the token.</param>
+/// <param name="UserId">The authenticated SqlOS user identifier, when present.</param>
+/// <param name="OrganizationId">The active organization identifier, when present.</param>
+/// <param name="ClientId">The OAuth client identifier, when present.</param>
+/// <param name="Audience">The validated token audience, when present.</param>
 public sealed record SqlOSValidatedToken(
     ClaimsPrincipal Principal,
     string SessionId,
@@ -90,21 +99,22 @@ public sealed record SqlOSRefreshRequest(
     string? OrganizationId,
     string? Resource = null);
 
-public sealed record SqlOSExchangeCodeRequest(
-    string Code,
-    string ClientId);
-
 public sealed record SqlOSForgotPasswordRequest(
     string Email,
     string? ClientId = null);
 
 public sealed record SqlOSResetPasswordRequest(string Token, string NewPassword);
 
+/// <summary>
+/// Trusted in-process password-reset delivery request. Public password-reset endpoints bind
+/// <see cref="SqlOSForgotPasswordRequest"/> and never accept <see cref="ResetUrlTemplate"/>.
+/// </summary>
 public sealed record SqlOSSendPasswordResetEmailRequest(
     string Email,
     string? ResetUrlTemplate = null,
     string? ClientId = null);
 
+/// <summary>Trusted dashboard/admin password-reset delivery request.</summary>
 public sealed record SqlOSSendUserPasswordResetEmailRequest(
     string? ResetUrlTemplate = null);
 
@@ -397,7 +407,13 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     string? ApplePrivateKeyPem = null,
     string? LogoDataUrl = null);
 
-public sealed record SqlOSAuthorizationUrlRequest(string ConnectionId, string ClientId, string RedirectUri);
+public sealed record SqlOSAuthorizationUrlRequest(
+    string ConnectionId,
+    string ClientId,
+    string RedirectUri,
+    string State,
+    string CodeChallenge,
+    string CodeChallengeMethod = "S256");
 
 public sealed record SqlOSCreateWorkspaceRequest(string Name);
 

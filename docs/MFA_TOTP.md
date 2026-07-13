@@ -74,6 +74,10 @@ POST /sqlos/auth/mfa/challenge/verify
 
 For forced enrollment:
 
+Only call the enrollment endpoints when the same login result has
+`requiresMfaEnrollment: true`. Completing a password or other first factor is
+not permission to add or replace an authenticator for a normal MFA challenge.
+
 ```http
 POST /sqlos/auth/mfa/challenge/totp/enroll/start
 {
@@ -92,6 +96,26 @@ POST /sqlos/auth/mfa/challenge/totp/enroll/verify
   "code": "123456"
 }
 ```
+
+The `mfaToken` and `enrollmentToken` are one bound proof. SqlOS verifies that
+they have the same user, organization, client, flow, and authorization request
+before confirming the authenticator, rotating recovery codes, or issuing any
+session, token, or authorization code. Tokens from different login attempts
+are not interchangeable, and a challenge-bound enrollment token cannot be
+verified through the account self-enrollment API.
+
+## Enrollment modes
+
+- **Account self-enrollment** starts from an already authenticated account
+  settings experience with `StartTotpEnrollmentAsync`. The host application is
+  responsible for protecting that account route with its authenticated session
+  and any recent-authentication policy it requires.
+- **Required enrollment** is available only when the MFA policy decision stored
+  on that exact challenge says the user has no permitted strong factor and must
+  enroll before continuing.
+- **Normal MFA verification** for a user with an existing authenticator accepts
+  only the existing TOTP or recovery code. First-factor completion alone never
+  permits adding or replacing a factor.
 
 ## Hosted OAuth
 
