@@ -104,6 +104,31 @@ Clients seeded in startup code are marked as **startup managed**. Their configur
 
 Dashboard-created clients are fully editable and persist across restarts.
 
+## Browser SSO and the first-party boundary
+
+SqlOS can reuse an existing AuthPage browser session without asking the user to
+enter a primary credential again, but only for clients marked as first-party.
+Owned clients created with `SeedOwnedWebApp`, `SeedOwnedNativeApp`, or the
+single-application setup are first-party automatically.
+
+Before issuing a new authorization code, SqlOS always re-evaluates the current
+organization, membership, and MFA policy. A request bound to an organization
+uses that organization rather than the organization remembered by the browser
+session. If organization selection or MFA is required, the user sees that step
+instead of receiving a code. With `prompt=none`, SqlOS returns
+`interaction_required` because the protocol forbids displaying the step.
+
+Dynamically registered, CIMD, and other third-party clients do not receive this
+silent session reuse. They require a user interaction; `prompt=none` returns
+`consent_required`. This prevents a client-controlled authorization URL from
+riding an unrelated signed-in browser session. Do not set `IsFirstParty` for an
+application you do not own and trust.
+
+Custom headless browser UIs should forward both `PendingToken` and `MfaToken`
+from `BuildUiUrl`. The former carries organization selection; the latter carries
+an MFA step-up into the headless request view. The official examples include
+both automatically.
+
 ## Portable clients with CIMD
 
 Use `CIMD` when a public client uses a stable HTTPS `client_id` that points to its own metadata document.

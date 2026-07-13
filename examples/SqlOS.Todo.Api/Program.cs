@@ -296,6 +296,7 @@ builder.AddSqlOS<TodoSampleDbContext>(
                         ["error"] = ctx.Error,
                         ["email"] = ctx.Email,
                         ["pendingToken"] = ctx.PendingToken,
+                        ["mfaToken"] = ctx.MfaToken,
                         ["displayName"] = ctx.DisplayName,
                         ["ui_context"] = ctx.UiContext?.ToJsonString()
                     });

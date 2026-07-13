@@ -1911,6 +1911,40 @@ public sealed class SqlOSAuthService
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
 
+    internal async Task<SqlOSAuthorizationMfaChallengeState> GetAuthorizationMfaChallengeStateAsync(
+        string mfaToken,
+        string authorizationRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        var token = await RequireTotpMfaService().GetPendingMfaTokenAsync(mfaToken, cancellationToken);
+        if (token.UserId == null)
+        {
+            throw new InvalidOperationException("MFA challenge is invalid or expired.");
+        }
+
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token);
+        if (payload == null
+            || !string.Equals(payload.Flow, "authorization", StringComparison.Ordinal)
+            || !string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("MFA challenge is invalid or expired.");
+        }
+
+        var evaluation = await RequireMfaPolicyService().EvaluateAsync(
+            token.UserId,
+            token.OrganizationId,
+            payload.AuthenticationMethod,
+            cancellationToken);
+        if (!evaluation.RequiresMfa || evaluation.EnrollmentRequired != payload.EnrollmentRequired)
+        {
+            throw new InvalidOperationException("MFA challenge is invalid or expired.");
+        }
+
+        return new SqlOSAuthorizationMfaChallengeState(
+            payload.EnrollmentRequired,
+            evaluation.AvailableFactors);
+    }
+
     private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
         SqlOSTemporaryToken token,
         string factorMethod,
@@ -2649,6 +2683,9 @@ public sealed class SqlOSAuthService
 
     private SqlOSTotpMfaService RequireTotpMfaService()
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
+
+    private SqlOSMfaPolicyService RequireMfaPolicyService()
+        => _mfaPolicyService ?? throw new InvalidOperationException("MFA policy service is not registered.");
 
     private async Task<SqlOSLoginResult?> TryCreateMfaLoginResultAsync(
         SqlOSUser user,

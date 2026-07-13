@@ -375,6 +375,7 @@ export class AuthAuthorizeComponent implements OnInit {
     this.email = params.get('email') || '';
 
     const pendingToken = params.get('pendingToken');
+    const mfaToken = params.get('mfaToken');
     const initialDisplayName = params.get('displayName') || '';
     const nextPath = params.get('next') || '/retail';
 
@@ -388,6 +389,7 @@ export class AuthAuthorizeComponent implements OnInit {
         pendingToken,
         this.email || null,
         initialDisplayName || null,
+        mfaToken,
       );
       this.viewModel.set(vm);
       if (vm.view) this.view.set(vm.view);

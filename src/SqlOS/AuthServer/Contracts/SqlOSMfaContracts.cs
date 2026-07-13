@@ -110,3 +110,7 @@ internal sealed record SqlOSMfaChallengePayload(
     string? Resource = null,
     bool EnrollmentRequired = false,
     IReadOnlyList<string>? PermittedEnrollmentFactors = null);
+
+internal sealed record SqlOSAuthorizationMfaChallengeState(
+    bool EnrollmentRequired,
+    IReadOnlyList<string> Methods);

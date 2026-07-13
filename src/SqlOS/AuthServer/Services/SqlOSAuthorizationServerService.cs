@@ -175,7 +175,8 @@ public sealed class SqlOSAuthorizationServerService
             CodeChallenge = input.CodeChallenge ?? string.Empty,
             CodeChallengeMethod = input.CodeChallengeMethod ?? "S256",
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            ClientApplication = client
         };
 
         _context.Set<SqlOSAuthorizationRequest>().Add(authorizationRequest);

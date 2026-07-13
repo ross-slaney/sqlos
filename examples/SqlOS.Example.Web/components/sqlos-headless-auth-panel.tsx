@@ -89,6 +89,7 @@ export function SqlOSHeadlessAuthPanel() {
   const initialError = searchParams.get("error");
   const initialEmail = searchParams.get("email") || "";
   const pendingToken = searchParams.get("pendingToken");
+  const initialMfaToken = searchParams.get("mfaToken");
   const initialDisplayName = searchParams.get("displayName") || "";
   const initialResetToken = searchParams.get("token") || "";
   const nextPath = searchParams.get("next") || "/retail";
@@ -128,6 +129,7 @@ export function SqlOSHeadlessAuthPanel() {
           pendingToken,
           initialEmail,
           initialDisplayName,
+          initialMfaToken,
         );
         setViewModel(vm);
         if (vm.view) setView(vm.view);
@@ -147,7 +149,7 @@ export function SqlOSHeadlessAuthPanel() {
     };
 
     void load();
-  }, [requestId, initialView, initialError, pendingToken, initialEmail, initialDisplayName]);
+  }, [requestId, initialView, initialError, pendingToken, initialEmail, initialDisplayName, initialMfaToken]);
 
   useEffect(() => {
     if (initialResetToken) {

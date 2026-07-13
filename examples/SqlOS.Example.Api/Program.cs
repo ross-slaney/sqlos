@@ -189,6 +189,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
                         ["error"] = ctx.Error,
                         ["email"] = ctx.Email,
                         ["pendingToken"] = ctx.PendingToken,
+                        ["mfaToken"] = ctx.MfaToken,
                         ["displayName"] = ctx.DisplayName,
                     };
                     return QueryHelpers.AddQueryString(
