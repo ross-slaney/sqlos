@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
@@ -640,6 +642,141 @@ public sealed class SqlOSOidcAuthServiceTests
     }
 
     [TestMethod]
+    public async Task StartAuthorization_RejectsOversizedDiscoveryResponse_AndAuditsReason()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeOidcProviderHttpClientFactory(request =>
+            RequestUriContains(request, ".well-known/openid-configuration")
+                ? OversizedJsonResponse()
+                : null);
+        var (admin, oidc) = CreateServices(context, httpFactory);
+
+        var connection = await CreateGoogleConnectionAsync(admin);
+
+        var action = () => oidc.StartAuthorizationAsync(new SqlOSStartOidcAuthorizationRequest(
+            connection.Id,
+            "user@example.com",
+            "example-web",
+            "https://app.example.local/callback/google",
+            "state",
+            "nonce",
+            "challenge",
+            "S256"), "127.0.0.1");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login provider response could not be processed.");
+        await AuditShouldContainAsync(context, "user.login.oidc.start_error", "OIDC discovery response exceeded");
+    }
+
+    [TestMethod]
+    public async Task StartAuthorization_RejectsNonJsonDiscoveryResponse_AndAuditsReason()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeOidcProviderHttpClientFactory(request =>
+            RequestUriContains(request, ".well-known/openid-configuration")
+                ? TextResponse(HttpStatusCode.OK, "<html>not json</html>", "text/html")
+                : null);
+        var (admin, oidc) = CreateServices(context, httpFactory);
+
+        var connection = await CreateGoogleConnectionAsync(admin);
+
+        var action = () => oidc.StartAuthorizationAsync(new SqlOSStartOidcAuthorizationRequest(
+            connection.Id,
+            "user@example.com",
+            "example-web",
+            "https://app.example.local/callback/google",
+            "state",
+            "nonce",
+            "challenge",
+            "S256"), "127.0.0.1");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login provider response could not be processed.");
+        await AuditShouldContainAsync(context, "user.login.oidc.start_error", "must be JSON");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_RejectsOversizedJwksResponse_AndAuditsReason()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeOidcProviderHttpClientFactory(request =>
+            RequestUriContains(request, "/certs")
+                ? OversizedJsonResponse()
+                : null);
+        var (admin, oidc) = CreateServices(context, httpFactory);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/google"]));
+        var connection = await CreateGoogleConnectionAsync(admin);
+
+        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/google",
+            "success:jwks@example.com:nonce-google",
+            "verifier",
+            "nonce-google",
+            null), "127.0.0.1");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login provider response could not be processed.");
+        await AuditShouldContainAsync(context, "user.login.oidc.error", "OIDC JWKS response exceeded");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_RejectsOversizedUserInfoResponse_AndAuditsReason()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeOidcProviderHttpClientFactory(request =>
+            RequestUriContains(request, "userinfo")
+                ? OversizedJsonResponse()
+                : null);
+        var (admin, oidc) = CreateServices(context, httpFactory);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/custom"]));
+        var connection = await CreateCustomConnectionAsync(admin);
+
+        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/custom",
+            "success:userinfo@example.com:nonce-custom",
+            "verifier",
+            "nonce-custom",
+            null), "127.0.0.1");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login provider response could not be processed.");
+        await AuditShouldContainAsync(context, "user.login.oidc.error", "OIDC userinfo response exceeded");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_RejectsOversizedGitHubProfileResponse_AndAuditsReason()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeOidcProviderHttpClientFactory(request =>
+            string.Equals(request.RequestUri?.AbsoluteUri, "https://api.github.com/user", StringComparison.OrdinalIgnoreCase)
+                ? OversizedJsonResponse()
+                : null);
+        var (admin, oidc) = CreateServices(context, httpFactory);
+
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest("example-web", "Example Web", "sqlos-example", ["https://app.example.local/callback/github"]));
+        var connection = await CreateGitHubConnectionAsync(admin);
+
+        var action = () => oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/github",
+            "success:github-profile@example.com:nonce-github",
+            "verifier",
+            "nonce-github",
+            null), "127.0.0.1");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The social login provider response could not be processed.");
+        await AuditShouldContainAsync(context, "user.login.oidc.error", "GitHub profile response exceeded");
+    }
+
+    [TestMethod]
     public async Task CompleteAuthorization_WithMultipleOrganizations_Fails()
     {
         using var context = CreateContext();
@@ -746,14 +883,24 @@ public sealed class SqlOSOidcAuthServiceTests
             x.LogoDataUrl == "data:image/png;base64,custom-logo");
     }
 
-    private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(TestSqlOSInMemoryDbContext context)
+    private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(
+        TestSqlOSInMemoryDbContext context,
+        IHttpClientFactory? httpClientFactory = null)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());
         var crypto = TestCryptoService.Create(context, options, new EphemeralDataProtectionProvider());
         var admin = new SqlOSAdminService(context, options, crypto);
-        var oidc = new SqlOSOidcAuthService(context, admin, crypto, new FakeOidcProviderHttpClientFactory(), NullLogger<SqlOSOidcAuthService>.Instance);
+        var oidc = new SqlOSOidcAuthService(
+            context,
+            admin,
+            crypto,
+            httpClientFactory ?? new FakeOidcProviderHttpClientFactory(),
+            NullLogger<SqlOSOidcAuthService>.Instance);
         return (admin, oidc);
     }
+
+    private static Task<SqlOSOidcConnection> CreateGoogleConnectionAsync(SqlOSAdminService admin)
+        => CreateGoogleConnectionAsync(admin, "https://app.example.local/callback/google");
 
     private static Task<SqlOSOidcConnection> CreateGoogleConnectionAsync(SqlOSAdminService admin, string callbackUri)
         => admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
@@ -762,6 +909,29 @@ public sealed class SqlOSOidcAuthServiceTests
             "google-client",
             "google-secret",
             [callbackUri],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+
+    private static Task<SqlOSOidcConnection> CreateGitHubConnectionAsync(SqlOSAdminService admin)
+        => admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.GitHub,
+            "GitHub",
+            "github-client",
+            "github-secret",
+            ["https://app.example.local/callback/github"],
+
             true,
             null,
             null,
@@ -799,6 +969,64 @@ public sealed class SqlOSOidcAuthServiceTests
             "TEAM123",
             "KEY123",
             TestApplePrivateKeyPem.Value));
+
+    private static Task<SqlOSOidcConnection> CreateCustomConnectionAsync(SqlOSAdminService admin)
+        => admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Custom,
+            "Acme OIDC",
+            "custom-client",
+            "custom-secret",
+            ["https://app.example.local/callback/custom"],
+            false,
+            null,
+            "https://oidc.example.local",
+            "https://oidc.example.local/authorize",
+            "https://oidc.example.local/token",
+            "https://oidc.example.local/userinfo",
+            "https://oidc.example.local/jwks",
+            null,
+            ["openid", "profile", "email"],
+            new SqlOSOidcClaimMapping
+            {
+                SubjectClaim = "custom_sub",
+                EmailClaim = "email_address",
+                EmailVerifiedClaim = "email_verified_flag",
+                DisplayNameClaim = "full_name"
+            },
+            SqlOSOidcClientAuthMethod.ClientSecretPost,
+            true,
+            null,
+            null,
+            null));
+
+    private static async Task AuditShouldContainAsync(
+        TestSqlOSInMemoryDbContext context,
+        string eventType,
+        string expectedDetail)
+    {
+        var auditDetails = await context.Set<SqlOSAuditEvent>()
+            .Where(x => x.EventType == eventType)
+            .Select(x => (x.DataJson ?? string.Empty) + (x.MetadataJson ?? string.Empty))
+            .ToListAsync();
+
+        auditDetails.Any(x => x.Contains(expectedDetail))
+            .Should().BeTrue($"audit details were: {string.Join(" | ", auditDetails)}");
+    }
+
+    private static bool RequestUriContains(HttpRequestMessage request, string value)
+        => request.RequestUri?.AbsoluteUri.Contains(value, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static HttpResponseMessage OversizedJsonResponse()
+        => TextResponse(
+            HttpStatusCode.OK,
+            "{\"padding\":\"" + new string('a', 1024 * 1024) + "\"}",
+            "application/json");
+
+    private static HttpResponseMessage TextResponse(HttpStatusCode statusCode, string content, string mediaType)
+        => new(statusCode)
+        {
+            Content = new StringContent(content, Encoding.UTF8, mediaType)
+        };
 
     private static TestSqlOSInMemoryDbContext CreateContext()
     {

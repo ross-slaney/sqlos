@@ -16,12 +16,15 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSOidcAuthService
 {
+    internal const int MaxProviderJsonResponseBytes = 1024 * 1024;
+    internal static readonly TimeSpan ProviderHttpTimeout = TimeSpan.FromSeconds(10);
     private const string PublicClaimValidationFailure = "The social login could not be completed.";
     private const int MaxAppleCallbackPayloadBytes = 4096;
     private const int MaxUserDisplayNameChars = 200;
     private static readonly IReadOnlyList<string> DefaultOidcScopes = ["openid", "email", "profile"];
     private static readonly IReadOnlyList<string> DefaultAppleScopes = ["name", "email"];
     private static readonly IReadOnlyList<string> DefaultGitHubScopes = ["read:user", "user:email"];
+    private const string ProviderResponsePublicError = "The social login provider response could not be processed.";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -67,66 +70,86 @@ public sealed class SqlOSOidcAuthService
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
-        var connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
-        ValidateCallbackUri(connection, request.CallbackUri);
-
-        var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
-        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc
-            && (!string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal)
-                || !_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge)))
+        SqlOSOidcConnection? connection = null;
+        try
         {
-            throw new InvalidOperationException(
-                "OIDC authorization requires a valid RFC 7636 S256 PKCE code challenge.");
-        }
+            connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
+            ValidateCallbackUri(connection, request.CallbackUri);
 
-        var authorizationParameters = new Dictionary<string, string?>
-        {
-            ["client_id"] = connection.ClientId,
-            ["redirect_uri"] = request.CallbackUri,
-            ["response_type"] = "code",
-            ["scope"] = string.Join(' ', resolved.Scopes),
-            ["state"] = request.State
-        };
-
-        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc)
-        {
-            authorizationParameters["nonce"] = request.Nonce;
-            authorizationParameters["code_challenge"] = request.CodeChallenge;
-            authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
-            authorizationParameters["login_hint"] = request.Email;
-        }
-        else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
-        {
-            authorizationParameters["login"] = request.Email;
-        }
-
-        if (connection.ProviderType == SqlOSOidcProviderType.Apple)
-        {
-            authorizationParameters["response_mode"] = "form_post";
-        }
-
-        var authorizationUrl = QueryHelpers.AddQueryString(resolved.AuthorizationEndpoint, authorizationParameters);
-
-        await _adminService.RecordAuditAsync(
-            "user.login.oidc.start",
-            "oidc_connection",
-            connection.Id,
-            ipAddress: ipAddress,
-            data: new
+            var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
+            if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc
+                && (!string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal)
+                    || !_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge)))
             {
-                provider = connection.ProviderType.ToString(),
-                request.Email,
-                request.ClientId,
-                request.CallbackUri
-            },
-            cancellationToken: cancellationToken);
+                throw new InvalidOperationException(
+                    "OIDC authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+            }
 
-        return new SqlOSStartOidcAuthorizationResult(
-            authorizationUrl,
-            connection.Id,
-            connection.ProviderType,
-            connection.DisplayName,
-            ParseJsonArray(connection.AllowedCallbackUrisJson));
+            var authorizationParameters = new Dictionary<string, string?>
+            {
+                ["client_id"] = connection.ClientId,
+                ["redirect_uri"] = request.CallbackUri,
+                ["response_type"] = "code",
+                ["scope"] = string.Join(' ', resolved.Scopes),
+                ["state"] = request.State
+            };
+
+            if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc)
+            {
+                authorizationParameters["nonce"] = request.Nonce;
+                authorizationParameters["code_challenge"] = request.CodeChallenge;
+                authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
+                authorizationParameters["login_hint"] = request.Email;
+            }
+            else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
+            {
+                authorizationParameters["login"] = request.Email;
+            }
+
+            if (connection.ProviderType == SqlOSOidcProviderType.Apple)
+            {
+                authorizationParameters["response_mode"] = "form_post";
+            }
+
+            var authorizationUrl = QueryHelpers.AddQueryString(resolved.AuthorizationEndpoint, authorizationParameters);
+
+            await _adminService.RecordAuditAsync(
+                "user.login.oidc.start",
+                "oidc_connection",
+                connection.Id,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    provider = connection.ProviderType.ToString(),
+                    request.Email,
+                    request.ClientId,
+                    request.CallbackUri
+                },
+                cancellationToken: cancellationToken);
+
+            return new SqlOSStartOidcAuthorizationResult(
+                authorizationUrl,
+                connection.Id,
+                connection.ProviderType,
+                connection.DisplayName,
+                ParseJsonArray(connection.AllowedCallbackUrisJson));
+        }
+        catch (Exception ex)
+        {
+            var auditError = GetAuditError(ex);
+            _logger.LogWarning(ex, "OIDC authorization start failed for connection {ConnectionId}: {Reason}.", request.ConnectionId, auditError);
+            await _adminService.RecordAuditAsync(
+                "user.login.oidc.start_error",
+                "oidc_connection",
+                connection?.Id ?? request.ConnectionId,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    error = auditError
+                },
+                cancellationToken: cancellationToken);
+            throw;
+        }
     }
 
     public async Task<SqlOSCompleteOidcAuthorizationResult> CompleteAuthorizationAsync(
@@ -187,7 +210,8 @@ public sealed class SqlOSOidcAuthService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "OIDC authentication failed for connection {ConnectionId}.", request.ConnectionId);
+            var auditError = GetAuditError(ex);
+            _logger.LogWarning(ex, "OIDC authentication failed for connection {ConnectionId}: {Reason}.", request.ConnectionId, auditError);
             await _adminService.RecordAuditAsync(
                 "user.login.oidc.error",
                 "oidc_connection",
@@ -195,7 +219,7 @@ public sealed class SqlOSOidcAuthService
                 ipAddress: ipAddress,
                 data: new
                 {
-                    error = ex.Message
+                    error = auditError
                 },
                 cancellationToken: cancellationToken);
             throw;
@@ -261,7 +285,7 @@ public sealed class SqlOSOidcAuthService
         });
 
         using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OAuth token", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(payload.RootElement.TryGetProperty("error_description", out var description)
@@ -311,7 +335,7 @@ public sealed class SqlOSOidcAuthService
 
         tokenRequest.Content = new FormUrlEncodedContent(formValues);
         using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC token", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(payload.RootElement.TryGetProperty("error_description", out var description)
@@ -346,7 +370,7 @@ public sealed class SqlOSOidcAuthService
     {
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
         using var jwksResponse = await httpClient.GetAsync(resolved.JwksUri!, cancellationToken);
-        using var jwksPayload = await ReadJsonAsync(jwksResponse, cancellationToken);
+        using var jwksPayload = await ReadJsonAsync(jwksResponse, "OIDC JWKS", cancellationToken);
         if (!jwksResponse.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC provider JWKS endpoint failed.");
@@ -387,7 +411,7 @@ public sealed class SqlOSOidcAuthService
         using var request = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC userinfo", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC provider user info request failed.");
@@ -413,7 +437,7 @@ public sealed class SqlOSOidcAuthService
 
         using var profileRequest = CreateGitHubApiRequest("https://api.github.com/user", accessToken);
         using var profileResponse = await httpClient.SendAsync(profileRequest, cancellationToken);
-        using var profilePayload = await ReadJsonAsync(profileResponse, cancellationToken);
+        using var profilePayload = await ReadJsonAsync(profileResponse, "GitHub profile", cancellationToken);
         if (!profileResponse.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The GitHub profile request failed.");
@@ -435,7 +459,7 @@ public sealed class SqlOSOidcAuthService
 
         using var emailRequest = CreateGitHubApiRequest("https://api.github.com/user/emails", accessToken);
         using var emailResponse = await httpClient.SendAsync(emailRequest, cancellationToken);
-        using var emailPayload = await ReadJsonAsync(emailResponse, cancellationToken);
+        using var emailPayload = await ReadJsonAsync(emailResponse, "GitHub email", cancellationToken);
         if (!emailResponse.IsSuccessStatusCode || emailPayload.RootElement.ValueKind != JsonValueKind.Array)
         {
             throw new InvalidOperationException("The GitHub email request failed.");
@@ -773,7 +797,7 @@ public sealed class SqlOSOidcAuthService
         var discoveryUrl = connection.DiscoveryUrl ?? throw new InvalidOperationException("The OIDC connection is missing a discovery URL.");
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
         using var response = await httpClient.GetAsync(discoveryUrl, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC discovery", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC discovery endpoint failed.");
@@ -947,11 +971,69 @@ public sealed class SqlOSOidcAuthService
         };
     }
 
-    private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<JsonDocument> ReadJsonAsync(
+        HttpResponseMessage response,
+        string responseDescription,
+        CancellationToken cancellationToken)
     {
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (!IsJsonMediaType(mediaType))
+        {
+            throw new ProviderJsonResponseException(
+                $"{responseDescription} response must be JSON but returned '{mediaType ?? "<missing>"}'.");
+        }
+
+        var contentLength = response.Content.Headers.ContentLength;
+        if (contentLength > MaxProviderJsonResponseBytes)
+        {
+            throw new ProviderJsonResponseException(
+                $"{responseDescription} response exceeded the {MaxProviderJsonResponseBytes} byte JSON limit.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        long totalBytes = 0;
+        while (true)
+        {
+            var remainingBytes = MaxProviderJsonResponseBytes + 1L - totalBytes;
+            var readSize = (int)Math.Min(chunk.Length, remainingBytes);
+            var bytesRead = await stream.ReadAsync(chunk.AsMemory(0, readSize), cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            totalBytes += bytesRead;
+            if (totalBytes > MaxProviderJsonResponseBytes)
+            {
+                throw new ProviderJsonResponseException(
+                    $"{responseDescription} response exceeded the {MaxProviderJsonResponseBytes} byte JSON limit.");
+            }
+
+            buffer.Write(chunk, 0, bytesRead);
+        }
+
+        buffer.Position = 0;
+        try
+        {
+            return await JsonDocument.ParseAsync(buffer, cancellationToken: cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            throw new ProviderJsonResponseException($"{responseDescription} response was not valid JSON: {ex.Message}", ex);
+        }
     }
+
+    private static bool IsJsonMediaType(string? mediaType)
+        => string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mediaType, "text/json", StringComparison.OrdinalIgnoreCase)
+            || (mediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private static string GetAuditError(Exception ex)
+        => ex is ProviderJsonResponseException providerJson
+            ? providerJson.AuditReason
+            : ex.Message;
 
     private async Task RejectClaimSetAsync(
         SqlOSOidcConnection connection,
@@ -1200,4 +1282,15 @@ public sealed class SqlOSOidcAuthService
         SqlOSOidcClaimMapping ClaimMapping,
         bool RequireVerifiedEmail,
         bool UseUserInfo);
+
+    private sealed class ProviderJsonResponseException : InvalidOperationException
+    {
+        public ProviderJsonResponseException(string auditReason, Exception? innerException = null)
+            : base(ProviderResponsePublicError, innerException)
+        {
+            AuditReason = auditReason;
+        }
+
+        public string AuditReason { get; }
+    }
 }

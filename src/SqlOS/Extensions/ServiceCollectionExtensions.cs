@@ -44,6 +44,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
         services.AddHttpClient();
+        services.AddHttpClient(nameof(SqlOSOidcAuthService), client =>
+        {
+            client.Timeout = SqlOSOidcAuthService.ProviderHttpTimeout;
+        })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false
+            });
         services.AddHttpClient(nameof(SqlOSCimdClientService))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
             {
