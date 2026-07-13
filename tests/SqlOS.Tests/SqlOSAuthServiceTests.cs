@@ -574,7 +574,7 @@ public sealed class SqlOSAuthServiceTests
                 code));
 
         rejected.Type.Should().Be("view");
-        rejected.ViewModel!.Error.Should().Be("MFA enrollment is not authorized for this challenge.");
+        rejected.ViewModel!.Error.Should().Be("The request could not be completed.");
         (await harness.Context.Set<SqlOSAuthorizationCode>().CountAsync()).Should().Be(0);
         (await harness.Context.Set<SqlOSRecoveryCode>().CountAsync()).Should().Be(0);
         (await harness.Context.Set<SqlOSUserAuthenticator>()

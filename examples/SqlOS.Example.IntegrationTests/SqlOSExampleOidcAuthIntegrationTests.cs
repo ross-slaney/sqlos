@@ -5,6 +5,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Errors;
 using SqlOS.Example.IntegrationTests.Infrastructure;
 
 namespace SqlOS.Example.IntegrationTests;
@@ -337,7 +338,9 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
 
         var callbackResponse = await ExampleApiFixture.Client.GetAsync($"/api/v1/auth/oidc/callback/{connectionId}?code=success:{Uri.EscapeDataString(email)}:{Uri.EscapeDataString(nonce)}&state={Uri.EscapeDataString(state)}");
         callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Contain("zero or one active organization membership");
+        var error = ExtractQueryValue(callbackResponse.Headers.Location!, "error");
+        error.Should().Be(SqlOSPublicAuthErrorMapper.DefaultExternalSignInMessage);
+        error.Should().NotContain("zero or one active organization membership");
     }
 
     private static async Task<string> UpsertOidcConnectionAsync(string providerType)

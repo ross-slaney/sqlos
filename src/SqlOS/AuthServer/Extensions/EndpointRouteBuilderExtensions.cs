@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
@@ -188,6 +189,11 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
+                var mapped = await MapPublicAuthErrorAsync(
+                    context,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.OAuthAuthorize,
+                    cancellationToken);
                 if (headlessAuthService.IsBrowserUiEnabled)
                 {
                     return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
@@ -196,14 +202,14 @@ public static class EndpointRouteBuilderExtensions
                         requestId: null,
                         email: context.Request.Query["login_hint"].ToString(),
                         uiContext: SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()))
-                        + $"&error={Uri.EscapeDataString(ex.Message)}");
+                        + $"&error={Uri.EscapeDataString(mapped.PublicMessage)}");
                 }
 
                 var page = await BuildAuthPageViewModelAsync(
                     "login",
                     null,
                     context.Request.Query["login_hint"].ToString(),
-                    ex.Message,
+                    mapped.PublicMessage,
                     null,
                     null,
                     authPrefix,
@@ -232,24 +238,24 @@ public static class EndpointRouteBuilderExtensions
             var invitation = !string.IsNullOrWhiteSpace(invitationToken)
                 ? await invitationService.ResolveEmailInvitationAsync(invitationToken, context, cancellationToken)
                 : null;
-                if (headlessAuthService.IsBrowserUiEnabled)
+            if (headlessAuthService.IsBrowserUiEnabled)
+            {
+                var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
+                if (!string.IsNullOrWhiteSpace(invitationToken))
                 {
-                    var uiContext = SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()) ?? new JsonObject();
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        uiContext["invitationToken"] = invitationToken;
-                    }
-                    if (!string.IsNullOrWhiteSpace(deviceUserCode))
-                    {
-                        uiContext["deviceUserCode"] = deviceUserCode;
-                    }
+                    uiContext["invitationToken"] = invitationToken;
+                }
+                if (!string.IsNullOrWhiteSpace(deviceUserCode))
+                {
+                    uiContext["deviceUserCode"] = deviceUserCode;
+                }
 
-                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
-                        context,
-                        invitation == null ? "login" : "invite",
-                        context.Request.Query["request"].ToString(),
-                    invitation?.Email ?? context.Request.Query["email"].ToString(),
-                    uiContext));
+                return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                    context,
+                    invitation == null ? "login" : "invite",
+                    context.Request.Query["request"].ToString(),
+                invitation?.Email ?? context.Request.Query["email"].ToString(),
+                uiContext));
             }
 
             var page = await BuildAuthPageViewModelAsync(
@@ -334,7 +340,7 @@ public static class EndpointRouteBuilderExtensions
                     "forgot-password",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -390,7 +396,7 @@ public static class EndpointRouteBuilderExtensions
                     "login",
                     null,
                     null,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -503,7 +509,7 @@ public static class EndpointRouteBuilderExtensions
                     "device",
                     null,
                     null,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -663,7 +669,7 @@ public static class EndpointRouteBuilderExtensions
                     "device-approve",
                     authorizationRequest?.Id,
                     session.User.DefaultEmail,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -882,7 +888,7 @@ public static class EndpointRouteBuilderExtensions
                     "password",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -1007,7 +1013,7 @@ public static class EndpointRouteBuilderExtensions
                     "email-otp",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -1123,7 +1129,7 @@ public static class EndpointRouteBuilderExtensions
                     "email-otp-verify",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -1469,7 +1475,7 @@ public static class EndpointRouteBuilderExtensions
                     "phone-otp",
                     requestId,
                     email: null,
-                    error: ex.Message,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName: null,
                     pendingToken: null,
                     authPrefix,
@@ -1562,7 +1568,7 @@ public static class EndpointRouteBuilderExtensions
                     "phone-otp-verify",
                     requestId,
                     email: null,
-                    error: ex.Message,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName: null,
                     pendingToken: null,
                     authPrefix,
@@ -1631,7 +1637,7 @@ public static class EndpointRouteBuilderExtensions
                     "mfa",
                     requestId,
                     email: null,
-                    error: ex.Message,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName: null,
                     pendingToken: null,
                     authPrefix,
@@ -1676,6 +1682,11 @@ public static class EndpointRouteBuilderExtensions
                     MfaToken: mfaToken,
                     RequiresMfaEnrollment: true,
                     MfaMethods: [SqlOSMfaFactorTypes.Totp]);
+                var publicMessage = await PublicAuthMessageAsync(
+                    context,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.HostedPage,
+                    cancellationToken);
                 try
                 {
                     return await RenderMfaChallengeAsync(
@@ -1686,11 +1697,11 @@ public static class EndpointRouteBuilderExtensions
                         authorizationServerService,
                         authService,
                         cancellationToken,
-                        error: ex.Message);
+                        error: publicMessage);
                 }
                 catch (InvalidOperationException)
                 {
-                    return Results.BadRequest(ex.Message);
+                    return Results.BadRequest(publicMessage);
                 }
             }
         });
@@ -1928,7 +1939,7 @@ public static class EndpointRouteBuilderExtensions
                     "signup",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName,
                     null,
                     authPrefix,
@@ -2041,7 +2052,7 @@ public static class EndpointRouteBuilderExtensions
                     "signup",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName,
                     null,
                     authPrefix,
@@ -2124,7 +2135,7 @@ public static class EndpointRouteBuilderExtensions
                     "signup",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName,
                     null,
                     authPrefix,
@@ -2228,7 +2239,7 @@ public static class EndpointRouteBuilderExtensions
                     "email-otp-signup-verify",
                     requestId,
                     email,
-                    ex.Message,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     null,
                     null,
                     authPrefix,
@@ -2301,7 +2312,7 @@ public static class EndpointRouteBuilderExtensions
                     "phone-otp-signup",
                     requestId,
                     email: null,
-                    error: ex.Message,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName: displayName,
                     pendingToken: null,
                     authPrefix,
@@ -2419,7 +2430,7 @@ public static class EndpointRouteBuilderExtensions
                     "phone-otp-signup-verify",
                     requestId,
                     email: null,
-                    error: ex.Message,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
                     displayName: null,
                     pendingToken: null,
                     authPrefix,
@@ -2507,7 +2518,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2528,7 +2539,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2549,7 +2560,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2570,7 +2581,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2591,7 +2602,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2602,6 +2613,7 @@ public static class EndpointRouteBuilderExtensions
             string? pendingToken,
             string? email,
             string? displayName,
+            HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
@@ -2623,12 +2635,13 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
         headless.MapPost("/identify", async (
             SqlOSHeadlessIdentifyRequest request,
+            HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
@@ -2643,7 +2656,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2664,7 +2677,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2695,12 +2708,13 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
         headless.MapPost("/password/reset", async (
             SqlOSResetPasswordRequest request,
+            HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             SqlOSAuthService authService,
             CancellationToken cancellationToken) =>
@@ -2717,7 +2731,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2738,7 +2752,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2759,7 +2773,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2822,7 +2836,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2843,7 +2857,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2864,7 +2878,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2885,7 +2899,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2906,7 +2920,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2927,7 +2941,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2948,7 +2962,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2969,7 +2983,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2990,7 +3004,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -3011,12 +3025,13 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
         headless.MapPost("/mfa/totp/enroll/start", async (
             SqlOSHeadlessMfaTotpEnrollmentStartRequest request,
+            HttpContext context,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
@@ -3031,7 +3046,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -3052,7 +3067,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -3073,7 +3088,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -3179,11 +3194,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new
-                {
-                    error = "invalid_grant",
-                    error_description = ex.Message
-                });
+                return await PublicOAuthTokenErrorAsync(context, ex, cancellationToken);
             }
         });
 
@@ -3202,11 +3213,16 @@ public static class EndpointRouteBuilderExtensions
                 }
                 catch (SqlOSClientRegistrationException ex)
                 {
+                    var error = await MapPublicAuthErrorAsync(
+                        context,
+                        ex,
+                        SqlOSPublicAuthErrorSurface.DynamicClientRegistration,
+                        cancellationToken);
                     return Results.Json(new
                     {
-                        error = ex.Error,
-                        error_description = ex.Message
-                    }, statusCode: ex.StatusCode);
+                        error = error.Error,
+                        error_description = error.PublicMessage
+                    }, statusCode: error.StatusCode);
                 }
             });
         }
@@ -3219,7 +3235,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
             }
         });
 
@@ -3318,7 +3334,7 @@ public static class EndpointRouteBuilderExtensions
             catch (InvalidOperationException ex)
             {
                 return Results.Content(
-                    BuildPasswordResetPage(token, ex.Message, success: false),
+                    BuildPasswordResetPage(token, await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken), success: false),
                     contentType: "text/html",
                     statusCode: StatusCodes.Status400BadRequest);
             }
@@ -3392,11 +3408,16 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
+                var error = await MapPublicAuthErrorAsync(
+                    httpContext,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.SamlAcs,
+                    cancellationToken);
                 var headlessErrorRedirect = await headlessAuthService.TryBuildUiUrlForAuthorizationRequestAsync(
                     httpContext,
                     relayState,
                     "login",
-                    ex.Message,
+                    error.PublicMessage,
                     pendingToken: null,
                     email: null,
                     displayName: null,
@@ -3406,7 +3427,11 @@ public static class EndpointRouteBuilderExtensions
                     return Results.Redirect(headlessErrorRedirect);
                 }
 
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.Json(new
+                {
+                    error = error.Error,
+                    message = error.PublicMessage
+                }, statusCode: error.StatusCode);
             }
         }
 
@@ -5234,6 +5259,66 @@ public static class EndpointRouteBuilderExtensions
         }
 
         return Results.Redirect($"{authPrefix}/login?status={status}");
+    }
+
+    private static async Task<SqlOSPublicAuthError> MapPublicAuthErrorAsync(
+        HttpContext context,
+        Exception exception,
+        SqlOSPublicAuthErrorSurface surface,
+        CancellationToken cancellationToken)
+    {
+        var error = SqlOSPublicAuthErrorMapper.Map(exception, surface);
+        var adminService = context.RequestServices.GetService<SqlOSAdminService>();
+        if (adminService != null)
+        {
+            await SqlOSPublicAuthErrorAudit.RecordIfDiagnosticAsync(
+                adminService,
+                context,
+                surface,
+                exception,
+                error,
+                cancellationToken);
+        }
+
+        return error;
+    }
+
+    private static async Task<string> PublicAuthMessageAsync(
+        HttpContext context,
+        Exception exception,
+        SqlOSPublicAuthErrorSurface surface,
+        CancellationToken cancellationToken)
+        => (await MapPublicAuthErrorAsync(context, exception, surface, cancellationToken)).PublicMessage;
+
+    private static async Task<IResult> PublicAuthJsonErrorAsync(
+        HttpContext context,
+        Exception exception,
+        SqlOSPublicAuthErrorSurface surface,
+        CancellationToken cancellationToken)
+    {
+        var error = await MapPublicAuthErrorAsync(context, exception, surface, cancellationToken);
+        return Results.Json(new
+        {
+            error = error.Error,
+            message = error.PublicMessage
+        }, statusCode: error.StatusCode);
+    }
+
+    private static async Task<IResult> PublicOAuthTokenErrorAsync(
+        HttpContext context,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var error = await MapPublicAuthErrorAsync(
+            context,
+            exception,
+            SqlOSPublicAuthErrorSurface.OAuthToken,
+            cancellationToken);
+        return Results.Json(new
+        {
+            error = error.Error,
+            error_description = error.PublicMessage
+        }, statusCode: error.StatusCode);
     }
 
     private static object BuildDeviceAuthorizationError(SqlOSDeviceAuthorizationException exception)

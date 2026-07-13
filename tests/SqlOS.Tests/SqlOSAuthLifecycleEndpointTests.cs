@@ -85,7 +85,7 @@ public sealed class SqlOSAuthLifecycleEndpointTests
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         json.RootElement.GetProperty("error").GetString().Should().Be("invalid_grant");
         json.RootElement.GetProperty("error_description").GetString()
-            .Should().Be("Session is no longer active.");
+            .Should().Be("The authorization grant is invalid or expired.");
         json.RootElement.ToString().Should().NotContain("membership_inactive");
         json.RootElement.ToString().Should().NotContain(organizationId);
 
