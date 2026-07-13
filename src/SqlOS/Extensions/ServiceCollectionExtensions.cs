@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -8,6 +9,7 @@ using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
+using SqlOS.AuthServer.Security;
 using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Services;
 using SqlOS.Dashboard;
@@ -43,6 +45,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Email));
         services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
+        services.AddAntiforgery(antiforgery =>
+        {
+            var cookieScope = options.AuthServer.BasePath.TrimEnd('/');
+            var cookieSuffix = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(cookieScope)))[..16].ToLowerInvariant();
+            antiforgery.Cookie.Name = $"sqlos_auth_page_csrf_{cookieSuffix}";
+            antiforgery.Cookie.Path = cookieScope;
+            antiforgery.Cookie.HttpOnly = true;
+            antiforgery.Cookie.IsEssential = true;
+            antiforgery.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+            antiforgery.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+            antiforgery.Cookie.MaxAge = SqlOSAntiforgeryAdditionalDataProvider.TokenLifetime;
+        });
+        services.AddSingleton<IAntiforgeryAdditionalDataProvider, SqlOSAntiforgeryAdditionalDataProvider>();
         services.AddHttpClient();
         services.AddHttpClient(nameof(SqlOSOidcAuthService), client =>
         {

@@ -70,7 +70,8 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         var userId = await CreateUserAsync(client, email, "Magic Headless User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId);
         const string verifier = "headless-magic-link-verifier-123456789-rfc7636-secure-value";
-        var requestId = await StartAuthorizationAsync(client, verifier, expectHostedPage: false);
+        var authorization = await StartAuthorizationAsync(client, verifier, expectHostedPage: false);
+        var requestId = authorization.RequestId;
 
         var start = await client.PostAsJsonAsync("/sqlos/auth/headless/magic-link/start", new { requestId, email });
         start.EnsureSuccessStatusCode();
@@ -97,12 +98,15 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         var userId = await CreateUserAsync(client, email, "Magic Hosted User", "P@ssword123!");
         await CreateMembershipAsync(client, organizationId, userId);
         const string verifier = "hosted-magic-link-verifier-123456789-rfc7636-secure-value";
-        var requestId = await StartAuthorizationAsync(client, verifier, expectHostedPage: true);
+        var authorization = await StartAuthorizationAsync(client, verifier, expectHostedPage: true);
+        var requestId = authorization.RequestId;
+        var antiforgeryToken = authorization.AntiforgeryToken!;
 
         var start = await client.PostAsync("/sqlos/auth/login/magic-link/start", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["requestId"] = requestId,
-            ["email"] = email
+            ["email"] = email,
+            ["__RequestVerificationToken"] = antiforgeryToken
         }));
         start.EnsureSuccessStatusCode();
         var token = ExtractToken(sender.GetLatestMessage(email).TextBody);
@@ -110,7 +114,8 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         var complete = await client.PostAsync("/sqlos/auth/login/magic-link/complete", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["requestId"] = requestId,
-            ["token"] = token
+            ["token"] = token,
+            ["__RequestVerificationToken"] = antiforgeryToken
         }));
         complete.StatusCode.Should().Be(HttpStatusCode.Redirect);
 
@@ -150,7 +155,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
             });
         });
 
-    private static async Task<string> StartAuthorizationAsync(HttpClient client, string verifier, bool expectHostedPage)
+    private static async Task<AuthorizationStart> StartAuthorizationAsync(HttpClient client, string verifier, bool expectHostedPage)
     {
         var response = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
         {
@@ -166,12 +171,19 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         if (expectHostedPage)
         {
             response.StatusCode.Should().Be(HttpStatusCode.OK);
-            return ExtractHiddenInput(await response.Content.ReadAsStringAsync(), "requestId");
+            var html = await response.Content.ReadAsStringAsync();
+            return new AuthorizationStart(
+                ExtractHiddenInput(html, "requestId"),
+                ExtractHiddenInput(html, "__RequestVerificationToken"));
         }
 
         response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        return QueryHelpers.ParseQuery(response.Headers.Location!.Query)["request"].ToString();
+        return new AuthorizationStart(
+            QueryHelpers.ParseQuery(response.Headers.Location!.Query)["request"].ToString(),
+            null);
     }
+
+    private sealed record AuthorizationStart(string RequestId, string? AntiforgeryToken);
 
     private static async Task AssertMagicLinkSessionAsync(HttpClient client, JsonDocument tokenJson, string organizationId)
     {

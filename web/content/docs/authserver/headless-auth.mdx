@@ -148,6 +148,8 @@ options.AuthServer.UseHeadlessAuthPage(headless =>
 
 The example repository has complete Next.js and Angular clients. Use [Build your own login and signup UI](/docs/guides/custom-login-ui) for the source-aligned implementation flow, including state and S256 PKCE, credentialed CORS, server-owned view transitions, callback validation, and code exchange.
 
+The headless routes are JSON integration endpoints, not SqlOS-hosted HTML forms, so they do not expect the hosted `__RequestVerificationToken` field. Native clients do not have browser cookie-CSRF exposure. For browser frontends, use an exact credentialed CORS allowlist or a same-origin/backend-for-frontend boundary; never combine credentialed requests with a reflected or wildcard origin. If your own UI host accepts cookie-authenticated form actions, protect those actions with that host's antiforgery mechanism. OAuth `state`, PKCE, and SqlOS request binding remain required but solve different substitution problems.
+
 The core files are:
 
 ```text

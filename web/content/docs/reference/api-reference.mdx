@@ -167,6 +167,8 @@ Honor `interval` while polling `/token`. Device errors use the OAuth-style `erro
 
 These browser routes render or process the SqlOS-hosted sign-in experience. Applications normally begin at `/authorize`; they do not call each form handler directly. The form posts use `application/x-www-form-urlencoded` and can change with the bundled UI.
 
+Every hosted `POST` requires the short-lived antiforgery field and matching browser cookie issued by a SqlOS `GET` page. The bundled UI supplies both automatically. Missing, expired, cross-browser, or cross-origin submissions return `400` before credentials or authorization state are processed. This requirement does not apply to the headless or direct JSON APIs.
+
 | Method | Route family | Purpose |
 | --- | --- | --- |
 | `GET` | `/sqlos/auth/login` | Hosted sign-in page |
