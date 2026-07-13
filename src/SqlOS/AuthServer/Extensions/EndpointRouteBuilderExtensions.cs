@@ -3362,7 +3362,16 @@ public static class EndpointRouteBuilderExtensions
             Results.Ok(await authService.SelectOrganizationForLoginAsync(request, httpContext, cancellationToken)));
 
         auth.MapPost("/mfa/challenge/verify", async (SqlOSMfaChallengeVerifyRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
-            Results.Ok(await authService.VerifyMfaChallengeAsync(request, httpContext, cancellationToken)));
+        {
+            try
+            {
+                return Results.Ok(await authService.VerifyMfaChallengeAsync(request, httpContext, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
+            }
+        });
 
         auth.MapPost("/mfa/challenge/totp/enroll/start", async (SqlOSTotpChallengeEnrollmentStartRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
