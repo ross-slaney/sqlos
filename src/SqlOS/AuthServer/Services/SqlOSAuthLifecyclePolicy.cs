@@ -208,6 +208,9 @@ internal static class SqlOSAuthLifecyclePolicy
         foreach (var refreshToken in refreshTokens)
         {
             refreshToken.RevokedAt = now;
+            refreshToken.ReplacementTokenResponse = null;
+            refreshToken.ReplacementOrganizationId = null;
+            refreshToken.ReplacementAccessTokenExpiresAt = null;
         }
 
         foreach (var temporaryToken in temporaryTokens)
@@ -288,6 +291,9 @@ internal static class SqlOSAuthLifecyclePolicy
         foreach (var refreshToken in refreshTokens)
         {
             refreshToken.RevokedAt = now;
+            refreshToken.ReplacementTokenResponse = null;
+            refreshToken.ReplacementOrganizationId = null;
+            refreshToken.ReplacementAccessTokenExpiresAt = null;
         }
     }
 }

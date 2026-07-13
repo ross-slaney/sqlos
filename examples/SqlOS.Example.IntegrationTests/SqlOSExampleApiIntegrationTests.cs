@@ -329,8 +329,10 @@ public sealed class SqlOSExampleApiIntegrationTests
         signupResponse.EnsureSuccessStatusCode();
         var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
         var tokens = signupJson.RootElement.GetProperty("tokens");
-        var refreshToken = tokens.GetProperty("refreshToken").GetString();
+        var originalRefreshToken = tokens.GetProperty("refreshToken").GetString();
+        var refreshToken = originalRefreshToken;
         var accessToken = tokens.GetProperty("accessToken").GetString();
+        var sessionId = tokens.GetProperty("sessionId").GetString();
         var organizationId = tokens.GetProperty("organizationId").GetString();
 
         var refreshResponse = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
@@ -364,12 +366,36 @@ public sealed class SqlOSExampleApiIntegrationTests
         });
         resetResponse.EnsureSuccessStatusCode();
 
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+            var session = await db.Set<SqlOSSession>().SingleAsync(candidate => candidate.Id == sessionId);
+            session.RevocationReason.Should().Be("password_reset");
+            var persistedRefreshTokens = await db.Set<SqlOSRefreshToken>()
+                .Where(candidate => candidate.SessionId == sessionId)
+                .ToListAsync();
+            persistedRefreshTokens.Should().HaveCount(2);
+            persistedRefreshTokens.Should().OnlyContain(candidate =>
+                candidate.RevokedAt != null
+                && candidate.ReplacementTokenResponse == null
+                && candidate.ReplacementOrganizationId == null
+                && candidate.ReplacementAccessTokenExpiresAt == null);
+        }
+
         var refreshAfterReset = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
         {
             refreshToken,
             organizationId
         });
         refreshAfterReset.IsSuccessStatusCode.Should().BeFalse("password reset must revoke every pre-reset refresh token");
+
+        var graceRetryAfterReset = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
+        {
+            refreshToken = originalRefreshToken,
+            organizationId
+        });
+        graceRetryAfterReset.IsSuccessStatusCode.Should().BeFalse(
+            "password reset must not release a cached replacement through the consumed-parent grace path");
 
         using (var afterResetRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello"))
         {
