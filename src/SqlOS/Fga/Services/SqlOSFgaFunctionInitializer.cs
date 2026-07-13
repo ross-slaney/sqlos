@@ -67,11 +67,26 @@ RETURN
     LEFT JOIN [{schema}].[{tables.Users}] u ON s.Id = u.SubjectId
     LEFT JOIN [{schema}].[{tables.ServiceAccounts}] sa ON s.Id = sa.SubjectId
     LEFT JOIN [{schema}].[{tables.UserGroups}] ug ON s.Id = ug.SubjectId
-    WHERE g.SubjectId IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@SubjectIds, ','))
+    LEFT JOIN [{schema}].[{tables.Agents}] ag ON s.Id = ag.SubjectId
+    WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
       AND rp.PermissionId = @PermissionId
       AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
       AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
       AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)
+      AND (s.SubjectTypeId <> 'agent' OR ag.SubjectId IS NOT NULL)
+      AND EXISTS (
+          SELECT 1
+          FROM [{schema}].[{tables.Subjects}] caller
+          LEFT JOIN [{schema}].[{tables.Users}] callerUser ON caller.Id = callerUser.SubjectId
+          LEFT JOIN [{schema}].[{tables.ServiceAccounts}] callerSa ON caller.Id = callerSa.SubjectId
+          LEFT JOIN [{schema}].[{tables.UserGroups}] callerGroup ON caller.Id = callerGroup.SubjectId
+          LEFT JOIN [{schema}].[{tables.Agents}] callerAgent ON caller.Id = callerAgent.SubjectId
+          WHERE caller.Id = JSON_VALUE(@SubjectIds, '$[0]')
+            AND (caller.SubjectTypeId <> 'user' OR callerUser.IsActive = 1)
+            AND (caller.SubjectTypeId <> 'service_account' OR (callerSa.SubjectId IS NOT NULL AND (callerSa.ExpiresAt IS NULL OR callerSa.ExpiresAt > GETUTCDATE())))
+            AND (caller.SubjectTypeId <> 'group' OR callerGroup.IsActive = 1)
+            AND (caller.SubjectTypeId <> 'agent' OR callerAgent.SubjectId IS NOT NULL)
+      )
       AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
       AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
 )";

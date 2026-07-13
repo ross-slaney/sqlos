@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -387,7 +388,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => false;
         }
 
-        var subjectIdsStr = string.Join(",", subjectIds);
+        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
         var permissionId = permission.Id;
 
         // Build the expression using the concrete DbContext type's method
@@ -408,7 +409,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var entityParam = Expression.Parameter(typeof(T), "entity");
         var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
         var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsStr, permissionId);
+        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
         var filterParametersExpr = Expression.Constant(filterParameters);
         var tvfCall = Expression.Call(contextExpr, tvfMethod,
             resourceIdProp,

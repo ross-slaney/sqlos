@@ -194,6 +194,44 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await AssertPointAndFilterAsync(user.SubjectId, resourceId, expected: false);
     }
 
+    [TestMethod]
+    public async Task EfFilter_RechecksDirectGroupMemberLifecycleWhenQueryExecutes()
+    {
+        var subjectService = CreateSubjectService();
+        var user = await subjectService.CreateUserAsync("Racing Lifecycle User", $"racing-lifecycle-{Guid.NewGuid():N}@example.com");
+        var group = await subjectService.CreateGroupAsync("Racing Lifecycle Group");
+        await subjectService.AddToGroupAsync(user.SubjectId, group.Id);
+        var resourceId = await CreateProtectedResourceWithGrantAsync(group.SubjectId);
+        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
+
+        user.IsActive = false;
+        await Context.SaveChangesAsync();
+
+        var listed = await Context.Set<LifecycleProtectedEntity>()
+            .Where(item => item.ResourceId == resourceId)
+            .Where(filter)
+            .AnyAsync();
+        Assert.IsFalse(listed, "The SQL query must recheck the direct member after the filter has been constructed.");
+    }
+
+    [TestMethod]
+    public async Task CraftedSubjectIdentifier_CannotInjectAnotherGrantSubjectIntoEfFilter()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var victimSubjectId = $"subj_victim_{suffix}";
+        var attackerSubjectId = $"subj_attacker_{suffix},{victimSubjectId}";
+        Context.Set<SqlOSFgaSubject>().AddRange(
+            new SqlOSFgaSubject { Id = victimSubjectId, SubjectTypeId = "user", DisplayName = "Victim" },
+            new SqlOSFgaSubject { Id = attackerSubjectId, SubjectTypeId = "user", DisplayName = "Attacker" });
+        Context.Set<SqlOSFgaUser>().AddRange(
+            new SqlOSFgaUser { Id = $"usr_victim_{suffix}", SubjectId = victimSubjectId, IsActive = true },
+            new SqlOSFgaUser { Id = $"usr_attacker_{suffix}", SubjectId = attackerSubjectId, IsActive = true });
+        await Context.SaveChangesAsync();
+        var resourceId = await CreateProtectedResourceWithGrantAsync(victimSubjectId);
+
+        await AssertPointAndFilterAsync(attackerSubjectId, resourceId, expected: false);
+    }
+
     private SqlOSFgaSubjectService CreateSubjectService()
     {
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
