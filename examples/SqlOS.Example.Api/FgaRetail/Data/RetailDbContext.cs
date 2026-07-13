@@ -6,6 +6,11 @@ using SqlOS.Fga.Models;
 
 namespace SqlOS.Example.Api.FgaRetail.Data;
 
+/// <summary>
+/// Lower-level/manual FGA sample context. The recommended application path is
+/// <c>SqlOSDbContext&lt;TContext&gt;</c> plus <c>ISqlOSResourceEntity</c>; this
+/// retail sample intentionally keeps manual resource lifecycle code visible.
+/// </summary>
 public class RetailDbContext : DbContext, ISqlOSFgaDbContext
 {
     public RetailDbContext(DbContextOptions<RetailDbContext> options) : base(options) { }

@@ -16,6 +16,8 @@ You will configure SqlOS so:
 - hosted and headless auth force enrollment before issuing tokens when policy requires MFA;
 - recovery codes are generated after TOTP enrollment.
 
+![Authenticator MFA policy in the SqlOS dashboard](/docs/guides-mfa-totp.png)
+
 ## Configure defaults
 
 Keep the first version optional unless your product needs an immediate tenant-wide requirement.
@@ -70,6 +72,7 @@ Use the organization policy API when one tenant requires MFA:
 
 ```bash
 curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa-policy \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "isEnabled": true,
@@ -82,43 +85,77 @@ curl -X PUT http://localhost:5062/sqlos/admin/auth/api/organizations/org_123/mfa
   }'
 ```
 
+`PUT` replaces the whole organization policy, so keep the enrollment and recovery fields in the payload. The route also requires an [operator session](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
+
 Use `requireMfaForOwnersAndAdmins` instead when only privileged tenant roles need MFA.
 
 ## Add account self-enrollment
 
-Expose protected app endpoints that call `SqlOSAuthService`.
+Expose app endpoints that call `SqlOSAuthService`, but put them behind bearer-token validation first. The audience must be the exact API audience registered for this resource server. After validation, take the user and organization IDs from `GetSqlOSValidatedToken()`; never accept either ID from the request body.
 
 ```csharp
-app.MapGet("/api/mfa/status", async (
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapGet("/mfa/status", async (
     SqlOSAuthService authService,
-    ClaimsPrincipal user,
+    HttpContext http,
     CancellationToken ct) =>
 {
-    var userId = user.FindFirstValue("sub")!;
-    var organizationId = user.FindFirstValue("org_id");
-    return await authService.GetMfaStatusAsync(userId, organizationId, ct);
+    var token = http.GetSqlOSValidatedToken();
+    if (string.IsNullOrWhiteSpace(token?.UserId))
+        return Results.Unauthorized();
+
+    return Results.Ok(await authService.GetMfaStatusAsync(
+        token.UserId,
+        token.OrganizationId,
+        ct));
 });
 
-app.MapPost("/api/mfa/totp/enroll/start", async (
+api.MapPost("/mfa/totp/enroll/start", async (
     SqlOSTotpEnrollmentStartRequest request,
     SqlOSAuthService authService,
-    ClaimsPrincipal user,
+    HttpContext http,
     CancellationToken ct) =>
 {
-    var userId = user.FindFirstValue("sub")!;
-    var organizationId = user.FindFirstValue("org_id");
-    return await authService.StartTotpEnrollmentAsync(userId, request, organizationId, ct);
+    var token = http.GetSqlOSValidatedToken();
+    if (string.IsNullOrWhiteSpace(token?.UserId))
+        return Results.Unauthorized();
+
+    return Results.Ok(await authService.StartTotpEnrollmentAsync(
+        token.UserId,
+        request,
+        token.OrganizationId,
+        ct));
 });
 
-app.MapPost("/api/mfa/totp/enroll/verify", async (
+api.MapPost("/mfa/totp/enroll/verify", async (
     SqlOSTotpEnrollmentVerifyRequest request,
     SqlOSAuthService authService,
-    HttpContext httpContext,
+    HttpContext http,
     CancellationToken ct) =>
-    await authService.VerifyTotpEnrollmentAsync(request, httpContext, ct));
+{
+    var token = http.GetSqlOSValidatedToken();
+    if (string.IsNullOrWhiteSpace(token?.UserId))
+        return Results.Unauthorized();
+
+    // Self-enrollment never accepts a login-time MFA challenge token.
+    var selfEnrollment = new SqlOSTotpEnrollmentVerifyRequest(
+        request.EnrollmentToken,
+        request.Code);
+
+    return Results.Ok(await authService.VerifyTotpEnrollmentAsync(selfEnrollment, http, ct));
+});
 ```
 
-Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, and verify the 6-digit TOTP code with the enrollment token. Show recovery codes once after verification.
+`RequireSqlOSAccessToken` rejects missing, invalid, expired, revoked, or wrong-audience tokens before any enrollment handler runs. If your host already uses ASP.NET Core authentication instead, apply an equivalent authorization policy that validates the exact audience and active SqlOS session.
+
+Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, and verify the 6-digit TOTP code with the server-minted enrollment token returned by the authenticated start call. Show recovery codes once after verification.
 
 ## Handle login-time MFA
 

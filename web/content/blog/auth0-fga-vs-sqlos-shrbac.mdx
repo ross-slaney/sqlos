@@ -101,21 +101,23 @@ The filter calls the SQL Server function that walks resource ancestors and match
 
 With Auth0 FGA, app data and authorization data are deliberately separate. When a document is created, the app writes its row to SQL Server and writes a tuple or relationship to FGA. For many systems, that decoupling is the point.
 
-With SqlOS, the resource can be created beside the row:
+With SqlOS, the domain row can describe its FGA resource and `SqlOSDbContext<TContext>` syncs the backing resource during the same EF save:
 
 ```csharp
+var documentId = Guid.NewGuid();
 var document = new Document
 {
-    Id = Guid.NewGuid(),
+    Id = documentId,
     ProjectId = project.Id,
+    ProjectResourceId = project.ResourceId,
+    ResourceId = $"document::{documentId:D}",
     Title = request.Title
 };
 
-document.ResourceId = dbContext.CreateResource(
-    parentId: project.ResourceId,
-    name: document.Title,
-    resourceTypeId: "document",
-    id: $"document::{document.Id:D}");
+// Document implements ISqlOSResourceEntity:
+// ResourceTypeId => "document"
+// ParentResourceId => ProjectResourceId
+// ResourceName => Title
 
 dbContext.Documents.Add(document);
 await dbContext.SaveChangesAsync(cancellationToken);

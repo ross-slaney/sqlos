@@ -1,0 +1,263 @@
+---
+title: "Hosting API"
+description: "Exact .NET hosting signatures for registering, configuring, mapping, and consuming SqlOS."
+order: 8
+section: reference
+---
+
+<Banner
+  eyebrow=".NET API"
+  title="Host SqlOS in an ASP.NET Core application"
+  href="/docs/getting-started"
+  actionLabel="Getting Started"
+>
+  The recommended path has three integration points: derive your EF context from `SqlOSDbContext<TContext>`, call the combined `AddSqlOS` overload, and call `MapSqlOS` after `Build()`.
+</Banner>
+
+## Package and assembly
+
+| Item | Value |
+| --- | --- |
+| Package | `SqlOS` |
+| Assembly | `SqlOS.dll` |
+| Target framework | `net9.0` |
+
+## SqlOSDbContext&lt;TContext&gt;
+
+**Namespace:** `SqlOS`
+
+**Assembly:** `SqlOS.dll`
+
+```csharp
+public abstract class SqlOSDbContext<TContext> : DbContext,
+    ISqlOSAuthServerDbContext,
+    ISqlOSFgaDbContext
+    where TContext : SqlOSDbContext<TContext>
+```
+
+### Constructor
+
+```csharp
+protected SqlOSDbContext(DbContextOptions<TContext> options)
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `options` | `DbContextOptions<TContext>` | EF Core options registered for the derived application context. |
+
+The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Relational contexts also register the `dbo.fn_IsResourceAccessible` table-valued function. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings.
+
+`SaveChanges` and `SaveChangesAsync` synchronize tracked entities that implement `ISqlOSResourceEntity` into the FGA resource table before EF saves the unit of work.
+
+### OnApplicationModelCreating
+
+```csharp
+protected virtual void OnApplicationModelCreating(ModelBuilder modelBuilder)
+```
+
+Override this method instead of `OnModelCreating`:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Project> Projects => Set<Project>();
+
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasKey(project => project.Id);
+            entity.Property(project => project.Name).HasMaxLength(200).IsRequired();
+        });
+    }
+}
+```
+
+## AddSqlOS&lt;TContext&gt;
+
+**Namespace:** `SqlOS.Extensions`
+
+**Type:** `WebApplicationBuilderExtensions`
+
+### Combined DbContext and SqlOS registration
+
+```csharp
+public static WebApplicationBuilder AddSqlOS<TContext>(
+    this WebApplicationBuilder builder,
+    Action<DbContextOptionsBuilder> configureDbContext,
+    Action<SqlOSOptions>? configureSqlOS = null)
+    where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `builder` | `WebApplicationBuilder` | The application host builder. |
+| `configureDbContext` | `Action<DbContextOptionsBuilder>` | Configures the application EF Core context. Use `UseSqlServer(...)` for the supported provider. |
+| `configureSqlOS` | `Action<SqlOSOptions>?` | Optional SqlOS configuration callback. |
+
+**Returns:** the same `WebApplicationBuilder`, for chaining.
+
+This overload calls `AddDbContext<TContext>` and registers the complete SqlOS service graph, hosted bootstrap, signing-key rotation, optional calendar synchronization, and dashboard middleware.
+
+### Existing DbContext registration
+
+```csharp
+public static WebApplicationBuilder AddSqlOS<TContext>(
+    this WebApplicationBuilder builder,
+    Action<SqlOSOptions>? configure = null)
+    where TContext : DbContext, ISqlOSAuthServerDbContext, ISqlOSFgaDbContext
+```
+
+Use this overload only when `TContext` is already registered in DI. It does not register the EF context.
+
+### Exceptions
+
+`AddSqlOS` throws `InvalidOperationException` when option validation fails. Examples include an issuer path that does not match `AuthServer.BasePath`, `PublicOrigin` and issuer mismatch, password dashboard mode without a password, or incomplete email/phone provider configuration.
+
+## UseSingleApplication
+
+**Namespace:** `SqlOS.Configuration`
+
+**Type:** `SqlOSOptions`
+
+```csharp
+public SqlOSOptions UseSingleApplication(
+    string name,
+    Action<SqlOSSingleApplicationOptions>? configure = null)
+```
+
+```csharp
+public SqlOSOptions UseSingleApplication(
+    IConfiguration configuration,
+    string sectionName = "SqlOS:Application")
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Product/application display name. A client ID is derived from it unless explicitly configured. |
+| `configure` | `Action<SqlOSSingleApplicationOptions>?` | Overrides origin, client ID, audience, redirect URI, scopes, credentials, and branding defaults. |
+| `configuration` | `IConfiguration` | Configuration containing the single-application section. |
+| `sectionName` | `string` | Section path. Defaults to `SqlOS:Application`. |
+
+**Returns:** the same `SqlOSOptions` instance.
+
+Single-application mode creates one first-party public PKCE client, applies AuthPage/email branding defaults, and disables CIMD and resource indicators. It cannot be combined with explicit startup client seeds.
+
+### Exceptions
+
+- `InvalidOperationException` when `name` is empty.
+- `InvalidOperationException` when the configuration section does not exist.
+- Host bootstrap throws `InvalidOperationException` when neither `Origin` nor an explicit redirect URI is supplied, the origin/redirect is invalid, or explicit client seeds are also configured.
+
+## MapSqlOS
+
+**Namespace:** `SqlOS.Extensions`
+
+**Type:** `WebApplicationExtensions`
+
+```csharp
+public static WebApplication MapSqlOS(this WebApplication app)
+```
+
+**Returns:** the same `WebApplication`.
+
+Maps AuthServer routes, audit-log admin routes, and transactional-email admin routes. Calendar connect/admin routes are also mapped when `SqlOSOptions.Calendar.Enabled` is `true`. Call it once after `builder.Build()`.
+
+## RequireSqlOSAccessToken
+
+**Namespace:** `SqlOS.Extensions`
+
+**Type:** `SqlOSErgonomicsExtensions`
+
+```csharp
+public static RouteGroupBuilder RequireSqlOSAccessToken(
+    this RouteGroupBuilder group,
+    string expectedAudience)
+```
+
+```csharp
+public static RouteGroupBuilder RequireSqlOSAccessToken(
+    this RouteGroupBuilder group,
+    Action<SqlOSAccessTokenValidationOptions> configure)
+```
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `group` | `RouteGroupBuilder` | Minimal API route group to protect. |
+| `expectedAudience` | `string` | Required JWT audience. Validation fails closed when empty. |
+| `configure` | `Action<SqlOSAccessTokenValidationOptions>` | Configures `ExpectedAudience`, optional `Realm`, `ResourceMetadataUrl`, and `ShouldValidate`. |
+
+**Returns:** the same route group.
+
+The endpoint filter validates the bearer token, issuer, lifetime, server-side session state, and exact audience. On success it sets `HttpContext.User` and stores a `SqlOSValidatedToken`. On failure it returns HTTP `401` with a Bearer challenge.
+
+### Exceptions
+
+- `ArgumentNullException` when `group` or `configure` is null.
+- `InvalidOperationException` when `ExpectedAudience` is empty.
+
+## GetSqlOSValidatedToken
+
+**Namespace:** `SqlOS.AuthServer.Extensions`
+
+**Type:** `SqlOSAccessTokenValidationExtensions`
+
+```csharp
+public static SqlOSValidatedToken? GetSqlOSValidatedToken(
+    this HttpContext context)
+```
+
+**Returns:** the validated token stored by `RequireSqlOSAccessToken` or `UseSqlOSAccessTokenValidation`; otherwise `null`.
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken("https://app.example.com/api");
+
+api.MapGet("/me", (HttpContext http) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    return token?.UserId is { } userId
+        ? Results.Ok(new { userId, token.OrganizationId, token.ClientId })
+        : Results.Unauthorized();
+});
+```
+
+## Complete one-application host
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS.Extensions;
+
+const string origin = "https://localhost:5001";
+
+var builder = WebApplication.CreateBuilder(args);
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not configured.");
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.PublicOrigin = origin;
+        options.AuthServer.Issuer = $"{origin}/sqlos/auth";
+        options.UseSingleApplication("Acme", application =>
+        {
+            application.Origin = origin;
+            application.Audience = $"{origin}/api";
+        });
+    });
+
+var app = builder.Build();
+app.MapSqlOS();
+app.Run();
+```
+
+SqlOS bootstraps its owned schema, signing key, default settings, client seed, and FGA core data when the host starts. Application EF migrations remain responsible only for application-owned tables.

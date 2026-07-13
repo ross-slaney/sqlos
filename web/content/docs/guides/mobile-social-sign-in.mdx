@@ -1,0 +1,259 @@
+---
+title: "Social sign-in for mobile apps"
+description: "Use native headless auth, a system authentication session, verified callbacks, and PKCE."
+order: 3
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Return social sign-in safely to a native app"
+  href="/docs/authserver/headless-auth-how-to"
+  actionLabel="Headless auth"
+>
+  Let the app own its sign-in screen while SqlOS owns provider redirects, identity linking, the OAuth transaction, and tokens.
+</Banner>
+
+![Trailnote mobile social sign-in, external provider session, and app callback](/docs/guides-mobile-social-sign-in.svg)
+
+This guide extends **Trailnote**, a fictional iOS and Android app, with Google and Apple sign-in. Trailnote starts a SqlOS headless authorization request, opens the provider in a system authentication session, returns through a verified app link, and exchanges the resulting authorization code with PKCE.
+
+<Callout type="info" title="This is browser-based OAuth">
+  The app does not use Google or Apple native sign-in SDKs. It opens the provider URL returned by SqlOS in `ASWebAuthenticationSession`, Chrome Custom Tabs, or an equivalent system authentication session.
+</Callout>
+
+## Keep the two callbacks distinct
+
+| Callback | Registered with | Example |
+| --- | --- | --- |
+| Provider callback | Google and Apple | `https://identity.trailnote.test/sqlos/auth/oidc/callback` |
+| App callback | SqlOS client | `https://app.trailnote.test/auth/callback` |
+
+The provider always returns to the public SqlOS host. SqlOS validates the provider response and then returns its own authorization code to the app callback. Never register a custom app scheme as the provider callback.
+
+## 1. Configure the public host and providers
+
+Provider credentials remain on the server. `PublicOrigin` must describe the externally reachable HTTPS origin, including when the app is behind a reverse proxy.
+
+```csharp
+const string publicOrigin = "https://identity.trailnote.test";
+const string providerCallback =
+    $"{publicOrigin}/sqlos/auth/oidc/callback";
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+    auth.PublicOrigin = publicOrigin;
+    auth.Issuer = $"{publicOrigin}/sqlos/auth";
+
+    auth.SeedGoogleConnection(
+        builder.Configuration["SqlOS:Oidc:Google:ClientId"]!,
+        builder.Configuration["SqlOS:Oidc:Google:ClientSecret"]!,
+        providerCallback);
+
+    auth.SeedOidcConnection(apple =>
+    {
+        apple.ProviderType = SqlOSOidcProviderType.Apple;
+        apple.DisplayName = "Apple";
+        apple.ClientId = builder.Configuration["SqlOS:Oidc:Apple:ServicesId"]!;
+        apple.AllowedCallbackUris = [providerCallback];
+        apple.AppleTeamId = builder.Configuration["SqlOS:Oidc:Apple:TeamId"];
+        apple.AppleKeyId = builder.Configuration["SqlOS:Oidc:Apple:KeyId"];
+        apple.ApplePrivateKeyPem =
+            builder.Configuration["SqlOS:Oidc:Apple:PrivateKeyPem"];
+    });
+});
+```
+
+Register `providerCallback` exactly in each provider console. Apple uses a `form_post` callback; SqlOS accepts both GET and POST at the shared callback route.
+
+## 2. Register a native public client
+
+Use a claimed HTTPS universal/app link in production. Keep a custom scheme only as a development fallback if your mobile framework needs one:
+
+```csharp
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "trailnote-mobile";
+    client.Name = "Trailnote Mobile";
+    client.Audience = "https://api.trailnote.test";
+    client.RedirectUris =
+    [
+        "https://app.trailnote.test/auth/callback",
+        "trailnote://auth/callback"
+    ];
+    client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+    client.ClientType = "public_pkce";
+    client.RequirePkce = true;
+    client.IsFirstParty = true;
+    client.AllowNativeHeadlessAuth = true;
+});
+```
+
+Native headless auth accepts only a first-party `public_pkce` client with PKCE required, an exact registered redirect URI, and `AllowNativeHeadlessAuth = true`.
+
+Configure the iOS associated domain and Android App Link for `app.trailnote.test`. Test that the operating system opens the installed app for the exact callback and that an unclaimed host stays in the browser.
+
+## 3. Start the outer OAuth transaction
+
+Generate an RFC 7636 verifier, its `S256` challenge, and a cryptographically random `state`. Keep the verifier and state in Keychain/Keystore-backed temporary storage until the callback finishes.
+
+```ts
+type Provider = {
+  connectionId: string;
+  providerType: string;
+  displayName: string;
+  logoDataUrl?: string | null;
+};
+
+type HeadlessResult = {
+  type: "view" | "redirect";
+  redirectUrl?: string | null;
+  viewModel?: {
+    requestId?: string | null;
+    providers?: Provider[];
+    error?: string | null;
+  } | null;
+};
+
+const AUTH = "https://identity.trailnote.test/sqlos/auth";
+const CLIENT_ID = "trailnote-mobile";
+const REDIRECT_URI = "https://app.trailnote.test/auth/callback";
+
+async function postHeadless(path: string, body: unknown): Promise<HeadlessResult> {
+  const response = await fetch(`${AUTH}/headless${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) throw new Error("Sign-in could not continue.");
+  return response.json();
+}
+
+const started = await postHeadless("/start", {
+  responseType: "code",
+  clientId: CLIENT_ID,
+  redirectUri: REDIRECT_URI,
+  state,
+  scope: "openid profile email offline_access",
+  codeChallenge,
+  codeChallengeMethod: "S256",
+  resource: "https://api.trailnote.test",
+  view: "login",
+});
+
+const requestId = started.viewModel?.requestId;
+const providers = started.viewModel?.providers ?? [];
+if (!requestId) throw new Error(started.viewModel?.error ?? "Sign-in could not start.");
+```
+
+Render provider buttons from `viewModel.providers`; do not hard-code database connection IDs into the app. Display name and optional logo come from the server configuration.
+
+## 4. Open the provider in a system session
+
+When the user chooses a provider, pass the returned `connectionId` back to SqlOS:
+
+```ts
+const google = providers.find((provider) => provider.providerType === "google");
+if (!google) throw new Error("Google sign-in is not available.");
+
+const providerStart = await postHeadless("/provider/start", {
+  requestId,
+  connectionId: google.connectionId,
+  email: null,
+});
+
+if (providerStart.type !== "redirect" || !providerStart.redirectUrl) {
+  throw new Error(providerStart.viewModel?.error ?? "Provider sign-in could not start.");
+}
+
+const callbackUrl = await openSystemAuthenticationSession(
+  providerStart.redirectUrl,
+  REDIRECT_URI,
+);
+```
+
+`openSystemAuthenticationSession` represents the platform API or framework wrapper around a system browser auth session. Do not render provider credentials in an embedded WebView.
+
+The browser sequence is:
+
+1. app → SqlOS provider-start URL;
+2. SqlOS → Google or Apple;
+3. provider → the public SqlOS provider callback;
+4. SqlOS → the registered app callback.
+
+SqlOS validates a separate provider state, nonce, and internal PKCE transaction before step 4. The app still must validate its original outer `state`.
+
+## 5. Validate the app callback and exchange the code
+
+```ts
+const callback = new URL(callbackUrl);
+if (
+  callback.origin !== "https://app.trailnote.test"
+  || callback.pathname !== "/auth/callback"
+) {
+  throw new Error("Unexpected sign-in callback URL.");
+}
+
+if (callback.searchParams.get("state") !== state) {
+  throw new Error("The sign-in state did not match.");
+}
+
+const code = callback.searchParams.get("code");
+if (!code) {
+  throw new Error(callback.searchParams.get("error") ?? "No authorization code returned.");
+}
+
+const tokenResponse = await fetch(`${AUTH}/token`, {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  body: new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    code,
+    code_verifier: verifier,
+    resource: "https://api.trailnote.test",
+  }).toString(),
+});
+
+if (!tokenResponse.ok) throw new Error("The authorization code could not be exchanged.");
+const tokens = await tokenResponse.json();
+```
+
+The app receives SqlOS access and refresh tokens, not the provider's tokens or an ID token. Store the refresh token in Keychain/Keystore-backed storage. Clear the verifier, state, request ID, callback URL, and authorization code after exchange.
+
+## Account and organization behavior
+
+- A new social identity is linked or provisioned as a passwordless SqlOS user.
+- Google requires a verified provider email.
+- Home-realm discovery can redirect SSO-governed email domains before local provider choices.
+- Invitation-managed organization access should use the invitation flow; social login is not the primary path for accepting an email-bound invitation.
+- The saved authorization request expires after 10 minutes; the final authorization code expires after 5 minutes.
+
+## Production checklist
+
+- Prefer claimed HTTPS universal/app links over custom schemes.
+- Use exact redirect strings and reject unexpected callback hosts, paths, state, and errors.
+- Use a system authentication session, never an embedded WebView.
+- Generate high-entropy state and PKCE material with platform cryptography.
+- Keep Google secrets and the Apple private key on the server.
+- Store refresh tokens and temporary verifier/state in secure platform storage.
+- Handle user cancellation, missing provider apps, offline transitions, and a callback delivered after the app was killed.
+- Test both fresh signup and returning identity linking for every provider.
+- Test Apple private-email relay, name availability on first consent, and account deletion/relinking.
+- Add app-owned telemetry around stages and error categories without logging codes, tokens, email addresses, or callback URLs.
+
+## Expected outcome
+
+Trailnote presents native provider buttons, hands credential entry to a trusted system browser, returns through a verified app link, and finishes a normal SqlOS authorization-code flow with PKCE. Provider secrets and provider tokens never enter the app.
+
+## Next steps
+
+- [Headless auth how-to](/docs/authserver/headless-auth-how-to)
+- [Social sign-in](/docs/guides/social-oidc)
+- [Google OIDC](/docs/authserver/google-oidc)
+- [Apple OIDC](/docs/authserver/apple-oidc)
+- [SMS sign-in for mobile](/docs/guides/sms-mobile-sign-in)
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens)

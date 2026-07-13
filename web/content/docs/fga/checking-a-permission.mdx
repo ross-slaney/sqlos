@@ -7,14 +7,17 @@ section: fga
 
 Use `CheckAccessAsync` for a yes/no answer: can this subject perform this action on this resource?
 
+<Callout type="warning" title="Authenticate before you authorize">
+  FGA checks a subject ID; it does not validate bearer tokens. Protect the route group for this API's exact audience first, then derive the subject ID from `GetSqlOSValidatedToken()`. Never trust a subject ID supplied by the client.
+</Callout>
+
 ## CheckAccessAsync
 
 ```csharp
 var access = await authService.CheckAccessAsync(
     subjectId,
-    "CHAIN_EDIT",
-    resourceId
-);
+    "WORKSPACE_MANAGE",
+    resourceId);
 
 if (!access.Allowed)
     return Results.Json(new { error = "Permission denied" }, statusCode: 403);
@@ -22,21 +25,23 @@ if (!access.Allowed)
 
 Use this for:
 
-- **Mutations** -- check before creating, updating, or deleting
-- **Single-resource gates** -- when you already have the resource ID
+- **Mutations** -- check before creating, updating, or deleting.
+- **Single-resource gates** -- when you already have the resource ID.
 
 ## HasCapabilityAsync
 
-Check if a subject has a permission anywhere in the tree (effectively a root-level check):
+Check if a subject has a permission on the configured root resource:
 
 ```csharp
-var canManageChains = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
+var canManageWorkspaces = await authService.HasCapabilityAsync(subjectId, "WORKSPACE_MANAGE");
 ```
 
 Use this for:
 
-- **Global UI toggles** -- show/hide "Create Chain" button
-- **Broad capability gates** -- "can this user create anything at all?"
+- **Global UI toggles** -- show a create action backed by a root-level grant.
+- **Platform gates** -- enforce capabilities intentionally assigned at the root.
+
+This method calls `CheckAccessAsync` for `RootResourceId`; it does not scan descendant resources to answer whether the subject has that permission somewhere.
 
 ## Access Tester (dashboard)
 
@@ -48,39 +53,49 @@ Select a subject, permission, and resource to see whether access is allowed and 
 
 ## Full mutation example
 
-From the retail example -- creating a chain with authorization:
+Create a protected entity after checking access to its parent resource. `SqlOSDbContext<TContext>` syncs the backing FGA resource row when the entity is saved.
 
 ```csharp
-app.MapPost("/api/chains", async (
-    CreateChainRequest request,
-    ExampleAppDbContext context,
-    ISqlOSFgaAuthService authService,
-    HttpContext http) =>
-{
-    var subjectId = http.GetSubjectId();
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
 
-    // 1. Check permission on the parent resource
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapPost("/workspaces", async (
+    CreateWorkspaceRequest request,
+    AppDbContext db,
+    ISqlOSFgaAuthService authService,
+    HttpContext http,
+    CancellationToken ct) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
+
+    var organizationResourceId = $"org::{request.OrganizationId}";
+
     var access = await authService.CheckAccessAsync(
-        subjectId, "CHAIN_EDIT", "retail_root");
+        subjectId,
+        "WORKSPACE_MANAGE",
+        organizationResourceId);
     if (!access.Allowed)
         return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
-    // 2. Create FGA resource as child of parent
-    var resourceId = context.CreateResource(
-        "retail_root", request.Name, "chain");
-
-    // 3. Create domain entity with the resource ID
-    var chain = new Chain
+    var workspaceId = Guid.NewGuid();
+    var workspace = new Workspace
     {
-        ResourceId = resourceId,
-        Name = request.Name,
-        Description = request.Description
+        Id = workspaceId,
+        ResourceId = $"workspace::{workspaceId:D}",
+        OrganizationId = request.OrganizationId,
+        Name = request.Name.Trim()
     };
-    context.Chains.Add(chain);
 
-    // 4. Save in one transaction
-    await context.SaveChangesAsync();
+    db.Workspaces.Add(workspace);
+    await db.SaveChangesAsync(ct);
 
-    return Results.Created($"/api/chains/{chain.Id}", chain);
+    return Results.Created($"/api/workspaces/{workspace.Id}", workspace);
 });
 ```

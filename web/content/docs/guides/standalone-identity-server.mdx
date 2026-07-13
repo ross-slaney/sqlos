@@ -29,6 +29,8 @@ By the end of this guide you will have:
 - resource APIs validating SqlOS tokens
 - links to SDK flows for invitations, OTP, and CLI device flow
 
+![Standalone SqlOS identity server topology for web, mobile, CLI, and resource APIs](/docs/guides-standalone-identity-server.svg)
+
 ## Topology
 
 <Files title="Standalone SqlOS topology">
@@ -149,6 +151,7 @@ Start with open access for the customer-facing app. Restrict sensitive surfaces.
 
 ```bash
 curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access-mode \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{ "accessMode": "selected_users_groups_roles" }'
 ```
@@ -157,6 +160,7 @@ Allow tenant admins for one organization:
 
 ```bash
 curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/assignments \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "principalType": "role",
@@ -170,8 +174,11 @@ curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-co
 Explain a decision:
 
 ```bash
-curl "https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access/check?organizationId=org_123&userId=usr_123"
+curl -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  "https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access/check?organizationId=org_123&userId=usr_123"
 ```
+
+These routes require the standalone host's operator authentication. The cookie-jar variable follows [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls); for production automation, prefer a separately authorized backend workflow.
 
 ## 5. Validate tokens in resource APIs
 

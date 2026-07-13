@@ -12,6 +12,95 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSAuthorizationPromptTests
 {
+    private const string ValidCodeChallenge = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    [TestMethod]
+    public async Task CreateAuthorizationRequestAsync_PublicClientCannotDisablePkce()
+    {
+        await using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedBrowserClient("public-web", "Public Web", "https://app.example.test/auth/callback");
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authorizationServer = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            authService,
+            crypto,
+            settings,
+            authPageSessionService,
+            options);
+        await admin.UpsertSeededClientsAsync();
+
+        var client = await context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>()
+            .SingleAsync(x => x.ClientId == "public-web");
+        client.RequirePkce = false;
+        client.TokenEndpointAuthMethod = "none";
+        await context.SaveChangesAsync();
+
+        var missingPkce = async () => await authorizationServer.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                client.ClientId,
+                "https://app.example.test/auth/callback",
+                "state-public",
+                "openid",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "hosted",
+                null));
+        await missingPkce.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A PKCE code challenge is required.");
+
+        var plainPkce = async () => await authorizationServer.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                client.ClientId,
+                "https://app.example.test/auth/callback",
+                "state-public",
+                "openid",
+                "challenge",
+                "plain",
+                null,
+                null,
+                null,
+                null,
+                "hosted",
+                null));
+        await plainPkce.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Only S256 PKCE is supported.");
+
+        var invalidS256Challenge = async () => await authorizationServer.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                client.ClientId,
+                "https://app.example.test/auth/callback",
+                "state-public",
+                "openid",
+                new string('A', 42),
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "hosted",
+                null));
+        await invalidS256Challenge.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*43-character RFC 7636 S256 value*");
+        (await context.Set<SqlOS.AuthServer.Models.SqlOSAuthorizationRequest>().CountAsync())
+            .Should().Be(0);
+    }
+
     [TestMethod]
     public async Task BuildAuthorizationErrorRedirectAsync_CancelsRequest_AndPreservesState()
     {
@@ -19,7 +108,7 @@ public sealed class SqlOSAuthorizationPromptTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("example-web", "Example Web", "https://app.example.test/auth/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -45,7 +134,7 @@ public sealed class SqlOSAuthorizationPromptTests
                 "https://app.example.test/auth/callback",
                 "state-123",
                 "openid profile email",
-                "challenge-123",
+                ValidCodeChallenge,
                 "S256",
                 null,
                 "alice@example.com",

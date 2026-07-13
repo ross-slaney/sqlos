@@ -329,6 +329,11 @@ public sealed class SqlOSSettingsService
             throw new InvalidOperationException("Grace window must be shorter than the rotation interval.");
         }
 
+        if (request.SigningKeyRetiredCleanupDays < request.SigningKeyGraceWindowDays)
+        {
+            throw new InvalidOperationException("Retired signing-key cleanup must not run before the JWKS grace window ends.");
+        }
+
         if (request.RefreshTokenGraceWindowSeconds < 0)
         {
             throw new InvalidOperationException("Refresh token grace window must be 0 or greater.");

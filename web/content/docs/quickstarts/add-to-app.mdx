@@ -1,0 +1,185 @@
+---
+title: "Add SqlOS to one app"
+description: "Embed hosted authentication in an ASP.NET Core app with UseSingleApplication."
+order: 1
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Quickstart"
+  title="Embed one hosted auth server"
+  href="#complete-program"
+  actionLabel="View the code"
+>
+  Install SqlOS 3.18.0, register one SQL Server `DbContext`, declare one application, and map the routes. FGA modeling and advanced client registration can wait.
+</Banner>
+
+## Goal
+
+Start an ASP.NET Core application with:
+
+- SqlOS tables in your existing SQL Server database;
+- one first-party PKCE application;
+- OAuth metadata and hosted login routes;
+- a password-protected embedded dashboard.
+
+## Prerequisites
+
+- .NET 9 SDK;
+- an ASP.NET Core project targeting `net9.0`;
+- EF Core 9;
+- an existing SQL Server database and a login allowed to create tables, indexes, and functions.
+
+SqlOS 3.18.0 targets `net9.0`; it is not compatible with a `net8.0` host.
+
+## Install
+
+```bash
+dotnet add package SqlOS --version 3.18.0
+```
+
+<Callout type="warning" title="Do not substitute 3.16.0">
+  The `3.18.0` package is the version contract for this guide. If NuGet does not list it yet, run the source examples from this repository or wait for the release; `3.16.0` predates the ASP.NET Core protected-state schema upgrade and other post-tag contracts documented here.
+</Callout>
+
+For a new project, store local values with user secrets:
+
+```bash
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=Acme;User Id=sa;Password=<your-password>;Encrypt=True;TrustServerCertificate=True"
+dotnet user-secrets set "SqlOS:Dashboard:Password" "<a-long-random-password>"
+```
+
+The database must already exist. SqlOS creates and upgrades its own tables inside it.
+
+## Complete program
+
+Replace `Program.cs` with:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Configuration;
+using SqlOS.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not configured.");
+
+const string publicOrigin = "http://localhost:5050";
+var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException(
+        "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.PublicOrigin = publicOrigin;
+        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+        options.UseSingleApplication("Acme", app =>
+        {
+            app.Origin = publicOrigin;
+            app.ClientId = "acme-web";
+            app.Audience = $"{publicOrigin}/api";
+            app.RedirectPath = "/auth/callback";
+        });
+
+        options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+        options.Dashboard.Password = dashboardPassword;
+    });
+
+var app = builder.Build();
+
+app.MapSqlOS();
+app.MapGet("/", () => Results.Ok(new { sqlos = "ready" }));
+
+app.Run();
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+}
+```
+
+`SqlOSDbContext<TContext>` registers the AuthServer, calendar, email, and FGA EF models. `UseSingleApplication` creates the application seed and AuthPage branding without exposing client-registration terminology in the common path.
+
+<Callout type="warning" title="SqlOS options are not automatically bound">
+  The example explicitly reads the dashboard password from `builder.Configuration` and assigns it to `options.Dashboard.Password`. Merely adding `SqlOS:Dashboard:Password` to configuration does not configure SqlOS unless your callback reads and assigns it.
+</Callout>
+
+## Run
+
+Use the same origin declared in the code:
+
+```bash
+dotnet run --urls http://localhost:5050
+```
+
+On the first start, SqlOS creates or upgrades its schema, automatically protects its signing key, writes default settings, and reconciles the `acme-web` application seed.
+
+## Verify
+
+Check the application:
+
+```bash
+curl http://localhost:5050/
+```
+
+Check OAuth metadata:
+
+```bash
+curl http://localhost:5050/sqlos/auth/.well-known/oauth-authorization-server
+```
+
+Open `http://localhost:5050/sqlos`, enter the configured dashboard password, then confirm:
+
+- the Auth dashboard opens;
+- the Applications or Clients view contains `acme-web`;
+- the redirect URI is `http://localhost:5050/auth/callback`;
+- the audience is `http://localhost:5050/api`.
+
+![Configured SqlOS dashboard after startup seeding](/docs/guides-configuration.png)
+
+This host now owns the auth server surfaces. Your browser application still needs a standard authorization-code-with-PKCE callback. Continue with the ASP.NET Core login quickstart for a complete framework-owned callback and application session.
+
+That runnable client uses `/signin-sqlos`, the conventional ASP.NET Core middleware callback. When adapting it to this host, either change `app.RedirectPath` above to `/signin-sqlos` or set the OAuth handler's `CallbackPath` to `/auth/callback`. The seeded redirect URI and middleware callback must match exactly.
+
+## Common failures
+
+### `Invalid SqlOS configuration` at startup
+
+`PublicOrigin` must be an absolute origin without a path, query, or fragment. `Issuer` must use the configured auth base path. For the defaults, it is exactly `{PublicOrigin}/sqlos/auth`.
+
+### SQL reports that the database does not exist
+
+SqlOS initializes tables, not the SQL Server database itself. Create the database and grant the application login the required DDL access before starting the host.
+
+### Dashboard password mode has no password
+
+Confirm the configuration key is available to this process and that the options callback assigns it. User secrets apply only to the project in which they were initialized.
+
+### Redirect mismatch
+
+The requested callback must exactly equal the seeded URI, including scheme, host, port, and path. Change `publicOrigin` and `RedirectPath` together.
+
+### Existing application uses the same client ID
+
+Single-application mode will not overwrite an unrelated manual client. Pick a different `ClientId` or remove the conflicting development record deliberately.
+
+## Production notes
+
+- Replace the local origin with the externally reachable HTTPS origin.
+- Read the connection string and dashboard password from your deployment secret store.
+- Restrict `/sqlos` and `/sqlos/admin` at the network or identity-aware proxy layer; the built-in password is a baseline, not the only control for a public admin endpoint.
+- Review signing-key persistence before deploying containers or multiple replicas. See [Production signing-key custody](/docs/authserver/signing-key-custody).
+- Run SqlOS bootstrap before application migrations if your application schema has foreign keys to SqlOS-owned tables.
+
+## Next steps
+
+- [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login)
+- [Protect an API](/docs/quickstarts/protect-api)
+- [Authorize EF Core queries](/docs/quickstarts/ef-authorization)
+- [Invite organization members](/docs/authserver/invitations)
+- [Single-application configuration](/docs/authserver/single-application)

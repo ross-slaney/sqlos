@@ -14,59 +14,71 @@ A subject is the entity being authorized. Every grant links a subject to a role 
 | `user` | `SqlOSFgaUser` | Human users (synced from AuthServer) |
 | `agent` | `SqlOSFgaAgent` | AI agents, bots, automated processes |
 | `service_account` | `SqlOSFgaServiceAccount` | API keys for service-to-service access |
-| `user_group` | `SqlOSFgaUserGroup` | Logical groups of users |
+| `group` | `SqlOSFgaUserGroup` | Logical groups of subjects |
 
-## Create a subject
+## Provision subjects
 
-**Users** are typically synced from AuthServer on login (see [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga)):
-
-```csharp
-context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-{
-    Id = user.Id,
-    SubjectTypeId = "user",
-    DisplayName = user.DisplayName,
-    OrganizationId = organizationId,
-    ExternalRef = user.Id
-});
-```
-
-**Agents** and **service accounts** can be created through the dashboard or seeded in startup:
+Use the SDK provisioning helpers for users, agents, and service accounts. The app resolves the current subject ID at its own request boundary, then passes that explicit ID into FGA.
 
 ```csharp
-context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-{
-    Id = "inventory_sync_agent",
-    SubjectTypeId = "agent",
-    DisplayName = "Inventory Sync Agent"
-});
+using SqlOS.Extensions;
+
+await context.ProvisionUserSubjectAsync(
+    subjectId,
+    displayName: displayName,
+    email: email,
+    externalRef: subjectId,
+    cancellationToken: ct);
 ```
+
+Agents and service accounts use the same explicit provisioning shape:
+
+```csharp
+await context.ProvisionAgentSubjectAsync(
+    "inventory_sync_agent",
+    displayName: "Inventory Sync Agent",
+    externalRef: "inventory-sync",
+    cancellationToken: ct);
+
+await context.ProvisionServiceAccountSubjectAsync(
+    "service_account::billing_api",
+    displayName: "Billing API",
+    clientId: "billing-api",
+    clientSecretHash: storedSecretHash,
+    description: "Billing API service account",
+    cancellationToken: ct);
+```
+
+The helpers are idempotent and update provided mutable fields without creating grants. Grants stay explicit:
+
+```csharp
+await context.GrantRoleAsync(
+    subjectId,
+    resourceId,
+    "workspace_member",
+    ct);
+```
+
+## Groups
+
+Create groups and manage group membership through `ISqlOSFgaSubjectService`:
+
+```csharp
+var group = await subjectService.CreateGroupAsync(
+    "Inventory Operators",
+    "People and agents that operate inventory workflows",
+    cancellationToken: ct);
+
+await subjectService.AddToGroupAsync(subjectId, group.Id, ct);
+```
+
+Groups are subjects with type `group`, but groups cannot be members of other groups.
 
 ## Authentication by subject type
 
-The example app supports multiple auth methods that map to different subject types:
+Authentication is application code. A bearer token, API key, or agent token can map to a user, service account, or agent subject, but FGA receives only the resolved `subjectId`.
 
-```csharp
-public static string? GetSubjectId(this HttpContext http)
-{
-    // Bearer JWT → user subject
-    var auth = http.Request.Headers.Authorization.ToString();
-    if (auth.StartsWith("Bearer "))
-        return ValidateAndGetUserId(auth);
-
-    // X-Api-Key → service account subject
-    if (http.Request.Headers.TryGetValue("X-Api-Key", out var apiKey))
-        return apiKey.ToString();
-
-    // X-Agent-Token → agent subject
-    if (http.Request.Headers.TryGetValue("X-Agent-Token", out var agent))
-        return agent.ToString();
-
-    return null;
-}
-```
-
-All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `GetAuthorizationFilterAsync` calls work regardless of whether the subject is a user, agent, or service account.
+All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `GetAuthorizationFilterAsync` calls work regardless of whether the subject is a user, agent, service account, or group.
 
 ## Dashboard
 

@@ -404,7 +404,14 @@ public sealed class SqlOSDeviceAuthorizationService
         deviceAuthorization.ConsumedAt = DateTime.UtcNow;
         deviceAuthorization.PollCount++;
         deviceAuthorization.LastPolledAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new SqlOSDeviceAuthorizationException("invalid_grant", "Device code has already been consumed.");
+        }
 
         var tokens = await _authService.CreateSessionTokensForUserAsync(
             deviceAuthorization.ApprovedUser,

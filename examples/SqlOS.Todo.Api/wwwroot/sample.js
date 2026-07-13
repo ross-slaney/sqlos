@@ -240,7 +240,7 @@ async function refreshTodos(todoListElement, sessionInfoElement) {
 
   sessionInfoElement.textContent = JSON.stringify(
     {
-      userId: mePayload.userId,
+      subjectId: mePayload.subjectId,
       clientId: mePayload.clientId,
       audience: mePayload.audience,
       resource: todosPayload.resource
