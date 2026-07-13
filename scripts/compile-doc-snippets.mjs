@@ -26,6 +26,14 @@ const snippetSpecs = [
     wrap: asCompleteProgram,
   })),
   {
+    name: "hierarchical EF authorization blog complete program",
+    relativePath:
+      "web/content/blog/hierarchical-authorization-native-ef-core.mdx",
+    heading: "## The complete runnable application",
+    marker: "var builder = WebApplication.CreateBuilder(args);",
+    wrap: asCompleteProgram,
+  },
+  {
     name: "audit-log registration",
     relativePath: "web/content/docs/reference/audit-logs.mdx",
     heading: "## Service registration",
