@@ -1,0 +1,479 @@
+---
+title: "Build your own login and signup UI"
+description: "Render a product-owned browser UI while SqlOS keeps OAuth, credentials, organizations, and MFA server-owned."
+order: 4
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Own the screens, keep the authorization state machine"
+  href="/docs/authserver/headless-auth"
+  actionLabel="Headless Auth reference"
+>
+  Build a branded browser experience without rebuilding OAuth, home realm discovery, provider callbacks, organization selection, MFA, sessions, or token issuance.
+</Banner>
+
+![A product-owned login UI renders each view returned by the SqlOS headless state machine before the OAuth callback](/docs/guides-custom-login-ui.svg)
+
+This guide builds **RelayDesk**, a fictional support application. RelayDesk renders the email, password, organization, and MFA screens. SqlOS validates every transition and eventually returns a normal authorization code to RelayDesk's registered callback.
+
+## Goal
+
+The browser completes this flow:
+
+```text
+/authorize + state + S256 PKCE
+  -> RelayDesk identify form
+  -> password, SSO, or another server-selected step
+  -> organization or MFA when required
+  -> registered callback + authorization code
+  -> /token + original PKCE verifier
+```
+
+Your UI draws the current view and submits user input. SqlOS still owns the saved authorization request, redirect validation, credentials, HRD, SAML/OIDC callbacks, invitations, organization membership, MFA policy, authorization code, session, and tokens.
+
+<Callout type="info" title="Start hosted, switch when the UI is the requirement">
+  Hosted AuthPage is the shortest integration. Choose headless when the authentication screens must use your design system, collect product-owned signup fields, or support product-specific experiments. Headless is not a password grant and does not turn your frontend into an authorization server.
+</Callout>
+
+## 1. Register the client and custom page
+
+Configure one public PKCE client, then tell SqlOS where RelayDesk renders authorization views:
+
+```csharp
+using Microsoft.AspNetCore.WebUtilities;
+
+const string identityOrigin = "https://identity.relaydesk.example";
+const string applicationOrigin = "https://app.relaydesk.example";
+
+builder.Services.AddCors(cors =>
+{
+    cors.AddPolicy("relaydesk-auth", policy =>
+    {
+        policy.WithOrigins(applicationOrigin)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    var auth = options.AuthServer;
+    auth.PublicOrigin = identityOrigin;
+    auth.Issuer = $"{identityOrigin}/sqlos/auth";
+
+    auth.SeedClient(client =>
+    {
+        client.ClientId = "relaydesk-web";
+        client.Name = "RelayDesk";
+        client.RedirectUris = [$"{applicationOrigin}/auth/callback"];
+        client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
+        client.ClientType = "public_pkce";
+        client.RequirePkce = true;
+        client.IsFirstParty = true;
+    });
+
+    auth.UseHeadlessAuthPage(headless =>
+    {
+        headless.BuildUiUrl = context => QueryHelpers.AddQueryString(
+            $"{applicationOrigin}/auth/authorize",
+            new Dictionary<string, string?>
+            {
+                ["request"] = context.RequestId,
+                ["view"] = context.View,
+                ["error"] = context.Error,
+                ["email"] = context.Email,
+                ["displayName"] = context.DisplayName,
+                ["pendingToken"] = context.PendingToken
+            });
+    });
+});
+
+var app = builder.Build();
+app.UseCors("relaydesk-auth");
+app.MapSqlOS();
+```
+
+`BuildUiUrl` is the mode switch. When it exists, `/sqlos/auth/authorize` redirects browser interaction to your page. There is no separate dashboard toggle.
+
+The default JSON API is `/sqlos/auth/headless`. `HeadlessApiBasePath` can move it, and `EnableApi = false` removes it. The examples below use the default. If your host moves it, configure the frontend's initial request URL to the same exact path, then compare it with the returned model's effective `headlessApiBasePath` and stop on a mismatch.
+
+Treat the URL values as presentation and flow context, not proof of identity. Load the saved request from SqlOS before rendering; the returned model contains the request's persisted `uiContext` when you supplied one to `/authorize`. Avoid logging full authorize-page URLs because callback errors and opaque pending state can appear in the query.
+
+## 2. Keep the browser boundary first-party
+
+Every cross-origin headless request must use:
+
+```ts
+credentials: "include"
+```
+
+The SqlOS AuthPage session cookie is `HttpOnly`, uses `SameSite=Lax`, and is scoped to the identity host. An app at `app.relaydesk.example` and identity host at `identity.relaydesk.example` are different origins but the same site, so explicit credentialed CORS is the intended topology.
+
+An app and identity host on unrelated sites are cross-site. `AllowCredentials()` does not override browser `SameSite` or third-party-cookie policy. Put the UI and identity host under the same registrable site, or use a reviewed first-party reverse proxy/backend-for-frontend that preserves the SqlOS cookie and does not log flow tokens.
+
+<Callout type="warning" title="CORS is not authentication">
+  Allow only exact product origins. Never combine `AllowAnyOrigin()` with credentials. Use HTTPS in production, configure trusted forwarded headers at the proxy, and keep the configured public origin, issuer, browser URL, and registered callback exact.
+</Callout>
+
+## 3. Start normal OAuth with state and S256 PKCE
+
+The custom page begins at `/authorize`, not at a password endpoint. Generate the verifier and state with Web Crypto and keep them only for the current tab's callback:
+
+```ts
+const IDENTITY_ORIGIN = "https://identity.relaydesk.example";
+const AUTH = `${IDENTITY_ORIGIN}/sqlos/auth`;
+const HEADLESS = `${AUTH}/headless`;
+const CLIENT_ID = "relaydesk-web";
+const REDIRECT_URI = "https://app.relaydesk.example/auth/callback";
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((value) => { binary += String.fromCharCode(value); });
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function randomToken(bytes: number): string {
+  const value = new Uint8Array(bytes);
+  crypto.getRandomValues(value);
+  return base64Url(value);
+}
+
+async function sha256Challenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
+  return base64Url(new Uint8Array(digest));
+}
+
+async function startSignIn(): Promise<void> {
+  const verifier = randomToken(48);
+  const state = randomToken(32);
+  const challenge = await sha256Challenge(verifier);
+
+  sessionStorage.setItem("relaydesk.oauth.verifier", verifier);
+  sessionStorage.setItem("relaydesk.oauth.state", state);
+
+  const authorize = new URL(`${AUTH}/authorize`);
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("client_id", CLIENT_ID);
+  authorize.searchParams.set("redirect_uri", REDIRECT_URI);
+  authorize.searchParams.set("scope", "openid profile email offline_access");
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("code_challenge", challenge);
+  authorize.searchParams.set("code_challenge_method", "S256");
+
+  window.location.replace(authorize.toString());
+}
+```
+
+The 48 random bytes become a verifier within the RFC 7636 length range. SqlOS accepts `S256`, not `plain`. Do not put the verifier in the URL or durable storage, and do not add a client secret to browser code.
+
+## 4. Load the server-owned view
+
+SqlOS redirects to a URL such as:
+
+```text
+https://app.relaydesk.example/auth/authorize?request=req_...&view=login
+```
+
+Read `request`, then load the authoritative model:
+
+```ts
+type OrganizationOption = {
+  id: string;
+  name: string;
+  primaryDomain?: string | null;
+  role: string;
+};
+
+type HeadlessViewModel = {
+  view: string;
+  requestId?: string | null;
+  headlessApiBasePath: string;
+  email?: string | null;
+  error?: string | null;
+  info?: string | null;
+  fieldErrors: Record<string, string>;
+  pendingToken?: string | null;
+  mfaToken?: string | null;
+  organizationSelection: OrganizationOption[];
+  providers: Array<{
+    connectionId: string;
+    providerType: string;
+    displayName: string;
+    logoDataUrl?: string | null;
+  }>;
+};
+
+type HeadlessActionResult = {
+  type: "view" | "redirect";
+  redirectUrl?: string | null;
+  viewModel?: HeadlessViewModel | null;
+};
+
+async function loadRequest(route: URLSearchParams): Promise<HeadlessViewModel> {
+  const requestId = route.get("request");
+  if (!requestId) throw new Error("The authorization request ID is missing.");
+
+  const url = new URL(`${HEADLESS}/requests/${requestId}`);
+  for (const name of ["view", "error", "pendingToken", "email", "displayName"]) {
+    const value = route.get(name);
+    if (value) url.searchParams.set(name, value);
+  }
+
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) throw new Error("The authorization request expired or is invalid.");
+
+  const model = await response.json() as HeadlessViewModel;
+  if (model.headlessApiBasePath !== new URL(HEADLESS).pathname) {
+    throw new Error("The configured headless API path does not match the server.");
+  }
+  return model;
+}
+```
+
+Pass the context emitted by `BuildUiUrl` back to the request loader. This matters after a provider callback when the next view can carry pending organization or MFA state. SqlOS still loads the saved request and validates the flow; the query is not an identity assertion.
+
+Render `model.view`; do not infer the next security step from the form you just submitted. A password can correctly produce `organization`, `mfa`, or `mfa-enroll` instead of completing authorization.
+
+## 5. Submit identify, password, organization, and MFA
+
+Use one credentialed action helper:
+
+```ts
+async function postAction(
+  path: string,
+  body: unknown,
+): Promise<HeadlessActionResult> {
+  const response = await fetch(`${HEADLESS}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error((await response.text()) || "Authentication could not continue.");
+  }
+
+  return response.json() as Promise<HeadlessActionResult>;
+}
+
+const identified = await postAction("/identify", {
+  requestId: model.requestId,
+  email,
+});
+
+const authenticated = await postAction("/password/login", {
+  requestId: model.requestId,
+  email,
+  password,
+});
+```
+
+`/identify` runs home realm discovery. Follow a returned redirect instead of showing a password form; the email may belong to an organization that requires SAML SSO. Otherwise replace the current model with the returned view.
+
+Organization selection deliberately uses the returned pending token:
+
+```ts
+const selected = await postAction("/organization/select", {
+  pendingToken: model.pendingToken,
+  organizationId,
+});
+```
+
+MFA verification stays bound to the authorization request and challenge:
+
+```ts
+const verified = await postAction("/mfa/verify", {
+  requestId: model.requestId,
+  mfaToken: model.mfaToken,
+  code,
+});
+```
+
+Keep `requestId`, `pendingToken`, `mfaToken`, enrollment tokens, and challenge tokens with the view model that returned them. Do not substitute values across tabs, users, clients, organizations, or parallel requests.
+
+## 6. Apply every action result the same way
+
+Centralize the transition rule:
+
+```ts
+function applyResult(
+  result: HeadlessActionResult,
+  render: (next: HeadlessViewModel) => void,
+): void {
+  if (result.type === "redirect" && result.redirectUrl) {
+    window.location.assign(result.redirectUrl);
+    return;
+  }
+
+  if (result.type === "view" && result.viewModel) {
+    render(result.viewModel);
+    return;
+  }
+
+  throw new Error("SqlOS returned an incomplete headless action result.");
+}
+```
+
+A redirect may go to an external OIDC/SAML provider or to RelayDesk's exact registered callback with a code. Never replace it with a URL constructed from user input. A view means SqlOS requires another interaction; render it instead of issuing tokens or declaring the user signed in.
+
+## 7. Validate state and exchange the code
+
+At `/auth/callback`, reject provider errors, missing local state, and state mismatch before exchanging the code:
+
+```ts
+async function completeCallback(): Promise<unknown> {
+  const query = new URLSearchParams(window.location.search);
+  const error = query.get("error");
+  if (error) throw new Error(query.get("error_description") || error);
+
+  const code = query.get("code");
+  const returnedState = query.get("state");
+  const expectedState = sessionStorage.getItem("relaydesk.oauth.state");
+  const verifier = sessionStorage.getItem("relaydesk.oauth.verifier");
+
+  if (!code || !returnedState || !expectedState || !verifier) {
+    throw new Error("OAuth callback state is missing or expired.");
+  }
+  if (returnedState !== expectedState) {
+    throw new Error("OAuth state validation failed.");
+  }
+
+  const response = await fetch(`${AUTH}/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
+      code,
+      code_verifier: verifier,
+    }),
+  });
+
+  sessionStorage.removeItem("relaydesk.oauth.state");
+  sessionStorage.removeItem("relaydesk.oauth.verifier");
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error_description || result.error || "Code exchange failed.");
+  }
+  return result;
+}
+```
+
+Connect the token response to your application's reviewed session design. The checked-in Next.js example gives it to NextAuth; a backend-for-frontend can exchange server-side and issue an encrypted application cookie. Do not persist refresh tokens in `localStorage`, and do not confuse the SqlOS AuthPage cookie with your application's authenticated session.
+
+## 8. Add product-owned signup fields
+
+Send additional values in `customFields`, then validate them in the host callback:
+
+```csharp
+auth.UseHeadlessAuthPage(headless =>
+{
+    headless.BuildUiUrl = BuildRelayDeskAuthorizeUrl;
+    headless.OnHeadlessSignupAsync = async (context, cancellationToken) =>
+    {
+        if (!string.Equals(
+            context.AuthorizationRequest?.ClientApplication?.ClientId,
+            "relaydesk-web",
+            StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var team = context.CustomFields["supportTeam"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrWhiteSpace(team))
+        {
+            throw new SqlOSHeadlessValidationException(
+                "Choose a support team.",
+                new Dictionary<string, string>
+                {
+                    ["supportTeam"] = "Support team is required."
+                });
+        }
+
+        await profiles.SaveAsync(context.User.Id, team, cancellationToken);
+    };
+});
+```
+
+The callback is global, so guard app-specific required fields by client. Writes through the SqlOS DbContext participate in its signup transaction; a separate database or external API does not. Make external provisioning idempotent and compensatable or outbox-driven.
+
+## 9. Map the optional branches
+
+The core transition rule stays the same. Add only the views your enabled policy can return:
+
+| Returned view or branch | What the UI must do | Focused documentation |
+| --- | --- | --- |
+| `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
+| `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
+| `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/guides/password-login) |
+| `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |
+| Provider redirect | Follow the exact returned OIDC/SAML URL; SqlOS owns callback validation | [Social sign-in](/docs/guides/social-oidc) · [SAML SSO](/docs/guides/saml-sso) |
+| `mfa`, `mfa-enroll` | Verify an existing factor or render forced enrollment with its returned token and QR data | [Authenticator MFA](/docs/guides/mfa-totp) |
+| `forgot-password`, `forgot-password-sent`, `password-reset` | Keep recovery enumeration-safe and use the configured reset destination | [Account recovery](/docs/guides/account-recovery-sessions) |
+| `device`, `device-approve`, `device-approved`, `device-denied` | Keep the device request bound to its request ID and require explicit approval | [CLI OAuth](/docs/authserver/cli-oauth) |
+
+Use the [Headless AuthPage API reference](/docs/reference/api-reference#headless-authpage-api) for exact request records and routes. Do not guess a response field: route validation errors are not yet one universal JSON envelope.
+
+## 10. Run the checked-in implementation
+
+The broad example contains complete Next.js and Angular headless clients:
+
+```bash
+npm ci --prefix examples/SqlOS.Example.Web
+npm ci --prefix examples/SqlOS.Example.AngularWeb
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Open `http://localhost:3010`, choose the headless/custom UI entry point, and complete password signup or login. The custom page is `/auth/authorize`; the callback is `/auth/callback`. The Angular client at `http://localhost:4200` exercises the same API without React.
+
+Compare these source files before adapting the pattern:
+
+- `examples/SqlOS.Example.Api/Program.cs` — host configuration, CORS, and signup hook
+- `examples/SqlOS.Example.Web/lib/sqlos-auth.ts` — state and PKCE
+- `examples/SqlOS.Example.Web/lib/sqlos-headless.ts` — typed API calls
+- `examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx` — state rendering
+- `examples/SqlOS.Example.Web/components/sqlos-auth-callback-panel.tsx` — callback validation and exchange
+- `examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts` — Angular client
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Request load returns `400` or `404` | The request may be expired, the ID may be wrong, or `EnableApi` may be false. Start a new `/authorize` request. |
+| Browser reports a CORS failure | Match the exact frontend origin, allow credentials, and send `credentials: "include"`. Do not use a wildcard. |
+| Reusable auth state disappears | Keep the UI and identity host same-site; credentialed CORS cannot defeat `SameSite=Lax` or third-party-cookie blocking. |
+| SqlOS rejects the authorize request | Match the seeded client ID and callback exactly, including scheme, host, port, path, and path case. |
+| Callback says state or verifier is missing | Finish in the same tab and avoid clearing `sessionStorage` before exchange. Start a new request rather than weakening validation. |
+| Login succeeds but the UI stops | Render the returned `organization`, `mfa`, or `mfa-enroll` view. Primary credentials do not bypass later policy. |
+| SSO domain still shows password | Always call `/identify`; do not choose password locally before HRD runs. |
+| Invitation loses its organization | Preserve the invitation-bound request and token; do not restart ordinary signup from an invite tab. |
+
+## Production checklist
+
+- [ ] Exact public origin, issuer, client, callback, and CORS origin
+- [ ] HTTPS and trusted forwarded-header configuration
+- [ ] Same-site identity/UI topology or reviewed first-party proxy
+- [ ] S256 PKCE and state generated with Web Crypto
+- [ ] State checked before code exchange
+- [ ] No browser client secret and no durable refresh token in `localStorage`
+- [ ] Every enabled server-returned view rendered
+- [ ] Flow tokens excluded from URLs where optional, logs, analytics, and error telemetry
+- [ ] Integration tests cover HRD, organization, MFA, invitation, and callback boundaries used by the product
+
+Continue with [Production Readiness](/docs/guides/production-readiness) and [Test Your Integration](/docs/guides/test-your-integration) before shipping.

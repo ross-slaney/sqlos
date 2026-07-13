@@ -1514,7 +1514,7 @@ var result = await oidcService.CompleteAuthorizationAsync(
 ```
 
 <Callout type="warning" title="Prefer the policy-aware browser flows">
-  For application login, use SqlOS's hosted authorization endpoints or [headless authentication](/docs/authserver/headless-auth-how-to). Those flows preserve organization selection, MFA, PKCE, state, nonce, and the normal authorization handoff. Use `CompleteAuthorizationAsync` directly only when you are building a trusted server-side identity broker. If that broker later calls `CreateSessionTokensForUserAsync`, it must first enforce organization membership and the required MFA policy itself; direct token creation bypasses the normal login state machine. Token creation still applies SqlOS application-access assignments.
+  For application login, use SqlOS's hosted authorization endpoints or [build a headless custom login UI](/docs/guides/custom-login-ui). Those flows preserve organization selection, MFA, PKCE, state, nonce, and the normal authorization handoff. Use `CompleteAuthorizationAsync` directly only when you are building a trusted server-side identity broker. If that broker later calls `CreateSessionTokensForUserAsync`, it must first enforce organization membership and the required MFA policy itself; direct token creation bypasses the normal login state machine. Token creation still applies SqlOS application-access assignments.
 </Callout>
 
 **Parameters**

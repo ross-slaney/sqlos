@@ -49,6 +49,8 @@ This path is the smallest browser integration and keeps authentication UI inside
 
 Choose the headless/custom UI entry point on the landing page. SqlOS still owns the authorization request and its server-side state, but redirects the interaction to `/auth/authorize` in this application.
 
+The docs walkthrough is [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui).
+
 [`sqlos-headless-auth-panel.tsx`](components/sqlos-headless-auth-panel.tsx) renders the returned view model and posts user actions to the SqlOS headless endpoints. It covers identification, password login/signup/reset, email and phone OTP, provider redirects, organization selection, MFA verification, and first-login TOTP enrollment.
 
 The headless signup UI sends `firstName`, `lastName`, and a required `referralSource` custom field. The API's `OnHeadlessSignupAsync` hook validates and persists that application profile data.

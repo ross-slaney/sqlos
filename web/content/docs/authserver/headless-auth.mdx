@@ -5,6 +5,15 @@ order: 6
 section: authserver
 ---
 
+<Banner
+  eyebrow="Headless AuthPage"
+  title="Use SqlOS as the state machine behind your UI"
+  href="/docs/guides/custom-login-ui"
+  actionLabel="Build a custom login UI"
+>
+  This page documents the feature and its branches. Use the guide for the complete browser, CORS, PKCE, callback, and example walkthrough.
+</Banner>
+
 **Headless** = SqlOS runs OAuth (`/sqlos/auth/authorize`, `/sqlos/auth/token`, PKCE, sessions, OIDC, SAML, codes). **Your app** draws the HTML.
 
 ## When to use headless
@@ -57,7 +66,7 @@ SqlOS uses one rule:
 
 There is no second seed or dashboard switch to keep in sync.
 
-More context: [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
+Implementation guide: [Build your own login and signup UI](/docs/guides/custom-login-ui). More context: [Hosted vs Headless](/docs/authserver/hosted-vs-headless).
 
 ## Headless endpoints
 
@@ -135,40 +144,15 @@ options.AuthServer.UseHeadlessAuthPage(headless =>
 
 ## Frontend implementation
 
-The example repo has a full headless UI. Main files:
+The example repository has complete Next.js and Angular clients. Use [Build your own login and signup UI](/docs/guides/custom-login-ui) for the source-aligned implementation flow, including state and S256 PKCE, credentialed CORS, server-owned view transitions, callback validation, and code exchange.
 
-```
-app/auth/authorize/page.tsx          → Custom authorize route
-components/sqlos-headless-auth-panel.tsx → Login/signup/org-selection UI
-lib/sqlos-headless.ts                → Typed client for headless endpoints
-```
+The core files are:
 
-**Typical flow** in your custom authorize page:
-
-```typescript
-// 1. Read the authorization request
-const request = await getHeadlessRequest(requestId);
-
-// 2. Show login or signup based on request.view
-if (request.view === "signup") {
-  // Show signup form
-}
-
-// 3. User submits email
-const identified = await headlessIdentify(requestId, email);
-// SqlOS returns a view, redirect, or next credential step.
-
-// 4. User submits password or starts/verifies email OTP
-const result = await headlessPasswordLogin(requestId, email, password);
-
-// 5. If multi-org, select organization
-if (result.requiresOrganizationSelection) {
-  await headlessSelectOrganization(requestId, orgId);
-}
-
-// 6. If policy requires MFA, render request.view === "mfa" or "mfa-enroll"
-
-// 7. SqlOS issues the auth code and redirects back to the OAuth client
+```text
+examples/SqlOS.Example.Web/app/auth/authorize/page.tsx
+examples/SqlOS.Example.Web/components/sqlos-headless-auth-panel.tsx
+examples/SqlOS.Example.Web/lib/sqlos-headless.ts
+examples/SqlOS.Example.AngularWeb/src/app/services/sqlos-headless.service.ts
 ```
 
 ## MFA views
