@@ -9,34 +9,55 @@ When using both AuthServer and FGA, you need to sync authenticated users into th
 
 ## The pattern
 
-After login, ensure the user exists as an FGA subject, the organization exists as an FGA resource, and the membership is mapped to a grant:
+After login, provision the authenticated user as an FGA subject, provision any non-entity organization resource, and map the auth membership to an explicit FGA grant:
 
 ```csharp
 public async Task EnsureUserAccessAsync(
-    string userId, string organizationId, CancellationToken ct)
+    string subjectId, string organizationId, CancellationToken ct)
 {
     var user = await _context.Set<SqlOSUser>()
-        .FirstAsync(x => x.Id == userId, ct);
+        .FirstAsync(x => x.Id == subjectId, ct);
     var organization = await _context.Set<SqlOSOrganization>()
         .FirstAsync(x => x.Id == organizationId, ct);
     var membership = await _context.Set<SqlOSMembership>()
-        .FirstAsync(x => x.UserId == userId
+        .FirstAsync(x => x.UserId == subjectId
             && x.OrganizationId == organizationId
             && x.IsActive, ct);
 
-    await EnsureSubjectAsync(user, organizationId, ct);
-    await EnsureOrganizationResourceAsync(organization, ct);
-    await EnsureMembershipGrantAsync(userId, organizationId, membership.Role, ct);
+    await _context.ProvisionUserSubjectAsync(
+        subjectId,
+        displayName: user.DisplayName,
+        email: user.DefaultEmail,
+        organizationId: organizationId,
+        externalRef: subjectId,
+        isActive: user.IsActive,
+        cancellationToken: ct);
+
+    var organizationResourceId = $"org::{organizationId}";
+    await _context.ProvisionResourceWithIdAsync(
+        organizationResourceId,
+        resourceTypeId: "organization",
+        name: organization.Name,
+        parentResourceId: "root",
+        isActive: organization.IsActive,
+        cancellationToken: ct);
+
+    var roleKey = membership.Role is "admin" or "owner"
+        ? "org_admin"
+        : "org_member";
+
+    await _context.GrantRoleAsync(subjectId, organizationResourceId, roleKey, ct);
+    await _context.SaveChangesAsync(ct);
 }
 ```
 
 ## What each step does
 
-**EnsureSubjectAsync** -- creates or updates `SqlOSFgaSubject` and `SqlOSFgaUser` for the authenticated user.
+**ProvisionUserSubjectAsync** -- creates or updates the FGA subject and typed FGA user row for the authenticated user.
 
-**EnsureOrganizationResourceAsync** -- creates an `SqlOSFgaResource` for the organization under root (if it doesn't exist).
+**ProvisionResourceWithIdAsync** -- creates or updates the organization resource under root. This is a manual resource because the organization is not represented by an `ISqlOSResourceEntity` in this example.
 
-**EnsureMembershipGrantAsync** -- creates a grant linking the user to a role on the organization resource, mapping the auth membership role to an FGA role:
+**GrantRoleAsync** -- creates an idempotent grant linking the subject to a role on the organization resource, mapping the auth membership role to an FGA role:
 
 | Auth role | FGA role |
 | --- | --- |

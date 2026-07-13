@@ -1,11 +1,17 @@
-import { redirect } from "next/navigation";
+import { DocsHomePage } from "@emcy/docs";
+import { docsSource } from "@/lib/docs-source";
 
 export const metadata = {
-  title: "Documentation - SqlOS",
+  title: "SqlOS documentation",
   description:
-    "SqlOS documentation for the merged AuthServer and Fga runtime, shared example stack, and SQL-backed test setup.",
+    "Start with one .NET application, then add authentication, organizations, and SQL-backed authorization as your B2B SaaS grows.",
 };
 
 export default function DocsPage() {
-  redirect("/docs/getting-started");
+  return (
+    <DocsHomePage
+      entry={docsSource.getHomeEntry()}
+      navigation={docsSource.getNavigation()}
+    />
+  );
 }

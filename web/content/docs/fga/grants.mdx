@@ -16,14 +16,11 @@ A grant links a subject, a role, and a resource. The subject gains all permissio
 **SDK**:
 
 ```csharp
-context.Set<SqlOSFgaGrant>().Add(new SqlOSFgaGrant
-{
-    Id = SqlOSCryptoService.GenerateId("grant"),
-    SubjectId = userId,
-    ResourceId = "org::acme",
-    RoleId = companyAdminRole.Id,
-    Description = "Full access to Acme Corp"
-});
+await context.GrantRoleAsync(
+    subjectId,
+    "org::acme",
+    "company_admin",
+    ct);
 await context.SaveChangesAsync(ct);
 ```
 
@@ -31,6 +28,7 @@ await context.SaveChangesAsync(ct);
 
 ```bash
 curl -X POST http://localhost:5062/sqlos/admin/fga/api/grants \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   -H "Content-Type: application/json" \
   -d '{
     "subjectId": "usr_...",
@@ -60,8 +58,11 @@ A Store Clerk granted on `store-001` can only see that one store's inventory. A 
 **Admin API**:
 
 ```bash
-curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{grantId}
+curl -X DELETE http://localhost:5062/sqlos/admin/fga/api/grants/{grantId} \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR"
 ```
+
+The Admin API requires an operator session; see [Authenticate operator API calls](/docs/authserver/dashboard-overview#authenticate-operator-api-calls).
 
 ## Time-bounded grants
 

@@ -115,3 +115,4 @@ The auth dashboard now keeps client onboarding in one place:
 - SqlOS still keeps consent simple by default.
 - Password is still the default local credential path.
 - `CIMD`, `DCR`, and resource indicators are now supported. Use them when you need portable or compatibility clients, not for the very first hosted setup.
+- AuthPage cookies are stateful sessions. Reuse requires an active user and, when organization-scoped, an active organization and membership. Logout-all, password reset, organization deactivation, and matching SSO organization-session revocation invalidate those cookies server-side.

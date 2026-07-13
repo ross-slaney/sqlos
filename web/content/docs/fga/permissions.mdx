@@ -52,7 +52,7 @@ var filter = await authService
 var access = await authService
     .CheckAccessAsync(subjectId, "CHAIN_EDIT", resourceId);
 
-// Capability check
+// Root-level capability check
 var canEdit = await authService
     .HasCapabilityAsync(subjectId, "CHAIN_EDIT");
 ```

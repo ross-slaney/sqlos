@@ -105,28 +105,31 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                 var parts = token.Split('|', 2, StringSplitOptions.None);
                 var provider = parts.Length > 0 ? parts[0] : "google";
                 var parsed = ParseCode(parts.Length > 1 ? parts[1] : "success:user@example.com:nonce");
+                var userInfoSubjectMismatch = string.Equals(parsed.mode, "userinfo-sub-mismatch", StringComparison.Ordinal);
+                var userInfoVerified = !string.Equals(parsed.mode, "split-claims", StringComparison.Ordinal) && parsed.isVerified;
 
                 return provider switch
                 {
                     "google" => Json(HttpStatusCode.OK, new
                     {
-                        sub = $"google-{parsed.email}",
-                        email = parsed.email,
-                        email_verified = parsed.isVerified,
-                        name = $"Google {parsed.email}"
+                        sub = userInfoSubjectMismatch ? $"mismatched-google-{parsed.email}" : $"google-{parsed.email}",
+                        email = parsed.userInfoEmail,
+                        email_verified = userInfoVerified,
+                        name = $"Google {parsed.userInfoEmail}"
                     }),
                     "microsoft" => Json(HttpStatusCode.OK, new
                     {
-                        sub = $"microsoft-{parsed.email}",
-                        preferred_username = parsed.email,
-                        name = $"Microsoft {parsed.email}"
+                        sub = userInfoSubjectMismatch ? $"mismatched-microsoft-{parsed.email}" : $"microsoft-{parsed.email}",
+                        preferred_username = parsed.userInfoEmail,
+                        name = $"Microsoft {parsed.userInfoEmail}"
                     }),
                     "custom" => Json(HttpStatusCode.OK, new
                     {
-                        custom_sub = $"custom-{parsed.email}",
-                        email_address = parsed.email,
-                        email_verified_flag = parsed.isVerified,
-                        full_name = $"Custom {parsed.email}"
+                        sub = userInfoSubjectMismatch ? $"mismatched-custom-standard-{parsed.email}" : $"custom-standard-{parsed.email}",
+                        custom_sub = $"custom-{parsed.userInfoEmail}",
+                        email_address = parsed.userInfoEmail,
+                        email_verified_flag = userInfoVerified,
+                        full_name = $"Custom {parsed.userInfoEmail}"
                     }),
                     _ => Json(HttpStatusCode.NotFound, new { error = "userinfo_not_supported" })
                 };
@@ -242,26 +245,31 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
             return "custom";
         }
 
-        private static (string email, string nonce, bool isVerified) ParseCode(string code)
+        private static (string email, string userInfoEmail, string nonce, bool isVerified, string mode) ParseCode(string code)
         {
             var trimmed = Uri.UnescapeDataString(code);
             if (trimmed.StartsWith("missing-email", StringComparison.OrdinalIgnoreCase))
             {
-                return (string.Empty, "nonce", true);
+                return (string.Empty, string.Empty, "nonce", true, "missing-email");
             }
 
             var parts = trimmed.Split(':', StringSplitOptions.None);
+            if (parts.Length >= 4 && string.Equals(parts[0], "split-claims", StringComparison.OrdinalIgnoreCase))
+            {
+                return (parts[1], parts[2], parts[3], true, "split-claims");
+            }
+
             if (parts.Length >= 3)
             {
-                return (parts[1], parts[2], !parts[0].StartsWith("unverified", StringComparison.OrdinalIgnoreCase));
+                return (parts[1], parts[1], parts[2], !parts[0].StartsWith("unverified", StringComparison.OrdinalIgnoreCase), parts[0]);
             }
 
             if (parts.Length == 2)
             {
-                return (parts[1], "nonce", !parts[0].StartsWith("unverified", StringComparison.OrdinalIgnoreCase));
+                return (parts[1], parts[1], "nonce", !parts[0].StartsWith("unverified", StringComparison.OrdinalIgnoreCase), parts[0]);
             }
 
-            return ("user@example.com", "nonce", true);
+            return ("user@example.com", "user@example.com", "nonce", true, "success");
         }
 
         private static string CreateIdToken(string provider, string clientId, string email, string nonce, bool isVerified)
@@ -301,6 +309,7 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                 ],
                 _ =>
                 [
+                    new Claim("sub", $"custom-standard-{email}"),
                     new Claim("custom_sub", $"custom-{email}"),
                     new Claim("email_address", email),
                     new Claim("email_verified_flag", isVerified ? "true" : "false"),

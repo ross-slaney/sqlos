@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">SqlOS production deployment boundary</title>
+  <desc id="desc">Traffic passes through a trusted TLS edge to replicated ASP.NET Core hosts that share SQL Server and a durable Data Protection key ring.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111827"/><stop offset="1" stop-color="#312e81"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#6366f1"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-opacity=".28"/></filter>
+    <style>.eyebrow{font:700 15px system-ui,sans-serif;letter-spacing:2px;fill:#c4b5fd}.title{font:750 43px system-ui,sans-serif;fill:#fff}.sub{font:400 20px system-ui,sans-serif;fill:#cbd5e1}.nodeTitle{font:750 22px system-ui,sans-serif;fill:#111827}.nodeSub{font:500 15px system-ui,sans-serif;fill:#64748b}.edgeTitle{font:750 22px system-ui,sans-serif;fill:#fff}.edgeSub{font:500 15px system-ui,sans-serif;fill:#e0e7ff}.chip{font:700 15px system-ui,sans-serif;fill:#e2e8f0}</style>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <text x="64" y="75" class="eyebrow">PRODUCTION READINESS</text>
+  <text x="64" y="124" class="title">Operate the host, database, and keys together.</text>
+  <text x="64" y="160" class="sub">Stable public URLs and a trusted edge are only the start of the deployment contract.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="238" width="238" height="170" rx="24" fill="url(#accent)"/>
+    <rect x="376" y="214" width="330" height="218" rx="24" fill="#fff"/>
+    <rect x="780" y="214" width="436" height="96" rx="24" fill="#fff"/>
+    <rect x="780" y="336" width="436" height="96" rx="24" fill="#fff"/>
+  </g>
+
+  <text x="96" y="292" class="edgeTitle">Trusted edge</text>
+  <text x="96" y="326" class="edgeSub">TLS + forwarded headers</text>
+  <text x="96" y="353" class="edgeSub">admin route controls</text>
+  <text x="96" y="380" class="edgeSub">rate and request limits</text>
+
+  <text x="414" y="270" class="nodeTitle">ASP.NET Core + SqlOS</text>
+  <text x="414" y="306" class="nodeSub">Replica A</text>
+  <rect x="414" y="327" width="116" height="42" rx="12" fill="#ede9fe"/><text x="472" y="354" text-anchor="middle" class="nodeSub">ready</text>
+  <text x="558" y="306" class="nodeSub">Replica B</text>
+  <rect x="558" y="327" width="116" height="42" rx="12" fill="#ede9fe"/><text x="616" y="354" text-anchor="middle" class="nodeSub">ready</text>
+  <text x="414" y="399" class="nodeSub">same version · one schema rollout</text>
+
+  <text x="816" y="256" class="nodeTitle">SQL Server</text>
+  <text x="816" y="285" class="nodeSub">identity · sessions · grants · signing keys</text>
+  <text x="816" y="378" class="nodeTitle">Data Protection key ring</text>
+  <text x="816" y="407" class="nodeSub">shared · durable · encrypted · recovery-tested</text>
+
+  <path d="M302 323h74M706 274h74M706 370h74" stroke="#a5b4fc" stroke-width="7" stroke-linecap="round"/>
+  <path d="m365 313 11 10-11 10M769 264l11 10-11 10M769 360l11 10-11 10" fill="none" stroke="#a5b4fc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g>
+    <rect x="64" y="523" width="218" height="62" rx="18" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-opacity=".13"/><text x="173" y="560" text-anchor="middle" class="chip">Stable issuer</text>
+    <rect x="300" y="523" width="218" height="62" rx="18" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-opacity=".13"/><text x="409" y="560" text-anchor="middle" class="chip">Backup + restore</text>
+    <rect x="536" y="523" width="218" height="62" rx="18" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-opacity=".13"/><text x="645" y="560" text-anchor="middle" class="chip">Smoke checks</text>
+    <rect x="772" y="523" width="218" height="62" rx="18" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-opacity=".13"/><text x="881" y="560" text-anchor="middle" class="chip">Observed rollout</text>
+    <rect x="1008" y="523" width="208" height="62" rx="18" fill="#fff" fill-opacity=".08" stroke="#fff" stroke-opacity=".13"/><text x="1112" y="560" text-anchor="middle" class="chip">Recovery drill</text>
+  </g>
+  <text x="640" y="648" text-anchor="middle" class="sub">Your application owns the platform controls around the embedded identity runtime.</text>
+</svg>

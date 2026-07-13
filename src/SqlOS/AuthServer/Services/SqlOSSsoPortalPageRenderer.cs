@@ -396,9 +396,23 @@ public static class SqlOSSsoPortalPageRenderer
                     render();
                 });
                 $("test").addEventListener("click", async () => {
+                    const toBase64Url = (bytes) => btoa(String.fromCharCode(...bytes))
+                        .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+                    const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+                    const verifier = toBase64Url(verifierBytes);
+                    const challengeBytes = new Uint8Array(await crypto.subtle.digest(
+                        "SHA-256",
+                        new TextEncoder().encode(verifier)));
+                    const stateBytes = crypto.getRandomValues(new Uint8Array(32));
                     const result = await request("/test", {
                         method: "POST",
-                        body: JSON.stringify({ clientId: $("client-id").value || null, redirectUri: $("redirect-uri").value || null })
+                        body: JSON.stringify({
+                            clientId: $("client-id").value || null,
+                            redirectUri: $("redirect-uri").value || null,
+                            state: toBase64Url(stateBytes),
+                            codeChallenge: toBase64Url(challengeBytes),
+                            codeChallengeMethod: "S256"
+                        })
                     });
                     showTest(result);
                 });

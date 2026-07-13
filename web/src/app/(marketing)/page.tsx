@@ -1,13 +1,8 @@
-import OssCredibilityBand from "@/components/OssCredibilityBand";
-import AuthSection from "@/components/marketing/AuthSection";
-import AuthStackSection from "@/components/marketing/AuthStackSection";
-import CtaSection from "@/components/marketing/CtaSection";
-import DeveloperExperienceSection from "@/components/marketing/DeveloperExperienceSection";
-import ExampleAppsSection from "@/components/marketing/ExampleAppsSection";
-import FeaturesSection from "@/components/marketing/FeaturesSection";
-import FgaSection from "@/components/marketing/FgaSection";
-import HeroSection from "@/components/marketing/HeroSection";
-import HowItWorksSection from "@/components/marketing/HowItWorksSection";
+import ClosingSection from "@/components/marketing/ClosingSection";
+import GallerySection from "@/components/marketing/GallerySection";
+import HeroCollage from "@/components/marketing/HeroCollage";
+import StatementSection from "@/components/marketing/StatementSection";
+import TrioSection from "@/components/marketing/TrioSection";
 import { fetchGitHubStars } from "@/lib/github";
 
 export default async function Home() {
@@ -15,16 +10,11 @@ export default async function Home() {
 
   return (
     <div className="relative min-h-screen">
-      <HeroSection />
-      <OssCredibilityBand githubStars={githubStars} />
-      <AuthSection />
-      <AuthStackSection />
-      <FgaSection />
-      <DeveloperExperienceSection />
-      <HowItWorksSection />
-      <ExampleAppsSection />
-      <FeaturesSection />
-      <CtaSection />
+      <HeroCollage />
+      <TrioSection />
+      <StatementSection />
+      <GallerySection />
+      <ClosingSection githubStars={githubStars} />
     </div>
   );
 }

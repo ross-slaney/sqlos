@@ -1,0 +1,30 @@
+---
+title: "Build B2B SaaS auth on .NET"
+description: "Start with one application and hosted login. Add organizations, SSO, and SQL-backed authorization when your product needs them."
+order: 0
+---
+
+<Callout type="info" title="Version contract">
+  These docs target **SqlOS 3.18.0**, **.NET 9**, **EF Core 9**, and **SQL Server**. Use the same package version as the docs: published `3.16.0` predates the ASP.NET Core protected-state schema upgrade and the complete current source/reference contract.
+</Callout>
+
+## Get useful proof first
+
+<CardGrid cols={2}>
+  <Card title="Run the Todo sample" description="See hosted login and authorized EF Core queries without changing an app." href="/docs/quickstarts/run-todo" />
+  <Card title="Add SqlOS to one app" description="Embed one hosted auth server with UseSingleApplication." href="/docs/quickstarts/add-to-app" />
+  <Card title="Sign in from ASP.NET Core" description="Use the built-in OAuth handler, PKCE, and a secure application cookie." href="/docs/quickstarts/aspnet-core-login" />
+  <Card title="Browse runnable examples" description="Choose a .NET, browser, mobile, or CLI reference application." href="/docs/examples" />
+  <Card title="Protect an API" description="Validate a SqlOS bearer token for an exact audience." href="/docs/quickstarts/protect-api" />
+  <Card title="Authorize EF queries" description="Filter rows in SQL with the current FGA APIs." href="/docs/quickstarts/ef-authorization" />
+</CardGrid>
+
+SqlOS has a broad platform surface, but you do not need to adopt it all. The normal path is incremental:
+
+1. Run the sample or embed one application.
+2. Complete hosted login into your ASP.NET Core session.
+3. Protect your application API.
+4. Add fine-grained authorization only to data that needs it.
+5. Add social login, SAML SSO, MFA, audit, calendar, or advanced clients as requirements appear.
+
+For a short map of the documentation, continue to [Getting Started](/docs/getting-started).
