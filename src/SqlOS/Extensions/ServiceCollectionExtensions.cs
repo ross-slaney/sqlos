@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -69,7 +70,20 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<SqlOSSchemaInitializer>();
         services.AddScoped<SqlOSBootstrapper>();
-        services.AddScoped<SqlOSCryptoService>();
+        services.AddSingleton<SqlOSValidationSigningKeyCache>();
+        services.AddScoped(sp =>
+        {
+            var context = sp.GetRequiredService<ISqlOSAuthServerDbContext>();
+            var authOptions = sp.GetRequiredService<IOptions<SqlOSAuthServerOptions>>();
+            var dataProtection = sp.GetRequiredService<IDataProtectionProvider>();
+            var cache = sp.GetRequiredService<SqlOSValidationSigningKeyCache>();
+            return new SqlOSCryptoService(
+                context,
+                authOptions,
+                new SqlOSDataProtectionSigningKeyCustody(dataProtection),
+                dataProtection,
+                cache);
+        });
         services.AddScoped<ISqlOSAuditLogService, SqlOSAuditLogService>();
         services.AddScoped<SqlOSSettingsService>();
         services.AddSingleton<ISqlOSAuthEmailSender, SqlOSAcsAuthEmailSender>();
