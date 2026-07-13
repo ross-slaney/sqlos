@@ -112,6 +112,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
             ?? builder.Configuration["ExampleFrontend:Origin"]
             ?? "http://localhost:3000";
         var enableHeadlessAuthPage = builder.Configuration.GetValue<bool?>("SqlOS:EnableHeadlessAuthPage") ?? true;
+        var enableMagicLink = builder.Configuration.GetValue<bool?>("SqlOS:EnableMagicLink") ?? false;
 
         auth.SeedAuthPage(page =>
         {
@@ -122,9 +123,16 @@ builder.AddSqlOS<ExampleAppDbContext>(
             page.BackgroundColor = "#f8fafc";
             page.Layout = "split";
             page.EnablePasswordSignup = false;
-            page.EnabledCredentialTypes = enablePhoneOtp
-                ? ["email_otp", "password", "phone_otp"]
-                : ["email_otp", "password"];
+            page.EnabledCredentialTypes = new[]
+                {
+                    "email_otp",
+                    "password",
+                    enablePhoneOtp ? "phone_otp" : null,
+                    enableMagicLink ? "magic_link" : null
+                }
+                .Where(static credential => credential != null)
+                .Select(static credential => credential!)
+                .ToList();
         });
         auth.SeedAuthEmails(email =>
         {
