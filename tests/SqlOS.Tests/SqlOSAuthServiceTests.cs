@@ -748,6 +748,110 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task MfaChallenge_WrongCodesConsumeChallengeAtConfiguredCap()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureRequiredMfa(options);
+            options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 3;
+            options.Mfa.Totp.MaxFailedAttemptsPerUser = 6;
+            options.Mfa.Totp.MaxFailedAttemptsPerIp = 10;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Bounded MFA",
+            $"bounded-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Bounded authenticator"));
+        await harness.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            harness.Totp.GenerateCodeForTesting(enrollment.Secret)));
+        var login = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.230"));
+        login.RequiresMfa.Should().BeTrue();
+        login.RequiresMfaEnrollment.Should().BeFalse();
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var reject = async () => await harness.Auth.VerifyMfaChallengeAsync(
+                new SqlOSMfaChallengeVerifyRequest(login.MfaToken!, "not-a-valid-code"),
+                CreatePasswordHttpContext("203.0.113.230"));
+            await reject.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+        }
+
+        var persisted = await harness.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(login.MfaToken!));
+        persisted.ConsumedAt.Should().NotBeNull();
+        harness.Crypto.DeserializePayload<SqlOSMfaChallengePayload>(persisted)!.FailedAttempts.Should().Be(3);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
+            x.Action == "user.mfa.challenge_failed" && x.UserId == user.Id)).Should().Be(3);
+
+        var correctAfterCap = async () => await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(
+                login.MfaToken!,
+                harness.Totp.GenerateCodeForTesting(
+                    enrollment.Secret,
+                    DateTimeOffset.UtcNow.AddSeconds(harness.Options.Mfa.Totp.PeriodSeconds))),
+            CreatePasswordHttpContext("203.0.113.230"));
+        await correctAfterCap.Should().ThrowAsync<InvalidOperationException>();
+        (await harness.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == user.Id)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task MfaChallenge_ReissuingChallengesCannotBypassUserThrottle()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureRequiredMfa(options);
+            options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 2;
+            options.Mfa.Totp.MaxFailedAttemptsPerUser = 3;
+            options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Throttled MFA",
+            $"throttled-mfa-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Throttled authenticator"));
+        await harness.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            harness.Totp.GenerateCodeForTesting(enrollment.Secret)));
+
+        var firstLogin = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.231"));
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var reject = async () => await harness.Auth.VerifyMfaChallengeAsync(
+                new SqlOSMfaChallengeVerifyRequest(firstLogin.MfaToken!, "wrong"),
+                CreatePasswordHttpContext("203.0.113.231"));
+            await reject.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+        }
+
+        var secondLogin = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.232"));
+        var finalFailure = async () => await harness.Auth.VerifyMfaChallengeAsync(
+            new SqlOSMfaChallengeVerifyRequest(secondLogin.MfaToken!, "wrong"),
+            CreatePasswordHttpContext("203.0.113.232"));
+        await finalFailure.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+
+        var reissue = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreatePasswordHttpContext("203.0.113.233"));
+        await reissue.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+        (await harness.Context.Set<SqlOSTemporaryToken>().CountAsync(x =>
+            x.Purpose == SqlOSAuthService.MfaChallengePurpose && x.UserId == user.Id)).Should().Be(2);
+    }
+
+    [TestMethod]
     public async Task RecoveryCode_CanSatisfyMfaOnlyOnce()
     {
         var harness = await TestHarness.CreateAsync();

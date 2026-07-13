@@ -557,6 +557,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.Property(x => x.Purpose).HasMaxLength(80);
             entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
+            entity.Property(x => x.PayloadJson).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<SqlOSAuditEvent>(entity =>

@@ -30,4 +30,8 @@ public sealed class SqlOSTotpMfaOptions
     public int RecoveryCodeCount { get; set; } = 10;
     public TimeSpan EnrollmentTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
     public TimeSpan ChallengeTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
+    public int MaxFailedAttemptsPerChallenge { get; set; } = 5;
+    public int MaxFailedAttemptsPerUser { get; set; } = 10;
+    public int MaxFailedAttemptsPerIp { get; set; } = 25;
+    public TimeSpan FailedAttemptWindow { get; set; } = TimeSpan.FromMinutes(10);
 }

@@ -681,7 +681,7 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
-        var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
+        var factorMethod = await _authService.VerifyMfaChallengeFactorAsync(token, code, httpContext, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }

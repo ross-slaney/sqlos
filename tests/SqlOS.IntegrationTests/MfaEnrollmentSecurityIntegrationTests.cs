@@ -110,6 +110,77 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         await VerifyHostedEndpointBindsAuthorizationRequestAsync(server, client);
     }
 
+    [TestMethod]
+    public async Task RealPublicEndpoint_BoundsMfaGuessingAndRejectsCorrectCodeAfterCap()
+    {
+        await using var server = await MfaEndpointServer.CreateAsync();
+        using var client = server.App.GetTestClient();
+        string email;
+        string userId;
+        string secret;
+        await using (var scope = server.App.Services.CreateAsyncScope())
+        {
+            var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+            var auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
+            var totp = scope.ServiceProvider.GetRequiredService<SqlOSTotpMfaService>();
+            var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "Endpoint Bounded MFA",
+                $"endpoint-bounded-{Guid.NewGuid():N}@example.com",
+                "P@ssword123!"));
+            email = user.DefaultEmail!;
+            userId = user.Id;
+            var enrollment = await auth.StartTotpEnrollmentAsync(user.Id, new SqlOSTotpEnrollmentStartRequest());
+            secret = enrollment.Secret;
+            await auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+                enrollment.EnrollmentToken,
+                totp.GenerateCodeForTesting(secret)));
+        }
+
+        var loginResponse = await client.PostAsJsonAsync("/sqlos/auth/password/login", new
+        {
+            email,
+            password = "P@ssword123!",
+            clientId = "test-client"
+        });
+        loginResponse.EnsureSuccessStatusCode();
+        using var loginJson = JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        var mfaToken = loginJson.RootElement.GetProperty("mfaToken").GetString()!;
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var rejected = await client.PostAsJsonAsync(
+                "/sqlos/auth/mfa/challenge/verify",
+                new { mfaToken, code = "not-a-valid-code" });
+            rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await rejected.Content.ReadAsStringAsync()).Should().Contain("MFA code is invalid");
+        }
+
+        string validCode;
+        await using (var scope = server.App.Services.CreateAsyncScope())
+        {
+            var totp = scope.ServiceProvider.GetRequiredService<SqlOSTotpMfaService>();
+            validCode = totp.GenerateCodeForTesting(
+                secret,
+                DateTimeOffset.UtcNow.AddSeconds(30));
+        }
+
+        var afterCap = await client.PostAsJsonAsync(
+            "/sqlos/auth/mfa/challenge/verify",
+            new { mfaToken, code = validCode });
+        afterCap.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        await using var verifyScope = server.App.Services.CreateAsyncScope();
+        var context = verifyScope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+        var crypto = verifyScope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
+        var challenge = await context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.TokenHash == crypto.HashToken(mfaToken));
+        challenge.ConsumedAt.Should().NotBeNull();
+        crypto.DeserializePayload<SqlOSMfaChallengePayload>(challenge)!.FailedAttempts.Should().Be(5);
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x =>
+            x.Action == "user.mfa.challenge_failed" && x.UserId == userId)).Should().Be(5);
+        (await context.Set<SqlOSSession>().CountAsync(x => x.UserId == userId)).Should().Be(0);
+    }
+
     private static async Task VerifyPublicEndpointRejectsFirstFactorEnrollmentAsync(
         MfaEndpointServer server,
         HttpClient client)
