@@ -100,6 +100,50 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
     }
 
     [TestMethod]
+    public async Task SqlServer_ConcurrentWrongCodesAllCountTowardChallengeCap()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaGuessRace");
+        var user = await fixture.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "SQL MFA Guess Race",
+            $"sql-mfa-guess-race-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await fixture.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Guess race authenticator"));
+        await fixture.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            fixture.Totp.GenerateCodeForTesting(enrollment.Secret)));
+        var login = await fixture.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext());
+        login.RequiresMfa.Should().BeTrue();
+        login.RequiresMfaEnrollment.Should().BeFalse();
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+
+        await using var instanceA = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var instanceB = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var instanceC = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var instanceD = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var instanceE = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var outcomes = await Task.WhenAll(
+            CaptureWrongCodeAsync(instanceA.Auth, login.MfaToken!),
+            CaptureWrongCodeAsync(instanceB.Auth, login.MfaToken!),
+            CaptureWrongCodeAsync(instanceC.Auth, login.MfaToken!),
+            CaptureWrongCodeAsync(instanceD.Auth, login.MfaToken!),
+            CaptureWrongCodeAsync(instanceE.Auth, login.MfaToken!));
+        outcomes.Should().OnlyContain(x => x is InvalidOperationException);
+
+        await using var verify = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var challenge = await verify.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.TokenHash == verify.Crypto.HashToken(login.MfaToken!));
+        challenge.ConsumedAt.Should().NotBeNull();
+        verify.Crypto.DeserializePayload<SqlOSMfaChallengePayload>(challenge)!.FailedAttempts.Should().Be(5);
+        (await verify.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
+            x.Action == "user.mfa.challenge_failed" && x.UserId == user.Id)).Should().Be(5);
+        (await verify.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == user.Id)).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task RealEndpoints_PublicHeadlessAndHostedRejectChallengeSubstitution()
     {
         await using var server = await MfaEndpointServer.CreateAsync();
@@ -437,6 +481,21 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         catch (Exception ex)
         {
             return new VerificationOutcome(false, ex);
+        }
+    }
+
+    private static async Task<Exception?> CaptureWrongCodeAsync(SqlOSAuthService auth, string mfaToken)
+    {
+        try
+        {
+            await auth.VerifyMfaChallengeAsync(
+                new SqlOSMfaChallengeVerifyRequest(mfaToken, "not-a-valid-code"),
+                CreateHttpContext());
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
         }
     }
 

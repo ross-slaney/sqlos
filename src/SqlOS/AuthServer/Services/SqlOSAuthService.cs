@@ -2000,7 +2000,7 @@ public sealed class SqlOSAuthService
         SqlOSTemporaryToken token,
         CancellationToken cancellationToken)
     {
-        for (var retry = 0; retry < 3; retry++)
+        while (true)
         {
             var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
                 ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
@@ -2021,7 +2021,7 @@ public sealed class SqlOSAuthService
                 await _context.SaveChangesAsync(cancellationToken);
                 return attemptCount;
             }
-            catch (DbUpdateConcurrencyException) when (retry < 2 && _context is DbContext dbContext)
+            catch (DbUpdateConcurrencyException) when (_context is DbContext dbContext)
             {
                 dbContext.ChangeTracker.Clear();
                 token = await _context.Set<SqlOSTemporaryToken>()
@@ -2029,8 +2029,6 @@ public sealed class SqlOSAuthService
                     ?? throw new InvalidOperationException(MfaChallengeFailureMessage);
             }
         }
-
-        throw new InvalidOperationException(MfaChallengeFailureMessage);
     }
 
     private async Task<int> CountRecentMfaFailuresAsync(
