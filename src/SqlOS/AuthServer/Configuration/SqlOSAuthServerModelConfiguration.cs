@@ -161,6 +161,137 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSScimConnection>(entity =>
+        {
+            entity.ToTable("SqlOSScimConnections", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.OrganizationId, x.SeedKey })
+                .IsUnique()
+                .HasFilter("[SeedKey] IS NOT NULL");
+            entity.HasIndex(x => x.TokenHash)
+                .IsUnique()
+                .HasFilter("[TokenHash] IS NOT NULL");
+            entity.HasIndex(x => new { x.OrganizationId, x.IsEnabled });
+            entity.HasIndex(x => x.OrganizationId)
+                .IsUnique()
+                .HasDatabaseName("UX_SqlOSScimConnections_OneEnabledPerOrganization")
+                .HasFilter("[IsEnabled] = 1");
+            entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.SeedKey).HasMaxLength(160);
+            entity.Property(x => x.TokenHash).HasMaxLength(128);
+            entity.Property(x => x.TokenPrefix).HasMaxLength(24);
+            entity.Property(x => x.Source).HasMaxLength(40);
+            entity.HasOne(x => x.Organization)
+                .WithMany(x => x.ScimConnections)
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimExternalId>(entity =>
+        {
+            entity.ToTable("SqlOSScimExternalIds", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.ExternalId })
+                .IsUnique()
+                .HasFilter("[ExternalId] IS NOT NULL");
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.EntityId }).IsUnique();
+            entity.HasIndex(x => new { x.ConnectionId, x.ResourceType, x.UserName })
+                .IsUnique()
+                .HasFilter("[UserName] IS NOT NULL");
+            entity.Property(x => x.ResourceType).HasMaxLength(20);
+            entity.Property(x => x.ExternalId).HasMaxLength(450).UseCollation("Latin1_General_100_BIN2");
+            entity.Property(x => x.EntityId).HasMaxLength(128);
+            entity.Property(x => x.FgaSubjectId).HasMaxLength(128);
+            entity.Property(x => x.UserName).HasMaxLength(450).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.PrimaryEmail).HasMaxLength(320).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.DisplayName).HasMaxLength(300).UseCollation("Latin1_General_100_CI_AS");
+            entity.Property(x => x.FormattedName).HasMaxLength(300);
+            entity.Property(x => x.GivenName).HasMaxLength(150);
+            entity.Property(x => x.FamilyName).HasMaxLength(150);
+            entity.HasOne(x => x.Connection)
+                .WithMany(x => x.ExternalIds)
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimGroupMapping>(entity =>
+        {
+            entity.ToTable("SqlOSScimGroupMappings", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ConnectionId, x.SourceKey })
+                .IsUnique()
+                .HasFilter("[SourceKey] IS NOT NULL");
+            entity.HasIndex(x => new { x.ConnectionId, x.IsEnabled });
+            entity.Property(x => x.SourceKey).HasMaxLength(300);
+            entity.Property(x => x.Source).HasMaxLength(40);
+            entity.Property(x => x.MatchType).HasMaxLength(40);
+            entity.Property(x => x.GroupDisplayName).HasMaxLength(300);
+            entity.Property(x => x.GroupExternalId).HasMaxLength(450);
+            entity.Property(x => x.GroupPattern).HasMaxLength(500);
+            entity.Property(x => x.RoleKey).HasMaxLength(120);
+            entity.Property(x => x.ResourceId).HasMaxLength(256);
+            entity.Property(x => x.ResourceIdTemplate).HasMaxLength(500);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.HasOne(x => x.Connection)
+                .WithMany(x => x.GroupMappings)
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimManagedGrant>(entity =>
+        {
+            entity.ToTable("SqlOSScimManagedGrants", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ConnectionId, x.MappingId, x.GroupExternalId, x.ResourceId, x.RoleId })
+                .HasDatabaseName("IX_SqlOSScimManagedGrants_Reconcile");
+            entity.HasIndex(x => x.GrantId);
+            entity.Property(x => x.GroupExternalId).HasMaxLength(450);
+            entity.Property(x => x.FgaGroupId).HasMaxLength(128);
+            entity.Property(x => x.FgaGroupSubjectId).HasMaxLength(128);
+            entity.Property(x => x.GrantId).HasMaxLength(128);
+            entity.Property(x => x.RoleId).HasMaxLength(128);
+            entity.Property(x => x.ResourceId).HasMaxLength(256);
+            entity.HasOne(x => x.Connection)
+                .WithMany()
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Mapping)
+                .WithMany(x => x.ManagedGrants)
+                .HasForeignKey(x => x.MappingId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimSyncEvent>(entity =>
+        {
+            entity.ToTable("SqlOSScimSyncEvents", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ConnectionId, x.OccurredAt });
+            entity.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
+            entity.Property(x => x.ResourceType).HasMaxLength(20);
+            entity.Property(x => x.ResourceId).HasMaxLength(128);
+            entity.Property(x => x.ExternalId).HasMaxLength(450);
+            entity.Property(x => x.Action).HasMaxLength(80);
+            entity.Property(x => x.Result).HasMaxLength(40);
+            entity.Property(x => x.Error).HasMaxLength(1000);
+            entity.Property(x => x.RequestId).HasMaxLength(128);
+            entity.Property(x => x.DataJson).HasColumnType("nvarchar(max)");
+            entity.HasOne(x => x.Connection)
+                .WithMany(x => x.SyncEvents)
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Organization)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScimOperationCommit>(entity =>
+        {
+            entity.ToTable("SqlOSScimOperationCommits", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.OccurredAt);
+        });
+
         modelBuilder.Entity<SqlOSSsoPortalSession>(entity =>
         {
             entity.ToTable("SqlOSSsoPortalSessions", schema, t => t.ExcludeFromMigrations());

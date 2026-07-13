@@ -154,3 +154,68 @@ public sealed class SqlOSOidcConnectionSeedOptions
     /// </summary>
     public bool IsEnabled { get; set; } = true;
 }
+
+public sealed class SqlOSScimConnectionSeedOptions
+{
+    public string Key { get; set; } = string.Empty;
+    public string? OrganizationId { get; set; }
+    public string? OrganizationSlug { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public string? Token { get; set; }
+    public string? TokenSecretName { get; set; }
+    public List<SqlOSScimGroupMappingSeedOptions> GroupMappings { get; } = [];
+
+    public SqlOSScimConnectionSeedOptions MapGroup(string displayName, Action<SqlOSScimGroupMappingSeedOptions> configure)
+    {
+        var mapping = new SqlOSScimGroupMappingSeedOptions
+        {
+            SourceKey = $"name:{displayName}",
+            MatchType = SqlOSScimGroupMappingMatchTypes.DisplayName,
+            GroupDisplayName = displayName
+        };
+        configure(mapping);
+        GroupMappings.Add(mapping);
+        return this;
+    }
+
+    public SqlOSScimConnectionSeedOptions MapGroupExternalId(string externalId, Action<SqlOSScimGroupMappingSeedOptions> configure)
+    {
+        var mapping = new SqlOSScimGroupMappingSeedOptions
+        {
+            SourceKey = $"external:{externalId}",
+            MatchType = SqlOSScimGroupMappingMatchTypes.ExternalId,
+            GroupExternalId = externalId
+        };
+        configure(mapping);
+        GroupMappings.Add(mapping);
+        return this;
+    }
+
+    public SqlOSScimConnectionSeedOptions MapGroupPattern(string pattern, Action<SqlOSScimGroupMappingSeedOptions> configure)
+    {
+        var mapping = new SqlOSScimGroupMappingSeedOptions
+        {
+            SourceKey = $"pattern:{pattern}",
+            MatchType = SqlOSScimGroupMappingMatchTypes.Pattern,
+            GroupPattern = pattern
+        };
+        configure(mapping);
+        GroupMappings.Add(mapping);
+        return this;
+    }
+}
+
+public sealed class SqlOSScimGroupMappingSeedOptions
+{
+    public string SourceKey { get; set; } = string.Empty;
+    public string MatchType { get; set; } = SqlOSScimGroupMappingMatchTypes.DisplayName;
+    public string? GroupDisplayName { get; set; }
+    public string? GroupExternalId { get; set; }
+    public string? GroupPattern { get; set; }
+    public string RoleKey { get; set; } = string.Empty;
+    public string? ResourceId { get; set; }
+    public string? ResourceIdTemplate { get; set; }
+    public string? Description { get; set; }
+    public bool Enabled { get; set; } = true;
+}

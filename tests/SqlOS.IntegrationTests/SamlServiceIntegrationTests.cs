@@ -534,6 +534,349 @@ public sealed class SamlServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task SignedSamlResponse_WithActiveScimProvisioning_LinksExistingMemberWithoutBroadEmailLinking()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var email = $"scim-saml-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("SCIM SAML Member", email, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(existingUser.Id);
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM SAML {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, existingUser.Id, isActive: true);
+        await AddScimUserLinkAsync(admin, org.Id, existingUser.Id, email);
+        var client = await CreateSamlClientAsync(admin, "scim-saml");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSScimSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "scim-saml");
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "SCIM", "Member", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
+        var externalIdentity = await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+            .SingleAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email);
+        externalIdentity.UserId.Should().Be(existingUser.Id);
+        (await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
+                .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email)))
+            .Should().Be(1);
+        (await AspireFixture.SharedContext.Set<SqlOSMembership>()
+                .CountAsync(x => x.OrganizationId == org.Id && x.UserId == existingUser.Id))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithOnlyCrossOrganizationScimProvisioning_DoesNotAutoLink()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var email = $"cross-org-scim-saml-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Cross-org SCIM Member", email, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(existingUser.Id);
+        var targetOrg = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Target SAML {Guid.NewGuid():N}", null));
+        var sourceOrg = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Source SCIM {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(targetOrg.Id, existingUser.Id, isActive: true);
+        await AddMembershipAsync(sourceOrg.Id, existingUser.Id, isActive: true);
+        await AddScimUserLinkAsync(admin, sourceOrg.Id, existingUser.Id, email);
+        var client = await CreateSamlClientAsync(admin, "cross-org-scim");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSCrossOrgScimSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, targetOrg.Id, certificate, "cross-org-scim");
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Cross", "Org", flow);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithStaleEmailOutsideCurrentScimRecord_DoesNotAutoLink()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var staleEmail = $"stale-scim-saml-{Guid.NewGuid():N}@example.com";
+        var currentEmail = $"current-scim-saml-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("SCIM Renamed Member", staleEmail, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(existingUser.Id);
+        var staleEmailRecord = await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
+            .SingleAsync(x => x.UserId == existingUser.Id);
+        staleEmailRecord.IsPrimary = false;
+        AspireFixture.SharedContext.Set<SqlOSUserEmail>().Add(new SqlOSUserEmail
+        {
+            Id = $"eml_{Guid.NewGuid():N}",
+            UserId = existingUser.Id,
+            Email = currentEmail,
+            NormalizedEmail = SqlOSAdminService.NormalizeEmail(currentEmail),
+            IsPrimary = true,
+            IsVerified = true,
+            VerifiedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        });
+        existingUser.DefaultEmail = currentEmail;
+        existingUser.UpdatedAt = DateTime.UtcNow;
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM Rename {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, existingUser.Id, isActive: true);
+        await AddScimUserLinkAsync(admin, org.Id, existingUser.Id, currentEmail);
+        var client = await CreateSamlClientAsync(admin, "stale-scim-email");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSStaleScimEmailIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "stale-scim-email");
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, staleEmail, "Stale", "Email", flow);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == staleEmail))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithOnlyLoginHintMatchingScimRecord_DoesNotAutoLink()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var email = $"login-hint-scim-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("SCIM Login Hint Member", email, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(existingUser.Id);
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM Login Hint {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, existingUser.Id, isActive: true);
+        await AddScimUserLinkAsync(admin, org.Id, existingUser.Id, email);
+        var client = await CreateSamlClientAsync(admin, "scim-login-hint");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSScimLoginHintIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "scim-login-hint");
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var authorizationRequest = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .SingleAsync(x => x.Id == flow.RelayState);
+        authorizationRequest.LoginHintEmail = email;
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            email,
+            "Login",
+            "Hint",
+            flow,
+            mutateBeforeSigning: RemoveEmailAttributeBeforeSigning);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithBroadEmailLinkingButOnlyVictimLoginHint_DoesNotLink()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var victimEmail = $"victim-login-hint-{Guid.NewGuid():N}@example.com";
+        var attackerSubject = $"attacker-subject-{Guid.NewGuid():N}";
+        var victim = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Victim Member", victimEmail, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(victim.Id);
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Victim Login Hint {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, victim.Id, isActive: true);
+        var client = await CreateSamlClientAsync(admin, "victim-login-hint");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSVictimLoginHintIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreatePolicySamlConnectionAsync(
+            admin,
+            org.Id,
+            certificate,
+            "victim-login-hint",
+            autoProvisionUsers: false,
+            autoLinkByEmail: true);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var authorizationRequest = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .SingleAsync(x => x.Id == flow.RelayState);
+        authorizationRequest.LoginHintEmail = victimEmail;
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            attackerSubject,
+            "Attacker",
+            "Subject",
+            flow,
+            mutateBeforeSigning: RemoveEmailAttributeBeforeSigning);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == attackerSubject))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithJitEnabledButOnlyLoginHint_DoesNotProvision()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var loginHintEmail = $"jit-login-hint-{Guid.NewGuid():N}@example.com";
+        var attackerSubject = $"jit-attacker-subject-{Guid.NewGuid():N}";
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"JIT Login Hint {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "jit-login-hint");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSJitLoginHintIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreatePolicySamlConnectionAsync(
+            admin,
+            org.Id,
+            certificate,
+            "jit-login-hint",
+            autoProvisionUsers: true,
+            autoLinkByEmail: false);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var authorizationRequest = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .SingleAsync(x => x.Id == flow.RelayState);
+        authorizationRequest.LoginHintEmail = loginHintEmail;
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var samlResponse = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            attackerSubject,
+            "Attacker",
+            "Subject",
+            flow,
+            mutateBeforeSigning: RemoveEmailAttributeBeforeSigning);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        var normalizedLoginHint = SqlOSAdminService.NormalizeEmail(loginHintEmail);
+        (await AspireFixture.SharedContext.Set<SqlOSUserEmail>()
+                .AnyAsync(x => x.NormalizedEmail == normalizedLoginHint))
+            .Should().BeFalse();
+        (await AspireFixture.SharedContext.Set<SqlOSMembership>()
+                .AnyAsync(x => x.OrganizationId == org.Id))
+            .Should().BeFalse();
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == attackerSubject))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_ExistingSubjectBindingWinsOverScimEmailCandidate()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var scimEmail = $"subject-conflict-scim-{Guid.NewGuid():N}@example.com";
+        var boundEmail = $"subject-conflict-bound-{Guid.NewGuid():N}@example.com";
+        var scimUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("SCIM Candidate", scimEmail, "P@ssword123!"));
+        var boundUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Already Bound User", boundEmail, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(scimUser.Id);
+        await MarkEmailVerifiedAsync(boundUser.Id);
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SCIM Subject Conflict {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, scimUser.Id, isActive: true);
+        await AddMembershipAsync(org.Id, boundUser.Id, isActive: true);
+        await AddScimUserLinkAsync(admin, org.Id, scimUser.Id, scimEmail);
+        var client = await CreateSamlClientAsync(admin, "scim-subject-conflict");
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSScimSubjectConflictIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, "scim-subject-conflict");
+        AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+        {
+            Id = $"ext_{Guid.NewGuid():N}",
+            UserId = boundUser.Id,
+            SsoConnectionId = connection.Id,
+            Issuer = connection.IdentityProviderEntityId,
+            Subject = scimEmail,
+            Email = boundEmail,
+            CreatedAt = DateTime.UtcNow
+        });
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, scimEmail, "SCIM", "Candidate", flow);
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        redirectUrl.Should().StartWith("https://client.example.local/callback?code=");
+        var authorizationCode = await AspireFixture.SharedContext.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.AuthorizationRequestId == flow.RelayState);
+        authorizationCode.UserId.Should().Be(boundUser.Id);
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .CountAsync(x => x.SsoConnectionId == connection.Id && x.Subject == scimEmail))
+            .Should().Be(1);
+    }
+
+    [DataTestMethod]
+    [DataRow("inactive_link")]
+    [DataRow("deleted_link")]
+    [DataRow("disabled_connection")]
+    [DataRow("inactive_membership")]
+    [DataRow("inactive_user")]
+    public async Task SignedSamlResponse_WithDeactivatedScimState_DoesNotAutoLink(string deactivatedState)
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var email = $"deactivated-scim-{deactivatedState}-{Guid.NewGuid():N}@example.com";
+        var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Deactivated SCIM Member", email, "P@ssword123!"));
+        await MarkEmailVerifiedAsync(existingUser.Id);
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Deactivated SCIM {Guid.NewGuid():N}", null));
+        await AddMembershipAsync(org.Id, existingUser.Id, isActive: deactivatedState != "inactive_membership");
+        await AddScimUserLinkAsync(
+            admin,
+            org.Id,
+            existingUser.Id,
+            email,
+            isActive: deactivatedState != "inactive_link",
+            deletedAt: deactivatedState == "deleted_link" ? DateTime.UtcNow : null,
+            connectionEnabled: deactivatedState != "disabled_connection");
+        if (deactivatedState == "inactive_user")
+        {
+            existingUser.IsActive = false;
+            existingUser.UpdatedAt = DateTime.UtcNow;
+            await AspireFixture.SharedContext.SaveChangesAsync();
+        }
+
+        var clientPrefix = deactivatedState switch
+        {
+            "inactive_link" => "deact-link",
+            "deleted_link" => "deact-delete",
+            "disabled_connection" => "deact-connection",
+            "inactive_membership" => "deact-member",
+            "inactive_user" => "deact-user",
+            _ => throw new InvalidOperationException($"Unknown deactivated SCIM state '{deactivatedState}'.")
+        };
+        var client = await CreateSamlClientAsync(admin, clientPrefix);
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSDeactivatedScimIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreateRestrictedSamlConnectionAsync(admin, org.Id, certificate, $"deactivated-{deactivatedState}");
+
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Deactivated", "Member", flow);
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No user could be resolved from the SAML assertion.");
+        (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>()
+                .AnyAsync(x => x.SsoConnectionId == connection.Id && x.Subject == email))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task SignedSamlResponse_WithExistingNonMemberAndJitOff_IsDenied()
     {
         var (_, admin, saml) = CreateSamlServices();
@@ -919,6 +1262,100 @@ public sealed class SamlServiceIntegrationTests
         email.IsVerified = true;
         email.VerifiedAt = DateTime.UtcNow;
         await AspireFixture.SharedContext.SaveChangesAsync();
+    }
+
+    private static async Task AddMembershipAsync(string organizationId, string userId, bool isActive)
+    {
+        AspireFixture.SharedContext.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            OrganizationId = organizationId,
+            UserId = userId,
+            Role = "member",
+            IsActive = isActive,
+            CreatedAt = DateTime.UtcNow
+        });
+        await AspireFixture.SharedContext.SaveChangesAsync();
+    }
+
+    private static async Task AddScimUserLinkAsync(
+        SqlOSAdminService admin,
+        string organizationId,
+        string userId,
+        string primaryEmail,
+        bool isActive = true,
+        DateTime? deletedAt = null,
+        bool connectionEnabled = true)
+    {
+        var setup = await admin.CreateScimConnectionAsync(new SqlOSCreateScimConnectionRequest(
+            organizationId,
+            $"SAML provenance {Guid.NewGuid():N}",
+            Enabled: connectionEnabled));
+        var now = DateTime.UtcNow;
+        AspireFixture.SharedContext.Set<SqlOSScimExternalId>().Add(new SqlOSScimExternalId
+        {
+            Id = $"scx_{Guid.NewGuid():N}",
+            ConnectionId = setup.ConnectionId,
+            ResourceType = "User",
+            ExternalId = $"directory-{Guid.NewGuid():N}",
+            EntityId = userId,
+            UserName = primaryEmail,
+            PrimaryEmail = primaryEmail,
+            DisplayName = primaryEmail,
+            OwnsUserLifecycle = true,
+            IsActive = isActive,
+            DeletedAt = deletedAt,
+            CreatedAt = now,
+            UpdatedAt = now,
+            LastSyncedAt = now
+        });
+        await AspireFixture.SharedContext.SaveChangesAsync();
+    }
+
+    private static async Task<SqlOSSsoConnection> CreateRestrictedSamlConnectionAsync(
+        SqlOSAdminService admin,
+        string organizationId,
+        X509Certificate2 certificate,
+        string prefix)
+        => await CreatePolicySamlConnectionAsync(
+            admin,
+            organizationId,
+            certificate,
+            prefix,
+            autoProvisionUsers: false,
+            autoLinkByEmail: false);
+
+    private static async Task<SqlOSSsoConnection> CreatePolicySamlConnectionAsync(
+        SqlOSAdminService admin,
+        string organizationId,
+        X509Certificate2 certificate,
+        string prefix,
+        bool autoProvisionUsers,
+        bool autoLinkByEmail)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        return await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            organizationId,
+            $"{prefix} SSO",
+            $"urn:{prefix}:{suffix}:idp",
+            "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(),
+            AutoProvisionUsers: autoProvisionUsers,
+            AutoLinkByEmail: autoLinkByEmail,
+            "email",
+            "first_name",
+            "last_name"));
+    }
+
+    private static void RemoveEmailAttributeBeforeSigning(
+        XmlDocument _,
+        XmlElement __,
+        XmlElement assertion)
+    {
+        var emailAttribute = assertion
+            .GetElementsByTagName("Attribute", "urn:oasis:names:tc:SAML:2.0:assertion")
+            .OfType<XmlElement>()
+            .Single(element => element.GetAttribute("Name") == "email");
+        emailAttribute.ParentNode!.RemoveChild(emailAttribute);
     }
 
     private static string BuildSignedSamlResponse(

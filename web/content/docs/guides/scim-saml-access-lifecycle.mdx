@@ -1,0 +1,174 @@
+---
+title: "Pair SCIM provisioning with SAML sign-in"
+description: "Make SCIM authoritative for organization access while SAML authenticates only active, already-provisioned members."
+order: 5
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Use SCIM for access lifecycle and SAML for sign-in"
+  href="/docs/guides/scim-directory-sync"
+  actionLabel="SCIM setup"
+>
+  Provision first, sign in second, and keep JIT off so an SSO assertion cannot bypass directory assignment.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - One SqlOS organization with an enabled SCIM connection
+  - One enabled SAML connection for the same organization
+  - A stable work-email attribute controlled by the enterprise identity provider
+  - A test user assigned to both provisioning and SSO in the identity provider
+</Callout>
+
+## Goal
+
+The directory assignment is the source of organization access:
+
+1. SCIM creates or activates the user and membership.
+2. SAML proves the identity at sign-in and binds the provider subject to that existing user.
+3. SCIM deactivation removes organization access and revokes its sessions even if the IdP can still issue a valid SAML assertion.
+
+This avoids two competing provisioning paths. SAML JIT does not create a membership that the SCIM assignment never authorized.
+
+## 1. Choose one canonical work email
+
+Map one IdP-owned value consistently:
+
+| IdP value | Destination |
+| --- | --- |
+| Stable work email | SCIM `userName` |
+| The same work email | SCIM `emails[type eq "work"].value` |
+| The same work email | The signed SAML attribute configured as the connection's email field |
+| Stable provider object ID | SCIM `externalId` |
+
+For Microsoft Entra, `userPrincipalName` is the simplest default when it is the tenant's stable routable work address. Use `mail` only when it is guaranteed to be populated, unique, and stable. For Okta, use the app username/work-email value that the enterprise controls.
+
+SqlOS normalizes the email for matching, but it keeps `externalId` case-exact. Do not let a display alias, personal email, browser login hint, or mutable nickname become the join key.
+
+## 2. Keep JIT provisioning off
+
+Create or update the SAML connection with automatic provisioning disabled:
+
+```csharp
+var draft = await adminService.CreateSsoConnectionDraftAsync(
+    new SqlOSCreateSsoConnectionDraftRequest(
+        OrganizationId: organizationId,
+        DisplayName: "Acme enterprise SSO",
+        PrimaryDomain: "acme.com",
+        AutoProvisionUsers: false,
+        AutoLinkByEmail: true));
+```
+
+`AutoProvisionUsers: false` is the non-negotiable setting for a SCIM-authoritative population. It prevents SAML from creating a new user or organization membership merely because the assertion is valid.
+
+`AutoLinkByEmail` controls the sign-in experience and trust breadth. Choose deliberately:
+
+| Policy | Experience | Boundary |
+| --- | --- | --- |
+| `true` / **Require SSO for existing members** | Email-first home realm discovery routes an existing member to the organization's SAML connection | Any existing member with an exact verified email controlled by this trusted connection can be linked |
+| `false` | Your app starts the organization's SAML connection explicitly; email-first discovery does not force SSO | First link is allowed only for an active SCIM record whose current primary email exactly matches the signed assertion in the same organization |
+
+The first row is the most seamless common enterprise setup when the IdP controls the organization's verified email domain. The second row is the narrower linking policy when your application already knows which organization/connection to start.
+
+In the delegated setup portal, **Allow JIT provisioning from SSO** maps to `AutoProvisionUsers`; keep it off. **Require SSO for existing members** maps to `AutoLinkByEmail`.
+
+<Callout type="warning" title="A login hint never proves identity">
+  SqlOS links from the signed SAML email attribute. An unsigned `login_hint`, stale alias, SCIM record in another organization, disabled SCIM connection, inactive membership, or deactivated/deleted SCIM link cannot authorize the narrow SCIM-provenance link.
+</Callout>
+
+## 3. Provision before the first SAML sign-in
+
+For the test user:
+
+1. Assign the user to the IdP's SCIM provisioning scope.
+2. Provision the user and confirm an active SqlOS organization membership.
+3. Confirm the SqlOS SCIM record's current primary email matches the SAML email attribute that the IdP will send.
+4. Assign the user to the IdP's SAML application if that is a separate assignment.
+5. Start SAML sign-in.
+
+On first successful sign-in, SqlOS binds the signed SAML issuer and subject to the already-provisioned user. It does not create a second user or a second membership.
+
+On later sign-ins, issuer and subject are the stable identity key. Email remains useful for profile display and controlled migration but is not repeatedly used to choose a different account.
+
+## 4. Verify the first-link result
+
+Check all four layers:
+
+| Layer | Expected result |
+| --- | --- |
+| Identity provider | SCIM user succeeded; SAML assertion contains the intended subject and email |
+| AuthServer user | One user and one active membership in the organization |
+| External identities | One SCIM link and one SAML issuer/subject link point to that user |
+| OAuth result | The application receives a normal code/token for the intended user and organization |
+
+Also confirm that a second SAML sign-in reuses the same external identity and does not perform another email-based account selection.
+
+## 5. Prove the denial paths
+
+Before rollout, run this matrix with test identities:
+
+| Scenario | Expected result |
+| --- | --- |
+| SAML sign-in before SCIM provisioning, JIT off | Denied; no user or membership is created |
+| Signed SAML email differs from current SCIM primary email | Denied when no existing SAML subject link exists |
+| Only the browser login hint matches | Denied |
+| SCIM record exists only in another organization | Denied |
+| SCIM connection or membership is inactive | Denied when no active linked identity can sign in |
+| SCIM user is active and same-org email matches | First SAML subject link succeeds |
+
+These checks are especially important when two customers can have people with the same normalized email or when a consultant belongs to several organizations.
+
+## 6. Prove deprovisioning
+
+Unassign or deactivate the test user through the IdP's provisioning control. SqlOS soft-deprovisions the organization boundary:
+
+- the organization's membership becomes inactive
+- sessions for that organization are revoked
+- SCIM-managed group memberships and inherited mapped access are removed
+- the user, external identity history, and unrelated organization memberships remain
+
+Attempt SAML sign-in again. The IdP may still authenticate the person, but SqlOS must not issue access for the deprovisioned organization.
+
+Then reassign or reactivate the user through SCIM. Confirm the existing membership and SCIM link reactivate without duplication, followed by a successful SAML sign-in.
+
+## 7. Handle email changes in the right order
+
+When the canonical work email changes:
+
+1. Update the directory source.
+2. Let SCIM update the current primary email in SqlOS.
+3. Update the SAML attribute from the same source.
+4. Test sign-in before removing any transitional IdP alias.
+
+If the SAML subject is unchanged and already linked, SqlOS resolves that subject first. If this is the first sign-in, the signed email must match the current active SCIM record. A stale email retained elsewhere on the user does not satisfy the narrow provenance rule.
+
+## 8. Roll out without creating a second access source
+
+Use this production checklist:
+
+- SCIM scope starts with assigned users and groups, not the entire tenant.
+- SAML JIT stays off for SCIM-managed organizations.
+- One trusted work-email source feeds SCIM and SAML.
+- Group-to-FGA mappings are explicit and limited to known roles/resources.
+- Deactivation, group-member removal, token rotation, and connection disable are tested.
+- Break-glass operator access is separate from customer SCIM groups and documented.
+- IdP provisioning logs, SqlOS SCIM activity, Audit Logs, and the FGA access tester are part of support runbooks.
+
+## Troubleshooting
+
+| Symptom | Cause to check first | Resolution |
+| --- | --- | --- |
+| First SAML sign-in says no user can be resolved | User was not provisioned, is inactive, or the signed email differs | Provision first and compare the current SCIM primary email with the signed SAML attribute |
+| Email-first sign-in does not redirect to SSO | `AutoLinkByEmail` / **Require SSO for existing members** is off | Start the organization SAML connection explicitly or enable the broader trusted-domain policy |
+| SAML sign-in creates an unexpected membership | JIT provisioning is on | Disable `AutoProvisionUsers` / **Allow JIT provisioning from SSO** and remove unintended access deliberately |
+| Deactivated user still has some access | The access comes from another organization, manual grant, non-SCIM group, or another auth path | Inspect memberships and the FGA explanation; SCIM removes only state it owns for this organization |
+| Email change breaks first sign-in | SAML changed before SCIM, or the two mappings use different source fields | Reconcile the directory mappings and push SCIM before retrying the first link |
+
+## Next steps
+
+- [Set up SCIM with Microsoft Entra ID](/docs/guides/scim-microsoft-entra)
+- [Set up SCIM with Okta](/docs/guides/scim-okta)
+- [Set up SAML SSO](/docs/guides/saml-sso)
+- [SCIM protocol and lifecycle reference](/docs/authserver/scim-directory-sync)
+- [SCIM group mapping](/docs/fga/scim-group-mapping)

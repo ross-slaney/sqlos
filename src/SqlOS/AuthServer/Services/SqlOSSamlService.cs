@@ -178,9 +178,14 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("Authorization request is no longer active.");
         }
 
-        var email = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue) ? emailValue : authorizationRequest.LoginHintEmail;
+        var hasAssertedEmail = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue)
+            && !string.IsNullOrWhiteSpace(emailValue);
+        // LoginHintEmail is routing input, not an authenticated identity claim.
+        // Only a signed assertion attribute can drive first-time email linking
+        // or JIT provisioning. Already-bound subjects do not depend on email.
+        var email = hasAssertedEmail ? emailValue : null;
         var organizationId = authorizationRequest.OrganizationId ?? connection.OrganizationId;
-        var user = await ResolveUserAsync(connection, principal, email, organizationId, cancellationToken)
+        var user = await ResolveUserAsync(connection, principal, email, hasAssertedEmail, organizationId, cancellationToken)
             ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
 
         if (_authorizationServerService != null)
@@ -622,6 +627,7 @@ public sealed class SqlOSSamlService
         SqlOSSsoConnection connection,
         SqlOSSamlPrincipal principal,
         string? email,
+        bool hasAssertedEmail,
         string organizationId,
         CancellationToken cancellationToken)
     {
@@ -673,7 +679,7 @@ public sealed class SqlOSSamlService
                 await EnsureMembershipAsync(organizationId, user.Id, cancellationToken);
             }
         }
-        else if (!string.IsNullOrWhiteSpace(email))
+        else if (hasAssertedEmail && !string.IsNullOrWhiteSpace(email))
         {
             normalizedEmail = SqlOSAdminService.NormalizeEmail(email);
             var existingEmail = await _context.Set<SqlOSUserEmail>().FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
@@ -698,7 +704,15 @@ public sealed class SqlOSSamlService
 
                 if (membership != null)
                 {
-                    if (!connection.AutoLinkByEmail || !existingEmail.IsVerified)
+                    var mayLinkExistingMember = existingEmail.IsVerified
+                        && (connection.AutoLinkByEmail
+                            || (hasAssertedEmail
+                                && await HasMatchingActiveScimProvisioningAsync(
+                                    user.Id,
+                                    organizationId,
+                                    normalizedEmail,
+                                    cancellationToken)));
+                    if (!mayLinkExistingMember)
                     {
                         return null;
                     }
@@ -781,6 +795,41 @@ public sealed class SqlOSSamlService
         => await _context.Set<SqlOSMembership>()
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.UserId == userId && x.OrganizationId == organizationId, cancellationToken);
+
+    private async Task<bool> HasMatchingActiveScimProvisioningAsync(
+        string userId,
+        string organizationId,
+        string normalizedEmail,
+        CancellationToken cancellationToken)
+    {
+        // An active SCIM record is a narrow, organization-scoped authorization
+        // to bind the corresponding SAML identity. Keep the asserted email tied
+        // to the current SCIM primary email so stale aliases cannot broaden the
+        // normal AutoLinkByEmail policy.
+        var provisionedPrimaryEmails = await _context.Set<SqlOSScimExternalId>()
+            .AsNoTracking()
+            .Where(link => link.ResourceType == "User"
+                && link.EntityId == userId
+                && link.IsActive
+                && link.DeletedAt == null
+                && _context.Set<SqlOSScimConnection>().Any(scimConnection =>
+                    scimConnection.Id == link.ConnectionId
+                    && scimConnection.OrganizationId == organizationId
+                    && scimConnection.IsEnabled)
+                && _context.Set<SqlOSMembership>().Any(membership =>
+                    membership.UserId == userId
+                    && membership.OrganizationId == organizationId
+                    && membership.IsActive))
+            .Select(link => link.PrimaryEmail)
+            .ToListAsync(cancellationToken);
+
+        return provisionedPrimaryEmails.Any(primaryEmail =>
+            !string.IsNullOrWhiteSpace(primaryEmail)
+            && string.Equals(
+                SqlOSAdminService.NormalizeEmail(primaryEmail),
+                normalizedEmail,
+                StringComparison.Ordinal));
+    }
 
     private async Task<bool> IsActiveFederatedUserAsync(
         string userId,

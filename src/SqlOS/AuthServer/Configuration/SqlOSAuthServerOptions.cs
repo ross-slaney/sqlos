@@ -47,6 +47,8 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
+    public bool EnableScim { get; set; }
+    public string ScimBasePath { get; set; } = "/sqlos/scim/v2";
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
     public int DefaultSigningKeyRetiredCleanupDays { get; set; } = 30;
@@ -69,6 +71,7 @@ public class SqlOSAuthServerOptions
     public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
     public List<SqlOSOidcConnectionSeedOptions> OidcConnectionSeeds { get; } = [];
+    public List<SqlOSScimConnectionSeedOptions> ScimConnectionSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
     {
@@ -118,6 +121,24 @@ public class SqlOSAuthServerOptions
         var seed = new SqlOSOidcConnectionSeedOptions();
         configure(seed);
         OidcConnectionSeeds.Add(seed);
+        return this;
+    }
+
+    /// <summary>
+    /// Seed an organization-scoped SCIM directory sync connection. Seeded connections are reconciled
+    /// on startup by stable key; mapping rules are reconciled by source key.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedScimConnection(string key, Action<SqlOSScimConnectionSeedOptions> configure)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("Seeded SCIM connections require a stable key.");
+        }
+
+        var seed = new SqlOSScimConnectionSeedOptions { Key = key.Trim() };
+        configure(seed);
+        EnableScim = true;
+        ScimConnectionSeeds.Add(seed);
         return this;
     }
 

@@ -1,0 +1,175 @@
+---
+title: "Set up SCIM with Microsoft Entra ID"
+description: "Connect an Entra enterprise application to SqlOS, map stable identity attributes, and prove user and group lifecycle before rollout."
+order: 5
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Provision SqlOS users and groups from Microsoft Entra ID"
+  href="/docs/guides/scim-directory-sync"
+  actionLabel="SCIM overview"
+>
+  Start with one assigned user, verify every provisioning stage, then add a small group and enable the recurring job.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - A Microsoft Entra tenant that includes application provisioning
+  - Permission to create and configure an enterprise application
+  - An existing SqlOS organization and dashboard admin access
+  - A public HTTPS SqlOS origin; use [Aspire Dev Tunnels](/docs/guides/scim-directory-sync#local-entra-or-okta-testing-with-aspire-dev-tunnels) for a temporary local test
+</Callout>
+
+## Goal
+
+Microsoft Entra is the SCIM client and SqlOS is the service provider. Entra creates, updates, deactivates, and reactivates the organization's users and mirrors assigned groups into SqlOS FGA.
+
+This guide uses **Sync only assigned users and groups**. It gives you a controlled rollout boundary and makes an accidental tenant-wide first sync much less likely.
+
+## 1. Create the SqlOS connection
+
+First complete steps 1 and 2 of the [SCIM directory sync guide](/docs/guides/scim-directory-sync#the-five-minute-setup):
+
+1. Enable SCIM and configure the public origin.
+2. Open `/sqlos/admin/auth/`, select the target organization, and open **SCIM**.
+3. Create one enabled connection.
+4. Copy the **Base URL** and the one-time bearer token before leaving the result.
+
+The values should look like this:
+
+| Entra field | SqlOS value |
+| --- | --- |
+| Tenant URL | `https://identity.example.com/sqlos/scim/v2` |
+| Secret Token | The one-time token returned by SqlOS |
+
+Do not append `/Users`, `/Groups`, or an organization ID to the Tenant URL. The bearer token already selects one connection and one organization.
+
+## 2. Create the Entra enterprise application
+
+In the [Microsoft Entra admin center](https://entra.microsoft.com/):
+
+1. Go to **Entra ID > Enterprise apps > New application**.
+2. Choose **Create your own application**.
+3. Name the application for the SqlOS product and customer organization.
+4. Choose **Integrate any other application you don't find in the gallery**.
+5. Open the new enterprise application, then select **Provisioning**.
+6. Create a new automatic provisioning configuration.
+7. Paste the SqlOS Base URL into **Tenant URL** and the one-time token into **Secret Token**.
+8. Select **Test Connection**, then save or create the provisioning job.
+
+Entra tests the connection by querying for a user that should not exist. A correct SqlOS response is `200 OK` with an empty SCIM `ListResponse`; the test does not create a user.
+
+<Callout type="warning" title="Treat the token like a password">
+  SqlOS stores only a hash and cannot show the token again. If it is lost or copied into the wrong tenant, rotate it from the organization's SCIM tab and immediately replace it in Entra. Rotation invalidates the old value.
+</Callout>
+
+## 3. Map one stable identity
+
+Open **Provisioning > Mappings > Provision Microsoft Entra ID Users**. Keep the mapping deliberately small for the first test:
+
+| Microsoft Entra attribute | SCIM target attribute | Purpose |
+| --- | --- | --- |
+| `userPrincipalName` | `userName` | Required sign-in-shaped identifier and primary matching field |
+| `userPrincipalName` | `emails[type eq "work"].value` | Stable work email used for linking and display |
+| `displayName` | `displayName` | Display label |
+| `givenName` | `name.givenName` | Given name |
+| `surname` | `name.familyName` | Family name |
+| `objectId` | `externalId` | Stable Entra object identifier |
+| The default soft-delete expression | `active` | Deactivate and reactivate the SqlOS organization membership |
+
+Use `mail` instead of `userPrincipalName` for the two email-shaped targets only when the tenant guarantees that `mail` is populated, unique, and stable for every assigned person. The important rule is that `userName`, the SCIM work email, and the SAML email claim use the same canonical work address.
+
+Set `userName` as the first matching attribute. Preserve the original casing of `externalId`: SqlOS treats external IDs as case-exact so that two provider objects are never merged approximately.
+
+Open the group mapping and keep these core values:
+
+| Microsoft Entra attribute | SCIM target attribute |
+| --- | --- |
+| `displayName` | `displayName` |
+| `objectId` | `externalId` |
+| Members | `members` |
+
+SqlOS mirrors groups and direct membership. A group does not grant a product role until you add a [SCIM group mapping](/docs/fga/scim-group-mapping).
+
+## 4. Limit the first provisioning scope
+
+1. Set **Scope** to **Sync only assigned users and groups**.
+2. Open **Users and groups** for the enterprise application.
+3. Assign one test user directly.
+4. Wait a few minutes if Entra does not immediately recognize a new assignment.
+
+Do not start with a production-wide group. The first user should have a real-looking work email but no access that would be harmful if the mapping is wrong.
+
+## 5. Provision the user on demand
+
+Open **Provisioning > Provision on demand**, select the assigned test user, and choose **Provision**. Entra shows the important stages independently:
+
+1. Test the connection.
+2. Evaluate whether the user is in scope.
+3. Import the source user.
+4. Match the source user to a SqlOS SCIM resource.
+5. Create or update the user.
+
+Inspect the details rather than accepting a green final banner alone. Confirm the outgoing values for `userName`, work email, `externalId`, names, and `active`.
+
+Then verify SqlOS:
+
+- **Auth Server > Organizations > Users** shows one active membership.
+- The organization's **SCIM** tab shows the applied operation and token last-used time.
+- **Audit Logs** shows the resulting lifecycle change.
+
+If Entra says the user is out of scope, confirm the assignment and scope, wait for assignment replication, and try again.
+
+## 6. Add one group
+
+Assign one small group to the enterprise application and provision it. Start with direct members who are already in scope. Entra on-demand group provisioning is intentionally bounded and is not a proof that a large or nested group will expand the way you expect.
+
+Verify that:
+
+1. The group appears under **Fine-Grained Auth > User Groups**.
+2. Its direct members match Entra.
+3. Removing and re-adding one member changes only that mirrored group.
+4. An optional SCIM mapping grants the intended role and resource, and removing the member revokes that inherited access.
+
+## 7. Start the recurring job
+
+Return to the provisioning overview, choose **Start provisioning**, and monitor the initial cycle. Keep the assignment scope small until the first full cycle finishes without quarantined or skipped objects.
+
+Run this lifecycle smoke test before broad rollout:
+
+| Change in Entra | Expected SqlOS result |
+| --- | --- |
+| Rename the test user | Names update; identity remains the same |
+| Change a pushed group membership | Mirrored FGA membership updates |
+| Unassign or deactivate the user | Organization membership becomes inactive, sessions for that organization are revoked, and SCIM-managed group access disappears |
+| Reassign or reactivate the user | The existing SCIM identity and membership reactivate without duplication |
+
+SqlOS soft-deprovisions within this organization. A shared user can remain active in another SqlOS organization, and manual grants or non-SCIM groups are not deleted.
+
+## 8. Add SAML sign-in without adding a second provisioning path
+
+SCIM should decide **who has access**; SAML should authenticate the person who was already provisioned. Do not turn on SAML JIT provisioning for the same population.
+
+Follow [Pair SCIM provisioning with SAML sign-in](/docs/guides/scim-saml-access-lifecycle) to align the Entra email claim, choose the linking policy, test first sign-in, and prove deprovisioning.
+
+## Troubleshooting
+
+| Entra result | Likely cause | Resolution |
+| --- | --- | --- |
+| Test Connection fails with `401` | Token is wrong, rotated, or its connection is disabled | Rotate or recopy the token and update this provisioning job |
+| Test Connection fails with `404` | Tenant URL includes the wrong host/path or SCIM is disabled | Use the exact Base URL returned by SqlOS and confirm `EnableScim` |
+| Test Connection fails on lookup | Matching attribute or filter was customized incompatibly | Make `userName` the first match and restore a supported exact `eq` lookup |
+| User is skipped as out of scope | User is not assigned, assignment has not replicated, or a scoping filter excluded it | Confirm **Sync only assigned users and groups**, assignment, and filter evaluation |
+| Duplicate or conflict response | Email, username, or external ID no longer identifies one resource | Correct the Entra source values; do not change casing or invent a second external ID |
+| Group exists without members | Members were not provisioned/in scope, or the source group is nested | Provision direct members first and inspect the Entra provisioning details |
+
+Use the Entra provisioning details, SqlOS SCIM activity, and SqlOS Audit Logs together. Validation failures can be returned directly to Entra before SqlOS persists a sync event.
+
+## Next steps
+
+- [Microsoft Entra on-demand provisioning](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/provision-on-demand)
+- [Microsoft Entra SCIM provisioning tutorial](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups)
+- [SCIM directory sync overview](/docs/guides/scim-directory-sync)
+- [Pair SCIM with SAML sign-in](/docs/guides/scim-saml-access-lifecycle)
+- [Map directory groups to FGA](/docs/fga/scim-group-mapping)

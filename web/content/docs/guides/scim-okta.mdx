@@ -1,0 +1,170 @@
+---
+title: "Set up SCIM with Okta"
+description: "Connect an Okta app integration to SqlOS, provision users, push groups, and prove deactivation before rollout."
+order: 5
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Provision SqlOS users and groups from Okta"
+  href="/docs/guides/scim-directory-sync"
+  actionLabel="SCIM overview"
+>
+  Configure the connector once, assign one user, then push a separate test group and verify the complete lifecycle.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - An Okta org with Lifecycle Management or another plan that exposes provisioning for the app integration
+  - Permission to create and assign an app integration
+  - An existing SqlOS organization and dashboard admin access
+  - A public HTTPS SqlOS origin; use [Aspire Dev Tunnels](/docs/guides/scim-directory-sync#local-entra-or-okta-testing-with-aspire-dev-tunnels) for a temporary local test
+</Callout>
+
+## Goal
+
+Okta is the SCIM client and source of lifecycle changes. SqlOS receives the user and group operations, keeps them inside one organization, and mirrors pushed groups into FGA.
+
+The safest first proof uses one directly assigned test user and a separate small group for Group Push.
+
+## 1. Create the SqlOS connection
+
+Complete steps 1 and 2 of the [SCIM directory sync guide](/docs/guides/scim-directory-sync#the-five-minute-setup):
+
+1. Enable SCIM and configure the public origin.
+2. Open `/sqlos/admin/auth/`, select the target organization, and open **SCIM**.
+3. Create one enabled connection.
+4. Copy the **Base URL** and one-time bearer token.
+
+Do not append `/Users`, `/Groups`, or an organization ID to the Base URL. Okta builds resource URLs beneath the connector base, and the token selects the organization.
+
+## 2. Enable SCIM on the Okta app integration
+
+For the common combined SSO and provisioning setup, create a private **SAML 2.0** app integration in the Okta App Integration Wizard. Okta's custom integration workflow can add SCIM provisioning to SAML or SWA integrations; it does not add SCIM provisioning to a custom OIDC integration.
+
+After creating the app:
+
+1. Open **General > App Settings > Edit**.
+2. Set **Provisioning** to **SCIM** and save.
+3. Open **Provisioning > Integration > Edit**.
+4. Enter the values below.
+
+| Okta field | Value |
+| --- | --- |
+| SCIM connector base URL | The SqlOS Base URL, such as `https://identity.example.com/sqlos/scim/v2` |
+| Unique identifier field for users | `userName` |
+| Supported provisioning actions | Push New Users, Push Profile Updates, and Push Groups |
+| Authentication Mode | HTTP Header |
+| Authorization | The one-time SqlOS bearer token |
+
+Choose **Test API Credentials**, then save.
+
+<Callout type="warning" title="Copy the token exactly once">
+  Paste the token value returned by SqlOS into Okta's HTTP Header authorization field. SqlOS cannot recover the plaintext later. Rotating the token immediately invalidates the value currently stored in Okta.
+</Callout>
+
+If the SCIM option is absent, confirm that provisioning is enabled for the Okta org and that the integration type supports it. For a provisioning-only development test, an Okta SCIM 2.0 header-auth test template can be used instead of attaching provisioning to the production SSO integration.
+
+## 3. Enable the outbound lifecycle
+
+Open **Provisioning > To App > Edit** and enable:
+
+- Create Users
+- Update User Attributes
+- Deactivate Users
+
+Without these switches, valid API credentials are not enough: assigning a new person can fail because Okta is allowed to search but not create the missing user.
+
+Review the profile mappings and keep the first rollout centered on SqlOS core attributes:
+
+| Okta profile value | SCIM target |
+| --- | --- |
+| Username, normally the work email | `userName` |
+| Primary work email | `emails[type eq "work"].value` |
+| First name | `name.givenName` |
+| Last name | `name.familyName` |
+| Display name or a first/last-name expression | `displayName` |
+| Okta-managed source identifier | `externalId` |
+| Okta user status | `active` |
+
+Use the same stable work email for `userName`, the primary work email, and the SAML email assertion if this app also provides SSO. Preserve Okta's `externalId` value and casing across retries.
+
+## 4. Assign and verify one user
+
+1. Open the app's **Assignments** tab.
+2. Assign one test person directly.
+3. Confirm the Okta username and mapped work email before saving the assignment.
+4. Wait for provisioning to complete, then inspect the assignment or System Log event.
+
+Verify SqlOS:
+
+- **Auth Server > Organizations > Users** shows one active membership.
+- The organization's **SCIM** tab shows the create or update and token last-used time.
+- **Audit Logs** shows the applied user lifecycle event.
+
+Change the test user's display name in Okta and confirm it updates the same SqlOS resource instead of creating another user.
+
+## 5. Push a separate group
+
+Okta app assignment and Okta Group Push are related but different controls. Use separate groups for them.
+
+<Callout type="warning" title="Do not reuse the assignment group for Group Push">
+  Okta does not support using the same group for app assignment and Group Push. Create one group that assigns people to the app and a second group whose name and membership are pushed downstream. Every pushed-group member must already be assigned and provisioned to the app.
+</Callout>
+
+To test Group Push:
+
+1. Create a small Okta group dedicated to downstream authorization, such as `SqlOS-Test-Readers`.
+2. Add only users who are already assigned and provisioned.
+3. Open the app integration's **Push Groups** tab.
+4. Choose **Push Groups > Find groups by name** and select the test group.
+5. Leave immediate membership push enabled for this test.
+6. Confirm the group and members appear in **Fine-Grained Auth > User Groups**.
+
+The group is mirrored but has no product permission by default. Add a [SCIM group mapping](/docs/fga/scim-group-mapping) when the group should grant a known FGA role on a known resource.
+
+Remove and re-add one member. Verify the mirrored membership and any inherited mapped access disappear and return without touching manual or unrelated FGA state.
+
+## 6. Prove deactivation and reactivation
+
+Unassign the test user from the app or deactivate the user in Okta. SqlOS should:
+
+- mark this organization's membership inactive
+- revoke sessions for this organization
+- remove SCIM-managed group memberships
+- remove access inherited from those groups
+- retain the user row, provider link, and history for a safe reactivation
+
+Reassign or reactivate the user and verify Okta reuses the existing SCIM identity. A user shared with another SqlOS organization remains active there, and manual grants or non-SCIM groups are not deleted.
+
+## 7. Pair the integration with SAML safely
+
+When the same Okta app handles SAML and SCIM, give each protocol one job:
+
+- SCIM assignment controls whether the person belongs to the SqlOS organization.
+- SAML authenticates an already-provisioned member.
+- SAML JIT provisioning stays off.
+- The Okta username/work email mapping matches the signed SAML email attribute.
+
+Follow [Pair SCIM provisioning with SAML sign-in](/docs/guides/scim-saml-access-lifecycle) for the two linking-policy choices and a complete rollout test.
+
+## Troubleshooting
+
+| Okta result | Likely cause | Resolution |
+| --- | --- | --- |
+| Test API Credentials returns `401` | Token is wrong, rotated, or the SqlOS connection is disabled | Rotate or recopy the token and update Okta |
+| Test API Credentials returns `404` | Connector base URL is wrong or SCIM is disabled | Use the exact Base URL from SqlOS and confirm `EnableScim` |
+| Assignment says matching user not found | Create Users is disabled under **To App** | Enable Create Users, Update User Attributes, and Deactivate Users |
+| User conflicts on create | Username, work email, or external ID collides with another connection resource | Correct the Okta profile values instead of retrying with a new identity |
+| Group appears without members | Members were not individually assigned/provisioned, or the assignment group was reused | Provision members first and use a separate Group Push group |
+| A pushed group reports an error | Target state was edited directly or the push mapping is stale | Inspect the Push Groups error details, correct the source/push mapping, and retry from Okta |
+
+Okta's System Log and task details explain the outgoing attempt. SqlOS SCIM activity explains persisted operations and reconciliation failures. SqlOS Audit Logs explain the resulting security state.
+
+## Next steps
+
+- [Okta: add SCIM provisioning to an app integration](https://help.okta.com/en-us/Content/Topics/apps/apps_app_integration_wizard_scim.htm)
+- [Okta: enable Group Push](https://help.okta.com/oie/en-us/content/topics/users-groups-profiles/usgp-enable-group-push.htm)
+- [SCIM directory sync overview](/docs/guides/scim-directory-sync)
+- [Pair SCIM with SAML sign-in](/docs/guides/scim-saml-access-lifecycle)
+- [Map directory groups to FGA](/docs/fga/scim-group-mapping)

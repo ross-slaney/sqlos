@@ -19,6 +19,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly RequestDelegate _next;
     private readonly string _pathPrefix;
     private readonly bool _isDevelopment;
+    private readonly bool _scimEnabled;
     private readonly SqlOSDashboardOptions _options;
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly SqlOSDashboardLoginThrottlingService _loginThrottlingService;
@@ -29,12 +30,14 @@ public sealed class SqlOSDashboardMiddleware
         string pathPrefix,
         IHostEnvironment environment,
         SqlOSDashboardOptions options,
+        bool scimEnabled,
         SqlOSDashboardSessionService sessionService,
         SqlOSDashboardLoginThrottlingService loginThrottlingService)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
+        _scimEnabled = scimEnabled;
         _options = options;
         _sessionService = sessionService;
         _loginThrottlingService = loginThrottlingService;
@@ -474,6 +477,10 @@ public sealed class SqlOSDashboardMiddleware
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var html = await reader.ReadToEndAsync();
         html = html.Replace("__SQL_OS_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(_pathPrefix), StringComparison.Ordinal);
+        html = html.Replace(
+            "__SQL_OS_DASHBOARD_CAPABILITIES_JSON__",
+            JsonSerializer.Serialize(new { scimEnabled = _scimEnabled }),
+            StringComparison.Ordinal);
         html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
         await context.Response.WriteAsync(html);
     }

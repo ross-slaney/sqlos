@@ -142,7 +142,32 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             && x.IpAddress == "203.0.113.50");
     }
 
-    private static DashboardMiddlewareHarness CreateHarness(Action<SqlOSDashboardOptions>? configure = null)
+    [TestMethod]
+    public async Task DashboardShell_ExposesScimCapability()
+    {
+        using var disabledHarness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = _ => Task.FromResult(true);
+        });
+        using var enabledHarness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = _ => Task.FromResult(true);
+        }, scimEnabled: true);
+
+        var disabled = await disabledHarness.GetDashboardAsync();
+        var enabled = await enabledHarness.GetDashboardAsync();
+
+        disabled.StatusCode.Should().Be(StatusCodes.Status200OK);
+        disabled.Body.Should().Contain("window.__SQL_OS_CAPABILITIES__ = {\"scimEnabled\":false};");
+        enabled.StatusCode.Should().Be(StatusCodes.Status200OK);
+        enabled.Body.Should().Contain("window.__SQL_OS_CAPABILITIES__ = {\"scimEnabled\":true};");
+    }
+
+    private static DashboardMiddlewareHarness CreateHarness(
+        Action<SqlOSDashboardOptions>? configure = null,
+        bool scimEnabled = false)
     {
         var dashboardOptions = new SqlOSDashboardOptions
         {
@@ -169,6 +194,7 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             "/sqlos",
             new TestHostEnvironment(),
             dashboardOptions,
+            scimEnabled,
             provider.GetRequiredService<SqlOSDashboardSessionService>(),
             provider.GetRequiredService<SqlOSDashboardLoginThrottlingService>());
 
@@ -195,6 +221,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
 
         public Task<DashboardResponse> PostLogoutAsync(string ipAddress)
             => SendAsync(HttpMethods.Post, "/sqlos/dashboard-auth/logout", null, ipAddress);
+
+        public Task<DashboardResponse> GetDashboardAsync()
+            => SendAsync(HttpMethods.Get, "/sqlos/admin/auth/organizations", null, "203.0.113.60");
 
         public async Task<List<SqlOSAuditEvent>> ListAuditEventsAsync()
         {

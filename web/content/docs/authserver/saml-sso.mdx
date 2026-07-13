@@ -152,7 +152,13 @@ Internally these map to the existing connection flags:
 
 When `RequireSsoForExistingMembers` is enabled, a user who already belongs to the organization and has a verified email on the SSO domain is sent to SSO. The first successful SAML sign-in links the IdP subject to that existing user. SqlOS does not create a user or membership on this path.
 
+An active SCIM-provisioned member can also complete that first subject link when `AutoLinkByEmail` is `false`. This narrow path requires an enabled SCIM connection, an active and non-deleted SCIM user record, and an active membership in the same organization, plus an exact normalized match between the signed SAML assertion's email attribute and the SCIM record's current primary email. A login hint is not sufficient. A disabled connection, a SCIM record from another organization, a stale email alias, or any deactivated/deleted SCIM state is not accepted. This does not enable general email auto-linking.
+
+Home realm discovery still follows `RequireSsoForExistingMembers`: when it is disabled, email-first discovery does not force an existing member into SSO. The SCIM-provenance exception applies after a client explicitly starts that organization's SAML connection. Enable `RequireSsoForExistingMembers` when existing members should be routed to SSO automatically.
+
 When `AllowJitProvisioning` is enabled, a successful SAML sign-in may create the missing user or organization membership when no existing organization member matches the SAML email. Keep this disabled when access should be invitation- or admin-managed.
+
+Every first-time email link and every JIT provision requires the configured email attribute in the signed SAML assertion. The login hint used for discovery and routing is never accepted as an authenticated email claim. An already-linked IdP subject can continue to resolve its existing user without an email attribute.
 
 JIT provisioning never reactivates an existing inactive membership, and SAML callbacks reject inactive users and inactive organizations. This preserves offboarding even when the IdP still sends a valid assertion for a previously linked subject. Re-enable the user or membership through an explicit trusted workflow before allowing another SAML login.
 

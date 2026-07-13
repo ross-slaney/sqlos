@@ -362,6 +362,69 @@ public sealed record SqlOSCreateSsoConnectionRequest(
     string? FirstNameAttributeName,
     string? LastNameAttributeName);
 
+public static class SqlOSScimGroupMappingMatchTypes
+{
+    public const string DisplayName = "display_name";
+    public const string ExternalId = "external_id";
+    public const string Pattern = "pattern";
+}
+
+public static class SqlOSScimSources
+{
+    public const string Seeded = "seeded";
+    public const string Dashboard = "dashboard";
+    public const string Api = "api";
+}
+
+public sealed record SqlOSCreateScimConnectionRequest(
+    string OrganizationId,
+    string DisplayName,
+    bool Enabled = true);
+
+public sealed record SqlOSUpdateScimConnectionRequest(
+    string DisplayName,
+    bool Enabled);
+
+public sealed record SqlOSRotateScimTokenResult(
+    string ConnectionId,
+    string Token,
+    string TokenPrefix,
+    DateTime TokenRotatedAt);
+
+public sealed record SqlOSCreateScimConnectionResult(
+    string ConnectionId,
+    string OrganizationId,
+    string DisplayName,
+    bool IsEnabled,
+    string Token,
+    string TokenPrefix,
+    DateTime TokenRotatedAt,
+    string BaseUrl,
+    string UsersUrl,
+    string GroupsUrl);
+
+public sealed record SqlOSCreateScimGroupMappingRequest(
+    string MatchType,
+    string? GroupDisplayName,
+    string? GroupExternalId,
+    string? GroupPattern,
+    string RoleKey,
+    string? ResourceId,
+    string? ResourceIdTemplate,
+    string? Description = null,
+    bool Enabled = true);
+
+public sealed record SqlOSUpdateScimGroupMappingRequest(
+    string MatchType,
+    string? GroupDisplayName,
+    string? GroupExternalId,
+    string? GroupPattern,
+    string RoleKey,
+    string? ResourceId,
+    string? ResourceIdTemplate,
+    string? Description,
+    bool Enabled);
+
 public sealed record SqlOSCreateOidcConnectionRequest(
     SqlOSOidcProviderType ProviderType,
     string DisplayName,
