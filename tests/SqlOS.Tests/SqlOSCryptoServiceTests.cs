@@ -547,8 +547,8 @@ public sealed class SqlOSCryptoServiceTests
 
         oldKey.RetiredAt = DateTime.UtcNow.AddDays(-8);
         await context.SaveChangesAsync();
-        (await service.ValidateAccessTokenAsync(oldToken, client.Audience)).Should().BeNull();
         (await service.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(7))).Should().Be(1);
+        (await service.ValidateAccessTokenAsync(oldToken, client.Audience)).Should().BeNull();
         (await service.GetValidationSigningKeysAsync()).Select(key => key.Kid).Should().Equal(newKey.Kid);
         custody.DeleteCount.Should().Be(1);
     }
