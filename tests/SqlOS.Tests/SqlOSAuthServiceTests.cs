@@ -1356,6 +1356,27 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task MagicLink_Complete_ExpiredToken_IsRejectedGenerically()
+    {
+        var harness = await MagicLinkHarness.CreateAsync();
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "expired-magic@example.com", "P@ssword123!"));
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("expired-magic@example.com", "test-client", OrganizationId: null),
+            new DefaultHttpContext());
+        var rawToken = ExtractMagicLinkToken(harness.EmailSender.Messages.Single().TextBody);
+        var stored = await harness.Context.Set<SqlOSTemporaryToken>().SingleAsync();
+        stored.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Auth.CompleteMagicLinkAsync(
+            new SqlOSMagicLinkCompleteRequest(rawToken),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in link is invalid or expired.");
+    }
+
+    [TestMethod]
     public async Task MagicLink_Complete_WrongOAuthRequestBinding_IsRejected()
     {
         var harness = await TestHarness.CreateAsync(configure: options =>
