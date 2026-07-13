@@ -51,7 +51,9 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
         completions.Count(response => response.StatusCode == HttpStatusCode.OK).Should().Be(1);
         completions.Count(response => response.StatusCode == HttpStatusCode.BadRequest).Should().Be(1);
         var rejected = completions.Single(response => response.StatusCode == HttpStatusCode.BadRequest);
-        (await rejected.Content.ReadAsStringAsync()).Should().NotContain(token);
+        var rejectedBody = await rejected.Content.ReadAsStringAsync();
+        rejectedBody.Should().Contain("The sign-in link is invalid or expired.");
+        rejectedBody.Should().NotContain(token);
 
         var replay = await client.PostAsJsonAsync("/api/v1/auth/magic-link/complete", new { token });
         replay.StatusCode.Should().Be(HttpStatusCode.BadRequest);

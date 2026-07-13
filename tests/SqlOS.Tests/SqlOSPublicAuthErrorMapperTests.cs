@@ -72,4 +72,20 @@ public sealed class SqlOSPublicAuthErrorMapperTests
         mapped.PublicMessage.Should().Be(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         mapped.HasDiagnosticDetail.Should().BeFalse();
     }
+
+    [DataTestMethod]
+    [DataRow("The sign-in link is invalid or expired.")]
+    [DataRow("Magic-link sign-in is unavailable.")]
+    [DataRow("Too many sign-in link requests. Try again later.")]
+    [DataRow("We couldn't send a sign-in link right now.")]
+    [DataRow("Wait 30 seconds before requesting another sign-in link.")]
+    public void PublicErrorMapper_PreservesReviewedMagicLinkMessages(string message)
+    {
+        var mapped = SqlOSPublicAuthErrorMapper.Map(
+            new InvalidOperationException(message),
+            SqlOSPublicAuthErrorSurface.HeadlessApi);
+
+        mapped.PublicMessage.Should().Be(message);
+        mapped.HasDiagnosticDetail.Should().BeFalse();
+    }
 }

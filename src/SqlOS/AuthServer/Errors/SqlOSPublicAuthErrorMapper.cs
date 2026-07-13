@@ -33,6 +33,7 @@ public static class SqlOSPublicAuthErrorMapper
         "Local password authentication is disabled.",
         "MFA challenge is invalid.",
         "MFA challenge is invalid or expired.",
+        "Magic-link sign-in is unavailable.",
         "Only authorization code requests are supported.",
         "Only S256 PKCE is supported.",
         "Password reset token is invalid or expired.",
@@ -49,9 +50,12 @@ public static class SqlOSPublicAuthErrorMapper
         "The selected organization is not available to this user.",
         "The selected organization requires MFA.",
         "The sign-in code is invalid or expired.",
+        "The sign-in link is invalid or expired.",
         "This device request is no longer pending.",
         "Too many sign-in code requests. Try again later.",
+        "Too many sign-in link requests. Try again later.",
         "We couldn't send a sign-in code right now.",
+        "We couldn't send a sign-in link right now.",
         "We couldn't send the invitation email right now.",
         SqlOSPasswordLoginAbuseService.PublicFailureMessage,
         "Joining an existing organization requires an invitation or approved join policy."
@@ -175,7 +179,8 @@ public static class SqlOSPublicAuthErrorMapper
         }
 
         return message.StartsWith("Wait ", StringComparison.Ordinal)
-            && message.EndsWith(" seconds before requesting another code.", StringComparison.Ordinal);
+            && (message.EndsWith(" seconds before requesting another code.", StringComparison.Ordinal)
+                || message.EndsWith(" seconds before requesting another sign-in link.", StringComparison.Ordinal));
     }
 
     private static string GetDefaultError(SqlOSPublicAuthErrorSurface surface)

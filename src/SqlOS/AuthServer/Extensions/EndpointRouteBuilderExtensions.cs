@@ -1250,11 +1250,16 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
+                var error = await MapPublicAuthErrorAsync(
+                    context,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.HostedPage,
+                    cancellationToken);
                 var page = await BuildAuthPageViewModelAsync(
                     "magic-link",
                     requestId,
                     email,
-                    ex.Message,
+                    error.PublicMessage,
                     null,
                     null,
                     authPrefix,
@@ -1380,11 +1385,16 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
+                var error = await MapPublicAuthErrorAsync(
+                    context,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.HostedPage,
+                    cancellationToken);
                 var page = await BuildAuthPageViewModelAsync(
                     "magic-link-confirm",
                     null,
                     null,
-                    ex.Message,
+                    error.PublicMessage,
                     null,
                     token,
                     authPrefix,
@@ -2794,7 +2804,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
@@ -2815,7 +2825,7 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(ex.Message);
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
             }
         });
 
