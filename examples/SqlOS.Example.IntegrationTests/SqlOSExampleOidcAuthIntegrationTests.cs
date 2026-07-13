@@ -184,7 +184,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
 
         callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         ExtractQueryValue(callbackResponse.Headers.Location!, "handoff").Should().BeNull();
-        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The social login could not be completed.");
+        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The external sign-in request could not be completed.");
     }
 
     [TestMethod]
@@ -213,7 +213,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
 
         callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         ExtractQueryValue(callbackResponse.Headers.Location!, "handoff").Should().BeNull();
-        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The social login could not be completed.");
+        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The external sign-in request could not be completed.");
     }
 
     [TestMethod]
