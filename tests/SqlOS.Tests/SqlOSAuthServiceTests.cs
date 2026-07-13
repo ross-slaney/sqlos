@@ -1289,6 +1289,28 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task MagicLink_Start_DoesNotUseRequestHostForEmailedLink()
+    {
+        var harness = await MagicLinkHarness.CreateAsync(options =>
+        {
+            options.PublicOrigin = null;
+            options.Issuer = "https://identity.example.test/sqlos/auth";
+        });
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Magic User", "magic@example.com", "P@ssword123!"));
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "https";
+        httpContext.Request.Host = new HostString("attacker.example");
+
+        await harness.Auth.RequestMagicLinkAsync(
+            new SqlOSMagicLinkStartRequest("magic@example.com", "test-client", OrganizationId: null),
+            httpContext);
+
+        var message = harness.EmailSender.Messages.Single();
+        message.TextBody.Should().Contain("https://identity.example.test/sqlos/auth/login/magic-link/complete?token=");
+        message.TextBody.Should().NotContain("attacker.example");
+    }
+
+    [TestMethod]
     public async Task MagicLink_Complete_ValidToken_IssuesSessionWithMagicLinkMethod()
     {
         var harness = await MagicLinkHarness.CreateAsync();

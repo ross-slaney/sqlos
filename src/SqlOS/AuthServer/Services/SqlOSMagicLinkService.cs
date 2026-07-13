@@ -89,7 +89,7 @@ public sealed class SqlOSMagicLinkService
             cancellationToken);
     }
 
-    public async Task<SqlOSMagicLinkVerificationResult> CompleteAsync(
+    internal async Task<SqlOSMagicLinkVerificationResult> CompleteAsync(
         SqlOSMagicLinkCompleteRequest request,
         string? expectedAuthorizationRequestId,
         bool requireAuthorizationRequestMatch,
@@ -427,7 +427,7 @@ public sealed class SqlOSMagicLinkService
                 expiresAt,
                 _options.TokenLifetime,
                 httpContext))
-            ?? BuildLoginUrl(rawToken, httpContext);
+            ?? BuildLoginUrl(rawToken);
 
         return new SqlOSMagicLinkMessageContext(
             applicationName,
@@ -454,19 +454,14 @@ public sealed class SqlOSMagicLinkService
             ? $"Sign in to {applicationName}"
             : _options.Subject.Replace("{applicationName}", applicationName, StringComparison.Ordinal);
 
-    private string BuildLoginUrl(string rawToken, HttpContext? httpContext)
-        => $"{GetPublicOrigin(httpContext)}{_authOptions.BasePath.TrimEnd('/')}/login/magic-link/complete?token={Uri.EscapeDataString(rawToken)}";
+    private string BuildLoginUrl(string rawToken)
+        => $"{GetPublicOrigin()}{_authOptions.BasePath.TrimEnd('/')}/login/magic-link/complete?token={Uri.EscapeDataString(rawToken)}";
 
-    private string GetPublicOrigin(HttpContext? httpContext)
+    private string GetPublicOrigin()
     {
         if (!string.IsNullOrWhiteSpace(_authOptions.PublicOrigin))
         {
             return _authOptions.PublicOrigin.TrimEnd('/');
-        }
-
-        if (httpContext != null)
-        {
-            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
         }
 
         return _authOptions.Issuer.TrimEnd('/').EndsWith(_authOptions.BasePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
@@ -541,7 +536,7 @@ public sealed class SqlOSMagicLinkService
         return $"{local[..visibleCount]}***@{domain}";
     }
 
-    public sealed record MagicLinkPayload(
+    internal sealed record MagicLinkPayload(
         string Email,
         string NormalizedEmail,
         string MaskedEmail,
@@ -556,7 +551,7 @@ public sealed class SqlOSMagicLinkService
     private sealed record RecentMagicLinkToken(SqlOSTemporaryToken Token, MagicLinkPayload? Payload);
 }
 
-public sealed record SqlOSMagicLinkVerificationResult(
+internal sealed record SqlOSMagicLinkVerificationResult(
     SqlOSTemporaryToken Token,
     SqlOSMagicLinkService.MagicLinkPayload Payload,
     SqlOSUser User,
