@@ -1,0 +1,419 @@
+---
+title: "Turn AuthServer memberships into FGA access"
+description: "Safely reconcile organization roles into tenant-scoped FGA grants."
+order: 6
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Turn a verified membership into data access"
+  href="/docs/fga/overview"
+  actionLabel="FGA overview"
+>
+  Authenticate the user with AuthServer, reconcile the selected organization membership into explicit FGA grants, and keep tenant ownership in every data query.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - An API route protected with [SqlOS access-token validation](/docs/quickstarts/protect-api)
+  - AuthServer organizations and memberships
+  - An FGA resource hierarchy with organization roots
+  - A `DbContext` derived from `SqlOSDbContext<TContext>` so AuthServer, FGA, and application data share one context
+</Callout>
+
+## The boundary you are building
+
+AuthServer and FGA answer different questions:
+
+| Layer | Question | Source of truth |
+| --- | --- | --- |
+| AuthServer | Who signed in, which organization did they select, and is that membership active? | User, organization, membership, session, and validated token records |
+| FGA | What may this subject do to this application resource? | Subject, resource, role, permission, and grant records |
+
+An AuthServer membership does not automatically create an FGA subject or grant. Likewise, `SqlOSFgaSubject.OrganizationId` is descriptive metadata; it is **not** an enforcement boundary and can hold only one value even when a user belongs to several organizations.
+
+This guide uses an explicit bridge:
+
+![A validated AuthServer membership is reconciled into a tenant-scoped FGA grant before application data is filtered](/docs/guides-authserver-to-fga.svg)
+
+1. Read the subject and organization from validated server state.
+2. Re-read the current user, organization, and membership from the database.
+3. Provision the FGA subject and `org::{organizationId}` resource.
+4. Reconcile the small set of roles owned by the membership mapping.
+5. Apply both the application tenant predicate and the FGA decision.
+
+## 1. Seed the organization authorization model
+
+The example application has organization roots with workspace children. Members may view workspaces; owners and admins may also manage them.
+
+```csharp
+options.Fga.Seed(seed =>
+{
+    seed.ResourceType("organization", "Organization");
+    seed.ResourceType("workspace", "Workspace");
+
+    seed.Permission(
+        "perm_workspace_view",
+        "WORKSPACE_VIEW",
+        "View workspaces",
+        "workspace");
+    seed.Permission(
+        "perm_workspace_manage",
+        "WORKSPACE_MANAGE",
+        "Manage workspaces",
+        "workspace");
+
+    seed.Role("role_org_member", "org_member", "Organization Member");
+    seed.Role("role_org_admin", "org_admin", "Organization Admin");
+    seed.RolePermission("org_member", "WORKSPACE_VIEW");
+    seed.RolePermission("org_admin", "WORKSPACE_VIEW");
+    seed.RolePermission("org_admin", "WORKSPACE_MANAGE");
+});
+```
+
+Every tenant gets a resource directly below the global root. Entity-backed child resources name that organization resource as their parent:
+
+```csharp
+using SqlOS.Fga.Interfaces;
+
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string ParentResourceId => $"org::{OrganizationId}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+```
+
+Assign `ResourceId = $"wrk::{workspace.Id}"` before saving a new workspace. `SqlOSDbContext<TContext>` then synchronizes the entity-backed child beneath its `org::{organizationId}` parent.
+
+```text
+root
+├── org::acme
+│   ├── wrk::planning
+│   └── wrk::support
+└── org::globex
+    └── wrk::operations
+```
+
+Grant organization membership roles on `org::{organizationId}`, never on `root`. A global-root grant would let a tenant-local role inherit into every organization's descendants.
+
+## 2. Reconcile the active membership
+
+Use a dedicated service so login, membership administration, directory sync, and repair jobs all apply the same policy. This version owns exactly two role keys on the organization root: `org_member` and `org_admin`.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS.AuthServer.Models;
+using SqlOS.Extensions;
+using SqlOS.Fga.Models;
+
+public sealed class MembershipFgaSyncService(AppDbContext db)
+{
+    private const string OrganizationResourceType = "organization";
+    private const string OrgMemberRole = "org_member";
+    private const string OrgAdminRole = "org_admin";
+
+    private static readonly string[] MembershipManagedRoles =
+        [OrgMemberRole, OrgAdminRole];
+
+    public async Task<bool> ReconcileAsync(
+        string trustedSubjectId,
+        string trustedOrganizationId,
+        CancellationToken ct = default)
+    {
+        var user = await db.Set<SqlOSUser>()
+            .SingleOrDefaultAsync(x => x.Id == trustedSubjectId, ct);
+        var organization = await db.Set<SqlOSOrganization>()
+            .SingleOrDefaultAsync(x => x.Id == trustedOrganizationId, ct);
+        var membership = await db.Set<SqlOSMembership>()
+            .SingleOrDefaultAsync(
+                x => x.UserId == trustedSubjectId
+                    && x.OrganizationId == trustedOrganizationId,
+                ct);
+
+        var hasActiveMembership = user?.IsActive == true
+            && organization?.IsActive == true
+            && membership?.IsActive == true;
+
+        if (!hasActiveMembership)
+        {
+            await RevokeMembershipRolesIfProvisionedAsync(
+                trustedSubjectId,
+                trustedOrganizationId,
+                ct);
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        var desiredRole = MapMembershipRole(membership!.Role);
+        if (desiredRole is null)
+        {
+            await RevokeMembershipRolesIfProvisionedAsync(
+                trustedSubjectId,
+                trustedOrganizationId,
+                ct);
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        await db.ProvisionUserSubjectAsync(
+            trustedSubjectId,
+            displayName: user!.DisplayName,
+            email: user.DefaultEmail,
+            organizationId: trustedOrganizationId,
+            externalRef: trustedSubjectId,
+            isActive: true,
+            cancellationToken: ct);
+
+        var organizationResourceId = OrganizationResourceId(
+            trustedOrganizationId);
+        await db.ProvisionResourceWithIdAsync(
+            organizationResourceId,
+            resourceTypeId: OrganizationResourceType,
+            name: organization!.Name,
+            parentResourceId: "root",
+            isActive: true,
+            cancellationToken: ct);
+
+        foreach (var mappedRole in MembershipManagedRoles)
+        {
+            if (!mappedRole.Equals(desiredRole, StringComparison.Ordinal))
+            {
+                await db.RevokeRoleAsync(
+                    trustedSubjectId,
+                    organizationResourceId,
+                    mappedRole,
+                    ct);
+            }
+        }
+
+        await db.GrantRoleAsync(
+            trustedSubjectId,
+            organizationResourceId,
+            desiredRole,
+            ct);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private async Task RevokeMembershipRolesIfProvisionedAsync(
+        string subjectId,
+        string organizationId,
+        CancellationToken ct)
+    {
+        var resourceId = OrganizationResourceId(organizationId);
+        var subjectExists = await db.Set<SqlOSFgaSubject>()
+            .AnyAsync(x => x.Id == subjectId, ct);
+        var resourceExists = await db.Set<SqlOSFgaResource>()
+            .AnyAsync(x => x.Id == resourceId, ct);
+
+        if (!subjectExists || !resourceExists)
+        {
+            return;
+        }
+
+        foreach (var mappedRole in MembershipManagedRoles)
+        {
+            await db.RevokeRoleAsync(
+                subjectId,
+                resourceId,
+                mappedRole,
+                ct);
+        }
+    }
+
+    private static string OrganizationResourceId(string organizationId)
+        => $"org::{organizationId}";
+
+    private static string? MapMembershipRole(string role)
+        => role.Trim().ToLowerInvariant() switch
+        {
+            "owner" or "admin" => OrgAdminRole,
+            "member" => OrgMemberRole,
+            _ => null
+        };
+}
+```
+
+Replace `AppDbContext` with your `SqlOSDbContext<TContext>` subclass. `ProvisionUserSubjectAsync`, `ProvisionResourceWithIdAsync`, `GrantRoleAsync`, and `RevokeRoleAsync` are idempotent, but they only track changes. The final `SaveChangesAsync` is required.
+
+<Callout type="warning" title="Reserve the mapped role keys">
+  The reconciler removes only `org_member` and `org_admin` on this subject's exact organization resource. Reserve those role keys for membership-derived access. Put manual or product-specific access in different role keys or on narrower resources. Do not delete every grant for the subject: that would erase unrelated access in this tenant and other organizations.
+</Callout>
+
+### Why the stale role is revoked first
+
+An add-only sync is unsafe during role changes:
+
+- `member` → `admin`: leaving `org_member` is redundant and makes the effective policy harder to explain.
+- `admin` → `member`: leaving `org_admin` preserves management access after the downgrade.
+- inactive or removed membership: leaving either mapped role keeps authorizing through FGA.
+
+The allowlist makes ownership explicit. An active reconciliation removes only the other mapped role and grants the desired one. An inactive reconciliation removes both mapped roles.
+
+The role-name switch also fails closed. An unexpected active membership role removes the membership-managed grants and returns `false` instead of silently treating an unknown value as `org_member`. Extend the explicit switch when your application defines additional trusted membership roles.
+
+## 3. Use only trusted identity and organization state
+
+Protect the route with the expected audience, then read the typed token saved by SqlOS validation. Do not accept `userId`, `subjectId`, or `organizationId` from the request body as the actor's authority.
+
+```csharp
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+var workspaces = app.MapGroup("/api/workspaces")
+    .RequireSqlOSAccessToken("https://api.example.com");
+
+workspaces.MapGet("/", async (
+    HttpContext http,
+    MembershipFgaSyncService membershipSync,
+    CancellationToken ct) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    if (string.IsNullOrWhiteSpace(token?.UserId)
+        || string.IsNullOrWhiteSpace(token.OrganizationId))
+    {
+        return Results.Unauthorized();
+    }
+
+    var active = await membershipSync.ReconcileAsync(
+        token.UserId,
+        token.OrganizationId,
+        ct);
+    return active ? Results.Ok() : Results.Forbid();
+});
+```
+
+The access token supplies trusted, validated identifiers, but the reconciler still re-reads the database. That prevents a stale request DTO—or an old assumption about the user's role—from selecting the grant.
+
+For an operator workflow, the target IDs may come from an authorized admin action, but the same rule applies: load the current records and derive the grant from the persisted membership rather than accepting an FGA role key from the browser.
+
+## 4. Enforce the tenant boundary and FGA decision
+
+FGA complements the application's tenant predicate; it does not replace it.
+
+### List endpoints
+
+Filter by the validated organization **and** the FGA expression:
+
+```csharp
+var token = http.GetSqlOSValidatedToken()!;
+var organizationId = token.OrganizationId!;
+var subjectId = token.UserId!;
+
+var filter = await fgaAuth.GetAuthorizationFilterAsync<Workspace>(
+    subjectId,
+    "WORKSPACE_VIEW");
+
+var rows = await db.Workspaces
+    .Where(x => x.OrganizationId == organizationId)
+    .Where(filter)
+    .OrderBy(x => x.Name)
+    .ToListAsync(ct);
+```
+
+The tenant predicate prevents rows owned by another organization from entering the candidate set. The FGA filter then applies resource-level authorization inside that tenant.
+
+### Detail and mutation endpoints
+
+Establish tenant ownership before the point check:
+
+```csharp
+var workspace = await db.Workspaces
+    .SingleOrDefaultAsync(
+        x => x.Id == workspaceId
+            && x.OrganizationId == organizationId,
+        ct);
+
+if (workspace is null)
+{
+    return Results.NotFound();
+}
+
+var access = await fgaAuth.CheckAccessAsync(
+    subjectId,
+    "WORKSPACE_MANAGE",
+    workspace.ResourceId);
+
+if (!access.Allowed)
+{
+    return Results.Forbid();
+}
+```
+
+Do the same ownership check before update, delete, sharing, or grant-management operations. Never authorize a resource ID from the request and then load a row without the organization predicate.
+
+## 5. Reconcile every lifecycle transition
+
+Login-time reconciliation keeps the common path fresh, but it is not an offboarding system by itself. Also call the reconciler from trusted workflows that change authorization state:
+
+| Transition | Required reconciliation |
+| --- | --- |
+| Membership created or reactivated | Reconcile that user/organization pair and grant the mapped role |
+| `member` → `admin` or `owner` | Revoke `org_member`; grant `org_admin` |
+| `admin` or `owner` → `member` | Revoke `org_admin`; grant `org_member` |
+| Membership deactivated or removed | Revoke both membership-managed roles on that organization root |
+| User deactivated | Reconcile every organization membership for that user |
+| Organization deactivated | Reconcile every membership in that organization |
+| User switches organizations | Reconcile the selected pair; do not revoke valid grants in the user's other organizations |
+| Membership reactivated | Re-read the current role and grant only its mapping |
+| Unexpected/custom role | Remove the mapped grants unless that exact role is deliberately added to the mapping allowlist |
+
+<Callout type="danger" title="Do not rely on FGA IsActive for revocation yet">
+  AuthServer rejects inactive users, organizations, and memberships at its session and token boundaries. FGA lifecycle enforcement is tracked separately in open [issue #132](https://github.com/ross-slaney/sqlos/issues/132): current FGA point checks and query filters can still honor an existing grant even when an FGA subject or resource has `IsActive = false`. Remove the mapped grants explicitly during offboarding.
+</Callout>
+
+If one user belongs to several organizations, reconcile each `(subjectId, organizationId)` pair independently. Updating the FGA subject's `OrganizationId` metadata during an organization switch does not revoke, scope, or replace grants in another organization.
+
+## 6. Choose a consistency strategy
+
+When AuthServer, FGA, and application data share one SQL database and `DbContext`, prefer one database transaction around the membership mutation and reconciliation. Commit the membership change and mapped-grant change together.
+
+When the membership source and FGA write cannot share a transaction:
+
+1. write a durable outbox event with the subject and organization IDs;
+2. reconcile from current database state, not from an event-provided role;
+3. retry idempotently until successful;
+4. run a periodic repair job over active and inactive memberships;
+5. alert on reconciliation failures and lag.
+
+Do not treat a best-effort login callback as the only revocation trigger. An offboarded user might never log in again, leaving the old FGA grant untouched.
+
+## 7. Verify upgrades, downgrades, and isolation
+
+Automate these cases with separate users and organizations:
+
+| Test | Proof |
+| --- | --- |
+| First active sync | One mapped grant exists on the selected `org::{id}` resource |
+| Repeat active sync | No duplicate grant is created |
+| Member promoted | `org_member` is gone and `org_admin` is effective |
+| Admin downgraded | `org_admin` is gone before member-level access is evaluated |
+| Membership removed | Both membership-managed roles are gone; unrelated grants remain |
+| User or organization deactivated | Every affected membership pair is reconciled and mapped grants are gone |
+| Organization switch | Each valid tenant keeps its own grant; metadata does not act as policy |
+| Request tampering | Body/query `subjectId` and `organizationId` cannot change the actor or tenant |
+| Unknown membership role | Both mapped grants are absent until the role is explicitly supported |
+| Cross-tenant list | A token for Acme cannot return Globex rows even if malformed grants exist |
+| Cross-tenant detail/mutation | Tenant ownership is checked before FGA and returns no foreign object |
+
+The runnable example uses this shape in:
+
+- `examples/SqlOS.Example.Api/Services/ExampleFgaService.cs`
+- `examples/SqlOS.Example.Api/Endpoints/ExampleAuthEndpoints.cs`
+- `examples/SqlOS.Example.Api/Endpoints/ExampleEndpoints.cs`
+- `examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs`
+
+## Next steps
+
+- [Syncing Auth to FGA reference](/docs/fga/syncing-auth-to-fga)
+- [Filter EF queries](/docs/guides/ef-query-filters)
+- [Memberships](/docs/authserver/memberships)
+- [Test your integration](/docs/guides/test-your-integration)

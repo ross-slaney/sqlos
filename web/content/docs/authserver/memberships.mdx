@@ -56,7 +56,7 @@ var orgs = await adminService.GetUserOrganizationsAsync(userId, ct);
 
 ## Syncing to FGA
 
-When using FGA, membership roles can be mapped to FGA grants. See [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga) for the pattern.
+When using FGA, membership roles can be mapped to explicit FGA grants. Use [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga) for role upgrade, downgrade, removal, organization switching, and cross-tenant guidance. [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga) is the shorter API reference.
 
 ## Invite a member
 
