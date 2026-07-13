@@ -93,6 +93,12 @@ var chains = await dbContext.Chains
 
 `Task<Expression<Func<T, bool>>>` — an EF Core-compatible expression you pass to `.Where()`.
 
+### Lifecycle enforcement
+
+Point checks, traces, and EF authorization filters apply the same lifecycle rules automatically. Inactive users and groups, expired service accounts, inactive target resources, and resources below an inactive ancestor are denied even when a matching grant remains stored. Applications do not need to revoke every grant when deactivating one of these records, and should not add a separate display-only lifecycle filter around authorization queries.
+
+Provision typed subjects with the SDK helpers rather than inserting only a bare `SqlOSFgaSubject`: authorization fails closed when a `user`, `group`, `agent`, or `service_account` subject is missing its corresponding typed lifecycle row.
+
 ---
 
 ### TraceResourceAccessAsync

@@ -94,6 +94,20 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task EnsureSchema_V5Migration_AddsGroupLifecycleColumn()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var initializer = new SqlOSFgaSchemaInitializer(
+            Context,
+            Options.Create(new SqlOSFgaOptions()),
+            loggerFactory.CreateLogger<SqlOSFgaSchemaInitializer>());
+
+        await initializer.EnsureSchemaAsync();
+
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSFgaUserGroups", "IsActive"));
+    }
+
+    [TestMethod]
     public async Task EnsureSchema_SetsCorrectVersion()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
@@ -105,7 +119,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         var version = await GetSchemaVersionAsync();
-        Assert.IsTrue(version >= 4, $"Schema version should be at least 4, was {version}");
+        Assert.IsTrue(version >= 5, $"Schema version should be at least 5, was {version}");
     }
 
     private async Task<bool> TableExistsAsync(string tableName)

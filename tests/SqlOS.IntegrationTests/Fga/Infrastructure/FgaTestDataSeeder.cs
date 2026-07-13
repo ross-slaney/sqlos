@@ -104,13 +104,19 @@ public static class FgaTestDataSeeder
         );
 
         // User extension
-        context.Set<SqlOSFgaUser>().Add(new SqlOSFgaUser
-        {
-            Id = TestUserId,
-            SubjectId = TestUserSubjectId,
-            Email = "testuser@example.com",
-            IsActive = true
-        });
+        context.Set<SqlOSFgaUser>().AddRange(
+            new SqlOSFgaUser { Id = "usr_test_sysadmin", SubjectId = SystemAdminSubjectId, IsActive = true },
+            new SqlOSFgaUser { Id = "usr_test_agencyadmin", SubjectId = AgencyAdminSubjectId, IsActive = true },
+            new SqlOSFgaUser { Id = "usr_test_member", SubjectId = AgencyMemberSubjectId, IsActive = true },
+            new SqlOSFgaUser { Id = "usr_test_groupmember", SubjectId = GroupMemberSubjectId, IsActive = true },
+            new SqlOSFgaUser { Id = "usr_test_unauth", SubjectId = UnauthorizedSubjectId, IsActive = true },
+            new SqlOSFgaUser
+            {
+                Id = TestUserId,
+                SubjectId = TestUserSubjectId,
+                Email = "testuser@example.com",
+                IsActive = true
+            });
 
         // Agent extension
         context.Set<SqlOSFgaAgent>().Add(new SqlOSFgaAgent

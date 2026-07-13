@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -387,7 +388,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return entity => false;
         }
 
-        var subjectIdsStr = string.Join(",", subjectIds);
+        var subjectIdsJson = JsonSerializer.Serialize(subjectIds);
         var permissionId = permission.Id;
 
         // Build the expression using the concrete DbContext type's method
@@ -408,7 +409,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         var entityParam = Expression.Parameter(typeof(T), "entity");
         var resourceIdProp = Expression.Property(entityParam, nameof(IHasResourceId.ResourceId));
         var contextExpr = Expression.Constant(_context, contextType);
-        var filterParameters = new AuthorizationFilterParameters(subjectIdsStr, permissionId);
+        var filterParameters = new AuthorizationFilterParameters(subjectIdsJson, permissionId);
         var filterParametersExpr = Expression.Constant(filterParameters);
         var tvfCall = Expression.Call(contextExpr, tvfMethod,
             resourceIdProp,
@@ -441,6 +442,11 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
     private async Task<List<string>> ResolveSubjectIdsAsync(string subjectId)
     {
+        if (!await IsSubjectActiveAsync(subjectId))
+        {
+            return [];
+        }
+
         var subjects = new List<string> { subjectId };
 
         var groupSubjectIds = await _context.Set<SqlOSFgaUserGroupMembership>()
@@ -448,7 +454,9 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             .Join(_context.Set<SqlOSFgaUserGroup>(),
                 m => m.UserGroupId,
                 g => g.Id,
-                (m, g) => g.SubjectId)
+                (m, g) => g)
+            .Where(g => g.IsActive)
+            .Select(g => g.SubjectId)
             .ToListAsync();
 
         subjects.AddRange(groupSubjectIds);
@@ -458,6 +466,11 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
     private async Task<List<SqlOSFgaSubjectInfo>> ResolveSubjectsWithInfoAsync(string subjectId)
     {
         var result = new List<SqlOSFgaSubjectInfo>();
+
+        if (!await IsSubjectActiveAsync(subjectId))
+        {
+            return result;
+        }
 
         var subject = await _context.Set<SqlOSFgaSubject>().FirstOrDefaultAsync(s => s.Id == subjectId);
         result.Add(new SqlOSFgaSubjectInfo
@@ -474,7 +487,8 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
 
         foreach (var membership in memberships)
         {
-            var group = await _context.Set<SqlOSFgaUserGroup>().FirstOrDefaultAsync(g => g.Id == membership.UserGroupId);
+            var group = await _context.Set<SqlOSFgaUserGroup>()
+                .FirstOrDefaultAsync(g => g.Id == membership.UserGroupId && g.IsActive);
             if (group != null)
             {
                 result.Add(new SqlOSFgaSubjectInfo
@@ -511,13 +525,40 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             }
 
             var resource = await _context.Set<SqlOSFgaResource>().FirstOrDefaultAsync(r => r.Id == currentId);
-            if (resource == null) break;
+            if (resource == null || !resource.IsActive) break;
             ancestors.Add(resource);
             currentId = resource.ParentId;
             depth++;
         }
 
         return ancestors;
+    }
+
+    private async Task<bool> IsSubjectActiveAsync(string subjectId)
+    {
+        var subjectType = await _context.Set<SqlOSFgaSubject>()
+            .AsNoTracking()
+            .Where(subject => subject.Id == subjectId)
+            .Select(subject => subject.SubjectTypeId)
+            .FirstOrDefaultAsync();
+
+        return subjectType switch
+        {
+            "user" => await _context.Set<SqlOSFgaUser>()
+                .AsNoTracking()
+                .AnyAsync(user => user.SubjectId == subjectId && user.IsActive),
+            "service_account" => await _context.Set<SqlOSFgaServiceAccount>()
+                .AsNoTracking()
+                .AnyAsync(account => account.SubjectId == subjectId
+                    && (account.ExpiresAt == null || account.ExpiresAt > DateTime.UtcNow)),
+            "group" => await _context.Set<SqlOSFgaUserGroup>()
+                .AsNoTracking()
+                .AnyAsync(group => group.SubjectId == subjectId && group.IsActive),
+            "agent" => await _context.Set<SqlOSFgaAgent>()
+                .AsNoTracking()
+                .AnyAsync(agent => agent.SubjectId == subjectId),
+            _ => false
+        };
     }
 
     private async Task<List<SqlOSFgaGrant>> GetActiveGrantsAsync(string subjectId, string resourceId)
