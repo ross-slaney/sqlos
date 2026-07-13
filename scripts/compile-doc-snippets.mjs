@@ -53,6 +53,27 @@ const snippetSpecs = [
     marker: "new SqlOSUpdateSecuritySettingsRequest(",
     wrap: asSecuritySettingsProgram,
   },
+  {
+    name: "FGA group grant",
+    relativePath: "web/content/docs/guides/fga-groups.mdx",
+    heading: "## 4. Grant one role to the group",
+    marker: "await db.GrantRoleAsync(",
+    wrap: asFgaGroupGrantProgram,
+  },
+  {
+    name: "FGA group detail authorization",
+    relativePath: "web/content/docs/guides/fga-groups.mdx",
+    heading: "## 5. Prove inherited detail access",
+    marker: "var workspace = await db.Workspaces",
+    wrap: asFgaGroupDetailProgram,
+  },
+  {
+    name: "FGA group list authorization",
+    relativePath: "web/content/docs/guides/fga-groups.mdx",
+    heading: "## 6. Prove inherited list access",
+    marker: "var filter = await fga.GetAuthorizationFilterAsync<Workspace>",
+    wrap: asFgaGroupListProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
@@ -187,6 +208,79 @@ using SqlOS.AuthServer.Services;
 SqlOSSettingsService settingsService = null!;
 
 ${snippet}
+`;
+}
+
+function asFgaGroupGrantProgram(snippet) {
+  return `using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
+
+ISqlOSFgaDbContext db = null!;
+var support = new SqlOSFgaUserGroup();
+var ct = CancellationToken.None;
+
+${snippet}
+`;
+}
+
+function asFgaGroupDetailProgram(snippet) {
+  return `using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
+
+static async Task<IResult> AuthorizeDetailAsync(
+    ReviewDbContext db,
+    ISqlOSFgaAuthService fga,
+    string workspaceId,
+    string organizationId,
+    string userSubjectId,
+    CancellationToken ct)
+{
+${snippet}
+}
+
+public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : DbContext(options)
+{
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
+}
+
+public sealed class Workspace : IHasResourceId
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+`;
+}
+
+function asFgaGroupListProgram(snippet) {
+  return `using Microsoft.EntityFrameworkCore;
+using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Models;
+
+ISqlOSFgaAuthService fga = null!;
+ReviewDbContext db = null!;
+var userSubjectId = "subj_user";
+var organizationId = "org_acme";
+var ct = CancellationToken.None;
+
+${snippet}
+
+public sealed class ReviewDbContext(DbContextOptions<ReviewDbContext> options) : DbContext(options)
+{
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
+}
+
+public sealed class Workspace : IHasResourceId
+{
+    public string Id { get; set; } = string.Empty;
+    public string OrganizationId { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
 `;
 }
 
