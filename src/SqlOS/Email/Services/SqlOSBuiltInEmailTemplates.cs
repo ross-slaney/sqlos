@@ -6,6 +6,7 @@ public static class SqlOSBuiltInEmailTemplates
     public const string AuthMagicLinkKey = "auth.magic-link";
     public const string AuthInvitationKey = "auth.invitation";
     public const string AuthPasswordResetKey = "auth.password-reset";
+    public const string AuthEmailVerificationKey = "auth.email-verification";
 
     public static IReadOnlyList<SqlOSBuiltInEmailTemplateDefinition> All { get; } =
     [
@@ -98,6 +99,29 @@ public static class SqlOSBuiltInEmailTemplates
             """,
             "Reset your {applicationName} password for {maskedEmail}: {resetUrl}. This link expires in {expiresInMinutes} minute(s).",
             """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","maskedEmail":"us***@example.com","resetUrl":"https://app.example.test/sqlos/auth/password/reset?token=sample","expiresInMinutes":"60","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
+            SuppressRenderedContentStorage: true),
+        new(
+            AuthEmailVerificationKey,
+            "Email verification",
+            "Verify your {applicationName} email",
+            """
+            <!DOCTYPE html>
+            <html lang="en">
+            <body style="margin:0;padding:24px;background:{backgroundColor};font-family:Segoe UI,Arial,sans-serif;color:{accentColor};">
+              <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:20px;padding:32px;">
+                <img src="{logoBase64}" alt="{applicationName}" style="max-height:42px;max-width:180px;display:{logoImageDisplay};margin:0 0 16px;" />
+                <p style="display:{logoTextDisplay};margin:0 0 12px;font-size:14px;color:#475569;font-weight:600;">{applicationName}</p>
+                <h1 style="margin:0 0 12px;font-size:28px;line-height:1.1;color:{accentColor};">Verify your email</h1>
+                <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">Use this link to verify {maskedEmail}. It expires in {expiresInHours} hour(s).</p>
+                <p style="margin:0 0 20px;"><a href="{verificationUrl}" style="display:inline-block;background:{primaryColor};color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:600;">Verify email</a></p>
+                <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">If the button does not work, open this link: {verificationUrl}</p>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this verification, you can ignore this email.</p>
+              </div>
+            </body>
+            </html>
+            """,
+            "Verify your {applicationName} email for {maskedEmail}: {verificationUrl}. This link expires in {expiresInHours} hour(s).",
+            """{"applicationName":"SqlOS","logoBase64":"","logoImageDisplay":"none","logoTextDisplay":"block","maskedEmail":"us***@example.com","verificationUrl":"https://app.example.test/sqlos/auth/email/verify?token=sample","expiresInHours":"24","primaryColor":"#2563eb","accentColor":"#0f172a","backgroundColor":"#f8fafc"}""",
             SuppressRenderedContentStorage: true)
     ];
 

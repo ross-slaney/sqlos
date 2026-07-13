@@ -322,6 +322,7 @@ public sealed class SqlOSTransactionalEmailTests
             .ToListAsync();
         keys.Should().Contain([
             SqlOSBuiltInEmailTemplates.AuthEmailOtpKey,
+            SqlOSBuiltInEmailTemplates.AuthEmailVerificationKey,
             SqlOSBuiltInEmailTemplates.AuthInvitationKey,
             SqlOSBuiltInEmailTemplates.AuthMagicLinkKey,
             SqlOSBuiltInEmailTemplates.AuthPasswordResetKey

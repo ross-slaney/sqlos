@@ -3313,15 +3313,16 @@ public static class EndpointRouteBuilderExtensions
 
         auth.MapPost("/logout", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
-            var request = await context.Request.ReadFromJsonAsync<LogoutRequest>(cancellationToken: cancellationToken) ?? new LogoutRequest(null, null);
-            await authService.LogoutAsync(request.RefreshToken, request.SessionId, cancellationToken);
+            var request = await context.Request.ReadFromJsonAsync<LogoutRequest>(cancellationToken: cancellationToken) ?? new LogoutRequest(null);
+            await authService.LogoutAsync(request.RefreshToken, sessionId: null, cancellationToken);
             return Results.NoContent();
         });
 
         auth.MapPost("/logout-all", async (LogoutAllRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
-            await authService.LogoutAllAsync(request.UserId, cancellationToken);
-            return Results.NoContent();
+            return await authService.LogoutAllByRefreshTokenAsync(request.RefreshToken, cancellationToken)
+                ? Results.NoContent()
+                : Results.Unauthorized();
         });
 
         auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
@@ -3367,8 +3368,29 @@ public static class EndpointRouteBuilderExtensions
             return Results.NoContent();
         });
 
-        auth.MapPost("/email/verification-token", async (SqlOSCreateVerificationTokenRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
-            Results.Ok(new { token = await authService.CreateEmailVerificationTokenAsync(request, cancellationToken) }));
+        auth.MapPost("/email/verification-token", async (SqlOSCreateVerificationTokenRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.RequestEmailVerificationAsync(request, httpContext, cancellationToken)));
+
+        auth.MapPost("/email/verification-email", async (SqlOSCreateVerificationTokenRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
+            Results.Ok(await authService.RequestEmailVerificationAsync(request, httpContext, cancellationToken)));
+
+        auth.MapGet("/email/verify", async (HttpContext context, SqlOSAuthService authService, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await authService.VerifyEmailAsync(
+                    new SqlOSVerifyEmailRequest(context.Request.Query["token"].ToString()),
+                    cancellationToken);
+                return Results.Content(BuildEmailVerificationPage(error: null), contentType: "text/html");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Content(
+                    BuildEmailVerificationPage(await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken)),
+                    contentType: "text/html",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
 
         auth.MapPost("/email/verify", async (SqlOSVerifyEmailRequest request, SqlOSAuthService authService, CancellationToken cancellationToken) =>
         {
@@ -5597,6 +5619,43 @@ public static class EndpointRouteBuilderExtensions
         """;
     }
 
+    private static string BuildEmailVerificationPage(string? error)
+    {
+        static string H(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+
+        var succeeded = string.IsNullOrWhiteSpace(error);
+        var title = succeeded ? "Email verified" : "Verification failed";
+        var message = succeeded
+            ? "Your email is verified. You can close this tab and continue signing in."
+            : H(error);
+        var stateClass = succeeded ? "success" : "error";
+
+        return $$"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>{{title}}</title>
+          <style>
+            body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
+            main { width:min(440px, calc(100vw - 32px)); background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:28px; box-shadow:0 24px 70px rgba(15,23,42,.10); }
+            h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
+            p { margin:0; color:#475569; line-height:1.5; }
+            .success { border-left:4px solid #16a34a; padding-left:16px; }
+            .error { border-left:4px solid #dc2626; padding-left:16px; }
+          </style>
+        </head>
+        <body>
+          <main class="{{stateClass}}">
+            <h1>{{title}}</h1>
+            <p>{{message}}</p>
+          </main>
+        </body>
+        </html>
+        """;
+    }
+
     private static async Task<IResult> RenderMfaChallengeAsync(
         SqlOSAuthorizationRequestLoginResult completion,
         string? authorizationRequestId,
@@ -5988,7 +6047,7 @@ public static class EndpointRouteBuilderExtensions
             : null;
     }
 
-    private sealed record LogoutRequest(string? RefreshToken, string? SessionId);
+    private sealed record LogoutRequest(string? RefreshToken);
     private sealed record CreateOrganizationInvitationRequest(
         string Email,
         string Role,
@@ -6001,7 +6060,7 @@ public static class EndpointRouteBuilderExtensions
         string? InvitedByUserId,
         bool? SendEmail);
     private sealed record RevokeInvitationRequest(string? Reason);
-    private sealed record LogoutAllRequest(string UserId);
+    private sealed record LogoutAllRequest(string? RefreshToken);
     private sealed record CreateMembershipRequest(string OrganizationId, string UserId, string Role);
     private static bool TryParseClientAuthMethod(string? value, out SqlOSOidcClientAuthMethod? method)
     {

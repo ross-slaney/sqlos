@@ -22,6 +22,10 @@ public sealed class SqlOSAuthService
     private const string PasswordResetPurpose = "password_reset";
     private const string PasswordResetRequestPurpose = "password_reset_request";
     private const string PasswordResetGenericMessage = "If an account can be reset, you'll receive a password reset email shortly.";
+    private const string EmailVerificationPurpose = "email_verification";
+    private const string EmailVerificationGenericMessage = "If the email can be verified, you'll receive a verification email shortly.";
+    private static readonly TimeSpan EmailVerificationLifetime = TimeSpan.FromDays(1);
+    private static readonly TimeSpan EmailVerificationResendCooldown = TimeSpan.FromMinutes(1);
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
@@ -1004,6 +1008,37 @@ public sealed class SqlOSAuthService
         await _adminService.RecordAuditAsync("user.logout-all", "user", userId, userId: userId, cancellationToken: cancellationToken);
     }
 
+    internal async Task<bool> LogoutAllByRefreshTokenAsync(
+        string? refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        var hashed = _cryptoService.HashToken(refreshToken);
+        var token = await _context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session)
+            .FirstOrDefaultAsync(x => x.TokenHash == hashed
+                && x.RevokedAt == null
+                && x.ConsumedAt == null
+                && x.ExpiresAt >= now,
+                cancellationToken);
+        var session = token?.Session;
+        if (session == null
+            || session.RevokedAt != null
+            || session.IdleExpiresAt < now
+            || session.AbsoluteExpiresAt < now)
+        {
+            return false;
+        }
+
+        await LogoutAllAsync(session.UserId, cancellationToken);
+        return true;
+    }
+
     public async Task<string> CreatePasswordResetTokenAsync(SqlOSForgotPasswordRequest request, CancellationToken cancellationToken = default)
     {
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
@@ -1409,21 +1444,135 @@ public sealed class SqlOSAuthService
             ?? throw new InvalidOperationException("Unknown email address.");
 
         var token = await _cryptoService.CreateTemporaryTokenAsync(
-            "email_verification",
+            EmailVerificationPurpose,
             email.UserId,
             null,
             null,
             new EmailVerificationPayload(email.Id),
-            TimeSpan.FromDays(1),
+            EmailVerificationLifetime,
             cancellationToken);
 
         await _adminService.RecordAuditAsync("user.email-verification-token-created", "user", email.UserId, userId: email.UserId, cancellationToken: cancellationToken);
         return token;
     }
 
+    public async Task<SqlOSEmailVerificationRequestResult> RequestEmailVerificationAsync(
+        SqlOSCreateVerificationTokenRequest request,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        var trimmedEmail = NormalizeEmailInput(request.Email);
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(trimmedEmail);
+        var maskedEmail = MaskEmail(trimmedEmail);
+        var now = DateTime.UtcNow;
+        var email = await _context.Set<SqlOSUserEmail>()
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+
+        await _adminService.RecordAuditAsync(
+            "user.email-verification-requested",
+            "system",
+            null,
+            userId: email?.UserId,
+            ipAddress: GetIp(httpContext),
+            data: new { maskedEmail, eligible = email is { IsVerified: false } },
+            cancellationToken: cancellationToken);
+
+        if (email == null || email.IsVerified)
+        {
+            return new SqlOSEmailVerificationRequestResult(EmailVerificationGenericMessage);
+        }
+
+        var recentTokens = await _context.Set<SqlOSTemporaryToken>()
+            .Where(x => x.Purpose == EmailVerificationPurpose
+                && x.UserId == email.UserId
+                && x.ConsumedAt == null
+                && x.ExpiresAt >= now
+                && x.CreatedAt >= now.Subtract(EmailVerificationResendCooldown))
+            .ToListAsync(cancellationToken);
+        if (recentTokens.Any(token =>
+                _cryptoService.DeserializePayload<EmailVerificationPayload>(token)?.EmailId == email.Id))
+        {
+            return new SqlOSEmailVerificationRequestResult(EmailVerificationGenericMessage);
+        }
+
+        string? rawToken = null;
+        try
+        {
+            rawToken = await CreateEmailVerificationTokenAsync(request, cancellationToken);
+            var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
+            var applicationName = string.IsNullOrWhiteSpace(branding.ApplicationName)
+                ? string.IsNullOrWhiteSpace(_options.EmailOtp.ApplicationName)
+                    ? "SqlOS"
+                    : _options.EmailOtp.ApplicationName.Trim()
+                : branding.ApplicationName;
+            var verificationUrl = $"{GetTrustedPublicOrigin()}{_options.BasePath.TrimEnd('/')}/email/verify?token={Uri.EscapeDataString(rawToken)}";
+            var result = await (_transactionalEmailService
+                    ?? throw new InvalidOperationException("Transactional email service is not registered."))
+                .SendAsync(
+                    new SqlOSSendEmailRequest(
+                        SqlOSBuiltInEmailTemplates.AuthEmailVerificationKey,
+                        email.Email,
+                        new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["applicationName"] = applicationName,
+                            ["logoBase64"] = branding.LogoBase64 ?? string.Empty,
+                            ["logoImageDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "none" : "block",
+                            ["logoTextDisplay"] = string.IsNullOrWhiteSpace(branding.LogoBase64) ? "block" : "none",
+                            ["maskedEmail"] = MaskEmail(email.Email),
+                            ["verificationUrl"] = verificationUrl,
+                            ["expiresInHours"] = (int)EmailVerificationLifetime.TotalHours,
+                            ["primaryColor"] = branding.PrimaryColor,
+                            ["accentColor"] = branding.AccentColor,
+                            ["backgroundColor"] = branding.BackgroundColor
+                        },
+                        IdempotencyKey: $"auth-email-verification:{email.Id}:{_cryptoService.HashToken(rawToken)[..32]}"),
+                    cancellationToken);
+
+            if (string.Equals(result.Status, SqlOSEmailDeliveryStatuses.Failed, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(result.SanitizedError ?? "Email verification delivery failed.");
+            }
+
+            await _adminService.RecordAuditAsync(
+                "user.email-verification-sent",
+                "system",
+                null,
+                userId: email.UserId,
+                ipAddress: GetIp(httpContext),
+                data: new { maskedEmail, result.DeliveryId, DeliveryStatus = result.Status, result.ProviderMessageId },
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (rawToken != null)
+            {
+                var token = await _cryptoService.FindTemporaryTokenAsync(
+                    EmailVerificationPurpose,
+                    rawToken,
+                    CancellationToken.None);
+                if (token != null)
+                {
+                    token.ConsumedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync(CancellationToken.None);
+                }
+            }
+
+            await _adminService.RecordAuditAsync(
+                "user.email-verification-send-failed",
+                "system",
+                null,
+                userId: email.UserId,
+                ipAddress: GetIp(httpContext),
+                data: new { maskedEmail, error = ex.Message },
+                cancellationToken: CancellationToken.None);
+        }
+
+        return new SqlOSEmailVerificationRequestResult(EmailVerificationGenericMessage);
+    }
+
     public async Task VerifyEmailAsync(SqlOSVerifyEmailRequest request, CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("email_verification", request.Token, cancellationToken)
+        var token = await _cryptoService.ConsumeTemporaryTokenAsync(EmailVerificationPurpose, request.Token, cancellationToken)
             ?? throw new InvalidOperationException("Email verification token is invalid or expired.");
         var payload = _cryptoService.DeserializePayload<EmailVerificationPayload>(token)
             ?? throw new InvalidOperationException("Email verification token payload is invalid.");

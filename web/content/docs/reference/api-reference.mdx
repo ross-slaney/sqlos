@@ -205,24 +205,21 @@ These routes expose the same strongly typed contracts used by `SqlOSAuthService`
 | `POST /sqlos/auth/mfa/challenge/totp/enroll/verify` | `SqlOSTotpEnrollmentVerifyRequest` | `200 SqlOSTotpEnrollmentVerifyResult` |
 | `POST /sqlos/auth/token/exchange` | `SqlOSExchangeCodeRequest` | `200 SqlOSTokenResponse` |
 | `POST /sqlos/auth/token/refresh` | `SqlOSRefreshRequest` | `200 SqlOSTokenResponse` |
-| `POST /sqlos/auth/logout` | `{ refreshToken?, sessionId? }` | `204 No Content` |
+| `POST /sqlos/auth/logout` | `{ refreshToken? }` | `204 No Content`; unknown or missing tokens are idempotent no-ops |
+| `POST /sqlos/auth/logout-all` | `{ refreshToken }` | `204 No Content`; `401` when the refresh token is missing, inactive, expired, or already consumed |
 | `POST /sqlos/auth/password/forgot` | `SqlOSForgotPasswordRequest` | `200 SqlOSPasswordResetRequestResult` |
 | `POST /sqlos/auth/password/reset-email` | `SqlOSSendPasswordResetEmailRequest` | `200 SqlOSPasswordResetRequestResult` |
 | `POST /sqlos/auth/password/reset` | `SqlOSResetPasswordRequest` | `204 No Content` |
+| `POST /sqlos/auth/email/verification-email` | `SqlOSCreateVerificationTokenRequest` | `200 SqlOSEmailVerificationRequestResult`; the same generic response is returned for known and unknown emails |
+| `POST /sqlos/auth/email/verification-token` | `SqlOSCreateVerificationTokenRequest` | Compatibility alias for `/email/verification-email`; it sends email and never returns a token |
+| `GET /sqlos/auth/email/verify?token=...` | Query-string token from the verification email | One-time browser verification page |
 | `POST /sqlos/auth/email/verify` | `SqlOSVerifyEmailRequest` | `204 No Content` |
 
 `POST /token/exchange` consumes the temporary code created by the direct SAML request-token flow. An OAuth authorization-code client must use the form-encoded `POST /token` endpoint, which enforces the OAuth redirect URI, PKCE verifier, and optional resource binding.
 
-### Privileged helpers
+Account-management routes are secure by default without adding a blanket ASP.NET Core authorization policy to `/sqlos/auth`. Logout accepts only refresh-token proof of session ownership; the HTTP route ignores a caller-supplied `sessionId`. Logout-all derives the user from an active, unconsumed refresh token and never accepts a `userId`. Email-verification requests send a one-time link through the configured SqlOS email pipeline, use the trusted `PublicOrigin`/issuer rather than request host headers, suppress rapid resends, and return the same public shape for known, unknown, already verified, and delivery-failure cases.
 
-`MapSqlOS` also maps these JSON handlers:
-
-| Route | Behavior | Required host decision |
-| --- | --- | --- |
-| `POST /sqlos/auth/logout-all` | Accepts `{ userId }` and revokes every session for that user | Expose only behind host-owned authorization; the route does not infer the caller's user ID |
-| `POST /sqlos/auth/email/verification-token` | Accepts `SqlOSCreateVerificationTokenRequest` and returns the raw token | Never expose to an untrusted browser; call `SqlOSAuthService` from a protected backend workflow instead |
-
-The `/sqlos/auth` route group does not attach a blanket ASP.NET Core authorization policy. Flow endpoints validate their credentials, challenge tokens, or request state, but explicit IDs are not self-authorizing. Apply host middleware/edge rules to privileged helpers or wrap the .NET service in your own authorized endpoint.
+Trusted backend code can still call `SqlOSAuthService.LogoutAsync(..., sessionId: ...)`, `LogoutAllAsync(userId)`, or `CreateEmailVerificationTokenAsync(...)` after applying its own ownership/admin policy. Do not expose those service methods by mapping caller-supplied IDs or raw tokens directly into a public route.
 
 ## Headless AuthPage API
 

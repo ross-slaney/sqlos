@@ -127,6 +127,165 @@ public sealed class SqlOSExampleApiIntegrationTests
     }
 
     [TestMethod]
+    public async Task AccountManagementEndpoints_DeriveSessionOwnershipFromRefreshToken()
+    {
+        using var factory = ExampleApiFixture.CreateFactory();
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = $"account-security-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Account Security User",
+            email,
+            password = "P@ssword123!",
+            clientId = "example-web"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+        using var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
+        var signupTokens = signupJson.RootElement.GetProperty("tokens");
+        var sessionId = signupTokens.GetProperty("sessionId").GetString();
+        var refreshToken = signupTokens.GetProperty("refreshToken").GetString();
+
+        var sessionIdLogout = await client.PostAsJsonAsync("/sqlos/auth/logout", new { sessionId });
+        sessionIdLogout.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+
+        var refreshAfterSessionIdAttack = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new { refreshToken });
+        refreshAfterSessionIdAttack.IsSuccessStatusCode.Should().BeTrue("an anonymous session id must not authorize logout");
+        using var refreshedJson = JsonDocument.Parse(await refreshAfterSessionIdAttack.Content.ReadAsStringAsync());
+        refreshToken = refreshedJson.RootElement.GetProperty("refreshToken").GetString();
+
+        var userId = await GetUserIdByEmailAsync(factory.Services, email);
+        var userIdLogoutAll = await client.PostAsJsonAsync("/sqlos/auth/logout-all", new { userId });
+        userIdLogoutAll.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+
+        var refreshAfterUserIdAttack = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new { refreshToken });
+        refreshAfterUserIdAttack.IsSuccessStatusCode.Should().BeTrue("a caller-supplied user id must not authorize logout-all");
+        using var secondRefreshJson = JsonDocument.Parse(await refreshAfterUserIdAttack.Content.ReadAsStringAsync());
+        refreshToken = secondRefreshJson.RootElement.GetProperty("refreshToken").GetString();
+
+        var selfLogoutAll = await client.PostAsJsonAsync("/sqlos/auth/logout-all", new { refreshToken });
+        selfLogoutAll.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
+
+        var refreshAfterSelfLogoutAll = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new { refreshToken });
+        refreshAfterSelfLogoutAll.IsSuccessStatusCode.Should().BeFalse("logout-all must revoke the authenticated user's token family");
+    }
+
+    [TestMethod]
+    public async Task EmailVerificationRequest_DeliversTrustedLinkWithoutDisclosingOrEnumerating()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Issuer", "https://auth.example.test/sqlos/auth");
+            builder.UseSetting("SqlOS:PublicOrigin", "https://auth.example.test");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+        var email = $"verify-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Verification User",
+            email,
+            password = "P@ssword123!",
+            clientId = "example-web"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+
+        using var knownRequest = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/email/verification-token")
+        {
+            Content = JsonContent.Create(new { email })
+        };
+        knownRequest.Headers.Host = "attacker.example";
+        knownRequest.Headers.TryAddWithoutValidation("Forwarded", "host=forwarded-attacker.example;proto=https");
+        knownRequest.Headers.TryAddWithoutValidation("X-Forwarded-Host", "forwarded-attacker.example");
+        var knownResponse = await client.SendAsync(knownRequest);
+        knownResponse.EnsureSuccessStatusCode();
+        var knownBody = await knownResponse.Content.ReadAsStringAsync();
+        using var knownJson = JsonDocument.Parse(knownBody);
+        knownJson.RootElement.GetProperty("message").GetString().Should()
+            .Be("If the email can be verified, you'll receive a verification email shortly.");
+        knownJson.RootElement.TryGetProperty("token", out _).Should().BeFalse();
+
+        sender.Messages.Should().ContainSingle();
+        var delivered = sender.Messages.Single();
+        delivered.TextBody.Should().Contain("https://auth.example.test/sqlos/auth/email/verify?token=");
+        delivered.TextBody.Should().NotContain("attacker.example");
+
+        var secondKnownResponse = await client.PostAsJsonAsync("/sqlos/auth/email/verification-email", new { email });
+        secondKnownResponse.EnsureSuccessStatusCode();
+        sender.Messages.Should().ContainSingle("the resend cooldown should prevent mail bombing");
+
+        var unknownResponse = await client.PostAsJsonAsync(
+            "/sqlos/auth/email/verification-token",
+            new { email = $"missing-{Guid.NewGuid():N}@example.com" });
+        unknownResponse.EnsureSuccessStatusCode();
+        (await unknownResponse.Content.ReadAsStringAsync()).Should().Be(knownBody);
+
+        var userId = await GetUserIdByEmailAsync(factory.Services, email);
+        (await IsEmailVerifiedAsync(factory.Services, userId)).Should().BeFalse();
+
+        var verificationToken = ExtractVerificationToken(delivered.TextBody);
+        var verifyResponse = await client.GetAsync($"/sqlos/auth/email/verify?token={Uri.EscapeDataString(verificationToken)}");
+        verifyResponse.EnsureSuccessStatusCode();
+        (await verifyResponse.Content.ReadAsStringAsync()).Should().Contain("Email verified");
+        (await IsEmailVerifiedAsync(factory.Services, userId)).Should().BeTrue();
+
+        var replayResponse = await client.GetAsync($"/sqlos/auth/email/verify?token={Uri.EscapeDataString(verificationToken)}");
+        replayResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest);
+    }
+
+    [TestMethod]
+    public async Task EmailVerificationRequest_DeliveryFailureLeavesNoUsableToken()
+    {
+        using var factory = ExampleApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("SqlOS:Issuer", "https://auth.example.test/sqlos/auth");
+            builder.UseSetting("SqlOS:PublicOrigin", "https://auth.example.test");
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ISqlOSEmailSender>();
+                services.AddSingleton<CapturingTransactionalEmailSender>();
+                services.AddSingleton<ISqlOSEmailSender>(sp => sp.GetRequiredService<CapturingTransactionalEmailSender>());
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
+        var email = $"verify-failure-{Guid.NewGuid():N}@example.com";
+        var signupResponse = await client.PostAsJsonAsync("/sqlos/auth/signup", new
+        {
+            displayName = "Verification Failure User",
+            email,
+            password = "P@ssword123!",
+            clientId = "example-web"
+        });
+        signupResponse.EnsureSuccessStatusCode();
+        sender.FailDelivery = true;
+
+        var knownResponse = await client.PostAsJsonAsync("/sqlos/auth/email/verification-token", new { email });
+        var unknownResponse = await client.PostAsJsonAsync(
+            "/sqlos/auth/email/verification-token",
+            new { email = $"missing-{Guid.NewGuid():N}@example.com" });
+        knownResponse.EnsureSuccessStatusCode();
+        unknownResponse.EnsureSuccessStatusCode();
+        (await knownResponse.Content.ReadAsStringAsync()).Should().Be(await unknownResponse.Content.ReadAsStringAsync());
+
+        var userId = await GetUserIdByEmailAsync(factory.Services, email);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+        (await db.Set<SqlOSTemporaryToken>().CountAsync(token =>
+            token.UserId == userId
+            && token.Purpose == "email_verification"
+            && token.ConsumedAt == null)).Should().Be(0);
+        (await db.Set<SqlOSAuditEvent>().CountAsync(audit =>
+            audit.UserId == userId
+            && audit.EventType == "user.email-verification-send-failed")).Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task PasswordResetAndRefresh_Work()
     {
         using var factory = ExampleApiFixture.CreateFactory(builder =>
@@ -1166,6 +1325,35 @@ public sealed class SqlOSExampleApiIntegrationTests
         var match = System.Text.RegularExpressions.Regex.Match(textBody, @"token=([A-Za-z0-9_-]+)");
         match.Success.Should().BeTrue();
         return match.Groups[1].Value;
+    }
+
+    private static string ExtractVerificationToken(string textBody)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            textBody,
+            @"/email/verify\?token=([A-Za-z0-9_-]+)");
+        match.Success.Should().BeTrue();
+        return match.Groups[1].Value;
+    }
+
+    private static async Task<string> GetUserIdByEmailAsync(IServiceProvider services, string email)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+        return await db.Set<SqlOSUserEmail>()
+            .Where(userEmail => userEmail.NormalizedEmail == email.ToUpperInvariant())
+            .Select(userEmail => userEmail.UserId)
+            .SingleAsync();
+    }
+
+    private static async Task<bool> IsEmailVerifiedAsync(IServiceProvider services, string userId)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+        return await db.Set<SqlOSUserEmail>()
+            .Where(userEmail => userEmail.UserId == userId)
+            .Select(userEmail => userEmail.IsVerified)
+            .SingleAsync();
     }
 
     private static string BuildSignedSamlResponse(

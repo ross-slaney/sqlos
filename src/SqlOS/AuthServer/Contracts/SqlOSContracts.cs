@@ -137,6 +137,8 @@ public sealed record SqlOSPasswordResetRequestResult(
 
 public sealed record SqlOSCreateVerificationTokenRequest(string Email);
 
+public sealed record SqlOSEmailVerificationRequestResult(string Message);
+
 public sealed record SqlOSVerifyEmailRequest(string Token);
 
 public sealed record SqlOSCreateOrganizationRequest(string Name, string? Slug, string? PrimaryDomain = null);
