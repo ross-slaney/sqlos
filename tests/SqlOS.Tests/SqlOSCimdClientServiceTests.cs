@@ -283,6 +283,16 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public void SecureTransport_DisablesRedirectsAndAmbientProxyRouting()
+    {
+        using var handler = SqlOSCimdHttpHandlerFactory.Create();
+
+        handler.AllowAutoRedirect.Should().BeFalse();
+        handler.UseProxy.Should().BeFalse();
+        handler.ConnectCallback.Should().NotBeNull();
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsRedirectResponsesWithoutFollowing()
     {
         using var context = CreateContext();
