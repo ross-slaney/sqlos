@@ -127,6 +127,25 @@ public sealed class PublicOriginSecurityIntegrationTests
             .Should().Be("https://localhost/sqlos/auth/authorize");
     }
 
+    [TestMethod]
+    public async Task ExplicitPublicOrigin_RemainsAuthoritativeUnderHostileHost()
+    {
+        const string proxyOrigin = "https://proxy.example.test";
+        await using var server = await PublicOriginServer.CreateAsync(
+            issuer: $"{proxyOrigin}/sqlos/auth",
+            trustedOrigin: proxyOrigin,
+            publicOrigin: proxyOrigin);
+        using var client = server.App.GetTestClient();
+
+        var response = await SendWithHostAsync(client, HttpMethod.Get, "/sqlos/auth/.well-known/oauth-authorization-server");
+        response.EnsureSuccessStatusCode();
+        using var metadata = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        metadata.RootElement.GetProperty("authorization_endpoint").GetString()
+            .Should().Be($"{proxyOrigin}/sqlos/auth/authorize");
+        metadata.RootElement.GetProperty("token_endpoint").GetString()
+            .Should().Be($"{proxyOrigin}/sqlos/auth/token");
+    }
+
     private static async Task<HttpResponseMessage> SendWithHostAsync(
         HttpClient client,
         HttpMethod method,
@@ -154,7 +173,8 @@ public sealed class PublicOriginSecurityIntegrationTests
 
         public static async Task<PublicOriginServer> CreateAsync(
             string issuer = $"{TrustedOrigin}/sqlos/auth",
-            string trustedOrigin = TrustedOrigin)
+            string trustedOrigin = TrustedOrigin,
+            string? publicOrigin = null)
         {
             await using var bootstrapContext = await AspireFixture.CreateIsolatedAuthContextAsync("PublicOrigin");
             var connectionString = bootstrapContext.Database.GetConnectionString()!;
@@ -166,6 +186,7 @@ public sealed class PublicOriginSecurityIntegrationTests
             {
                 options.AuthServer.Issuer = issuer;
                 options.AuthServer.BasePath = "/sqlos/auth";
+                options.AuthServer.PublicOrigin = publicOrigin;
                 options.AuthServer.DeviceAuthorization.Enabled = true;
                 options.AuthServer.SeedBrowserClient("browser-client", "Browser Client", "https://client.example.test/callback");
                 options.AuthServer.SeedCliClient("device-client", "Device Client", "openid");

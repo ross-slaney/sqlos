@@ -58,6 +58,36 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [DataTestMethod]
+    [DataRow("issuer")]
+    [DataRow("public-origin")]
+    [DataRow("single-application")]
+    public void AddSqlOS_Throws_WhenTrustedAuthorityIncludesUserInformation(string source)
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            if (source == "issuer")
+            {
+                options.AuthServer.Issuer = "https://trusted.example@attacker.example/sqlos/auth";
+            }
+            else if (source == "public-origin")
+            {
+                options.AuthServer.PublicOrigin = "https://trusted.example@attacker.example";
+                options.AuthServer.Issuer = "https://trusted.example@attacker.example/sqlos/auth";
+            }
+            else
+            {
+                options.UseSingleApplication("Acme", application =>
+                    application.Origin = "https://trusted.example@attacker.example");
+            }
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*cannot include user information.*");
+    }
+
+    [DataTestMethod]
     [DataRow("/")]
     [DataRow("sqlos/scim/v2")]
     [DataRow("/sqlos/scim/v2?tenant=acme")]
