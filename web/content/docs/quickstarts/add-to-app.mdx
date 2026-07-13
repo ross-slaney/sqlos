@@ -76,8 +76,6 @@ builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
-        options.AuthServer.PublicOrigin = publicOrigin;
-        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;
@@ -150,7 +148,7 @@ That runnable client uses `/signin-sqlos`, the conventional ASP.NET Core middlew
 
 ### `Invalid SqlOS configuration` at startup
 
-`PublicOrigin` must be an absolute origin without a path, query, or fragment. `Issuer` must use the configured auth base path. For the defaults, it is exactly `{PublicOrigin}/sqlos/auth`.
+In single-application local development, SqlOS derives the issuer from `app.Origin` when the issuer is otherwise left at its default. For production or multi-application deployments, configure one stable issuer; set `PublicOrigin` during production readiness when you need to make that external origin explicit. `PublicOrigin` must be an absolute origin without a path, query, or fragment, and the issuer must be exactly `{PublicOrigin}/sqlos/auth` when it is set.
 
 ### SQL reports that the database does not exist
 

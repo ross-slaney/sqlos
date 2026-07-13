@@ -54,7 +54,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? throw new InvalidOperationException(
         "Connection string 'DefaultConnection' was not configured.");
 
-const string publicOrigin = "http://localhost:5050";
+const string appOrigin = "http://localhost:5050";
 var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
     ?? throw new InvalidOperationException(
         "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
@@ -62,12 +62,10 @@ builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
-        options.AuthServer.PublicOrigin = publicOrigin;
-        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
         options.UseSingleApplication("Acme", app =>
         {
-            app.Origin = publicOrigin;
-            app.Audience = $"{publicOrigin}/api";
+            app.Origin = appOrigin;
+            app.Audience = $"{appOrigin}/api";
         });
 
         options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;

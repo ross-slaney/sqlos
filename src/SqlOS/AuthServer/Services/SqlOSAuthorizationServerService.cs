@@ -1136,14 +1136,7 @@ public sealed class SqlOSAuthorizationServerService
     }
 
     public string GetPublicOrigin(HttpContext httpContext)
-    {
-        if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
-        {
-            return _options.PublicOrigin.TrimEnd('/');
-        }
-
-        return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
-    }
+        => SqlOSPublicOriginResolver.Resolve(_options);
 
     private static List<string> ParseJsonArray(string json)
         => JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();

@@ -692,25 +692,8 @@ public sealed class SqlOSInvitationService
 
     private string BuildAcceptUrl(string rawToken, HttpContext? httpContext)
     {
-        var origin = GetPublicOrigin(httpContext);
+        var origin = SqlOSPublicOriginResolver.Resolve(_options);
         return $"{origin}{_options.BasePath.TrimEnd('/')}/invitations/accept?token={Uri.EscapeDataString(rawToken)}";
-    }
-
-    private string GetPublicOrigin(HttpContext? httpContext)
-    {
-        if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
-        {
-            return _options.PublicOrigin.TrimEnd('/');
-        }
-
-        if (httpContext != null)
-        {
-            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
-        }
-
-        return _options.Issuer.TrimEnd('/').EndsWith(_options.BasePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-            ? _options.Issuer.TrimEnd('/')[..^_options.BasePath.TrimEnd('/').Length]
-            : _options.Issuer.TrimEnd('/');
     }
 
     private static void EnsureInvitationPending(SqlOSInvitation invitation)

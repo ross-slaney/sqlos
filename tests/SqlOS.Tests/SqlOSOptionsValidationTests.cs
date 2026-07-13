@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
@@ -119,6 +120,21 @@ public sealed class SqlOSOptionsValidationTests
         });
 
         act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_SingleApplicationOriginDerivesIssuerWithoutPublicOriginSetup()
+    {
+        var services = new ServiceCollection();
+
+        services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.UseSingleApplication("Acme", application =>
+                application.Origin = "http://localhost:5050"));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
+        options.PublicOrigin.Should().BeNull();
+        options.Issuer.Should().Be("http://localhost:5050/sqlos/auth");
     }
 
     [TestMethod]

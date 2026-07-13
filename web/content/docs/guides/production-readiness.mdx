@@ -32,9 +32,11 @@ Use this as the minimum deployment contract:
 | Edge or reverse proxy | TLS, trusted forwarded headers, admin-route access control, rate limiting, request limits |
 | Deployment controller | One-writer schema rollout, readiness gates, compatible replicas, rollback/runbook |
 
-## 1. Make the public URL explicit
+## 1. Make the public URL stable
 
-Production URLs must not depend on the container's internal host name or HTTP scheme. Set both values in the `AddSqlOS` callback:
+SqlOS never uses the incoming request `Host` as the authority for invitation links, provider callbacks, discovery metadata, device verification, or SSO portal links. When `PublicOrigin` is omitted, those URLs use the authority of the validated absolute `Issuer`; the default `https://localhost/sqlos/auth` therefore keeps local development zero-configuration.
+
+For production, set the issuer to the canonical external authorization-server URL. Set `PublicOrigin` as an explicit readiness setting when a reverse proxy or deployment configuration makes the externally reachable origin non-obvious, and keep it aligned with the issuer:
 
 ```csharp
 var publicOrigin = builder.Configuration["SqlOS:PublicOrigin"]
@@ -52,7 +54,7 @@ builder.AddSqlOS<AppDbContext>(
     });
 ```
 
-`PublicOrigin` must be an absolute **origin only**: scheme, host, and optional port, with no path, query, or fragment. With `DashboardBasePath = "/sqlos"`, SqlOS derives the auth base path as `/sqlos/auth`, and `Issuer` must be exactly `{PublicOrigin}/sqlos/auth`.
+`PublicOrigin` is optional when the issuer already contains the correct public authority. When configured, it must be an absolute **origin only**: scheme, host, and optional port, with no path, query, or fragment. With `DashboardBasePath = "/sqlos"`, SqlOS derives the auth base path as `/sqlos/auth`, and `Issuer` must be exactly `{PublicOrigin}/sqlos/auth`.
 
 Examples:
 
@@ -65,7 +67,7 @@ The issuer is a security identifier, not just a link. Resource APIs validate the
 
 ### Reverse proxies and forwarded headers
 
-`PublicOrigin` keeps generated invitation, reset, callback, device, and portal URLs on the external origin. Also configure ASP.NET Core to accept forwarded scheme and host information **only from your known proxy** so the rest of the host sees the original HTTPS request correctly:
+The trusted issuer/`PublicOrigin` keeps generated invitation, reset, callback, device, and portal URLs on the external origin regardless of request headers. Also configure ASP.NET Core to accept forwarded scheme and host information **only from your known proxy** so client-IP policy and the rest of the host see the original request correctly:
 
 ```csharp
 using System.Net;

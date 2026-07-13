@@ -49,8 +49,6 @@ builder.AddSqlOS<AppDbContext>(
     db => db.UseSqlServer(connectionString),
     options =>
     {
-        options.AuthServer.PublicOrigin = publicOrigin;
-        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
         options.UseSingleApplication("Acme", app =>
         {
             app.Origin = publicOrigin;

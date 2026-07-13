@@ -100,7 +100,7 @@ public sealed class SqlOSDeviceAuthorizationService
             ipAddress: GetIp(httpContext),
             cancellationToken: cancellationToken);
 
-        var origin = GetPublicOrigin(httpContext);
+        var origin = SqlOSPublicOriginResolver.Resolve(_options);
         var basePath = _options.BasePath.TrimEnd('/');
         var verificationUri = $"{origin}{basePath}/device";
         var verificationUriComplete = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
@@ -604,16 +604,6 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.Status,
             requiresOrganizationSelection,
             organizations);
-
-    private string GetPublicOrigin(HttpContext httpContext)
-    {
-        if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
-        {
-            return _options.PublicOrigin.TrimEnd('/');
-        }
-
-        return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
-    }
 
     private static List<string> NormalizeRequestedScopes(string? scope)
         => string.IsNullOrWhiteSpace(scope)

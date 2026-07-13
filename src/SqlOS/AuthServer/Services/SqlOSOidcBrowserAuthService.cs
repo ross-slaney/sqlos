@@ -414,9 +414,7 @@ public sealed class SqlOSOidcBrowserAuthService
 
     private string GetProviderCallbackUri(HttpContext httpContext)
     {
-        var origin = string.IsNullOrWhiteSpace(_options.PublicOrigin)
-            ? $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/')
-            : _options.PublicOrigin!.TrimEnd('/');
+        var origin = SqlOSPublicOriginResolver.Resolve(_options);
 
         return $"{origin}{_options.BasePath.TrimEnd('/')}/oidc/callback";
     }
