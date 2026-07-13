@@ -329,7 +329,10 @@ public sealed class SqlOSExampleApiIntegrationTests
         signupResponse.EnsureSuccessStatusCode();
         var signupJson = JsonDocument.Parse(await signupResponse.Content.ReadAsStringAsync());
         var tokens = signupJson.RootElement.GetProperty("tokens");
-        var refreshToken = tokens.GetProperty("refreshToken").GetString();
+        var originalRefreshToken = tokens.GetProperty("refreshToken").GetString();
+        var refreshToken = originalRefreshToken;
+        var accessToken = tokens.GetProperty("accessToken").GetString();
+        var sessionId = tokens.GetProperty("sessionId").GetString();
         var organizationId = tokens.GetProperty("organizationId").GetString();
 
         var refreshResponse = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
@@ -338,6 +341,16 @@ public sealed class SqlOSExampleApiIntegrationTests
             organizationId
         });
         refreshResponse.EnsureSuccessStatusCode();
+        using var refreshJson = JsonDocument.Parse(await refreshResponse.Content.ReadAsStringAsync());
+        refreshToken = refreshJson.RootElement.GetProperty("refreshToken").GetString();
+        accessToken = refreshJson.RootElement.GetProperty("accessToken").GetString();
+
+        using (var beforeResetRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello"))
+        {
+            beforeResetRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            var beforeResetResponse = await client.SendAsync(beforeResetRequest);
+            beforeResetResponse.EnsureSuccessStatusCode();
+        }
 
         var forgotResponse = await client.PostAsJsonAsync("/sqlos/auth/password/forgot", new { email, clientId = "example-web" });
         forgotResponse.EnsureSuccessStatusCode();
@@ -352,6 +365,45 @@ public sealed class SqlOSExampleApiIntegrationTests
             newPassword = "NewPassword123!"
         });
         resetResponse.EnsureSuccessStatusCode();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ExampleAppDbContext>();
+            var session = await db.Set<SqlOSSession>().SingleAsync(candidate => candidate.Id == sessionId);
+            session.RevocationReason.Should().Be("password_reset");
+            var persistedRefreshTokens = await db.Set<SqlOSRefreshToken>()
+                .Where(candidate => candidate.SessionId == sessionId)
+                .ToListAsync();
+            persistedRefreshTokens.Should().HaveCount(2);
+            persistedRefreshTokens.Should().OnlyContain(candidate =>
+                candidate.RevokedAt != null
+                && candidate.ReplacementTokenResponse == null
+                && candidate.ReplacementOrganizationId == null
+                && candidate.ReplacementAccessTokenExpiresAt == null);
+        }
+
+        var refreshAfterReset = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
+        {
+            refreshToken,
+            organizationId
+        });
+        refreshAfterReset.IsSuccessStatusCode.Should().BeFalse("password reset must revoke every pre-reset refresh token");
+
+        var graceRetryAfterReset = await client.PostAsJsonAsync("/sqlos/auth/token/refresh", new
+        {
+            refreshToken = originalRefreshToken,
+            organizationId
+        });
+        graceRetryAfterReset.IsSuccessStatusCode.Should().BeFalse(
+            "password reset must not release a cached replacement through the consumed-parent grace path");
+
+        using (var afterResetRequest = new HttpRequestMessage(HttpMethod.Get, "/api/hello"))
+        {
+            afterResetRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            var afterResetResponse = await client.SendAsync(afterResetRequest);
+            afterResetResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized,
+                "database-backed access-token validation must reject a session revoked by password reset");
+        }
 
         var loginResponse = await client.PostAsJsonAsync("/sqlos/auth/password/login", new
         {

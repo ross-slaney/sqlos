@@ -349,7 +349,7 @@ SqlOS's database-backed `ValidateAccessTokenAsync` and `UseSqlOSAccessTokenValid
 
 An external resource server that validates only JWT signature and lifetime from JWKS has no database session lookup. It can continue accepting an already-issued access token until `exp`. Keep access tokens short-lived, or use a session-aware introspection/validation path where immediate revocation is required.
 
-Password reset itself still does not revoke anything. A strong recovery experience should tell the user to sign in with the new password and review devices immediately. A support-led compromise workflow that already knows the affected user id can call `LogoutAllAsync` as a distinct authorized operation.
+Password reset revokes the user's OAuth sessions, refresh-token families, hosted AuthPage sessions, pending authorization codes, MFA challenges, approved-but-unconsumed device authorizations, and active email/phone OTP challenges. The user must sign in again with the new password. A strong recovery experience should still direct them to review devices after signing in; a support-led compromise workflow that already knows the affected user id can call `LogoutAllAsync` without changing the password.
 
 ## 9. Verify the complete flow
 

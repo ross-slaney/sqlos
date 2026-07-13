@@ -280,6 +280,11 @@ public sealed class SqlOSAuthLifecycleTests
         await using var harness = await LifecycleHarness.CreateAsync();
         var subject = await harness.CreateOrganizationSubjectAsync("password-reset");
         var tokens = await harness.IssueTokensAsync(subject);
+        var rotatedTokens = await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(tokens.RefreshToken, subject.Organization.Id));
+        var consumedParent = await harness.Context.Set<SqlOSRefreshToken>()
+            .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(tokens.RefreshToken));
+        consumedParent.ReplacementTokenResponse.Should().NotBeNull();
         var authPageCookie = await harness.CreateAuthPageSessionAsync(subject);
         const string verifier = "password-reset-verifier-123456789012345678901";
         var authorizationRequest = new SqlOSAuthorizationRequest
@@ -365,6 +370,15 @@ public sealed class SqlOSAuthLifecycleTests
         (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", authPageCookie)).Should().BeNull();
         (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == tokens.SessionId))
             .RevocationReason.Should().Be("password_reset");
+        var revokedRefreshTokens = await harness.Context.Set<SqlOSRefreshToken>()
+            .Where(x => x.SessionId == tokens.SessionId)
+            .ToListAsync();
+        revokedRefreshTokens.Should().HaveCount(2);
+        revokedRefreshTokens.Should().OnlyContain(x =>
+            x.RevokedAt != null
+            && x.ReplacementTokenResponse == null
+            && x.ReplacementOrganizationId == null
+            && x.ReplacementAccessTokenExpiresAt == null);
         (await harness.Context.Set<SqlOSAuthorizationCode>()
             .SingleAsync(x => x.CodeHash == harness.Crypto.HashToken(pendingCode))).ConsumedAt.Should().NotBeNull();
         (await harness.Crypto.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, pendingMfaToken))
@@ -374,8 +388,11 @@ public sealed class SqlOSAuthLifecycleTests
         emailChallenge.InvalidatedReason.Should().Be("password_reset");
         phoneChallenge.InvalidatedReason.Should().Be("password_reset");
         var refresh = async () => await harness.Auth.RefreshAsync(
-            new SqlOSRefreshRequest(tokens.RefreshToken, subject.Organization.Id));
+            new SqlOSRefreshRequest(rotatedTokens.RefreshToken, subject.Organization.Id));
         await refresh.Should().ThrowAsync<InvalidOperationException>();
+        var graceRetry = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(tokens.RefreshToken, subject.Organization.Id));
+        await graceRetry.Should().ThrowAsync<InvalidOperationException>();
         var codeExchange = async () => await harness.Authorization.ExchangeAuthorizationCodeAsync(
             new SqlOSTokenRequest(
                 "authorization_code",
