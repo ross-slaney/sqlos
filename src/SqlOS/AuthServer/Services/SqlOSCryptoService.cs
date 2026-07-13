@@ -21,6 +21,7 @@ public sealed class SqlOSCryptoService
 {
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly SqlOSValidationSigningKeyCache _validationSigningKeyCache;
     private readonly PasswordHasher<object> _passwordHasher = new();
     private readonly IDataProtector? _secretProtector;
     private readonly ITimeLimitedDataProtector? _refreshTokenResponseProtector;
@@ -34,7 +35,8 @@ public sealed class SqlOSCryptoService
             context,
             options,
             new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider),
-            dataProtectionProvider)
+            dataProtectionProvider,
+            validationSigningKeyCache: null)
     {
     }
 
@@ -42,10 +44,12 @@ public sealed class SqlOSCryptoService
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         ISqlOSSigningKeyCustody signingKeyCustody,
-        IDataProtectionProvider? dataProtectionProvider = null)
+        IDataProtectionProvider? dataProtectionProvider = null,
+        SqlOSValidationSigningKeyCache? validationSigningKeyCache = null)
     {
         _context = context;
         _options = options.Value;
+        _validationSigningKeyCache = validationSigningKeyCache ?? new SqlOSValidationSigningKeyCache();
         _secretProtector = dataProtectionProvider?.CreateProtector("SqlOS.AuthServer.OidcSecrets");
         _refreshTokenResponseProtector = dataProtectionProvider?
             .CreateProtector("SqlOS.AuthServer.RefreshTokenResponse.v1")
@@ -347,6 +351,7 @@ public sealed class SqlOSCryptoService
             _context.Set<SqlOSSigningKey>().Add(createdKey);
             await _context.SaveChangesAsync(cancellationToken);
             await CommitAsync(transaction, cancellationToken);
+            _validationSigningKeyCache.InvalidateAll();
             return createdKey;
         }
         catch
@@ -363,11 +368,19 @@ public sealed class SqlOSCryptoService
     public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(CancellationToken cancellationToken = default)
     {
         var graceWindow = await ResolveSigningKeyGraceWindowAsync(cancellationToken);
-        var cutoff = DateTime.UtcNow.Subtract(graceWindow);
-        var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
-        return keys
-            .Where(key => key.IsActive || key.RetiredAt >= cutoff)
-            .ToList();
+        var cacheKey = $"{_options.Schema}|{_options.Issuer}|{graceWindow.Ticks}";
+        return await _validationSigningKeyCache.GetOrCreateAsync(
+            cacheKey,
+            _options.AccessTokenValidationSigningKeyCacheTtl,
+            async ct =>
+            {
+                var cutoff = DateTime.UtcNow.Subtract(graceWindow);
+                var keys = await LoadAndValidateSigningKeysAsync(ct);
+                return keys
+                    .Where(key => key.IsActive || key.RetiredAt >= cutoff)
+                    .ToList();
+            },
+            cancellationToken);
     }
 
     public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
@@ -400,6 +413,7 @@ public sealed class SqlOSCryptoService
             _context.Set<SqlOSSigningKey>().Add(newKey);
             await _context.SaveChangesAsync(cancellationToken);
             await CommitAsync(transaction, cancellationToken);
+            _validationSigningKeyCache.InvalidateAll();
             return newKey;
         }
         catch
@@ -445,6 +459,7 @@ public sealed class SqlOSCryptoService
 
         _context.Set<SqlOSSigningKey>().RemoveRange(expired);
         await _context.SaveChangesAsync(cancellationToken);
+        _validationSigningKeyCache.InvalidateAll();
         return expired.Count;
     }
 
@@ -659,20 +674,29 @@ public sealed class SqlOSCryptoService
                 nextIdleExpiry = session.AbsoluteExpiresAt;
             }
 
-            var sessionToUpdate = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
-                ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
-            sessionToUpdate.LastSeenAt = now;
-            sessionToUpdate.IdleExpiresAt = nextIdleExpiry;
+            var shouldSaveActivity = false;
+            if (ShouldPersistValidationLastSeen(session.LastSeenAt, now))
+            {
+                var sessionToUpdate = _context.Set<SqlOSSession>().Local.FirstOrDefault(x => x.Id == session.Id)
+                    ?? await _context.Set<SqlOSSession>().FirstAsync(x => x.Id == session.Id, cancellationToken);
+                sessionToUpdate.LastSeenAt = now;
+                sessionToUpdate.IdleExpiresAt = nextIdleExpiry;
+                shouldSaveActivity = true;
+            }
             if (!string.IsNullOrWhiteSpace(session.ClientApplicationId))
             {
                 var client = await _context.Set<SqlOSClientApplication>()
                     .FirstOrDefaultAsync(x => x.Id == session.ClientApplicationId, cancellationToken);
-                if (client != null)
+                if (client != null && ShouldPersistValidationLastSeen(client.LastSeenAt, now))
                 {
                     client.LastSeenAt = now;
+                    shouldSaveActivity = true;
                 }
             }
-            await _context.SaveChangesAsync(cancellationToken);
+            if (shouldSaveActivity)
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+            }
 
             return new SqlOSValidatedToken(
                 principal,
@@ -715,6 +739,14 @@ public sealed class SqlOSCryptoService
         rsa.ImportFromPem(key.PublicKeyPem);
         var parameters = rsa.ExportParameters(false);
         return new RsaSecurityKey(parameters) { KeyId = key.Kid };
+    }
+
+    private bool ShouldPersistValidationLastSeen(DateTime? currentLastSeenAt, DateTime now)
+    {
+        var debounceInterval = _options.AccessTokenValidationLastSeenDebounceInterval;
+        return debounceInterval <= TimeSpan.Zero
+            || currentLastSeenAt == null
+            || currentLastSeenAt.Value.Add(debounceInterval) <= now;
     }
 
     private async Task<SqlOSSigningKey> CreateSigningKeyAsync(

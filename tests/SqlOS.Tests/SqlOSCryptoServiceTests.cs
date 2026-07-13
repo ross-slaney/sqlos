@@ -547,8 +547,8 @@ public sealed class SqlOSCryptoServiceTests
 
         oldKey.RetiredAt = DateTime.UtcNow.AddDays(-8);
         await context.SaveChangesAsync();
-        (await service.ValidateAccessTokenAsync(oldToken, client.Audience)).Should().BeNull();
         (await service.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(7))).Should().Be(1);
+        (await service.ValidateAccessTokenAsync(oldToken, client.Audience)).Should().BeNull();
         (await service.GetValidationSigningKeysAsync()).Select(key => key.Kid).Should().Equal(newKey.Kid);
         custody.DeleteCount.Should().Be(1);
     }
@@ -599,6 +599,79 @@ public sealed class SqlOSCryptoServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*share the same canonical RSA public key*ambiguous provider ownership*");
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessTokenAsync_DebouncesRepeatedLastSeenWrites()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions
+        {
+            AccessTokenValidationLastSeenDebounceInterval = TimeSpan.FromMinutes(10)
+        });
+        var service = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        session.LastSeenAt = DateTime.UtcNow.AddMinutes(-30);
+        client.LastSeenAt = session.LastSeenAt;
+        await context.SaveChangesAsync();
+        var token = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+
+        var baselineSaveCount = context.SaveChangesAsyncCallCount;
+        (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().NotBeNull();
+        context.SaveChangesAsyncCallCount.Should().Be(baselineSaveCount + 1);
+        var updatedSessionLastSeenAt = session.LastSeenAt;
+        var updatedClientLastSeenAt = client.LastSeenAt;
+
+        for (var i = 0; i < 3; i++)
+        {
+            (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().NotBeNull();
+        }
+
+        context.SaveChangesAsyncCallCount.Should().Be(baselineSaveCount + 1);
+        session.LastSeenAt.Should().Be(updatedSessionLastSeenAt);
+        client.LastSeenAt.Should().Be(updatedClientLastSeenAt);
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessTokenAsync_RejectsRevokedSessionWithinLastSeenDebounceWindow()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions
+        {
+            AccessTokenValidationLastSeenDebounceInterval = TimeSpan.FromMinutes(10)
+        });
+        var service = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        var token = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+
+        session.RevokedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+        var baselineSaveCount = context.SaveChangesAsyncCallCount;
+
+        (await service.ValidateAccessTokenAsync(token, client.Audience)).Should().BeNull();
+        context.SaveChangesAsyncCallCount.Should().Be(baselineSaveCount);
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessTokenAsync_InvalidatesSigningKeyCacheOnRotationAndKeepsRetiredKeysInGrace()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions
+        {
+            AccessTokenValidationSigningKeyCacheTtl = TimeSpan.FromHours(1),
+            AccessTokenValidationLastSeenDebounceInterval = TimeSpan.FromMinutes(10)
+        });
+        var service = new SqlOSCryptoService(context, options, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        var tokenBeforeRotation = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+        (await service.ValidateAccessTokenAsync(tokenBeforeRotation, client.Audience)).Should().NotBeNull();
+
+        var newKey = await service.RotateSigningKeyAsync();
+        var tokenAfterRotation = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+
+        newKey.IsActive.Should().BeTrue();
+        (await service.ValidateAccessTokenAsync(tokenAfterRotation, client.Audience)).Should().NotBeNull();
+        (await service.ValidateAccessTokenAsync(tokenBeforeRotation, client.Audience)).Should().NotBeNull();
     }
 
     [TestMethod]

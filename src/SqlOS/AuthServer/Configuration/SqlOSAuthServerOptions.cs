@@ -13,6 +13,20 @@ public class SqlOSAuthServerOptions
     public string? PublicOrigin { get; set; }
     public string DefaultAudience { get; set; } = "sqlos";
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
+    /// <summary>
+    /// How long each SqlOS instance caches public signing keys for access-token validation.
+    /// In-process key creation, rotation, replacement, and cleanup clear this cache immediately;
+    /// the TTL bounds stale-key exposure across other instances or out-of-band database changes.
+    /// Set to zero to disable the validation-key cache.
+    /// </summary>
+    public TimeSpan AccessTokenValidationSigningKeyCacheTtl { get; set; } = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Minimum interval between persisted LastSeenAt updates during access-token validation for
+    /// the same session or client. Validation still checks the session row on every request so
+    /// revocation and absolute expiry remain immediate. Set to zero to write LastSeenAt on every
+    /// successful validation.
+    /// </summary>
+    public TimeSpan AccessTokenValidationLastSeenDebounceInterval { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan RefreshTokenLifetime { get; set; } = TimeSpan.FromDays(30);
     public TimeSpan TemporaryTokenLifetime { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan SessionIdleTimeout { get; set; } = TimeSpan.FromDays(7);

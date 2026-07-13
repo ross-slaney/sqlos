@@ -80,6 +80,7 @@ internal static class SqlOSOptionsValidator
         ValidateEmailOptions(options.Email, errors);
         ValidateCalendarOptions(options.Calendar, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
+        ValidateAccessTokenValidationOptions(options.AuthServer, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
         ValidateSigningKeyOptions(options.AuthServer, errors);
 
@@ -227,6 +228,19 @@ internal static class SqlOSOptionsValidator
         if (options.LockoutDuration <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.PasswordLogin.LockoutDuration must be greater than zero.");
+        }
+    }
+
+    private static void ValidateAccessTokenValidationOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.AccessTokenValidationSigningKeyCacheTtl < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.AccessTokenValidationSigningKeyCacheTtl must be zero or greater.");
+        }
+
+        if (options.AccessTokenValidationLastSeenDebounceInterval < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.AccessTokenValidationLastSeenDebounceInterval must be zero or greater.");
         }
     }
 
