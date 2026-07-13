@@ -239,6 +239,60 @@ public sealed class SqlOSScimServiceTests
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.Action == "scim.user.deactivated" && x.Source == "scim")).Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task AuthenticateAsync_ScimIsDisabledByDefault()
+    {
+        using var context = CreateContext();
+        var harness = CreateHarness(context);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = "Bearer any-token";
+
+        var act = async () => await harness.Scim.AuthenticateAsync(httpContext);
+
+        var error = await act.Should().ThrowAsync<SqlOSScimException>();
+        error.Which.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [TestMethod]
+    public async Task GetUserAsync_DoesNotCrossOrganizationBoundary()
+    {
+        using var context = CreateContext();
+        await SeedOrganizationAsync(context);
+        context.Set<SqlOSOrganization>().Add(new SqlOSOrganization
+        {
+            Id = "org_other",
+            Slug = "other",
+            Name = "Other",
+            CreatedAt = DateTime.UtcNow
+        });
+        context.Set<SqlOSUser>().Add(new SqlOSUser
+        {
+            Id = "usr_other",
+            DisplayName = "Other User",
+            DefaultEmail = "other@example.test",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        context.Set<SqlOSMembership>().Add(new SqlOSMembership
+        {
+            Id = "mem_other",
+            OrganizationId = "org_other",
+            UserId = "usr_other",
+            Role = "member",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+        var harness = CreateHarness(context);
+        var connection = await CreateConnectionAsync(harness.Admin);
+
+        var act = async () => await harness.Scim.GetUserAsync(connection, "usr_other");
+
+        var error = await act.Should().ThrowAsync<SqlOSScimException>();
+        error.Which.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
     private static Harness CreateHarness(TestSqlOSInMemoryDbContext context, SqlOSAuthServerOptions? optionsValue = null)
     {
         var options = Options.Create(optionsValue ?? new SqlOSAuthServerOptions());

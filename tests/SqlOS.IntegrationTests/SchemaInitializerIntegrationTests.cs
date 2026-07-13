@@ -185,7 +185,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(25, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(29, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -224,7 +224,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
-            Assert.AreEqual(25, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(29, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {

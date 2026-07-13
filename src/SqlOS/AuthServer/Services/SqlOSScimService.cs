@@ -13,7 +13,7 @@ using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
 
-public sealed class SqlOSScimException : InvalidOperationException
+internal sealed class SqlOSScimException : InvalidOperationException
 {
     public SqlOSScimException(int statusCode, string message, string? scimType = null)
         : base(message)
@@ -26,7 +26,7 @@ public sealed class SqlOSScimException : InvalidOperationException
     public string? ScimType { get; }
 }
 
-public sealed class SqlOSScimService
+internal sealed class SqlOSScimService
 {
     private const string UserSchema = "urn:ietf:params:scim:schemas:core:2.0:User";
     private const string GroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group";

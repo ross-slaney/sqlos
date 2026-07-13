@@ -42,9 +42,12 @@ public static class EndpointRouteBuilderExtensions
         var ssoSetupApi = endpoints.MapGroup(resolvedSsoSetupApiPath);
         ssoSetupApi.ExcludeFromDescription();
 
-        var scim = endpoints.MapGroup(NormalizeScimBasePath(authOptions.ScimBasePath));
-        scim.ExcludeFromDescription();
-        MapScimEndpoints(scim);
+        if (authOptions.EnableScim)
+        {
+            var scim = endpoints.MapGroup(NormalizeScimBasePath(authOptions.ScimBasePath));
+            scim.ExcludeFromDescription();
+            MapScimEndpoints(scim);
+        }
 
         auth.MapGet("/.well-known/oauth-authorization-server", async (HttpContext context, SqlOSAuthorizationServerService authorizationServerService, CancellationToken cancellationToken) =>
             Results.Ok(await authorizationServerService.GetMetadataAsync(context, cancellationToken)));
@@ -3467,7 +3470,10 @@ public static class EndpointRouteBuilderExtensions
             return Results.Ok(await adminService.GetDashboardSummaryAsync(cancellationToken));
         });
 
-        MapScimAdminEndpoints(adminApi);
+        if (authOptions.EnableScim)
+        {
+            MapScimAdminEndpoints(adminApi);
+        }
         MapAdminEndpoints(adminApi);
         return endpoints;
     }

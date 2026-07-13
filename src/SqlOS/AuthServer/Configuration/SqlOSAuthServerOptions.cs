@@ -47,7 +47,7 @@ public class SqlOSAuthServerOptions
     public bool RequireVerifiedEmailForPasswordLogin { get; set; }
     public bool EnableLocalPasswordAuth { get; set; } = true;
     public bool EnableSaml { get; set; } = true;
-    public bool EnableScim { get; set; } = true;
+    public bool EnableScim { get; set; }
     public string ScimBasePath { get; set; } = "/sqlos/scim/v2";
     public int DefaultSigningKeyRotationIntervalDays { get; set; } = 90;
     public int DefaultSigningKeyGraceWindowDays { get; set; } = 7;
@@ -137,6 +137,7 @@ public class SqlOSAuthServerOptions
 
         var seed = new SqlOSScimConnectionSeedOptions { Key = key.Trim() };
         configure(seed);
+        EnableScim = true;
         ScimConnectionSeeds.Add(seed);
         return this;
     }
