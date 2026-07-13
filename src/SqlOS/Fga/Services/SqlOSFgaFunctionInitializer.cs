@@ -50,21 +50,28 @@ RETURN
     WITH ancestors AS (
         SELECT Id, ParentId, 0 AS Depth
         FROM [{schema}].[{tables.Resources}]
-        WHERE Id = @ResourceId
+        WHERE Id = @ResourceId AND IsActive = 1
 
         UNION ALL
 
 	        SELECT r.Id, r.ParentId, a.Depth + 1
 	        FROM [{schema}].[{tables.Resources}] r
 	        INNER JOIN ancestors a ON r.Id = a.ParentId
-	        WHERE a.Depth < {maxDepth}
+	        WHERE a.Depth < {maxDepth} AND r.IsActive = 1
 	    )
     SELECT TOP 1 a.Id
     FROM ancestors a
     INNER JOIN [{schema}].[{tables.Grants}] g ON a.Id = g.ResourceId
     INNER JOIN [{schema}].[{tables.RolePermissions}] rp ON g.RoleId = rp.RoleId
+    INNER JOIN [{schema}].[{tables.Subjects}] s ON g.SubjectId = s.Id
+    LEFT JOIN [{schema}].[{tables.Users}] u ON s.Id = u.SubjectId
+    LEFT JOIN [{schema}].[{tables.ServiceAccounts}] sa ON s.Id = sa.SubjectId
+    LEFT JOIN [{schema}].[{tables.UserGroups}] ug ON s.Id = ug.SubjectId
     WHERE g.SubjectId IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@SubjectIds, ','))
       AND rp.PermissionId = @PermissionId
+      AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
+      AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
+      AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)
       AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
       AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
 )";

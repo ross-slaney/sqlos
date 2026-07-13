@@ -52,6 +52,17 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         }
     }
 
+    [TestMethod]
+    public async Task EnsureFunctionsExist_EnforcesPrincipalAndResourceLifecycle()
+    {
+        var definition = await GetFunctionDefinitionAsync();
+
+        definition.Should().Contain("IsActive = 1");
+        definition.Should().Contain("u.IsActive = 1");
+        definition.Should().Contain("sa.ExpiresAt > GETUTCDATE()");
+        definition.Should().Contain("ug.IsActive = 1");
+    }
+
     private static async Task<string> GetFunctionDefinitionAsync()
     {
         var connection = Context.Database.GetDbConnection();

@@ -141,6 +141,7 @@ BEGIN
         [Description] NVARCHAR(MAX)  NULL,
         [GroupType]   NVARCHAR(MAX)  NULL,
         [SubjectId]   NVARCHAR(450)  NOT NULL,
+        [IsActive]    BIT            NOT NULL DEFAULT 1,
         [CreatedAt]   DATETIME2      NOT NULL,
         [UpdatedAt]   DATETIME2      NOT NULL,
         CONSTRAINT [PK_{UserGroups}] PRIMARY KEY ([Id]),

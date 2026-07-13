@@ -21,6 +21,17 @@ public sealed class TestSqlOSDbContext : DbContext, ISqlOSAuthServerDbContext, I
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<LifecycleProtectedEntity>(entity =>
+        {
+            entity.ToTable("LifecycleProtectedEntities");
+            entity.HasKey(item => item.Id);
+        });
         modelBuilder.UseSqlOS(GetType());
     }
+}
+
+public sealed class LifecycleProtectedEntity : IHasResourceId
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
 }
