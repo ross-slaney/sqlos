@@ -7,18 +7,18 @@ section: authserver
 
 <Banner
   eyebrow="Identity inside your app"
-  title="Users, sessions, SSO, OAuth/OIDC, and hosted or headless auth from one embedded module"
+  title="Users, sessions, SSO, OAuth, and social OIDC from one embedded module"
   href="../getting-started"
   actionLabel="Install SqlOS"
 >
   AuthServer is the identity half of SqlOS. It keeps your users, clients, sessions, and login flows in your app and in your database instead of splitting them into another hosted dependency.
 </Banner>
 
-AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and SAML run inside your app. Data lives in your database.
+AuthServer is SqlOS's identity piece. Users, orgs, sessions, OAuth tokens, social OIDC, and SAML run inside your app. Data lives in your database. For applications, SqlOS is an OAuth authorization server; for Google, Microsoft, Apple, and custom social login, it acts as an OIDC relying party.
 
 <Callout type="info" title="Recommended reading order">
   1. [Dashboard](/docs/authserver/dashboard-overview) → [Organizations](/docs/authserver/organizations) → [Hosted vs headless](/docs/authserver/hosted-vs-headless)
-  2. [Password login](/docs/authserver/password-login), [Email OTP](/docs/authserver/email-otp), or [Magic Link](/docs/authserver/magic-link) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso)
+  2. [Password login](/docs/authserver/password-login), [Email OTP](/docs/authserver/email-otp), [Magic Link](/docs/authserver/magic-link), or [Phone OTP](/docs/authserver/phone-otp) → [OIDC](/docs/authserver/oidc-auth) / [SAML](/docs/authserver/saml-sso)
   3. Security policy: [MFA and TOTP](/docs/authserver/mfa-totp) and [Security Settings](/docs/authserver/security-settings)
   4. One app: [Single-Application Setup](/docs/authserver/single-application)
   5. Advanced: [Clients](/docs/authserver/clients), [Application Access](/docs/authserver/application-access), [CIMD](/docs/authserver/client-id-metadata-documents), [DCR](/docs/authserver/dynamic-client-registration) -- only when you need them
@@ -28,7 +28,7 @@ AuthServer is SqlOS's identity piece. Users, orgs, sessions, tokens, OIDC, and S
 
 <CardGrid cols={3}>
   <Card title="Organizations" description="Multi-tenant orgs, memberships, and roles." />
-  <Card title="Users" description="Email/password, email OTP, magic-link, SSO-provisioned, or OIDC-linked identities." />
+  <Card title="Users" description="Password, email code, magic link, phone code, SSO-provisioned, or OIDC-linked identities." />
   <Card title="Sessions" description="JWT access tokens, refresh token rotation, and replay detection." />
   <Card title="MFA and recovery codes" description="Optional self-enrollment, tenant-required TOTP, and recovery-code challenges." />
   <Card title="OIDC" description="Google, Microsoft, GitHub, Apple, and custom providers." />
@@ -52,8 +52,8 @@ app.MapSqlOS();
 Typical browser login:
 
 1. App sends the user to `/sqlos/auth/authorize` with PKCE.
-2. User enters email. [Home realm discovery](/docs/authserver/home-realm-discovery) picks password, Email OTP, magic link, or SSO.
-3. User signs in (password, Email OTP, magic link, OIDC, or SAML).
+2. User chooses an enabled credential. Email-first flows use [home realm discovery](/docs/authserver/home-realm-discovery) to pick password, Email OTP, a magic link, or SSO.
+3. User signs in (password, email or phone OTP, magic link, OIDC, or SAML).
 4. Multiple orgs? User picks one.
 5. MFA required? SqlOS renders or returns a TOTP challenge or forced enrollment step.
 6. SqlOS returns an auth code.
@@ -75,19 +75,13 @@ Open `/sqlos/admin/auth/`. Manage orgs, users, memberships, clients, OIDC, SSO, 
 
 | Service | Purpose |
 | --- | --- |
-| `SqlOSAuthService` | Login, Email OTP, magic links, invitations, refresh, logout, token validation |
+| `SqlOSAuthService` | Login, email and phone OTP, magic links, invitations, refresh, logout, token validation |
 | `SqlOSAdminService` | Create orgs, users, memberships, clients, SSO |
 | `SqlOSCryptoService` | Token generation, PKCE, password hashing, JWKS |
 | `SqlOSHomeRealmDiscoveryService` | Route users to password or SSO by email domain |
 | `SqlOSSsoAuthorizationService` | SAML SSO authorization and code exchange |
 | `SqlOSOidcAuthService` | Google, Microsoft, GitHub, Apple, and custom social login |
 | `SqlOSSettingsService` | Session lifetimes and security configuration |
-
-## Signing keys and protected secrets
-
-SqlOS stores JWT signing keys in your application database. Private signing key PEMs are protected with `SqlOSCryptoService.ProtectSecret` when ASP.NET Data Protection is available, and legacy plaintext rows are upgraded the next time the active key is loaded.
-
-Production deployments should configure a durable Data Protection key ring outside the application database. If Data Protection keys are lost, existing protected signing keys and other protected secrets cannot be unprotected.
 
 ## Hosted and headless
 
@@ -96,14 +90,14 @@ Production deployments should configure a durable Data Protection key ring outsi
     SqlOS renders the login, signup, invitation, OTP, and recovery pages for you. This is the fastest path for internal tools and most first-party apps.
   </AccordionItem>
   <AccordionItem title="Headless auth">
-    SqlOS still runs OAuth/OIDC, sessions, and token issuance. Your application takes ownership of the login UI and interaction flow.
+    SqlOS still runs OAuth authorization, sessions, token issuance, and its social OIDC relying-party flows. Your application takes ownership of the login UI and interaction flow.
   </AccordionItem>
   <AccordionItem title="Client onboarding modes">
     Use seeded or dashboard-created owned clients for the normal path. Reach for CLI device flow, `CIMD`, and optional `DCR` when you need terminal, portable, or compatibility-oriented clients.
   </AccordionItem>
 </Accordion>
 
-[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Magic Link](/docs/authserver/magic-link) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
+[Headless Auth](/docs/authserver/headless-auth) · [Email OTP](/docs/authserver/email-otp) · [Magic Link](/docs/authserver/magic-link) · [Phone OTP](/docs/authserver/phone-otp) · [MFA and TOTP](/docs/authserver/mfa-totp) · [Email Invitations](/docs/authserver/invitations) · [CLI OAuth](/docs/authserver/cli-oauth) · [Hosted vs Headless](/docs/authserver/hosted-vs-headless)
 
 ## Client guides
 

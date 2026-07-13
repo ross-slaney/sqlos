@@ -78,8 +78,7 @@ public sealed record SqlOSHeadlessPasswordLoginRequest(
 
 public sealed record SqlOSHeadlessPasswordResetEmailRequest(
     string Email,
-    string? RequestId = null,
-    string? ResetUrlTemplate = null);
+    string? RequestId = null);
 
 public sealed record SqlOSHeadlessEmailOtpStartRequest(
     string RequestId,

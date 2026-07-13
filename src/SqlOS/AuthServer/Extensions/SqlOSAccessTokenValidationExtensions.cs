@@ -6,15 +6,41 @@ using SqlOS.AuthServer.Services;
 
 namespace SqlOS.AuthServer.Extensions;
 
+/// <summary>
+/// Provides ASP.NET Core middleware and request-context helpers for validating SqlOS access tokens.
+/// </summary>
 public static class SqlOSAccessTokenValidationExtensions
 {
+    /// <summary>The <see cref="HttpContext.Items"/> key used to store a successfully validated token.</summary>
     public const string ValidatedTokenItemKey = "SqlOS.AuthServer.ValidatedAccessToken";
 
+    /// <summary>
+    /// Adds SqlOS bearer access-token validation to the application pipeline for the specified audience.
+    /// </summary>
+    /// <param name="app">The application pipeline builder.</param>
+    /// <param name="expectedAudience">The exact audience required in a valid access token.</param>
+    /// <returns>The same <paramref name="app"/> instance.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="expectedAudience"/> is empty or contains only whitespace.</exception>
     public static IApplicationBuilder UseSqlOSAccessTokenValidation(
         this IApplicationBuilder app,
         string expectedAudience)
         => app.UseSqlOSAccessTokenValidation(options => options.ExpectedAudience = expectedAudience);
 
+    /// <summary>
+    /// Adds configured SqlOS bearer access-token validation to the application pipeline.
+    /// </summary>
+    /// <param name="app">The application pipeline builder.</param>
+    /// <param name="configure">A callback that configures token validation.</param>
+    /// <returns>The same <paramref name="app"/> instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="app"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The configured <see cref="SqlOSAccessTokenValidationOptions.ExpectedAudience"/> is empty.
+    /// </exception>
+    /// <remarks>
+    /// Successful validation sets <see cref="HttpContext.User"/> and makes the validated token
+    /// available through <see cref="GetSqlOSValidatedToken(HttpContext)"/>. Failed validation
+    /// short-circuits the request with an HTTP 401 response and a Bearer challenge.
+    /// </remarks>
     public static IApplicationBuilder UseSqlOSAccessTokenValidation(
         this IApplicationBuilder app,
         Action<SqlOSAccessTokenValidationOptions> configure)
@@ -29,6 +55,13 @@ public static class SqlOSAccessTokenValidationExtensions
         return app.UseMiddleware<SqlOSAccessTokenValidationMiddleware>(options);
     }
 
+    /// <summary>
+    /// Gets the token validated for the current request by SqlOS access-token middleware or a
+    /// SqlOS-protected route group.
+    /// </summary>
+    /// <param name="context">The current HTTP context.</param>
+    /// <returns>The validated token, or <see langword="null"/> when SqlOS did not validate a token for the request.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
     public static SqlOSValidatedToken? GetSqlOSValidatedToken(this HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);

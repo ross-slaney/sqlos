@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -15,9 +16,15 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSOidcAuthService
 {
+    internal const int MaxProviderJsonResponseBytes = 1024 * 1024;
+    internal static readonly TimeSpan ProviderHttpTimeout = TimeSpan.FromSeconds(10);
+    private const string PublicClaimValidationFailure = "The social login could not be completed.";
+    private const int MaxAppleCallbackPayloadBytes = 4096;
+    private const int MaxUserDisplayNameChars = 200;
     private static readonly IReadOnlyList<string> DefaultOidcScopes = ["openid", "email", "profile"];
     private static readonly IReadOnlyList<string> DefaultAppleScopes = ["name", "email"];
     private static readonly IReadOnlyList<string> DefaultGitHubScopes = ["read:user", "user:email"];
+    private const string ProviderResponsePublicError = "The social login provider response could not be processed.";
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -63,57 +70,86 @@ public sealed class SqlOSOidcAuthService
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
-        var connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
-
-        var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
-        var authorizationParameters = new Dictionary<string, string?>
+        SqlOSOidcConnection? connection = null;
+        try
         {
-            ["client_id"] = connection.ClientId,
-            ["redirect_uri"] = request.CallbackUri,
-            ["response_type"] = "code",
-            ["scope"] = string.Join(' ', resolved.Scopes),
-            ["state"] = request.State
-        };
+            connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
+            ValidateCallbackUri(connection, request.CallbackUri);
 
-        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc)
-        {
-            authorizationParameters["nonce"] = request.Nonce;
-            authorizationParameters["code_challenge"] = request.CodeChallenge;
-            authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
-            authorizationParameters["login_hint"] = request.Email;
-        }
-        else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
-        {
-            authorizationParameters["login"] = request.Email;
-        }
-
-        if (connection.ProviderType == SqlOSOidcProviderType.Apple)
-        {
-            authorizationParameters["response_mode"] = "form_post";
-        }
-
-        var authorizationUrl = QueryHelpers.AddQueryString(resolved.AuthorizationEndpoint, authorizationParameters);
-
-        await _adminService.RecordAuditAsync(
-            "user.login.oidc.start",
-            "oidc_connection",
-            connection.Id,
-            ipAddress: ipAddress,
-            data: new
+            var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
+            if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc
+                && (!string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal)
+                    || !_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge)))
             {
-                provider = connection.ProviderType.ToString(),
-                request.Email,
-                request.ClientId,
-                request.CallbackUri
-            },
-            cancellationToken: cancellationToken);
+                throw new InvalidOperationException(
+                    "OIDC authorization requires a valid RFC 7636 S256 PKCE code challenge.");
+            }
 
-        return new SqlOSStartOidcAuthorizationResult(
-            authorizationUrl,
-            connection.Id,
-            connection.ProviderType,
-            connection.DisplayName,
-            ParseJsonArray(connection.AllowedCallbackUrisJson));
+            var authorizationParameters = new Dictionary<string, string?>
+            {
+                ["client_id"] = connection.ClientId,
+                ["redirect_uri"] = request.CallbackUri,
+                ["response_type"] = "code",
+                ["scope"] = string.Join(' ', resolved.Scopes),
+                ["state"] = request.State
+            };
+
+            if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc)
+            {
+                authorizationParameters["nonce"] = request.Nonce;
+                authorizationParameters["code_challenge"] = request.CodeChallenge;
+                authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
+                authorizationParameters["login_hint"] = request.Email;
+            }
+            else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
+            {
+                authorizationParameters["login"] = request.Email;
+            }
+
+            if (connection.ProviderType == SqlOSOidcProviderType.Apple)
+            {
+                authorizationParameters["response_mode"] = "form_post";
+            }
+
+            var authorizationUrl = QueryHelpers.AddQueryString(resolved.AuthorizationEndpoint, authorizationParameters);
+
+            await _adminService.RecordAuditAsync(
+                "user.login.oidc.start",
+                "oidc_connection",
+                connection.Id,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    provider = connection.ProviderType.ToString(),
+                    request.Email,
+                    request.ClientId,
+                    request.CallbackUri
+                },
+                cancellationToken: cancellationToken);
+
+            return new SqlOSStartOidcAuthorizationResult(
+                authorizationUrl,
+                connection.Id,
+                connection.ProviderType,
+                connection.DisplayName,
+                ParseJsonArray(connection.AllowedCallbackUrisJson));
+        }
+        catch (Exception ex)
+        {
+            var auditError = GetAuditError(ex);
+            _logger.LogWarning(ex, "OIDC authorization start failed for connection {ConnectionId}: {Reason}.", request.ConnectionId, auditError);
+            await _adminService.RecordAuditAsync(
+                "user.login.oidc.start_error",
+                "oidc_connection",
+                connection?.Id ?? request.ConnectionId,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    error = auditError
+                },
+                cancellationToken: cancellationToken);
+            throw;
+        }
     }
 
     public async Task<SqlOSCompleteOidcAuthorizationResult> CompleteAuthorizationAsync(
@@ -130,8 +166,8 @@ public sealed class SqlOSOidcAuthService
             var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
             var providerUser = resolved.Protocol == SqlOSSocialProviderProtocol.OAuthProfile
                 ? await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken)
-                : await CompleteOidcAuthorizationAsync(connection, resolved, request, cancellationToken);
-            var provisioned = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, cancellationToken);
+                : await CompleteOidcAuthorizationAsync(connection, resolved, request, ipAddress, cancellationToken);
+            var provisioned = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, ipAddress, cancellationToken);
             var organizations = await _adminService.GetUserOrganizationsAsync(provisioned.User.Id, cancellationToken);
             var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
             var authMethod = connection.ProviderType switch
@@ -174,7 +210,8 @@ public sealed class SqlOSOidcAuthService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "OIDC authentication failed for connection {ConnectionId}.", request.ConnectionId);
+            var auditError = GetAuditError(ex);
+            _logger.LogWarning(ex, "OIDC authentication failed for connection {ConnectionId}: {Reason}.", request.ConnectionId, auditError);
             await _adminService.RecordAuditAsync(
                 "user.login.oidc.error",
                 "oidc_connection",
@@ -182,7 +219,7 @@ public sealed class SqlOSOidcAuthService
                 ipAddress: ipAddress,
                 data: new
                 {
-                    error = ex.Message
+                    error = auditError
                 },
                 cancellationToken: cancellationToken);
             throw;
@@ -193,17 +230,24 @@ public sealed class SqlOSOidcAuthService
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         SqlOSCompleteOidcAuthorizationRequest request,
+        string? ipAddress,
         CancellationToken cancellationToken)
     {
         var tokenPayload = await ExchangeCodeAsync(connection, resolved, request, cancellationToken);
         var idToken = tokenPayload.IdToken
             ?? throw new InvalidOperationException("The OIDC provider token response did not include an ID token.");
         var idTokenPrincipal = await ValidateIdTokenAsync(connection, resolved, idToken, request.Nonce, cancellationToken);
-        var userInfoClaims = resolved.UseUserInfo && !string.IsNullOrWhiteSpace(resolved.UserInfoEndpoint)
+        IReadOnlyDictionary<string, string>? userInfoClaims = resolved.UseUserInfo && !string.IsNullOrWhiteSpace(resolved.UserInfoEndpoint)
             ? await LoadUserInfoClaimsAsync(resolved.UserInfoEndpoint!, tokenPayload.AccessToken, cancellationToken)
-            : new Dictionary<string, string>(StringComparer.Ordinal);
-        var callbackClaims = ParseCallbackPayloadClaims(request.UserPayloadJson);
-        return MapProviderUser(connection, resolved, idTokenPrincipal, userInfoClaims, callbackClaims);
+            : null;
+        return await MapProviderUserAsync(
+            connection,
+            resolved,
+            idTokenPrincipal,
+            userInfoClaims,
+            request.UserPayloadJson,
+            ipAddress,
+            cancellationToken);
     }
 
     private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
@@ -241,7 +285,7 @@ public sealed class SqlOSOidcAuthService
         });
 
         using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OAuth token", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(payload.RootElement.TryGetProperty("error_description", out var description)
@@ -291,7 +335,7 @@ public sealed class SqlOSOidcAuthService
 
         tokenRequest.Content = new FormUrlEncodedContent(formValues);
         using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC token", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(payload.RootElement.TryGetProperty("error_description", out var description)
@@ -326,7 +370,7 @@ public sealed class SqlOSOidcAuthService
     {
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
         using var jwksResponse = await httpClient.GetAsync(resolved.JwksUri!, cancellationToken);
-        using var jwksPayload = await ReadJsonAsync(jwksResponse, cancellationToken);
+        using var jwksPayload = await ReadJsonAsync(jwksResponse, "OIDC JWKS", cancellationToken);
         if (!jwksResponse.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC provider JWKS endpoint failed.");
@@ -367,13 +411,24 @@ public sealed class SqlOSOidcAuthService
         using var request = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC userinfo", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC provider user info request failed.");
         }
 
-        return FlattenJson(payload.RootElement);
+        var claims = FlattenJson(payload.RootElement);
+        if (payload.RootElement.ValueKind != JsonValueKind.Object ||
+            !payload.RootElement.TryGetProperty("sub", out var subjectElement) ||
+            subjectElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(subjectElement.GetString()))
+        {
+            // OIDC Core requires UserInfo sub to be a non-empty JSON string. Removing any
+            // flattened non-string representation makes the validation path fail closed.
+            claims.Remove("sub");
+        }
+
+        return claims;
     }
 
     private async Task<ProviderUser> LoadGitHubUserAsync(string accessToken, CancellationToken cancellationToken)
@@ -382,7 +437,7 @@ public sealed class SqlOSOidcAuthService
 
         using var profileRequest = CreateGitHubApiRequest("https://api.github.com/user", accessToken);
         using var profileResponse = await httpClient.SendAsync(profileRequest, cancellationToken);
-        using var profilePayload = await ReadJsonAsync(profileResponse, cancellationToken);
+        using var profilePayload = await ReadJsonAsync(profileResponse, "GitHub profile", cancellationToken);
         if (!profileResponse.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The GitHub profile request failed.");
@@ -404,7 +459,7 @@ public sealed class SqlOSOidcAuthService
 
         using var emailRequest = CreateGitHubApiRequest("https://api.github.com/user/emails", accessToken);
         using var emailResponse = await httpClient.SendAsync(emailRequest, cancellationToken);
-        using var emailPayload = await ReadJsonAsync(emailResponse, cancellationToken);
+        using var emailPayload = await ReadJsonAsync(emailResponse, "GitHub email", cancellationToken);
         if (!emailResponse.IsSuccessStatusCode || emailPayload.RootElement.ValueKind != JsonValueKind.Array)
         {
             throw new InvalidOperationException("The GitHub email request failed.");
@@ -449,42 +504,83 @@ public sealed class SqlOSOidcAuthService
         return request;
     }
 
-    private ProviderUser MapProviderUser(
+    private async Task<ProviderUser> MapProviderUserAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         ClaimsPrincipal idTokenPrincipal,
-        IReadOnlyDictionary<string, string> userInfoClaims,
-        IReadOnlyDictionary<string, string> callbackClaims)
+        IReadOnlyDictionary<string, string>? userInfoClaims,
+        string? callbackPayload,
+        string? ipAddress,
+        CancellationToken cancellationToken)
     {
         var idTokenClaims = idTokenPrincipal.Claims
             .GroupBy(x => x.Type, StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.First().Value, StringComparer.Ordinal);
 
-        string? ResolveClaim(string? claimType)
+        var idTokenSubject = GetClaim(idTokenClaims, "sub");
+        if (idTokenSubject == null)
         {
-            if (string.IsNullOrWhiteSpace(claimType))
-            {
-                return null;
-            }
-
-            return callbackClaims.GetValueOrDefault(claimType)
-                ?? userInfoClaims.GetValueOrDefault(claimType)
-                ?? idTokenClaims.GetValueOrDefault(claimType);
+            await RejectClaimSetAsync(
+                connection,
+                "id_token_subject_missing",
+                idTokenSubject: null,
+                userInfoSubject: null,
+                ipAddress,
+                cancellationToken);
         }
 
-        var subject = ResolveClaim(resolved.ClaimMapping.SubjectClaim)
-            ?? throw new InvalidOperationException("The OIDC provider did not return a subject claim.");
-        var email = ResolveClaim(resolved.ClaimMapping.EmailClaim)
-            ?? ResolveClaim(resolved.ClaimMapping.PreferredUsernameClaim);
-        var emailVerified = ParseBooleanClaim(ResolveClaim(resolved.ClaimMapping.EmailVerifiedClaim));
-        var firstName = ResolveClaim(resolved.ClaimMapping.FirstNameClaim)
-            ?? callbackClaims.GetValueOrDefault("given_name")
-            ?? callbackClaims.GetValueOrDefault("name.firstName");
-        var lastName = ResolveClaim(resolved.ClaimMapping.LastNameClaim)
-            ?? callbackClaims.GetValueOrDefault("family_name")
-            ?? callbackClaims.GetValueOrDefault("name.lastName");
-        var displayName = ResolveClaim(resolved.ClaimMapping.DisplayNameClaim)
-            ?? callbackClaims.GetValueOrDefault("name");
+        if (userInfoClaims != null)
+        {
+            var userInfoSubject = GetClaim(userInfoClaims, "sub");
+            if (userInfoSubject == null || !string.Equals(idTokenSubject, userInfoSubject, StringComparison.Ordinal))
+            {
+                await RejectClaimSetAsync(
+                    connection,
+                    userInfoSubject == null ? "userinfo_subject_missing" : "userinfo_subject_mismatch",
+                    idTokenSubject,
+                    userInfoSubject,
+                    ipAddress,
+                    cancellationToken);
+            }
+        }
+
+        // The locally stored external subject is always taken from the validated ID token.
+        // A custom mapping can select another signed claim, but UserInfo can never replace it.
+        var subject = GetClaim(idTokenClaims, resolved.ClaimMapping.SubjectClaim);
+        if (subject == null)
+        {
+            await RejectClaimSetAsync(
+                connection,
+                "mapped_id_token_subject_missing",
+                idTokenSubject,
+                userInfoSubject: null,
+                ipAddress,
+                cancellationToken);
+        }
+
+        // Email and its verification bit are an inseparable claim pair. Prefer a subject-bound
+        // UserInfo pair when it contains an email; otherwise use the pair from the ID token.
+        var identityClaims = ResolveEmailClaims(userInfoClaims, resolved.ClaimMapping, "userinfo", allowPreferredUsername: false)
+            ?? ResolveEmailClaims(idTokenClaims, resolved.ClaimMapping, "id_token", allowPreferredUsername: false)
+            ?? ResolveEmailClaims(userInfoClaims, resolved.ClaimMapping, "userinfo", allowPreferredUsername: true)
+            ?? ResolveEmailClaims(idTokenClaims, resolved.ClaimMapping, "id_token", allowPreferredUsername: true);
+        var email = identityClaims?.Email;
+        var emailVerified = identityClaims?.EmailVerified ?? false;
+
+        var firstName = GetClaim(userInfoClaims, resolved.ClaimMapping.FirstNameClaim)
+            ?? GetClaim(idTokenClaims, resolved.ClaimMapping.FirstNameClaim);
+        var lastName = GetClaim(userInfoClaims, resolved.ClaimMapping.LastNameClaim)
+            ?? GetClaim(idTokenClaims, resolved.ClaimMapping.LastNameClaim);
+        var displayName = GetClaim(userInfoClaims, resolved.ClaimMapping.DisplayNameClaim)
+            ?? GetClaim(idTokenClaims, resolved.ClaimMapping.DisplayNameClaim);
+
+        if (connection.ProviderType == SqlOSOidcProviderType.Apple)
+        {
+            var appleName = ParseAppleCallbackDisplayName(callbackPayload);
+            firstName ??= appleName.FirstName;
+            lastName ??= appleName.LastName;
+        }
+
         if (string.IsNullOrWhiteSpace(displayName))
         {
             displayName = string.Join(' ', new[] { firstName, lastName }.Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
@@ -495,26 +591,26 @@ public sealed class SqlOSOidcAuthService
             displayName = email ?? subject;
         }
 
-        var canAutoLinkByEmail = !string.IsNullOrWhiteSpace(email) &&
-            (resolved.AllowEmailLinkWithoutVerifiedClaim || emailVerified);
+        displayName = TruncateUtf16(displayName!, MaxUserDisplayNameChars);
 
-        if (connection.ProviderType == SqlOSOidcProviderType.Google && !emailVerified)
-        {
-            canAutoLinkByEmail = false;
-        }
+        // Auto-linking is deliberately secure-by-default for every OIDC provider: only the
+        // verification claim from the same authenticated claim set as the email can authorize it.
+        var canAutoLinkByEmail = !string.IsNullOrWhiteSpace(email) && emailVerified;
 
         return new ProviderUser(
-            subject,
+            subject!,
             email ?? string.Empty,
             displayName ?? string.Empty,
             emailVerified,
-            canAutoLinkByEmail);
+            canAutoLinkByEmail,
+            identityClaims?.Source);
     }
 
     private async Task<ProvisionedProviderUser> ResolveOrProvisionUserAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         ProviderUser providerUser,
+        string? ipAddress,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(providerUser.Email))
@@ -524,7 +620,20 @@ public sealed class SqlOSOidcAuthService
 
         if (resolved.RequireVerifiedEmail && !providerUser.EmailVerified)
         {
-            throw new InvalidOperationException("The provider email must be verified before it can be linked.");
+            await _adminService.RecordAuditAsync(
+                "user.login.oidc.claim_mismatch",
+                "oidc_connection",
+                connection.Id,
+                ipAddress: ipAddress,
+                data: new
+                {
+                    provider = connection.ProviderType.ToString(),
+                    oidcConnectionId = connection.Id,
+                    claimSource = providerUser.EmailClaimSource,
+                    reason = "verified_email_missing_from_source"
+                },
+                cancellationToken: cancellationToken);
+            throw new InvalidOperationException(PublicClaimValidationFailure);
         }
 
         var externalIdentity = await _context.Set<SqlOSExternalIdentity>()
@@ -535,21 +644,38 @@ public sealed class SqlOSOidcAuthService
         if (externalIdentity != null)
         {
             var existingUser = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
+            await RequireActiveFederatedUserAsync(existingUser, cancellationToken);
             return new ProvisionedProviderUser(existingUser, Created: false);
         }
 
         SqlOSUser? user = null;
         var created = false;
-        if (providerUser.CanAutoLinkByEmail)
-        {
-            var normalizedEmail = SqlOSAdminService.NormalizeEmail(providerUser.Email);
-            var existingEmail = await _context.Set<SqlOSUserEmail>()
-                .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
+        var normalizedEmail = SqlOSAdminService.NormalizeEmail(providerUser.Email);
+        var existingEmail = await _context.Set<SqlOSUserEmail>()
+            .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
 
-            if (existingEmail != null)
+        if (existingEmail != null)
+        {
+            if (!providerUser.CanAutoLinkByEmail)
             {
-                user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+                await _adminService.RecordAuditAsync(
+                    "user.login.oidc.email_link_rejected",
+                    "oidc_connection",
+                    connection.Id,
+                    ipAddress: ipAddress,
+                    data: new
+                    {
+                        provider = connection.ProviderType.ToString(),
+                        oidcConnectionId = connection.Id,
+                        claimSource = providerUser.EmailClaimSource,
+                        reason = "email_not_verified_in_source"
+                    },
+                    cancellationToken: cancellationToken);
+                throw new InvalidOperationException(PublicClaimValidationFailure);
             }
+
+            user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == existingEmail.UserId, cancellationToken);
+            await RequireActiveFederatedUserAsync(user, cancellationToken);
         }
 
         if (user == null)
@@ -569,10 +695,10 @@ public sealed class SqlOSOidcAuthService
                 Id = _cryptoService.GenerateId("eml"),
                 UserId = user.Id,
                 Email = providerUser.Email,
-                NormalizedEmail = SqlOSAdminService.NormalizeEmail(providerUser.Email),
+                NormalizedEmail = normalizedEmail,
                 IsPrimary = true,
-                IsVerified = true,
-                VerifiedAt = DateTime.UtcNow,
+                IsVerified = providerUser.EmailVerified,
+                VerifiedAt = providerUser.EmailVerified ? DateTime.UtcNow : null,
                 CreatedAt = DateTime.UtcNow
             });
 
@@ -608,6 +734,38 @@ public sealed class SqlOSOidcAuthService
         return new ProvisionedProviderUser(user, created);
     }
 
+    private async Task RequireActiveFederatedUserAsync(
+        SqlOSUser user,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            user.Id,
+            organizationId: null,
+            cancellationToken: cancellationToken);
+        if (lifecycle.IsActive)
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId: user.Id,
+            organizationId: null,
+            decision: lifecycle,
+            now: DateTime.UtcNow,
+            cancellationToken: cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            "oidc_callback",
+            lifecycle,
+            user.Id,
+            organizationId: null);
+        await _context.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException("Social sign-in could not be completed.");
+    }
+
     private async Task<SqlOSOidcConnection> RequireEnabledConnectionAsync(string connectionId, CancellationToken cancellationToken)
         => await _context.Set<SqlOSOidcConnection>()
             .FirstOrDefaultAsync(x => x.Id == connectionId && x.IsEnabled, cancellationToken)
@@ -633,14 +791,13 @@ public sealed class SqlOSOidcAuthService
                 scopes,
                 claimMapping,
                 RequireVerifiedEmail: connection.ProviderType is SqlOSOidcProviderType.Google or SqlOSOidcProviderType.GitHub,
-                AllowEmailLinkWithoutVerifiedClaim: connection.ProviderType is SqlOSOidcProviderType.Microsoft or SqlOSOidcProviderType.Apple,
                 UseUserInfo: connection.UseUserInfo && !string.IsNullOrWhiteSpace(connection.UserInfoEndpoint));
         }
 
         var discoveryUrl = connection.DiscoveryUrl ?? throw new InvalidOperationException("The OIDC connection is missing a discovery URL.");
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
         using var response = await httpClient.GetAsync(discoveryUrl, cancellationToken);
-        using var payload = await ReadJsonAsync(response, cancellationToken);
+        using var payload = await ReadJsonAsync(response, "OIDC discovery", cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException("The OIDC discovery endpoint failed.");
@@ -670,7 +827,6 @@ public sealed class SqlOSOidcAuthService
             scopes,
             claimMapping,
             RequireVerifiedEmail: connection.ProviderType == SqlOSOidcProviderType.Google,
-            AllowEmailLinkWithoutVerifiedClaim: connection.ProviderType is SqlOSOidcProviderType.Microsoft or SqlOSOidcProviderType.Apple,
             UseUserInfo: connection.UseUserInfo && !string.IsNullOrWhiteSpace(userInfoEndpoint));
     }
 
@@ -701,7 +857,10 @@ public sealed class SqlOSOidcAuthService
         var now = DateTimeOffset.UtcNow;
         var credentials = new SigningCredentials(new ECDsaSecurityKey(ecdsa)
         {
-            KeyId = connection.AppleKeyId
+            KeyId = connection.AppleKeyId,
+            // This ECDSA instance is intentionally request-scoped. Do not let IdentityModel cache
+            // a signature provider that retains it after the using scope disposes the key.
+            CryptoProviderFactory = new CryptoProviderFactory { CacheSignatureProviders = false }
         }, SecurityAlgorithms.EcdsaSha256);
         var token = new JwtSecurityToken(
             issuer: connection.AppleTeamId,
@@ -733,7 +892,7 @@ public sealed class SqlOSOidcAuthService
             throw new InvalidOperationException("This OIDC connection does not have any allowed callback URIs configured.");
         }
 
-        if (!allowed.Contains(callbackUri, StringComparer.OrdinalIgnoreCase))
+        if (!allowed.Contains(callbackUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException("The callback URI is not allowed for this OIDC connection.");
         }
@@ -812,50 +971,239 @@ public sealed class SqlOSOidcAuthService
         };
     }
 
-    private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<JsonDocument> ReadJsonAsync(
+        HttpResponseMessage response,
+        string responseDescription,
+        CancellationToken cancellationToken)
     {
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (!IsJsonMediaType(mediaType))
+        {
+            throw new ProviderJsonResponseException(
+                $"{responseDescription} response must be JSON but returned '{mediaType ?? "<missing>"}'.");
+        }
+
+        var contentLength = response.Content.Headers.ContentLength;
+        if (contentLength > MaxProviderJsonResponseBytes)
+        {
+            throw new ProviderJsonResponseException(
+                $"{responseDescription} response exceeded the {MaxProviderJsonResponseBytes} byte JSON limit.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        long totalBytes = 0;
+        while (true)
+        {
+            var remainingBytes = MaxProviderJsonResponseBytes + 1L - totalBytes;
+            var readSize = (int)Math.Min(chunk.Length, remainingBytes);
+            var bytesRead = await stream.ReadAsync(chunk.AsMemory(0, readSize), cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            totalBytes += bytesRead;
+            if (totalBytes > MaxProviderJsonResponseBytes)
+            {
+                throw new ProviderJsonResponseException(
+                    $"{responseDescription} response exceeded the {MaxProviderJsonResponseBytes} byte JSON limit.");
+            }
+
+            buffer.Write(chunk, 0, bytesRead);
+        }
+
+        buffer.Position = 0;
+        try
+        {
+            return await JsonDocument.ParseAsync(buffer, cancellationToken: cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            throw new ProviderJsonResponseException($"{responseDescription} response was not valid JSON: {ex.Message}", ex);
+        }
     }
 
-    private static IReadOnlyDictionary<string, string> ParseCallbackPayloadClaims(string? payload)
+    private static bool IsJsonMediaType(string? mediaType)
+        => string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mediaType, "text/json", StringComparison.OrdinalIgnoreCase)
+            || (mediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private static string GetAuditError(Exception ex)
+        => ex is ProviderJsonResponseException providerJson
+            ? providerJson.AuditReason
+            : ex.Message;
+
+    private async Task RejectClaimSetAsync(
+        SqlOSOidcConnection connection,
+        string reason,
+        string? idTokenSubject,
+        string? userInfoSubject,
+        string? ipAddress,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(payload))
+        _logger.LogWarning(
+            "Rejected OIDC claims for connection {ConnectionId}: {Reason}. ID-token subject {IdTokenSubject}; UserInfo subject {UserInfoSubject}.",
+            connection.Id,
+            reason,
+            idTokenSubject,
+            userInfoSubject);
+
+        await _adminService.RecordAuditAsync(
+            "user.login.oidc.claim_mismatch",
+            "oidc_connection",
+            connection.Id,
+            ipAddress: ipAddress,
+            data: new
+            {
+                provider = connection.ProviderType.ToString(),
+                oidcConnectionId = connection.Id,
+                reason,
+                anchorSubject = idTokenSubject,
+                userInfoSubject
+            },
+            cancellationToken: cancellationToken);
+
+        throw new InvalidOperationException(PublicClaimValidationFailure);
+    }
+
+    private static ResolvedEmailClaims? ResolveEmailClaims(
+        IReadOnlyDictionary<string, string>? claims,
+        SqlOSOidcClaimMapping mapping,
+        string source,
+        bool allowPreferredUsername)
+    {
+        var email = GetClaim(claims, mapping.EmailClaim);
+        if (email != null)
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return new ResolvedEmailClaims(
+                email,
+                ParseBooleanClaim(GetClaim(claims, mapping.EmailVerifiedClaim)),
+                source);
+        }
+
+        // preferred_username is a login/display hint in OIDC, not the email value to which an
+        // email_verified claim applies. It can provision an external-only account, but it cannot
+        // borrow a verification bit or authorize email auto-linking.
+        var preferredUsername = allowPreferredUsername
+            ? GetClaim(claims, mapping.PreferredUsernameClaim)
+            : null;
+        return preferredUsername == null
+            ? null
+            : new ResolvedEmailClaims(preferredUsername, EmailVerified: false, Source: source);
+    }
+
+    private static string? GetClaim(IReadOnlyDictionary<string, string>? claims, string? claimType)
+    {
+        if (claims == null || string.IsNullOrWhiteSpace(claimType))
+        {
+            return null;
+        }
+
+        var value = claims.GetValueOrDefault(claimType);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static AppleCallbackDisplayName ParseAppleCallbackDisplayName(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload) || Encoding.UTF8.GetByteCount(payload) > MaxAppleCallbackPayloadBytes)
+        {
+            return new AppleCallbackDisplayName(null, null);
         }
 
         try
         {
-            using var document = JsonDocument.Parse(payload);
-            var result = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (document.RootElement.TryGetProperty("email", out var emailElement) && emailElement.ValueKind == JsonValueKind.String)
+            using var document = JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 4 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("name", out var nameElement) ||
+                nameElement.ValueKind != JsonValueKind.Object)
             {
-                result["email"] = emailElement.GetString()!;
+                return new AppleCallbackDisplayName(null, null);
             }
 
-            if (document.RootElement.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.Object)
-            {
-                if (nameElement.TryGetProperty("firstName", out var firstName) && firstName.ValueKind == JsonValueKind.String)
-                {
-                    result["given_name"] = firstName.GetString()!;
-                }
-
-                if (nameElement.TryGetProperty("lastName", out var lastName) && lastName.ValueKind == JsonValueKind.String)
-                {
-                    result["family_name"] = lastName.GetString()!;
-                }
-            }
-
-            return result;
+            var firstName = nameElement.TryGetProperty("firstName", out var firstNameElement) && firstNameElement.ValueKind == JsonValueKind.String
+                ? SanitizeAppleNamePart(firstNameElement.GetString())
+                : null;
+            var lastName = nameElement.TryGetProperty("lastName", out var lastNameElement) && lastNameElement.ValueKind == JsonValueKind.String
+                ? SanitizeAppleNamePart(lastNameElement.GetString())
+                : null;
+            return new AppleCallbackDisplayName(firstName, lastName);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return new AppleCallbackDisplayName(null, null);
         }
     }
 
-    private static IReadOnlyDictionary<string, string> FlattenJson(JsonElement element)
+    private static string? SanitizeAppleNamePart(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder();
+        var pendingWhitespace = false;
+        foreach (var rune in value.Normalize(NormalizationForm.FormC).EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Control or
+                UnicodeCategory.Format or
+                UnicodeCategory.LineSeparator or
+                UnicodeCategory.ParagraphSeparator or
+                UnicodeCategory.PrivateUse or
+                UnicodeCategory.OtherNotAssigned ||
+                rune.Value is '<' or '>')
+            {
+                continue;
+            }
+
+            if (Rune.IsWhiteSpace(rune))
+            {
+                pendingWhitespace = builder.Length > 0;
+                continue;
+            }
+
+            if (pendingWhitespace)
+            {
+                if (builder.Length + 1 + rune.Utf16SequenceLength > MaxUserDisplayNameChars)
+                {
+                    break;
+                }
+
+                builder.Append(' ');
+                pendingWhitespace = false;
+            }
+            else if (builder.Length + rune.Utf16SequenceLength > MaxUserDisplayNameChars)
+            {
+                break;
+            }
+
+            builder.Append(rune.ToString());
+        }
+
+        var sanitized = builder.ToString().Trim();
+        return sanitized.Length == 0 ? null : sanitized;
+    }
+
+    private static string TruncateUtf16(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+
+        return value[..length].TrimEnd();
+    }
+
+    private static Dictionary<string, string> FlattenJson(JsonElement element)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         FlattenJsonInto(element, result, prefix: null);
@@ -913,7 +1261,12 @@ public sealed class SqlOSOidcAuthService
         string Email,
         string DisplayName,
         bool EmailVerified,
-        bool CanAutoLinkByEmail);
+        bool CanAutoLinkByEmail,
+        string? EmailClaimSource = null);
+
+    private sealed record ResolvedEmailClaims(string Email, bool EmailVerified, string Source);
+
+    private sealed record AppleCallbackDisplayName(string? FirstName, string? LastName);
 
     private sealed record ProvisionedProviderUser(SqlOSUser User, bool Created);
 
@@ -928,6 +1281,16 @@ public sealed class SqlOSOidcAuthService
         IReadOnlyList<string> Scopes,
         SqlOSOidcClaimMapping ClaimMapping,
         bool RequireVerifiedEmail,
-        bool AllowEmailLinkWithoutVerifiedClaim,
         bool UseUserInfo);
+
+    private sealed class ProviderJsonResponseException : InvalidOperationException
+    {
+        public ProviderJsonResponseException(string auditReason, Exception? innerException = null)
+            : base(ProviderResponsePublicError, innerException)
+        {
+            AuditReason = auditReason;
+        }
+
+        public string AuditReason { get; }
+    }
 }

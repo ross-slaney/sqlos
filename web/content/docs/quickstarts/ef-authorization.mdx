@@ -1,0 +1,280 @@
+---
+title: "Authorize EF Core queries"
+description: "Model one protected entity and filter accessible rows in SQL."
+order: 4
+section: quickstarts
+---
+
+<Banner
+  eyebrow="Quickstart"
+  title="Keep row authorization inside the EF query"
+  href="#complete-program"
+  actionLabel="View the code"
+>
+  Implement `ISqlOSResourceEntity`, seed one permission and role, grant that role at creation time, and use `GetAuthorizationFilterAsync` on list queries.
+</Banner>
+
+## Goal
+
+Create projects through an audience-protected API and return only projects the signed-in user may read. The application row and its SqlOS resource are saved through the same `DbContext`.
+
+## Prerequisites
+
+- SqlOS 3.18.0;
+- .NET 9, EF Core 9, and SQL Server;
+- a completed [Protect an API](/docs/quickstarts/protect-api) flow;
+- a valid access token whose `aud` is `http://localhost:5050/api`.
+
+## Complete program
+
+The following `Program.cs` is a complete one-app host with one protected `Project` entity:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Configuration;
+using SqlOS.Extensions;
+using SqlOS.Fga.Interfaces;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not configured.");
+
+const string publicOrigin = "http://localhost:5050";
+const string apiAudience = $"{publicOrigin}/api";
+const string projectRead = "project.read";
+const string projectOwner = "project_owner";
+
+var dashboardPassword = builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException(
+        "Configure SqlOS:Dashboard:Password with user secrets or your secret store.");
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.AuthServer.PublicOrigin = publicOrigin;
+        options.AuthServer.Issuer = $"{publicOrigin}/sqlos/auth";
+
+        options.UseSingleApplication("Acme", app =>
+        {
+            app.Origin = publicOrigin;
+            app.ClientId = "acme-web";
+            app.Audience = apiAudience;
+        });
+
+        options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+        options.Dashboard.Password = dashboardPassword;
+
+        options.Fga.Seed(seed =>
+        {
+            seed.ResourceType("project", "Project");
+            seed.Permission(projectRead, "Read project", "project");
+            seed.Role(projectOwner, "Project owner").Can(projectRead);
+        });
+    });
+
+var app = builder.Build();
+
+app.MapSqlOS();
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapPost("/projects", async (
+    CreateProjectRequest request,
+    HttpContext http,
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    if (string.IsNullOrWhiteSpace(token?.UserId))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Name))
+    {
+        return Results.BadRequest(new { error = "name is required" });
+    }
+
+    var projectId = Guid.NewGuid();
+    var project = new Project
+    {
+        Id = projectId,
+        ResourceId = $"project::{projectId:D}",
+        Name = request.Name.Trim(),
+        CreatedAt = DateTime.UtcNow
+    };
+
+    db.Projects.Add(project);
+
+    await db.ProvisionUserSubjectAsync(
+        token.UserId,
+        displayName: token.UserId,
+        organizationId: token.OrganizationId,
+        cancellationToken: cancellationToken);
+
+    await db.GrantRoleAsync(
+        token.UserId,
+        project,
+        projectOwner,
+        cancellationToken);
+
+    await db.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/projects/{project.Id}", new
+    {
+        project.Id,
+        project.ResourceId,
+        project.Name,
+        project.CreatedAt
+    });
+});
+
+api.MapGet("/projects", async (
+    HttpContext http,
+    AppDbContext db,
+    ISqlOSFgaAuthService authorization,
+    CancellationToken cancellationToken) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+    {
+        return Results.Unauthorized();
+    }
+
+    var filter = await authorization.GetAuthorizationFilterAsync<Project>(
+        subjectId,
+        projectRead);
+
+    var projects = await db.Projects
+        .AsNoTracking()
+        .Where(filter)
+        .OrderBy(project => project.Name)
+        .Select(project => new
+        {
+            project.Id,
+            project.ResourceId,
+            project.Name,
+            project.CreatedAt
+        })
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(projects);
+});
+
+app.Run();
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options)
+{
+    public DbSet<Project> Projects => Set<Project>();
+
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.ToTable("Projects");
+            entity.HasKey(project => project.Id);
+            entity.Property(project => project.ResourceId).HasMaxLength(200);
+            entity.HasIndex(project => project.ResourceId).IsUnique();
+        });
+    }
+}
+
+public sealed class Project : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+
+    public string ResourceTypeId => "project";
+    public string ResourceName => Name;
+    public string? ParentResourceId => null;
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+
+public sealed record CreateProjectRequest(string Name);
+```
+
+Create the `Projects` table with your normal EF migration workflow. SqlOS owns its own tables; your application migration owns `Projects`.
+
+## How the write works
+
+1. The API takes the subject from the validated access token.
+2. `ProvisionUserSubjectAsync` ensures that subject exists in FGA.
+3. The new `Project` describes its resource through `ISqlOSResourceEntity`.
+4. `GrantRoleAsync` grants `project_owner` to the pending resource.
+5. `SqlOSDbContext.SaveChangesAsync` synchronizes the backing resource before EF commits.
+
+The grant remains explicit. Implementing `ISqlOSResourceEntity` does not grant access by itself.
+
+## Verify
+
+Start the host and use an access token from the `acme-web` authorization flow:
+
+```bash
+curl -X POST http://localhost:5050/api/projects \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Launch plan"}'
+```
+
+List accessible rows:
+
+```bash
+curl http://localhost:5050/api/projects \
+  -H "Authorization: Bearer <access-token>"
+```
+
+Open `/sqlos/admin/fga/resources` and confirm the project resource exists. Open Grants and confirm the signed-in subject has `project_owner` on that resource.
+
+Use the Access Tester to verify the same subject, resource, and permission before comparing the decision with the API response:
+
+![SqlOS Access Tester for an EF Core authorization decision](/docs/dashboard-access-tester.png)
+
+Sign in as another user and call the list endpoint. It should not return the first user's project until you explicitly grant that subject an appropriate role.
+
+## Common failures
+
+### `FGA resource type 'project' was not found`
+
+Keep the `options.Fga.Seed(...)` block and restart the host so startup seeding creates the resource type, permission, role, and role-permission link.
+
+### `FGA subject ... was not found`
+
+Provision the subject before calling `GrantRoleAsync`. Grants do not create subjects implicitly.
+
+### The application row exists but no resource appears
+
+The context must derive from `SqlOSDbContext<TContext>`, and the tracked entity must implement `ISqlOSResourceEntity`. Saving through another context bypasses resource synchronization.
+
+### The list is empty
+
+Confirm the subject ID comes from the validated token, the role grant targets the entity's exact `ResourceId`, and the permission key matches the seeded key exactly.
+
+### EF cannot translate the filter
+
+Keep `ResourceId` as a mapped string property. Call `Where(filter)` while the query is still `IQueryable`; do not compile the expression or switch to in-memory enumeration first.
+
+## Production notes
+
+- Never accept the acting subject ID from the request body or query string.
+- Use stable, unique resource IDs and index the mapped `ResourceId` property.
+- Model tenant or organization roots when roles should inherit to many child rows.
+- Check write permissions before modifying existing resources; list filtering only protects reads.
+- Keep resource creation, subject provisioning, and the initial grant in one application transaction where possible.
+- Add integration tests proving that ungranted subjects cannot read or mutate protected rows.
+
+## Next steps
+
+- [Model an FGA hierarchy](/docs/guides/model-fga)
+- [Filter EF Core queries](/docs/guides/ef-query-filters)
+- [Check a permission](/docs/fga/checking-a-permission)
+- [Create protected resources](/docs/fga/creating-resources)

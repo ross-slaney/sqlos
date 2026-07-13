@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>SqlOS</PackageId>
-    <Version>3.15.0</Version>
+    <Version>3.18.0</Version>
     <Authors>Ross Slaney</Authors>
     <Description>Embedded auth server and fine-grained authorization runtime for .NET + SQL Server + EF Core.</Description>
     <PackageTags>authentication;authorization;fga;saml;jwt;sessions;efcore;sqlserver</PackageTags>
@@ -21,6 +21,11 @@
     <Nullable>enable</Nullable>
     <RootNamespace>SqlOS</RootNamespace>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The XML file improves IDE and generated-reference coverage for documented APIs.
+         CS1591 remains suppressed until the intentionally supported surface is fully annotated.
+         CS0419 covers the intentionally overloaded AddSqlOS cref until member docs are generated. -->
+    <NoWarn>$(NoWarn);1591;0419</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

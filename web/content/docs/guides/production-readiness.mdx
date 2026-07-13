@@ -1,0 +1,311 @@
+---
+title: "Production Readiness"
+description: "Deploy SqlOS behind a proxy with stable public URLs, durable keys, controlled schema upgrades, hardened admin routes, and recovery-tested backups."
+order: 8
+section: guides
+---
+
+<Banner
+  eyebrow="Operations guide"
+  title="Put SqlOS into production deliberately"
+  href="../getting-started"
+  actionLabel="Getting Started"
+>
+  SqlOS runs inside your ASP.NET Core process and stores identity and authorization state in your SQL Server database. A production deployment therefore has three parts to operate together: your application, the database, and the ASP.NET Core Data Protection key ring.
+</Banner>
+
+This guide is the handoff between “the login flow works” and “the team can safely deploy, scale, restore, and troubleshoot it.” It describes the controls present in the current package and calls out the controls your host or platform must provide.
+
+<Callout type="info" title="What SqlOS does and does not operate">
+  SqlOS bootstraps its schema, persists signing keys, rotates signing keys, records audit events, and provides dashboard authentication. It does not currently register a SqlOS-specific ASP.NET Core health check, emit a SqlOS `Meter` or `ActivitySource`, coordinate schema upgrades across replicas, or provide down migrations. Add those operational boundaries in the host and deployment platform.
+</Callout>
+
+## Production topology
+
+Use this as the minimum deployment contract:
+
+| Component | Production responsibility |
+| --- | --- |
+| ASP.NET Core host | Stable public issuer, trusted proxy handling, HTTPS, SqlOS configuration, health endpoints, logs |
+| SQL Server | Durable SqlOS and application data, backups, encryption, capacity, recovery testing |
+| Data Protection key ring | Shared by every replica and revision, durable across replacement, backed up, encrypted at rest |
+| Edge or reverse proxy | TLS, trusted forwarded headers, admin-route access control, rate limiting, request limits |
+| Deployment controller | One-writer schema rollout, readiness gates, compatible replicas, rollback/runbook |
+
+## 1. Make the public URL explicit
+
+Production URLs must not depend on the container's internal host name or HTTP scheme. Set both values in the `AddSqlOS` callback:
+
+```csharp
+var publicOrigin = builder.Configuration["SqlOS:PublicOrigin"]
+    ?? throw new InvalidOperationException("SqlOS:PublicOrigin is required.");
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("DefaultConnection is required.");
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        options.DashboardBasePath = "/sqlos";
+        options.AuthServer.PublicOrigin = publicOrigin;
+        options.AuthServer.Issuer = $"{publicOrigin.TrimEnd('/')}/sqlos/auth";
+    });
+```
+
+`PublicOrigin` must be an absolute **origin only**: scheme, host, and optional port, with no path, query, or fragment. With `DashboardBasePath = "/sqlos"`, SqlOS derives the auth base path as `/sqlos/auth`, and `Issuer` must be exactly `{PublicOrigin}/sqlos/auth`.
+
+Examples:
+
+| Setting | Correct | Incorrect |
+| --- | --- | --- |
+| `PublicOrigin` | `https://identity.example.com` | `https://identity.example.com/sqlos` |
+| `Issuer` | `https://identity.example.com/sqlos/auth` | `http://sqlos-api:8080/sqlos/auth` |
+
+The issuer is a security identifier, not just a link. Resource APIs validate the `iss` claim against it, and discovery publishes it. Treat an issuer change as a coordinated identity migration: update clients and resource servers, account for tokens minted with the old issuer, and smoke-test discovery and token validation before shifting traffic.
+
+### Reverse proxies and forwarded headers
+
+`PublicOrigin` keeps generated invitation, reset, callback, device, and portal URLs on the external origin. Also configure ASP.NET Core to accept forwarded scheme and host information **only from your known proxy** so the rest of the host sees the original HTTPS request correctly:
+
+```csharp
+using System.Net;
+using Microsoft.AspNetCore.HttpOverrides;
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedHost;
+
+    options.KnownProxies.Add(IPAddress.Parse("10.0.0.10"));
+});
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    // Configure SqlOS as shown above.
+});
+
+var app = builder.Build();
+app.MapSqlOS();
+```
+
+Use your platform's known proxy or network configuration instead of copying an “accept all proxies” snippet. Trusting arbitrary `X-Forwarded-*` headers lets a caller influence host, scheme, client IP, and any policy built on them.
+
+`AddSqlOS` installs a startup filter that runs the configured Forwarded Headers middleware before its dashboard middleware. That ordering makes dashboard login throttling and audit events use the trusted external client IP. Configure `ForwardedHeadersOptions` before building the app; you do not need a second `UseForwardedHeaders()` call solely for SqlOS.
+
+## 2. Protect the right routes
+
+Do not place a blanket edge-authentication rule on `/sqlos/*`. That also captures the OAuth server and hosted sign-in page, causing login redirects, discovery, callbacks, and token exchange to fail.
+
+For the default base path, start with this boundary:
+
+| Path | Audience | Edge policy |
+| --- | --- | --- |
+| `/sqlos` and `/sqlos/` | Operators | Protect; this is the dashboard shell |
+| `/sqlos/admin/*` | Operators | Protect; these are administrative UIs and APIs |
+| `/sqlos/auth/*` | End users and OAuth clients | Keep reachable; this contains discovery, JWKS, authorize, token, hosted AuthPage, and provider callbacks |
+| `/sqlos/dashboard-auth/*` | Operators using built-in password mode | Reachable only where the dashboard login flow is intended to work; rate-limit at the edge |
+
+Match the exact `/sqlos` root and the `/sqlos/admin/` path segment. A prefix rule such as `/sqlos*` is too broad and can also match unrelated application paths.
+
+<Callout type="warning" title="Delegated SSO setup is an intentional exception">
+  The hosted customer SSO setup portal lives under `/sqlos/admin/auth/sso-portal` by default and protects its own short-lived setup session. If customers use that portal, make a narrow, reviewed edge exception for its start, UI, and setup API routes—or move the headless setup API with `AuthServer.SsoPortal.HeadlessApiBasePath` and render your own UI. A blanket `/sqlos/admin/*` identity-proxy rule will otherwise block customer setup links.
+</Callout>
+
+### Restrict portable-client metadata fetches
+
+CIMD accepts an HTTPS URL as `client_id` and fetches its metadata from the SqlOS host. General multi-client configuration enables CIMD by default; `UseSingleApplication` disables it. If portable clients are not a production requirement, set `options.AuthServer.ClientRegistration.Cimd.Enabled = false`.
+
+When CIMD is enabled, populate `Cimd.TrustedHosts` so an untrusted host is rejected before the request, and enforce outbound DNS/IP controls against loopback, link-local, cloud metadata, and private-network destinations. An empty allowlist makes any syntactically valid HTTPS metadata host eligible for a fetch. See [Client ID Metadata Documents](/docs/authserver/client-id-metadata-documents#turn-it-on).
+
+SqlOS still enforces its own dashboard policy inside the process. Edge protection is defense in depth, not a replacement for configuring the dashboard.
+
+## 3. Harden dashboard access
+
+The default dashboard mode is `DevelopmentOnly`. Without an authorization callback, it is available only when the host environment is Development and returns `404` in production. For an operator-accessible production dashboard, configure password mode explicitly:
+
+```csharp
+options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+options.Dashboard.Password =
+    builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException("SqlOS dashboard password is required.");
+options.Dashboard.SessionLifetime = TimeSpan.FromHours(2);
+```
+
+Password mode uses a constant-time password comparison, a Data Protection-protected `HttpOnly` session cookie, login throttling, temporary lockout, and dashboard login/logout audit events. It is a useful baseline, not a complete public admin perimeter.
+
+For production:
+
+- read the password from a secret provider, never source control or a checked-in settings file;
+- put the dashboard behind a VPN, identity-aware proxy, private ingress, or equivalent operator access layer;
+- keep the session lifetime no longer than operations require;
+- leave dashboard login throttling enabled and add edge rate limiting;
+- use `Dashboard.AuthorizationCallback` when the host must impose an additional request-level decision;
+- verify both page and API behavior—some unauthorized admin APIs intentionally return `404`, while others return `401`.
+
+See [Dashboard](/docs/authserver/dashboard-overview) for the operator surfaces and [Configuration](/docs/guides/configuration#dashboard-password) for local secret setup.
+
+## 4. Keep secrets out of the deployment artifact
+
+SqlOS options are assigned in code; the package does not automatically bind a `SqlOS` configuration section. Read sensitive values from ASP.NET Core configuration providers and assign them inside `AddSqlOS`.
+
+Typical secrets include:
+
+- dashboard password;
+- Google, Microsoft, Apple, GitHub, or custom provider credentials;
+- SAML/customer setup material supplied outside metadata;
+- Azure Communication Services and Twilio credentials;
+- calendar provider client credentials;
+- any certificate password or key-encryption credential used by the host.
+
+Startup seeds are reconciled on every startup. If a seed contains a provider secret, configuration remains the source of that secret and can overwrite a dashboard-managed change on the next deployment. Decide which settings are deployment-managed and which are operator-managed; do not alternate between both models accidentally.
+
+SqlOS protects persisted provider credentials and other sensitive values with ASP.NET Core Data Protection, but encryption after ingestion does not make it safe to commit plaintext inputs. Restrict access to the configuration provider and database independently.
+
+## 5. Persist and share Data Protection keys
+
+`AddSqlOS` registers ASP.NET Core Data Protection. The framework's default key storage is not a production durability plan for ephemeral containers or multiple replicas. Configure a shared store before registering SqlOS:
+
+```csharp
+using Microsoft.AspNetCore.DataProtection;
+
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName("contoso-sqlos-production")
+    .PersistKeysToFileSystem(new DirectoryInfo("/var/lib/contoso/dpkeys"));
+
+builder.AddSqlOS<AppDbContext>(/* ... */);
+```
+
+The filesystem path is only an example. Use a durable local or shared volume for your platform, and protect the key ring at rest with operating-system permissions and encrypted storage. Every replica and every concurrently deployed revision must use the same key ring and the same `ApplicationName`.
+
+The key ring protects more than dashboard cookies. SqlOS uses it for JWT signing private keys, persisted OIDC client secrets and Apple private keys, TOTP secrets, protected phone values, refresh-rotation replacement tokens, calendar access and refresh tokens, and other protected values.
+
+<Callout type="warning" title="A database backup is not enough">
+  Back up the SQL Server database and the Data Protection key ring as one recovery set. Losing the key ring can leave restored protected values unreadable even though every row is present. Retain old Data Protection keys for as long as protected database values or cookies may still depend on them.
+</Callout>
+
+SqlOS protects JWT private signing keys automatically; there is no signing-key flag to enable. SQL Server stores the public key and an opaque protected reference, so the database remains part of recovery without containing plaintext private key material. For automatic single-host and shared-filesystem deployment examples, see [Production Readiness: Signing Keys](/docs/authserver/signing-key-custody).
+
+## 6. Roll schema changes forward through one instance
+
+SqlOS owns its tables separately from your EF Core migrations. At host startup, `SqlOSBootstrapHostedService` calls `SqlOSBootstrapper`, which:
+
+1. discovers embedded, numbered AuthServer SQL scripts;
+2. applies pending scripts in ascending order and updates `SqlOSSchema`;
+3. ensures an active signing key, settings, templates, and startup seeds;
+4. applies the FGA scripts tracked by `SqlOSFgaSchema`;
+5. creates or verifies FGA functions and seed data when enabled.
+
+The current initializers execute SQL batches directly. They do **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
+
+Use this rollout sequence:
+
+1. Back up the database and Data Protection key ring; record the application and SqlOS package versions.
+2. Restore that backup into a non-production environment and run the new build against it.
+3. In production, hold the old replicas and start one canary/new revision first.
+4. Wait for `SqlOS initialization complete.` and confirm there are no migration, function, seed, or signing-key errors.
+5. Run the discovery, JWKS, login, token, API, and logout smoke tests below.
+6. Roll the same tested build to the remaining replicas; avoid a prolonged mixed-version fleet.
+
+If application migrations contain foreign keys to SqlOS-owned tables, resolve and call `SqlOSBootstrapper.InitializeAsync()` before your application's `MigrateAsync()` step. Do not copy SqlOS tables into your EF migrations. See [Schema ownership](/docs/guides/configuration#schema-ownership).
+
+Treat rollback as a recovery decision, not “deploy the old binary and hope.” An older package may not understand a newer, forward-only schema. Rehearse whether your release can roll the binary back safely; otherwise restore a compatible database/key-ring recovery set and application version according to your runbook.
+
+## 7. Add host-owned health and observability
+
+The current package does not add health endpoints. Your host should expose separate liveness and readiness checks:
+
+- **Liveness** answers whether the process should be restarted. Do not make it depend on every external identity provider.
+- **Readiness** should stay false until application startup succeeds and should verify the SQL Server dependency your login and authorization paths require.
+- If your policy requires a schema assertion, add a host-owned check for the expected `SqlOSSchema` and `SqlOSFgaSchema` versions. Update that expectation with the package version.
+- Keep detailed diagnostics private; public health responses should not reveal connection strings, schema names, or provider errors.
+
+At minimum, retain `Information` logs for the `SqlOS` category during deploys:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "SqlOS": "Information",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+    }
+  }
+}
+```
+
+SqlOS logs bootstrap and schema versions, signing-key rotation, provider failures, calendar synchronization, and FGA initialization through normal `ILogger` categories. Its persisted [Audit Logs](/docs/guides/audit-logs) are a separate security/governance record; ship application logs to your observability system and define retention/export policy for audit records.
+
+Alert on:
+
+- a revision that never reaches ready after a package upgrade;
+- any bootstrap, schema, FGA-function, or signing-key rotation error;
+- sustained OAuth `5xx` responses or provider callback failures;
+- dashboard and password-login rate-limit/lockout audit events;
+- unusual refresh replay, logout-all, client disable/revoke, or signing-key rotation events;
+- database saturation or latency that threatens token and authorization requests.
+
+## 8. Back up and restore the identity system
+
+The SQL Server backup must include SqlOS auth, FGA, audit, email, and calendar tables alongside any application rows that refer to them. The recovery plan must also include:
+
+- the matching Data Protection key ring and its at-rest decryption material;
+- application configuration and secret-provider versions;
+- the application build and SqlOS package version compatible with the restored schema;
+- DNS, certificate, proxy, and issuer configuration;
+- any external provider callback/redirect configuration that cannot be reconstructed from the database.
+
+Run a restore drill, not just a backup job. In an isolated environment, restore the database and key ring, start the matching build, then prove that existing protected material can be read and a new sign-in can complete. If OIDC, SAML, MFA, calendar, or email are business-critical, include each enabled path in the drill.
+
+## Release smoke checklist
+
+Run this against the public origin through the real proxy, not directly against a pod or container:
+
+### Protocol and keys
+
+- [ ] `GET /sqlos/auth/.well-known/oauth-authorization-server` returns `200` and publishes the exact production issuer.
+- [ ] `GET /sqlos/auth/.well-known/jwks.json` returns `200` and at least one current validation key.
+- [ ] A known public client can start `/authorize` with an exact registered redirect URI and S256 PKCE.
+- [ ] Code exchange succeeds once; reuse of the code or a wrong verifier fails.
+
+### Tokens and application access
+
+- [ ] The access token signature, expiry, `iss`, `aud`, `sub`, `sid`, and expected `org_id` are correct.
+- [ ] The intended protected API accepts the token.
+- [ ] A different audience, missing token, malformed token, and revoked session are rejected.
+- [ ] Refresh rotates the refresh token; logout revokes the session and subsequent SqlOS session-aware validation fails.
+
+### User journeys
+
+- [ ] Hosted password or passwordless sign-in works through the external HTTPS origin.
+- [ ] Each enabled OIDC or SAML provider returns through its production callback.
+- [ ] Invitation, password-reset, OTP, and MFA messages contain production—not internal—URLs.
+- [ ] Multi-organization selection and organization-scoped claims behave as expected.
+
+### Administration and recovery
+
+- [ ] `/sqlos/auth/*` remains reachable without operator edge authentication.
+- [ ] `/sqlos`, `/sqlos/`, and operator routes under `/sqlos/admin/*` are unavailable to untrusted callers, except the narrowly reviewed delegated SSO portal paths when that customer flow is enabled.
+- [ ] CIMD is disabled or constrained by a pre-fetch host allowlist and outbound network policy.
+- [ ] An authorized operator can sign in, open the dashboard, and view audit events.
+- [ ] Restarting or replacing an instance with the shared key ring preserves protected secrets and sessions as designed.
+- [ ] The current database/key-ring backup has a recent successful restore drill.
+
+## Source evidence
+
+The operational behavior described here is visible in the current source:
+
+- [`SqlOSPathDefaults` and `SqlOSOptionsValidator`](https://github.com/ross-slaney/sqlos/tree/main/src/SqlOS/Configuration) define the base-path, public-origin, and issuer relationship.
+- [`SqlOSBootstrapper`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Services/SqlOSBootstrapper.cs) shows the startup order.
+- [`SqlOSSchemaInitializer`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/AuthServer/Services/SqlOSSchemaInitializer.cs) and [`SqlOSFgaSchemaInitializer`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Fga/Services/SqlOSFgaSchemaInitializer.cs) execute embedded forward scripts.
+- [`SqlOSCryptoService`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/AuthServer/Services/SqlOSCryptoService.cs) shows Data Protection-backed persisted secrets and signing-key behavior.
+- [`SqlOSDashboardMiddleware`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Dashboard/SqlOSDashboardMiddleware.cs) and the auth endpoint mappings show the dashboard/admin boundary.
+
+## Next steps
+
+- [Test your integration](/docs/guides/test-your-integration)
+- [Troubleshooting](/docs/guides/troubleshooting)
+- [Token validation](/docs/authserver/token-validation)
+- [Audit Logs](/docs/guides/audit-logs)

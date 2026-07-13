@@ -5,7 +5,7 @@ order: 12
 section: fga
 ---
 
-`HasCapabilityAsync` checks whether a subject has a specific permission anywhere in the resource tree. Use it for broad capability gates where you don't have a specific resource ID.
+`HasCapabilityAsync` checks whether a subject has a specific permission on the configured FGA root resource. Use it only for capabilities you deliberately grant at root. It does not search every descendant for any matching grant.
 
 ## Usage
 
@@ -21,11 +21,12 @@ if (!canCreateChains)
 | Scenario | Method |
 | --- | --- |
 | "Can this user edit *this* chain?" | `CheckAccessAsync` with a resource ID |
-| "Can this user edit *any* chain?" | `HasCapabilityAsync` |
+| "Does this user have our global create-chain capability?" | `HasCapabilityAsync`, with a role granted on root |
+| "Can this user edit at least one chain somewhere?" | Query/filter the relevant chain resources; `HasCapabilityAsync` does not answer this |
 | "Show me all chains this user can see" | `GetAuthorizationFilterAsync` |
 
 `HasCapabilityAsync` is useful for:
 
-- **UI toggles** -- show/hide "Create" buttons based on broad permissions
-- **Top-level gates** -- "does this user have any write access at all?"
-- **Feature flags** -- enable/disable features based on capabilities
+- **UI toggles** -- show/hide globally granted "Create" actions
+- **Top-level gates** -- enforce a permission intentionally assigned on the root resource
+- **Global operator roles** -- distinguish a platform-level grant from tenant/resource grants

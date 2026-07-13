@@ -76,6 +76,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
 
         var auth = options.AuthServer;
         auth.Issuer = builder.Configuration["SqlOS:Issuer"] ?? "https://localhost/sqlos/auth";
+        auth.PublicOrigin = builder.Configuration["SqlOS:PublicOrigin"];
         auth.DefaultSigningKeyRotationIntervalDays = 90;
         auth.DefaultSigningKeyGraceWindowDays = 7;
         options.ConfigureEmail(email =>
@@ -361,6 +362,7 @@ app.Use(async (context, next) =>
 
 app.MapExampleAuthEndpoints();
 app.MapExampleEndpoints();
+app.MapExampleCalendarEndpoints();
 app.MapDemoEndpoints();
 app.MapChainEndpoints();
 app.MapLocationEndpoints();

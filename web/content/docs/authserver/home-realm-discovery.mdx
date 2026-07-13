@@ -51,7 +51,10 @@ Response:
 ```json
 {
   "mode": "password",
-  "organizations": []
+  "organizationId": null,
+  "organizationName": null,
+  "primaryDomain": null,
+  "connectionId": null
 }
 ```
 
@@ -61,7 +64,9 @@ Or for an SSO user:
 {
   "mode": "sso",
   "organizationId": "org_...",
-  "ssoConnectionId": "sso_..."
+  "organizationName": "Acme Corp",
+  "primaryDomain": "acme.com",
+  "connectionId": "sso_..."
 }
 ```
 

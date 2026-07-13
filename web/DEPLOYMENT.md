@@ -56,7 +56,7 @@ The GitHub Actions principal must be able to:
 - Create resources inside that group
 - Edit DNS in the zone’s resource group (e.g. `sqlos.dev`)
 
-The simplest option is `Contributor` on the subscription.
+The simplest option is `Contributor` plus `User Access Administrator` on the subscription. `Contributor` alone is not enough because the foundation deployment assigns `AcrPull` to the managed identity.
 
 If you want tighter scope, pre-create the app resource group yourself and then grant the principal `Contributor` on:
 
@@ -91,6 +91,16 @@ az ad sp create-for-rbac \
   --scopes "/subscriptions/<subscription-id>" \
   --query "{clientId:appId, clientSecret:password, tenantId:tenant}" \
   -o json
+```
+
+`foundation.bicep` assigns `AcrPull` to the container app's managed identity. That step needs `User Access Administrator` on the same scope:
+
+```bash
+az role assignment create \
+  --assignee-object-id "$(az ad sp show --id <client-id> --query id --output tsv)" \
+  --assignee-principal-type ServicePrincipal \
+  --role "User Access Administrator" \
+  --scope "/subscriptions/<subscription-id>"
 ```
 
 Use the returned values like this:

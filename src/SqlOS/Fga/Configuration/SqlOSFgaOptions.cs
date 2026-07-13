@@ -19,6 +19,13 @@ public class SqlOSFgaOptions
     public SqlOSFgaTableNames TableNames { get; set; } = new();
     public SqlOSFgaSeedData? StartupSeedData { get; private set; }
 
+    /// <summary>
+    /// Adds resource types, permissions, roles, and role-permission assignments to the FGA
+    /// startup seed that SqlOS reconciles during host bootstrap.
+    /// </summary>
+    /// <param name="configure">A callback that declares the authorization model to seed.</param>
+    /// <returns>The same options instance so that additional configuration can be chained.</returns>
+    /// <remarks>Multiple calls add to or replace matching entries in the accumulated startup seed.</remarks>
     public SqlOSFgaOptions Seed(Action<SqlOSFgaSeedBuilder> configure)
     {
         var builder = StartupSeedData == null

@@ -654,25 +654,6 @@ public sealed class SqlOSAuthService
         return result with { Organizations = organizations };
     }
 
-    public async Task<SqlOSTokenResponse> ExchangeCodeAsync(SqlOSExchangeCodeRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
-    {
-        var token = await _cryptoService.ConsumeTemporaryTokenAsync("auth_code", request.Code, cancellationToken)
-            ?? throw new InvalidOperationException("Authorization code is invalid or expired.");
-        var payload = _cryptoService.DeserializePayload<AuthCodePayload>(token)
-            ?? throw new InvalidOperationException("Authorization code payload is invalid.");
-
-        if (!string.Equals(payload.ClientId, request.ClientId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Authorization code was not issued for this client.");
-        }
-
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId!, cancellationToken);
-        var client = await _adminService.RequireClientAsync(request.ClientId, payload.RedirectUri, cancellationToken);
-        var tokens = await CreateSessionAndTokensAsync(user, client, token.OrganizationId, payload.AuthenticationMethod, httpContext, cancellationToken);
-        await _adminService.RecordAuditAsync("user.login.code-exchanged", "user", user.Id, userId: user.Id, organizationId: token.OrganizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
-        return tokens;
-    }
-
     public async Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
@@ -696,10 +677,7 @@ public sealed class SqlOSAuthService
             return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
         }
 
-        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= DateTime.UtcNow || session.IdleExpiresAt <= DateTime.UtcNow)
-        {
-            throw new InvalidOperationException("Session is no longer active.");
-        }
+        EnsureSessionIsActive(session);
 
         if (_options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource))
         {
@@ -711,13 +689,21 @@ public sealed class SqlOSAuthService
             }
         }
 
-        string? organizationId = request.OrganizationId;
-        if (!string.IsNullOrWhiteSpace(organizationId) && !await _adminService.UserHasMembershipAsync(session.UserId, organizationId, cancellationToken))
+        if (refreshToken.ConsumedAt != null)
         {
-            throw new InvalidOperationException("User is not a member of the selected organization.");
+            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
         }
 
-        organizationId ??= session.OrganizationId;
+        var requestedOrganizationId = string.IsNullOrWhiteSpace(request.OrganizationId)
+            ? null
+            : request.OrganizationId.Trim();
+        var organizationId = requestedOrganizationId ?? session.OrganizationId;
+        await RequireActiveLifecycleAsync(
+            session.UserId,
+            organizationId,
+            "refresh",
+            session.Id,
+            cancellationToken);
         await _adminService.EnsureApplicationAccessAsync(
             session.ClientApplication!,
             session.UserId,
@@ -728,7 +714,7 @@ public sealed class SqlOSAuthService
         // Mint the access token, build the new refresh token row, and
         // populate the grace-window cache fields all BEFORE the single
         // SaveChangesAsync. This avoids a visibility window where
-        // ConsumedAt is set but ReplacementAccessToken is still null
+        // ConsumedAt is set but ReplacementTokenResponse is still null
         // (which would cause concurrent callers to fail the grace
         // window check and trigger false-positive replay detection).
         //
@@ -742,7 +728,6 @@ public sealed class SqlOSAuthService
         var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
         var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);
 
-        refreshToken.ConsumedAt = DateTime.UtcNow;
         var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
         var nextRefreshToken = new SqlOSRefreshToken
         {
@@ -753,13 +738,25 @@ public sealed class SqlOSAuthService
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.Add(securitySettings.RefreshTokenLifetime)
         };
+
+        string? protectedReplacementResponse = null;
+        if (securitySettings.RefreshTokenGraceWindow > TimeSpan.Zero)
+        {
+            var replacementResponse = JsonSerializer.Serialize(
+                new RefreshTokenReplacementPayload(accessToken, newRawRefreshToken));
+            protectedReplacementResponse = _cryptoService.ProtectRefreshTokenResponse(
+                replacementResponse,
+                securitySettings.RefreshTokenGraceWindow);
+        }
+
+        refreshToken.ConsumedAt = DateTime.UtcNow;
         refreshToken.ReplacedByTokenId = nextRefreshToken.Id;
 
-        // Cache the issued access token on the consumed row, encrypted
-        // at rest, alongside the org id and expiry, so concurrent
-        // refresh attempts within the grace window can return the SAME
-        // access token instead of getting a divergent fresh one.
-        refreshToken.ReplacementAccessToken = _cryptoService.ProtectSecret(accessToken);
+        // Cache the complete response as one purpose-bound, time-limited
+        // Data Protection payload. The raw replacement refresh token is
+        // otherwise never persisted, and every retry receives this exact
+        // pair instead of minting a sibling lineage.
+        refreshToken.ReplacementTokenResponse = protectedReplacementResponse;
         refreshToken.ReplacementOrganizationId = organizationId;
         refreshToken.ReplacementAccessTokenExpiresAt = accessTokenExpiresAt;
 
@@ -775,7 +772,7 @@ public sealed class SqlOSAuthService
         {
             // Lost the rotation race to a concurrent refresh on this or
             // another instance. The winner has already committed the
-            // entire rotation (ConsumedAt + ReplacementAccessToken cache
+            // entire rotation (ConsumedAt + ReplacementTokenResponse cache
             // + new refresh token row) atomically, so a fresh re-read
             // will see a fully populated grace-window cache. We need to:
             //   1) Discard our failed-rotation change tracker state (the
@@ -802,6 +799,21 @@ public sealed class SqlOSAuthService
                 .FirstOrDefaultAsync(x => x.Id == refreshToken.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Refresh token vanished after concurrency conflict.");
 
+            if (fresh.RevokedAt != null || fresh.ExpiresAt <= DateTime.UtcNow)
+            {
+                throw new InvalidOperationException("Refresh token is no longer valid.");
+            }
+
+            // A concurrency conflict can now also mean replay detection
+            // revoked the session while this request was rotating a live
+            // descendant. In that case the parent was not consumed by a
+            // winning rotation, so it must never enter the grace path.
+            EnsureSessionIsActive(fresh.Session!);
+            if (fresh.ConsumedAt == null)
+            {
+                throw new InvalidOperationException("Refresh token rotation could not be completed.");
+            }
+
             return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
         }
 
@@ -818,8 +830,9 @@ public sealed class SqlOSAuthService
     /// <summary>
     /// Handles a refresh request where the presented token has already been
     /// consumed. If the consumption happened recently AND a replacement
-    /// access token was cached, return the same cached token pair (grace
-    /// window). Otherwise, trigger replay detection and revoke the family.
+    /// access token was cached, return that access token plus a fresh sibling
+    /// refresh token in the same family (grace window). Otherwise, trigger
+    /// replay detection and revoke the family.
     /// </summary>
     private async Task<SqlOSTokenResponse> HandleConsumedRefreshTokenAsync(
         SqlOSRefreshToken refreshToken,
@@ -828,11 +841,41 @@ public sealed class SqlOSAuthService
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        // Consumed-token retries bypass the normal rotation path, so the
+        // session lifecycle must be checked here before protected response
+        // material is read or released. Token-row revocation is not a
+        // substitute for the session security boundary.
+        EnsureSessionIsActive(session);
+
+        var cachedOrganizationId = refreshToken.ReplacementOrganizationId ?? session.OrganizationId;
+
+        // A consumed refresh token can only return the cached access token
+        // minted by the winning rotation. Never let a retry select a
+        // different tenant than that cached token.
+        if (!string.IsNullOrWhiteSpace(request.OrganizationId)
+            && !string.Equals(request.OrganizationId, cachedOrganizationId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Organization does not match the original refresh.");
+        }
+
+        await RequireActiveLifecycleAsync(
+            session.UserId,
+            cachedOrganizationId,
+            "refresh_grace_window",
+            session.Id,
+            cancellationToken);
+        await _adminService.EnsureApplicationAccessAsync(
+            session.ClientApplication!,
+            session.UserId,
+            cachedOrganizationId,
+            "application.access.refresh_denied",
+            cancellationToken: cancellationToken);
+
         var graceWindow = securitySettings.RefreshTokenGraceWindow;
         var withinGraceWindow = graceWindow > TimeSpan.Zero
             && refreshToken.ConsumedAt!.Value.Add(graceWindow) > DateTime.UtcNow
             && !string.IsNullOrEmpty(refreshToken.ReplacedByTokenId)
-            && !string.IsNullOrEmpty(refreshToken.ReplacementAccessToken)
+            && !string.IsNullOrEmpty(refreshToken.ReplacementTokenResponse)
             && refreshToken.ReplacementAccessTokenExpiresAt is { } cachedExpiry
             && cachedExpiry > DateTime.UtcNow;
 
@@ -841,7 +884,11 @@ public sealed class SqlOSAuthService
             var replacement = await _context.Set<SqlOSRefreshToken>()
                 .FirstOrDefaultAsync(x => x.Id == refreshToken.ReplacedByTokenId, cancellationToken);
 
-            if (replacement != null && replacement.RevokedAt == null)
+            if (replacement != null
+                && replacement.RevokedAt == null
+                && replacement.ExpiresAt > DateTime.UtcNow
+                && string.Equals(replacement.SessionId, refreshToken.SessionId, StringComparison.Ordinal)
+                && string.Equals(replacement.FamilyId, refreshToken.FamilyId, StringComparison.Ordinal))
             {
                 // Resource indicator validation must still match the original
                 // authorization, even on the grace window path.
@@ -866,14 +913,39 @@ public sealed class SqlOSAuthService
                     throw new InvalidOperationException("Organization does not match the original refresh.");
                 }
 
-                var cachedAccessToken = _cryptoService.UnprotectSecret(refreshToken.ReplacementAccessToken!);
+                RefreshTokenReplacementPayload cachedResponse;
+                try
+                {
+                    var responseJson = _cryptoService.UnprotectRefreshTokenResponse(refreshToken.ReplacementTokenResponse!);
+                    cachedResponse = JsonSerializer.Deserialize<RefreshTokenReplacementPayload>(responseJson)
+                        ?? throw new InvalidOperationException("The cached refresh token response is invalid.");
+
+                    if (string.IsNullOrWhiteSpace(cachedResponse.AccessToken)
+                        || string.IsNullOrWhiteSpace(cachedResponse.RefreshToken)
+                        || !string.Equals(
+                            _cryptoService.HashToken(cachedResponse.RefreshToken),
+                            replacement.TokenHash,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("The cached refresh token response does not match its replacement token.");
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or JsonException)
+                {
+                    await RevokeRefreshTokenFamilyAsync(
+                        session.Id,
+                        refreshToken.FamilyId,
+                        "refresh_token_response_invalid",
+                        cancellationToken);
+                    throw new InvalidOperationException("Refresh token has already been used.");
+                }
 
                 return new SqlOSTokenResponse(
-                    cachedAccessToken,
-                    await ReissueGraceWindowRefreshTokenAsync(replacement, cancellationToken),
+                    cachedResponse.AccessToken,
+                    cachedResponse.RefreshToken,
                     session.Id,
                     session.ClientApplication!.ClientId,
-                    refreshToken.ReplacementOrganizationId,
+                    cachedOrganizationId,
                     refreshToken.ReplacementAccessTokenExpiresAt!.Value,
                     replacement.ExpiresAt);
             }
@@ -881,33 +953,6 @@ public sealed class SqlOSAuthService
 
         await RevokeRefreshTokenFamilyAsync(session.Id, refreshToken.FamilyId, "refresh_token_reuse", cancellationToken);
         throw new InvalidOperationException("Refresh token has already been used.");
-    }
-
-    /// <summary>
-    /// Mints a fresh opaque refresh token in the same family as the given
-    /// replacement and persists it. Used by the grace window path: we
-    /// can't return the original raw replacement refresh token because we
-    /// only stored its hash, so callers in the grace window receive a new
-    /// valid token in the same refresh-token family rather than the
-    /// original replacement token value. The new token shares lifetime,
-    /// family, and session with the replacement and rotates normally on
-    /// next use.
-    /// </summary>
-    private async Task<string> ReissueGraceWindowRefreshTokenAsync(SqlOSRefreshToken replacement, CancellationToken cancellationToken)
-    {
-        var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
-        var sibling = new SqlOSRefreshToken
-        {
-            Id = _cryptoService.GenerateId("rfr"),
-            SessionId = replacement.SessionId,
-            FamilyId = replacement.FamilyId,
-            TokenHash = _cryptoService.HashToken(newRawRefreshToken),
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = replacement.ExpiresAt
-        };
-        _context.Set<SqlOSRefreshToken>().Add(sibling);
-        await _context.SaveChangesAsync(cancellationToken);
-        return newRawRefreshToken;
     }
 
     public async Task LogoutAsync(string? refreshToken, string? sessionId, CancellationToken cancellationToken = default)
@@ -937,6 +982,9 @@ public sealed class SqlOSAuthService
         foreach (var token in refreshTokens)
         {
             token.RevokedAt = DateTime.UtcNow;
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -945,29 +993,13 @@ public sealed class SqlOSAuthService
 
     public async Task LogoutAllAsync(string userId, CancellationToken cancellationToken = default)
     {
-        var sessions = await _context.Set<SqlOSSession>()
-            .Where(x => x.UserId == userId && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
-        if (sessions.Count == 0)
-        {
-            return;
-        }
-
-        var sessionIds = sessions.Select(x => x.Id).ToList();
-        foreach (var session in sessions)
-        {
-            session.RevokedAt = DateTime.UtcNow;
-            session.RevocationReason = "logout_all";
-        }
-
-        var refreshTokens = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
-        foreach (var token in refreshTokens)
-        {
-            token.RevokedAt = DateTime.UtcNow;
-        }
-
+        await SqlOSAuthLifecyclePolicy.RevokeAsync(
+            _context,
+            userId,
+            organizationId: null,
+            "logout_all",
+            DateTime.UtcNow,
+            cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await _adminService.RecordAuditAsync("user.logout-all", "user", userId, userId: userId, cancellationToken: cancellationToken);
     }
@@ -993,15 +1025,6 @@ public sealed class SqlOSAuthService
 
     public async Task<SqlOSPasswordResetRequestResult> RequestPasswordResetEmailAsync(
         SqlOSForgotPasswordRequest request,
-        HttpContext? httpContext = null,
-        CancellationToken cancellationToken = default)
-        => await RequestPasswordResetEmailAsync(
-            new SqlOSSendPasswordResetEmailRequest(request.Email, ClientId: request.ClientId),
-            httpContext,
-            cancellationToken);
-
-    public async Task<SqlOSPasswordResetRequestResult> RequestPasswordResetEmailAsync(
-        SqlOSSendPasswordResetEmailRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
@@ -1075,8 +1098,9 @@ public sealed class SqlOSAuthService
         {
             await SendPasswordResetEmailToEligibleUserAsync(
                 email,
-                request.ResetUrlTemplate,
+                trustedResetUrlTemplate: null,
                 client?.Id,
+                client?.IsFirstParty == true ? client.ClientId : null,
                 httpContext,
                 cancellationToken);
         }
@@ -1106,7 +1130,13 @@ public sealed class SqlOSAuthService
         }
 
         var client = await TryResolveClientApplicationAsync(request.ClientId, cancellationToken);
-        return await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, client?.Id, httpContext, cancellationToken);
+        return await SendPasswordResetEmailToEligibleUserAsync(
+            email,
+            request.ResetUrlTemplate,
+            client?.Id,
+            client?.IsFirstParty == true ? client.ClientId : null,
+            httpContext,
+            cancellationToken);
     }
 
     public async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailForUserAsync(
@@ -1142,7 +1172,13 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password reset is unavailable for this account.");
         }
 
-        var result = await SendPasswordResetEmailToEligibleUserAsync(email, request.ResetUrlTemplate, clientApplicationId: null, httpContext, cancellationToken);
+        var result = await SendPasswordResetEmailToEligibleUserAsync(
+            email,
+            request.ResetUrlTemplate,
+            clientApplicationId: null,
+            clientId: null,
+            httpContext,
+            cancellationToken);
         await RecordPasswordResetAuditAsync(
             "password_reset.admin_email_sent",
             "admin",
@@ -1157,23 +1193,29 @@ public sealed class SqlOSAuthService
 
     private async Task<SqlOSPasswordResetEmailResult> SendPasswordResetEmailToEligibleUserAsync(
         SqlOSUserEmail email,
-        string? resetUrlTemplate,
+        string? trustedResetUrlTemplate,
         string? clientApplicationId,
+        string? clientId,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        var (token, expiresAt) = await CreatePasswordResetTokenForEmailAsync(email, clientApplicationId, cancellationToken);
-        var context = await BuildPasswordResetMessageContextAsync(
-            email.Email,
-            MaskEmail(email.Email),
-            token,
-            expiresAt,
-            resetUrlTemplate,
-            httpContext,
-            cancellationToken);
+        var maskedEmail = MaskEmail(email.Email);
+        string? token = null;
 
         try
         {
+            var tokenResult = await CreatePasswordResetTokenForEmailAsync(email, clientApplicationId, cancellationToken);
+            token = tokenResult.Token;
+            var expiresAt = tokenResult.ExpiresAt;
+            var context = await BuildPasswordResetMessageContextAsync(
+                email.Email,
+                maskedEmail,
+                token,
+                expiresAt,
+                trustedResetUrlTemplate,
+                clientId,
+                cancellationToken);
+
             if (_passwordResetOptions.BuildMessage != null)
             {
                 var authEmailSender = _authEmailSender
@@ -1241,18 +1283,24 @@ public sealed class SqlOSAuthService
                 result.SanitizedError,
                 $"Password reset email queued for {context.MaskedEmail}.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            await InvalidateActivePasswordResetTokensAsync(email.UserId, cancellationToken);
+            if (token != null)
+            {
+                // Once the reset token has been persisted, cleanup must not inherit request
+                // cancellation. A disconnected caller must not be able to strand a live token
+                // between link generation and delivery.
+                await InvalidateActivePasswordResetTokensAsync(email.UserId, CancellationToken.None);
+            }
             await RecordPasswordResetAuditAsync(
                 "password_reset.email_send_failed",
                 "system",
                 null,
                 email.UserId,
-                context.MaskedEmail,
+                maskedEmail,
                 GetIp(httpContext),
                 new { error = ex.Message },
-                cancellationToken);
+                CancellationToken.None);
             throw;
         }
     }
@@ -1315,6 +1363,13 @@ public sealed class SqlOSAuthService
 
         credential.SecretHash = _cryptoService.HashPassword(request.NewPassword);
         credential.LastUsedAt = null;
+        await SqlOSAuthLifecyclePolicy.RevokeAsync(
+            _context,
+            user.Id,
+            organizationId: null,
+            "password_reset",
+            DateTime.UtcNow,
+            cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPasswordResetAuditAsync(
             "password_reset.completed",
@@ -1421,19 +1476,51 @@ public sealed class SqlOSAuthService
         string mfaToken,
         SqlOSTotpEnrollmentStartRequest request,
         CancellationToken cancellationToken = default)
+        => await StartTotpEnrollmentForChallengeCoreAsync(
+            mfaToken,
+            request,
+            expectedFlow: "client",
+            expectedAuthorizationRequestId: null,
+            cancellationToken);
+
+    internal async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForAuthorizationChallengeAsync(
+        string mfaToken,
+        string authorizationRequestId,
+        SqlOSTotpEnrollmentStartRequest request,
+        CancellationToken cancellationToken = default)
+        => await StartTotpEnrollmentForChallengeCoreAsync(
+            mfaToken,
+            request,
+            expectedFlow: "authorization",
+            expectedAuthorizationRequestId: authorizationRequestId,
+            cancellationToken);
+
+    private async Task<SqlOSTotpEnrollmentStartResult> StartTotpEnrollmentForChallengeCoreAsync(
+        string mfaToken,
+        SqlOSTotpEnrollmentStartRequest request,
+        string expectedFlow,
+        string? expectedAuthorizationRequestId,
+        CancellationToken cancellationToken)
     {
         var token = await RequireTotpMfaService().GetPendingMfaTokenAsync(mfaToken, cancellationToken);
-        if (token.UserId == null)
+        try
         {
-            throw new InvalidOperationException("MFA challenge is invalid.");
+            var payload = await ValidateEnrollmentChallengeAsync(
+                token,
+                expectedFlow,
+                expectedAuthorizationRequestId,
+                cancellationToken);
+            return await RequireTotpMfaService().StartChallengeEnrollmentAsync(
+                token,
+                payload,
+                request.DisplayName,
+                cancellationToken);
         }
-
-        return await RequireTotpMfaService().StartEnrollmentAsync(
-            token.UserId,
-            token.OrganizationId,
-            request.DisplayName,
-            requireEnrollmentAllowed: false,
-            cancellationToken);
+        catch (InvalidOperationException)
+        {
+            await RecordRejectedChallengeEnrollmentAsync(token, "start", cancellationToken);
+            throw new InvalidOperationException("MFA enrollment is not authorized for this challenge.");
+        }
     }
 
     public async Task<SqlOSTotpEnrollmentVerifyResult> VerifyTotpEnrollmentAsync(
@@ -1441,18 +1528,153 @@ public sealed class SqlOSAuthService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await RequireTotpMfaService().VerifyEnrollmentAsync(request, cancellationToken);
         if (string.IsNullOrWhiteSpace(request.MfaToken))
         {
-            return result;
+            return await RequireTotpMfaService().VerifyEnrollmentAsync(request, cancellationToken);
         }
 
-        var challengeResult = await CompleteMfaChallengeWithoutCodeAsync(
-            request.MfaToken,
-            SqlOSMfaFactorTypes.Totp,
-            httpContext,
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (SupportsDatabaseTransactions() && _context.Database.CurrentTransaction == null)
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            var verification = await VerifyTotpChallengeEnrollmentCoreAsync(
+                request,
+                expectedFlow: "client",
+                expectedAuthorizationRequestId: null,
+                cancellationToken);
+            var challengeResult = await CompleteConsumedMfaChallengeAsync(
+                verification.ChallengeToken,
+                SqlOSMfaFactorTypes.Totp,
+                httpContext,
+                cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return verification.Enrollment with
+            {
+                Tokens = challengeResult.Tokens,
+                RedirectUrl = challengeResult.RedirectUrl
+            };
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    internal async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyTotpEnrollmentForAuthorizationChallengeAsync(
+        SqlOSTotpEnrollmentVerifyRequest request,
+        string authorizationRequestId,
+        CancellationToken cancellationToken = default)
+        => await VerifyTotpChallengeEnrollmentCoreAsync(
+            request,
+            expectedFlow: "authorization",
+            expectedAuthorizationRequestId: authorizationRequestId,
             cancellationToken);
-        return result with { Tokens = challengeResult.Tokens, RedirectUrl = challengeResult.RedirectUrl };
+
+    private async Task<SqlOSTotpChallengeEnrollmentVerification> VerifyTotpChallengeEnrollmentCoreAsync(
+        SqlOSTotpEnrollmentVerifyRequest request,
+        string expectedFlow,
+        string? expectedAuthorizationRequestId,
+        CancellationToken cancellationToken)
+        => await RequireTotpMfaService().VerifyChallengeEnrollmentAsync(
+            request,
+            expectedFlow,
+            expectedAuthorizationRequestId,
+            cancellationToken);
+
+    private async Task<SqlOSMfaChallengePayload> ValidateEnrollmentChallengeAsync(
+        SqlOSTemporaryToken token,
+        string expectedFlow,
+        string? expectedAuthorizationRequestId,
+        CancellationToken cancellationToken)
+    {
+        if (token.UserId == null || token.ClientApplicationId == null)
+        {
+            throw new InvalidOperationException("MFA challenge payload is invalid.");
+        }
+
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        if (!payload.EnrollmentRequired
+            || payload.PermittedEnrollmentFactors?.Contains(SqlOSMfaFactorTypes.Totp, StringComparer.OrdinalIgnoreCase) != true
+            || !string.Equals(payload.Flow, expectedFlow, StringComparison.Ordinal)
+            || (expectedAuthorizationRequestId != null
+                && !string.Equals(payload.AuthorizationRequestId, expectedAuthorizationRequestId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("MFA enrollment is not authorized for this challenge.");
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == token.ClientApplicationId, cancellationToken);
+        if (client == null || !string.Equals(client.ClientId, payload.ClientId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("MFA challenge client binding is invalid.");
+        }
+
+        if (string.Equals(expectedFlow, "authorization", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
+            {
+                throw new InvalidOperationException("MFA challenge authorization binding is invalid.");
+            }
+
+            var request = await _context.Set<SqlOSAuthorizationRequest>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == payload.AuthorizationRequestId, cancellationToken);
+            if (request == null || !string.Equals(request.ClientApplicationId, token.ClientApplicationId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("MFA challenge authorization binding is invalid.");
+            }
+        }
+
+        return payload;
+    }
+
+    private async Task RecordRejectedChallengeEnrollmentAsync(
+        SqlOSTemporaryToken token,
+        string stage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _adminService.RecordAuditAsync(
+                "user.mfa.enrollment.challenge_rejected",
+                "user",
+                token.UserId,
+                userId: token.UserId,
+                organizationId: token.OrganizationId,
+                data: new
+                {
+                    stage,
+                    challenge_id = token.Id,
+                    client_application_id = token.ClientApplicationId
+                },
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Rejection must remain fail-closed even if audit persistence is unavailable.
+        }
     }
 
     public async Task<SqlOSMfaChallengeVerifyResult> VerifyMfaChallengeAsync(
@@ -1467,17 +1689,31 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        if (!string.Equals(payload.Flow, "client", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("MFA challenge is not valid for direct authentication.");
+        }
+
+        if (payload.EnrollmentRequired)
+        {
+            throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        }
+
         var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, request.Code, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
-    public async Task<string> CreateMfaChallengeAsync(
+    internal async Task<string> CreateMfaChallengeAsync(
         SqlOSUser user,
         SqlOSClientApplication client,
         string? organizationId,
         string authenticationMethod,
         string flow,
+        bool enrollmentRequired,
+        IReadOnlyList<string> permittedEnrollmentFactors,
         string? authorizationRequestId = null,
         string? resource = null,
         CancellationToken cancellationToken = default)
@@ -1491,21 +1727,11 @@ public sealed class SqlOSAuthService
                 client.ClientId,
                 authenticationMethod,
                 authorizationRequestId,
-                resource),
+                resource,
+                enrollmentRequired,
+                permittedEnrollmentFactors),
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
-
-    public async Task<SqlOSMfaChallengeVerifyResult> CompleteMfaChallengeWithoutCodeAsync(
-        string mfaToken,
-        string factorMethod,
-        HttpContext? httpContext = null,
-        CancellationToken cancellationToken = default)
-    {
-        var token = await _cryptoService.FindTemporaryTokenAsync(MfaChallengePurpose, mfaToken, cancellationToken)
-            ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
-        token.ConsumedAt = DateTime.UtcNow;
-        return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
-    }
 
     private async Task<SqlOSMfaChallengeVerifyResult> CompleteConsumedMfaChallengeAsync(
         SqlOSTemporaryToken token,
@@ -1628,6 +1854,13 @@ public sealed class SqlOSAuthService
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        organizationId = string.IsNullOrWhiteSpace(organizationId) ? null : organizationId.Trim();
+        await RequireActiveLifecycleAsync(
+            user.Id,
+            organizationId,
+            "token_issue",
+            sessionId: null,
+            cancellationToken);
         var effectiveAudience = ResolveEffectiveAudience(client, resource);
         await _adminService.EnsureApplicationAccessAsync(
             client,
@@ -1678,22 +1911,64 @@ public sealed class SqlOSAuthService
             refreshToken.ExpiresAt);
     }
 
-    private string BuildPasswordResetUrl(string token, string? resetUrlTemplate, HttpContext? httpContext)
+    private async Task RequireActiveLifecycleAsync(
+        string userId,
+        string? organizationId,
+        string boundary,
+        string? sessionId,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId,
+            cancellationToken);
+        if (lifecycle.IsActive)
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId,
+            organizationId,
+            lifecycle,
+            DateTime.UtcNow,
+            cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            boundary,
+            lifecycle,
+            userId,
+            organizationId,
+            sessionId);
+        await _context.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException("Session is no longer active.");
+    }
+
+    private string BuildPasswordResetUrl(string token, string? trustedResetUrlTemplate)
     {
         var escapedToken = Uri.EscapeDataString(token);
-        if (!string.IsNullOrWhiteSpace(resetUrlTemplate))
+        if (!string.IsNullOrWhiteSpace(trustedResetUrlTemplate))
         {
-            var template = resetUrlTemplate.Trim();
+            var template = trustedResetUrlTemplate.Trim();
             if (template.Contains("{token}", StringComparison.Ordinal))
             {
+                ValidatePasswordResetTemplate(template);
                 return template.Replace("{token}", escapedToken, StringComparison.Ordinal);
             }
 
-            var separator = template.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-            return $"{template}{separator}token={escapedToken}";
+            var templateUri = new Uri(ValidatePasswordResetUrl(template), UriKind.Absolute);
+            var builder = new UriBuilder(templateUri);
+            var query = builder.Query.TrimStart('?');
+            builder.Query = string.IsNullOrEmpty(query)
+                ? $"token={escapedToken}"
+                : $"{query}&token={escapedToken}";
+            return builder.Uri.AbsoluteUri;
         }
 
-        return $"{GetPublicOrigin(httpContext)}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
+        return $"{GetTrustedPublicOrigin()}{_options.BasePath.TrimEnd('/')}/password/reset?token={escapedToken}";
     }
 
     private async Task<SqlOSPasswordResetMessageContext> BuildPasswordResetMessageContextAsync(
@@ -1701,8 +1976,8 @@ public sealed class SqlOSAuthService
         string maskedEmail,
         string token,
         DateTime expiresAt,
-        string? resetUrlTemplate,
-        HttpContext? httpContext,
+        string? trustedResetUrlTemplate,
+        string? clientId,
         CancellationToken cancellationToken)
     {
         var branding = await _settingsService.GetResolvedAuthEmailBrandingAsync(cancellationToken);
@@ -1718,8 +1993,9 @@ public sealed class SqlOSAuthService
                 maskedEmail,
                 expiresAt,
                 _passwordResetOptions.TokenLifetime,
-                httpContext))
-            ?? BuildPasswordResetUrl(token, resetUrlTemplate, httpContext);
+                clientId))
+            ?? BuildPasswordResetUrl(token, trustedResetUrlTemplate);
+        resetUrl = ValidateGeneratedPasswordResetUrl(resetUrl, token);
 
         return new SqlOSPasswordResetMessageContext(
             applicationName,
@@ -1942,21 +2218,61 @@ public sealed class SqlOSAuthService
             now.Add(_passwordResetOptions.TokenLifetime),
             nextAllowedSendAt ?? now.Add(_passwordResetOptions.ResendCooldown));
 
-    private string GetPublicOrigin(HttpContext? httpContext)
+    private string GetTrustedPublicOrigin()
     {
         if (!string.IsNullOrWhiteSpace(_options.PublicOrigin))
         {
             return _options.PublicOrigin.TrimEnd('/');
         }
 
-        if (httpContext != null)
+        if (!Uri.TryCreate(_options.Issuer, UriKind.Absolute, out var issuer))
         {
-            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}".TrimEnd('/');
+            throw new InvalidOperationException("AuthServer.Issuer must be an absolute URI before password reset links can be generated.");
         }
 
-        return _options.Issuer.TrimEnd('/').EndsWith(_options.BasePath.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
-            ? _options.Issuer.TrimEnd('/')[..^_options.BasePath.TrimEnd('/').Length]
-            : _options.Issuer.TrimEnd('/');
+        return issuer.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
+
+    private static string ValidatePasswordResetUrl(string? resetUrl)
+    {
+        var trimmed = resetUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed)
+            || trimmed.Any(char.IsControl)
+            || trimmed.Contains('\\', StringComparison.Ordinal)
+            || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || uri == null
+            || (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                && (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) || !uri.IsLoopback))
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw new InvalidOperationException("The configured password reset URL must be an absolute HTTPS URL (or loopback HTTP URL) without user information.");
+        }
+
+        return trimmed;
+    }
+
+    private static void ValidatePasswordResetTemplate(string template)
+    {
+        const string marker = "sqlos-password-reset-token-marker";
+        var probe = template.Replace("{token}", marker, StringComparison.Ordinal);
+        var probeUri = new Uri(ValidatePasswordResetUrl(probe), UriKind.Absolute);
+        if (probeUri.GetLeftPart(UriPartial.Authority).Contains(marker, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The password reset token placeholder cannot appear in the URL authority.");
+        }
+    }
+
+    private static string ValidateGeneratedPasswordResetUrl(string? resetUrl, string token)
+    {
+        var validated = ValidatePasswordResetUrl(resetUrl);
+        var uri = new Uri(validated, UriKind.Absolute);
+        if (uri.GetLeftPart(UriPartial.Authority).Contains(token, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The password reset token cannot appear in the URL authority.");
+        }
+
+        return validated;
     }
 
     private static string MaskEmail(string email)
@@ -2181,6 +2497,11 @@ public sealed class SqlOSAuthService
             organizationId,
             authenticationMethod,
             "client",
+            evaluation.EnrollmentRequired,
+            evaluation.EnrollmentRequired
+                ? evaluation.AvailableFactors.Where(static factor =>
+                    string.Equals(factor, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)).ToArray()
+                : Array.Empty<string>(),
             cancellationToken: cancellationToken);
 
         return new SqlOSLoginResult(
@@ -2275,27 +2596,107 @@ public sealed class SqlOSAuthService
 
     private async Task RevokeRefreshTokenFamilyAsync(string sessionId, string familyId, string reason, CancellationToken cancellationToken)
     {
+        var revokedAt = DateTime.UtcNow;
+
+        if (SupportsDatabaseTransactions())
+        {
+            // Replay revocation must win against a concurrent rotation on a
+            // different app instance. Revoking the session first takes the
+            // lifecycle lock observed by RefreshAsync's concurrency token;
+            // the family update then covers every descendant visible in the
+            // same transaction, including one committed just before it.
+            IDbContextTransaction? transaction = null;
+            try
+            {
+                if (_context.Database.CurrentTransaction == null)
+                {
+                    transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                }
+
+                await _context.Set<SqlOSSession>()
+                    .Where(x => x.Id == sessionId && x.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, revokedAt)
+                        .SetProperty(x => x.RevocationReason, reason), cancellationToken);
+
+                await _context.Set<SqlOSRefreshToken>()
+                    .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.RevokedAt, x => x.RevokedAt ?? revokedAt)
+                        .SetProperty(x => x.ReplacementTokenResponse, (string?)null)
+                        .SetProperty(x => x.ReplacementOrganizationId, (string?)null)
+                        .SetProperty(x => x.ReplacementAccessTokenExpiresAt, (DateTime?)null), cancellationToken);
+
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (transaction != null)
+                {
+                    await transaction.DisposeAsync();
+                }
+            }
+
+            // ExecuteUpdate intentionally bypasses tracked state. Nothing in
+            // this failed grant may subsequently flush a stale active token
+            // or cached response back to the database.
+            if (_context is DbContext dbContext)
+            {
+                dbContext.ChangeTracker.Clear();
+            }
+
+            return;
+        }
+
+        // The in-memory provider used by unit tests has no transactions or
+        // server-side ExecuteUpdate support, so retain an equivalent tracked
+        // implementation for that provider.
         var session = await _context.Set<SqlOSSession>().FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
         if (session != null && session.RevokedAt == null)
         {
-            session.RevokedAt = DateTime.UtcNow;
+            session.RevokedAt = revokedAt;
             session.RevocationReason = reason;
         }
 
         var refreshTokens = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId && x.RevokedAt == null)
+            .Where(x => x.SessionId == sessionId && x.FamilyId == familyId)
             .ToListAsync(cancellationToken);
 
         foreach (var token in refreshTokens)
         {
-            token.RevokedAt = DateTime.UtcNow;
+            token.RevokedAt ??= revokedAt;
+            token.ReplacementTokenResponse = null;
+            token.ReplacementOrganizationId = null;
+            token.ReplacementAccessTokenExpiresAt = null;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    private static void EnsureSessionIsActive(SqlOSSession session)
+    {
+        var now = DateTime.UtcNow;
+        if (session.RevokedAt != null || session.AbsoluteExpiresAt <= now || session.IdleExpiresAt <= now)
+        {
+            throw new InvalidOperationException("Session is no longer active.");
+        }
+    }
+
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
+    private sealed record RefreshTokenReplacementPayload(string AccessToken, string RefreshToken);
     private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
     private sealed record PasswordResetRequestPayload(
         string NormalizedEmail,

@@ -271,7 +271,7 @@ public sealed class SqlOSAuditLogsTests
     {
         using var context = CreateContext();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
 
         await admin.RecordAuditAsync(
@@ -350,7 +350,7 @@ public sealed class SqlOSAuditLogsTests
     private static SqlOSAuditLogService CreateService(TestSqlOSInMemoryDbContext context)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         return new SqlOSAuditLogService(context, crypto);
     }
 

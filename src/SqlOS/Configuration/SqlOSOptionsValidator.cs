@@ -1,4 +1,5 @@
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Calendar.Configuration;
 using SqlOS.Email.Configuration;
 
 namespace SqlOS.Configuration;
@@ -78,13 +79,36 @@ internal static class SqlOSOptionsValidator
         ValidatePhoneOtpOptions(options.AuthServer.PhoneOtp, errors);
         ValidatePasswordResetOptions(options.AuthServer.PasswordReset, errors);
         ValidateEmailOptions(options.Email, errors);
+        ValidateCalendarOptions(options.Calendar, errors);
         ValidatePasswordLoginAbuseOptions(options.AuthServer.PasswordLogin, errors);
+        ValidateAccessTokenValidationOptions(options.AuthServer, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
+        ValidateSigningKeyOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
         {
             throw new InvalidOperationException(
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
+        }
+    }
+
+    private static void ValidateSigningKeyOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.DefaultSigningKeyRotationIntervalDays <= 0
+            || options.DefaultSigningKeyGraceWindowDays <= 0
+            || options.DefaultSigningKeyRetiredCleanupDays <= 0)
+        {
+            errors.Add("AuthServer default signing-key lifecycle values must be positive days.");
+        }
+
+        if (options.DefaultSigningKeyGraceWindowDays >= options.DefaultSigningKeyRotationIntervalDays)
+        {
+            errors.Add("AuthServer.DefaultSigningKeyGraceWindowDays must be shorter than DefaultSigningKeyRotationIntervalDays.");
+        }
+
+        if (options.DefaultSigningKeyRetiredCleanupDays < options.DefaultSigningKeyGraceWindowDays)
+        {
+            errors.Add("AuthServer.DefaultSigningKeyRetiredCleanupDays must be at least DefaultSigningKeyGraceWindowDays.");
         }
     }
 
@@ -205,6 +229,19 @@ internal static class SqlOSOptionsValidator
         if (options.LockoutDuration <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.PasswordLogin.LockoutDuration must be greater than zero.");
+        }
+    }
+
+    private static void ValidateAccessTokenValidationOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.AccessTokenValidationSigningKeyCacheTtl < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.AccessTokenValidationSigningKeyCacheTtl must be zero or greater.");
+        }
+
+        if (options.AccessTokenValidationLastSeenDebounceInterval < TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.AccessTokenValidationLastSeenDebounceInterval must be zero or greater.");
         }
     }
 
@@ -450,6 +487,49 @@ internal static class SqlOSOptionsValidator
         if (options.RenderedTextPreviewMaxLength <= 0)
         {
             errors.Add("Email.RenderedTextPreviewMaxLength must be greater than zero.");
+        }
+    }
+
+    private static void ValidateCalendarOptions(SqlOSCalendarOptions options, List<string> errors)
+    {
+        if (options.ConnectSessionLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.ConnectSessionLifetime must be greater than zero.");
+        }
+
+        if (options.AccessTokenRefreshSkew < TimeSpan.Zero)
+        {
+            errors.Add("Calendar.AccessTokenRefreshSkew must be zero or greater.");
+        }
+
+        if (options.SyncWindowPastDays < 0)
+        {
+            errors.Add("Calendar.SyncWindowPastDays must be zero or greater.");
+        }
+
+        if (options.SyncWindowFutureDays <= 0)
+        {
+            errors.Add("Calendar.SyncWindowFutureDays must be greater than zero.");
+        }
+
+        if (!options.SyncScheduler.Enabled)
+        {
+            return;
+        }
+
+        if (options.SyncScheduler.Interval <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.SyncScheduler.Interval must be greater than zero.");
+        }
+
+        if (options.SyncScheduler.SyncEvery <= TimeSpan.Zero)
+        {
+            errors.Add("Calendar.SyncScheduler.SyncEvery must be greater than zero.");
+        }
+
+        if (options.SyncScheduler.MaxConnectionsPerRun <= 0)
+        {
+            errors.Add("Calendar.SyncScheduler.MaxConnectionsPerRun must be greater than zero.");
         }
     }
 

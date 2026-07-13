@@ -6,10 +6,12 @@
     const fgaDashboardPath = `${dashboardBasePath}/admin/fga`;
     const emailDashboardPath = `${dashboardBasePath}/admin/email`;
     const auditDashboardPath = `${dashboardBasePath}/admin/audit`;
+    const calendarDashboardPath = `${dashboardBasePath}/admin/calendar`;
     const authApiBasePath = `${authDashboardPath}/api`;
     const fgaApiBasePath = `${fgaDashboardPath}/api`;
     const emailApiBasePath = `${emailDashboardPath}/api`;
     const auditApiBasePath = `${auditDashboardPath}/api`;
+    const calendarApiBasePath = `${calendarDashboardPath}/api`;
     const clientOnboardingDocsUrl = "https://sqlos.dev/docs/authserver/preregistration-vs-cimd-vs-dcr";
 
     const content = document.getElementById("content");
@@ -55,6 +57,11 @@
         search: ""
     };
     let selectedAuditEventId = null;
+    let selectedCalendarConnectionId = null;
+    const calendarConnectionFilters = {
+        search: "",
+        includeRevoked: true
+    };
 
     const authViews = {
         overview: { title: "Auth Server", description: "Organizations, users, sessions, applications, and security settings." },
@@ -270,6 +277,9 @@
         templates: { title: "Email Templates", description: "Create, edit, activate, deactivate, and preview transactional email templates." },
         messages: { title: "Email Messages", description: "Review recent transactional email deliveries and provider outcomes." }
     };
+    const calendarViews = {
+        connections: { title: "Calendar Connections", description: "Google and Microsoft calendar connections, sync health, and token status per user or organization." }
+    };
 
     configureNavLinks();
 
@@ -456,6 +466,10 @@
             return `${auditDashboardPath}/${route.slice(6)}`;
         }
 
+        if (route.startsWith("calendar-")) {
+            return `${calendarDashboardPath}/${route.slice(9)}`;
+        }
+
         return `${dashboardBasePath}/`;
     }
 
@@ -579,6 +593,16 @@
                 view,
                 key: "audit-logs",
                 canonicalPath: `${auditDashboardPath}/${view}`
+            };
+        }
+
+        if (segments[1] === "calendar") {
+            const view = calendarViews[segments[2]] ? segments[2] : "connections";
+            return {
+                kind: "calendar",
+                view,
+                key: `calendar-${view}`,
+                canonicalPath: `${calendarDashboardPath}/${view}`
             };
         }
 
@@ -1072,6 +1096,11 @@
 
             if (route.kind === "audit") {
                 await renderAuditLogs();
+                return;
+            }
+
+            if (route.kind === "calendar") {
+                await renderCalendarConnections();
                 return;
             }
 
@@ -3616,6 +3645,198 @@
             selectedAuditEventId = null;
             await render();
         });
+    }
+
+    async function renderCalendarConnections() {
+        const config = calendarViews.connections;
+        setHeader("Integrations", config.title, config.description);
+        renderLoading("Loading calendar connections...");
+
+        const pager = getPagerState("calendar-connections", 25);
+        const params = new URLSearchParams();
+        params.set("page", String(pager.page));
+        params.set("pageSize", String(pager.pageSize));
+        params.set("includeRevoked", calendarConnectionFilters.includeRevoked ? "true" : "false");
+        if (calendarConnectionFilters.search) {
+            params.set("search", calendarConnectionFilters.search);
+        }
+
+        const [summary, result] = await Promise.all([
+            fetchJson(`${calendarApiBasePath}/summary`),
+            fetchJson(`${calendarApiBasePath}/connections?${params.toString()}`)
+        ]);
+
+        let selectedConnection = null;
+        if (selectedCalendarConnectionId) {
+            try {
+                selectedConnection = await fetchJson(`${calendarApiBasePath}/connections/${encodeURIComponent(selectedCalendarConnectionId)}`);
+            } catch {
+                selectedCalendarConnectionId = null;
+            }
+        }
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            ${renderStatsGroup("Calendar Integration", summary, [
+                { key: "connections", label: "Connections" },
+                { key: "active", label: "Active" },
+                { key: "errored", label: "Errored" },
+                { key: "events", label: "Synced Events" }
+            ])}
+            <div class="panel-grid">
+                <section class="panel">
+                    <div class="panel-actions">
+                        <h2>Connections</h2>
+                        <div id="calendar-pagination-top">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+                    </div>
+                    <form id="calendar-filter-form" class="inline-form">
+                        <input name="search" value="${esc(calendarConnectionFilters.search)}" placeholder="Search by name, account, user, or organization">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="includeRevoked" ${calendarConnectionFilters.includeRevoked ? "checked" : ""}>
+                            Include disconnected
+                        </label>
+                        <button type="submit">Apply</button>
+                    </form>
+                    ${renderList(
+                        result.data,
+                        item => `
+                            <div class="list-item-header">
+                                <strong>${esc(item.displayName)}</strong>
+                                <button type="button" data-calendar-connection-id="${esc(item.id)}">Inspect</button>
+                            </div>
+                            <div class="client-badge-row">
+                                <span class="client-badge client-badge--source">${esc(item.providerType)}</span>
+                                <span class="client-badge client-badge--info">${esc(item.mode)}</span>
+                                <span class="client-badge ${calendarStatusBadgeClass(item)}">${esc(item.revokedAt ? "Disconnected" : item.status)}</span>
+                            </div>
+                            ${renderMetadataRows([
+                                { label: "Owner", value: item.userId ? `User ${item.userId}` : item.organizationId ? `Org ${item.organizationId}` : "n/a" },
+                                { label: "Account", value: item.providerAccountEmail || "n/a" },
+                                { label: "Last sync", value: item.lastSyncAt ? formatDate(item.lastSyncAt) : "never" },
+                                { label: "Token expires", value: item.accessTokenExpiresAt ? formatDate(item.accessTokenExpiresAt) : "n/a" },
+                                { label: "Refresh token", value: item.hasRefreshToken ? "stored (encrypted)" : "none" },
+                                { label: "Last error", value: item.lastError || "" }
+                            ])}
+                        `,
+                        "No calendar connections yet. Apps create them through the SqlOS calendar connect flow."
+                    )}
+                </section>
+                ${renderCalendarConnectionDetail(selectedConnection)}
+            </div>
+        `;
+
+        bindForm("calendar-filter-form", async form => {
+            calendarConnectionFilters.search = String(form.get("search") || "").trim();
+            calendarConnectionFilters.includeRevoked = form.get("includeRevoked") === "on";
+            selectedCalendarConnectionId = null;
+            setPagerPage("calendar-connections", 1);
+        });
+
+        document.querySelectorAll("[data-calendar-connection-id]").forEach(button => {
+            button.addEventListener("click", async () => {
+                selectedCalendarConnectionId = button.dataset.calendarConnectionId || null;
+                await render();
+            });
+        });
+
+        bindCalendarConnectionAction("[data-calendar-sync]", "calendarSync", "sync", "Calendar sync completed.");
+        bindCalendarConnectionAction("[data-calendar-refresh]", "calendarRefresh", "refresh", "Calendar access token refreshed.");
+        bindCalendarConnectionAction("[data-calendar-disconnect]", "calendarDisconnect", "disconnect", "Calendar connection disconnected.");
+
+        bindPagination("#calendar-pagination-top", async page => {
+            pager.page = Math.max(1, page);
+            selectedCalendarConnectionId = null;
+            await render();
+        });
+    }
+
+    function bindCalendarConnectionAction(selector, dataKey, action, successMessage) {
+        document.querySelectorAll(selector).forEach(button => {
+            button.addEventListener("click", async () => {
+                try {
+                    await fetchJson(`${calendarApiBasePath}/connections/${encodeURIComponent(button.dataset[dataKey])}/${action}`, {
+                        method: "POST"
+                    });
+                    setFlash("success", successMessage);
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                }
+
+                await render();
+            });
+        });
+    }
+
+    function calendarStatusBadgeClass(item) {
+        if (item.revokedAt) {
+            return "client-badge--muted";
+        }
+
+        if (item.status === "Error") {
+            return "client-badge--danger";
+        }
+
+        return "client-badge--success";
+    }
+
+    function renderCalendarConnectionDetail(detail) {
+        if (!detail) {
+            return `
+                <section class="panel">
+                    <h2>Connection detail</h2>
+                    <div class="empty-state-block">Select a connection to inspect sync health, calendars, and token status.</div>
+                </section>
+            `;
+        }
+
+        const connection = detail.connection;
+        const isRevoked = Boolean(connection.revokedAt);
+        return `
+            <section class="panel">
+                <div class="panel-actions">
+                    <h2>${esc(connection.displayName)}</h2>
+                    <div class="form-actions">
+                        ${isRevoked || connection.mode === "ConnectionOnly" ? "" : `<button type="button" data-calendar-sync="${esc(connection.id)}">Sync now</button>`}
+                        ${isRevoked ? "" : `<button type="button" data-calendar-refresh="${esc(connection.id)}">Refresh token</button>`}
+                        ${isRevoked ? "" : `<button type="button" data-calendar-disconnect="${esc(connection.id)}">Disconnect</button>`}
+                    </div>
+                </div>
+                ${renderMetadataRows([
+                    { label: "Provider", value: connection.providerType },
+                    { label: "Mode", value: connection.mode },
+                    { label: "Status", value: isRevoked ? `Disconnected (${connection.revokedAt ? formatDate(connection.revokedAt) : "n/a"})` : connection.status },
+                    { label: "Owner", value: connection.userId ? `User ${connection.userId}` : connection.organizationId ? `Org ${connection.organizationId}` : "n/a" },
+                    { label: "Account", value: connection.providerAccountEmail || "n/a" },
+                    { label: "Scopes", value: (connection.scopes || []).join(" ") || "n/a" },
+                    { label: "Connected", value: formatDate(connection.createdAt) },
+                    { label: "Last sync", value: connection.lastSyncAt ? formatDate(connection.lastSyncAt) : "never" },
+                    { label: "Synced events", value: String(detail.eventCount ?? 0) },
+                    { label: "Last error", value: connection.lastError || "" }
+                ])}
+                <h3>Calendars</h3>
+                ${renderList(
+                    detail.calendars,
+                    calendar => `
+                        <div class="list-item-header">
+                            <strong>${esc(calendar.displayName || calendar.providerCalendarId)}</strong>
+                            <span class="client-badge ${calendar.lastSyncStatus === "error" ? "client-badge--danger" : calendar.isSyncEnabled ? "client-badge--success" : "client-badge--muted"}">
+                                ${esc(calendar.lastSyncStatus === "error" ? "Error" : calendar.isSyncEnabled ? "Syncing" : "Paused")}
+                            </span>
+                        </div>
+                        ${renderMetadataRows([
+                            { label: "Calendar id", value: calendar.providerCalendarId },
+                            { label: "Last sync", value: calendar.lastSyncCompletedAt ? formatDate(calendar.lastSyncCompletedAt) : "never" },
+                            { label: "Cursor", value: calendar.hasSyncCursor ? "incremental" : "full window" },
+                            { label: "Events", value: String(calendar.eventCount ?? 0) },
+                            { label: "Error", value: calendar.lastSyncError || "" }
+                        ])}
+                    `,
+                    connection.mode === "ConnectionOnly"
+                        ? "Connection-only mode: the app calls the provider directly; SqlOS stores no calendars or events."
+                        : "No calendars enrolled yet. The first sync enrolls the provider's primary calendar automatically."
+                )}
+            </section>
+        `;
     }
 
     async function renderEmailRoute(view) {

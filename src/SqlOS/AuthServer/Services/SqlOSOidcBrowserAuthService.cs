@@ -54,6 +54,12 @@ public sealed class SqlOSOidcBrowserAuthService
             throw new InvalidOperationException("Only S256 PKCE is supported for OIDC browser login.");
         }
 
+        if (!_cryptoService.IsValidS256PkceCodeChallenge(request.CodeChallenge))
+        {
+            throw new InvalidOperationException(
+                "PKCE code challenge must be a 43-character RFC 7636 S256 value.");
+        }
+
         var client = await _adminService.RequireClientAsync(request.ClientId, request.RedirectUri, cancellationToken);
         var callbackUri = GetProviderCallbackUri(httpContext);
         var providerNonce = _cryptoService.GenerateOpaqueToken();

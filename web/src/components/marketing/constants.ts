@@ -87,6 +87,10 @@ export const productFeatures = [
     description: "Automatic RS256 signing key rotation with configurable intervals and grace windows.",
   },
   {
+    title: "Calendar integration",
+    description: "Google and Microsoft 365 calendar connections per user or org with encrypted tokens and scheduled sync.",
+  },
+  {
     title: "Orgs and users",
     description: "Multi-tenant user management with memberships, sessions, refresh tokens, and audit log.",
   },

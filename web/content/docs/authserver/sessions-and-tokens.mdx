@@ -42,7 +42,7 @@ var orgId = validated.OrganizationId;
 | Field | Description |
 | --- | --- |
 | `UserId` | Authenticated user |
-| `SessionId` | Active session |
+| `SessionId` | Persisted session referenced by the token |
 | `ClientId` | OAuth client that initiated login |
 | `OrganizationId` | Scoped organization (nullable) |
 | `Principal` | `ClaimsPrincipal` with all JWT claims |
@@ -55,18 +55,53 @@ External services can validate SqlOS-issued JWTs using the public key at:
 GET /sqlos/auth/.well-known/jwks.json
 ```
 
+JWKS publishes the active public key and any retired public keys still inside the configured rotation grace window. Tokens require an exact `RS256` algorithm, `JWT` type, and matching `kid`; resource servers should refresh JWKS when rotation introduces an unknown `kid`.
+
+Private signing material is never returned by this endpoint or stored as plaintext in the application database.
+
+JWKS-only validation cannot see the persisted SqlOS session. It accepts a signed, correctly issued token until its JWT expiry even if the session was logged out in the meantime. Use the SDK/middleware validator—or an application-owned trusted introspection/session check—when immediate revocation is required.
+
 ## Refresh tokens
 
-Refresh tokens are opaque and rotated on every use. Each refresh consumes the old token and issues a new one.
+Refresh tokens are opaque and rotated on successful refresh. Each refresh consumes the old token and issues a new pair.
 
 ```csharp
 var tokens = await authService.RefreshAsync(
-    new SqlOSRefreshRequest(refreshToken, organizationId: null), ct);
+    new SqlOSRefreshRequest(refreshToken, OrganizationId: null), ct);
 ```
 
-**Replay detection**: If a consumed refresh token is reused, SqlOS revokes the entire token family and the session. This protects against token theft.
+**Grace and replay detection**: The default 30-second refresh grace returns the same cached access token plus a fresh sibling refresh token in the same family and with the same expiry for a near-concurrent retry. Reuse outside the configured grace behavior revokes the entire token family and the session. Set `RefreshTokenGraceWindowSeconds` deliberately for your client concurrency model.
 
-**Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating.
+### Concurrent refresh retries
+
+By default, SqlOS allows a 30-second retry grace window for near-simultaneous refreshes from multiple tabs, SSR calls, or app instances. The first request performs the only rotation. Every accepted retry of that consumed token receives the byte-for-byte same access token and refresh token, so the family always remains one linear lineage:
+
+```text
+R0 (consumed) -> R1 (the only active replacement)
+```
+
+SqlOS never creates a sibling `R2` for a retry of `R0`. If `R1` has already advanced, an older retry can only converge through the same stored lineage; it cannot create another active branch. Outside the grace window, reuse revokes the family and session.
+
+The short-lived response cache is purpose-bound and encrypted automatically, and its ciphertext is cryptographically unusable after the grace window. Consumed token hashes remain until normal expiry so later reuse can still identify and revoke the family. Production deployments with multiple replicas or ephemeral storage should follow the [Data Protection guidance in Production Readiness](/docs/guides/production-readiness#5-persist-and-share-data-protection-keys).
+
+Set `RefreshTokenGraceWindowSeconds` to `0` when immediate replay detection is preferred over concurrent-retry tolerance.
+
+**Organization switching**: Pass a different `organizationId` during refresh to switch the token's org scope without re-authenticating. SqlOS requires an active user, active target organization, and active membership before it mints the replacement token. When `organizationId` is omitted, SqlOS applies the same checks to the organization already stored on the session; omission never bypasses membership validation. Grace-window retries also revalidate the organization of the cached replacement token before returning it.
+
+## Lifecycle enforcement
+
+SqlOS treats the database lifecycle state as part of authentication, not only as dashboard metadata. The following boundaries require the user to remain active. When an organization is present, the organization and the user's membership must also remain active:
+
+- authorization-code and device-flow approval
+- authorization-code exchange and all session/token creation
+- refresh, including concurrent grace-window retries
+- hosted AuthPage cookie reuse
+- OIDC and SAML callbacks
+- stateful access-token validation
+
+Lifecycle failures are returned as generic authentication or `invalid_grant` failures. The audit log records `auth.lifecycle.denied` with the internal boundary and reason (`user_inactive`, `organization_inactive`, or `membership_inactive`) without exposing that detail to the browser or OAuth client.
+
+Stateful access-token validation checks both the absolute and idle session deadlines. Successful validation records activity and slides the idle deadline, capped by the absolute session deadline.
 
 ## CLI device-flow tokens
 
@@ -95,6 +130,8 @@ Revoke all sessions for a user:
 await authService.LogoutAllAsync(userId, ct);
 ```
 
+`LogoutAllAsync` invalidates both OAuth sessions and hosted AuthPage sessions. A successful password reset does the same. Organization deactivation invalidates organization-bound OAuth and AuthPage sessions, and the SSO portal's organization-session revocation action invalidates matching-domain AuthPage sessions along with OAuth sessions.
+
 ## Session lifetimes
 
 Configured via the dashboard (Auth Server > Security) or the admin API:
@@ -102,7 +139,7 @@ Configured via the dashboard (Auth Server > Security) or the admin API:
 | Setting | Description |
 | --- | --- |
 | Refresh token lifetime | How long a refresh token is valid |
-| Session idle timeout | Session expires after this period of inactivity |
+| Session idle timeout | Refresh is rejected when no successful refresh has extended the session within this period |
 | Session absolute lifetime | Hard expiration regardless of activity |
 
 ```json
@@ -121,6 +158,8 @@ builder.AddSqlOS<AppDbContext>(options =>
     options.AuthServer.AccessTokenLifetime = TimeSpan.FromMinutes(15);
 });
 ```
+
+Idle timeout does not retroactively shorten a JWT that has already been issued. Session-aware access-token validation rejects a missing, revoked, or absolutely expired session; the access token's own `exp` remains its time boundary. Idle expiry is enforced on refresh, and a successful refresh extends the idle deadline without moving the absolute deadline.
 
 ## Viewing active sessions
 
