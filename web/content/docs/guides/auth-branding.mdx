@@ -44,9 +44,9 @@ SqlOS supports two durable operating models:
 
 Startup seeds are reconciled into the database whenever the host starts. If a seed remains configured, a dashboard edit to the same settings is temporary and will be replaced on restart. The dashboard displays a **Startup managed** callout when that applies.
 
-Choose one owner per environment. A common rollout is to seed initial values, remove the seeds after the first deployment, and then deliberately hand ownership to dashboard operators. Do not alternate owners unintentionally.
+Choose one owner per environment. A common rollout is to seed initial values, remove the seeds after the first deployment, and then deliberately hand ownership to dashboard operators. If you use `UseSingleApplication`, also disable its implicit branding seeds during that handoff, as shown in [Use the dashboard instead](#5-use-the-dashboard-instead). Do not alternate owners unintentionally.
 
-`UseSingleApplication("Acme", ...)` already seeds the application name and basic AuthPage/email defaults when explicit seeds are absent. Add explicit seeds when you want deliberate colors, layout, copy, or logo values.
+`UseSingleApplication("Acme", ...)` creates startup-managed AuthPage and email seeds by default, even when you do not call `SeedAuthPage` or `SeedAuthEmails`. Add explicit seed configuration when you want deliberate colors, layout, copy, or logo values.
 
 ## 2. Store the logo as a data URL
 
@@ -108,7 +108,7 @@ The visual fields control:
 | `Layout = "split"` | form plus secondary brand panel |
 | `Layout = "stacked"` | compact centered presentation without the secondary panel |
 
-Only `split` and `stacked` are valid layouts. Colors must use supported hex values.
+Only `split` and `stacked` are valid layouts. Use six-digit `#RRGGBB` colors so the values render consistently in both the hosted page and built-in email.
 
 <Callout type="warning" title="Credentials are behavior, not decoration">
   `EnabledCredentialTypes` and `EnablePasswordSignup` change which authentication journeys users may start. Configure and test each provider before adding it to the list. Do not enable Email OTP, phone OTP, or a social button merely to change page appearance.
@@ -137,10 +137,13 @@ This branding is consumed by the built-in templates for:
 - `auth.invitation`;
 - `auth.password-reset`.
 
-AuthPage and email branding are separate settings because browser and email presentation often need different assets or contrast. Email visual values resolve in this order:
+AuthPage and email branding are separate settings because browser and email presentation often need different assets or contrast. The email logo resolves in this order:
 
-1. email-specific logo/colors from the dashboard or `SeedAuthEmails`;
-2. the AuthPage logo/color for any email-specific visual value that is empty.
+1. the email-specific logo from the dashboard or `SeedAuthEmails`;
+2. the AuthPage logo when the email logo is empty;
+3. application-name text in the built-in template when neither logo exists.
+
+The color resolver also falls back to the corresponding AuthPage color when an existing stored email color is missing. Current startup seeds and dashboard forms require email colors and initialize defaults, so configure explicit email colors rather than trying to leave those fields empty.
 
 The email application name resolves from the stored email-branding value. Before one exists, SqlOS initializes it from the invitation application name when configured, then the Email OTP application name, then `SqlOS`.
 
@@ -152,7 +155,19 @@ An invitation-specific application name can still override the name for that inv
 
 ## 5. Use the dashboard instead
 
-When operators own branding, do not keep the corresponding startup seeds configured.
+When operators own branding, do not keep the corresponding startup seeds configured. `UseSingleApplication` enables implicit AuthPage and email seeds by default, so dashboard ownership requires disabling those defaults too:
+
+```csharp
+options.UseSingleApplication("Acme", app =>
+{
+    app.Origin = "https://app.acme.example";
+    app.Audience = "https://app.acme.example/api";
+    app.ConfigureAuthPageBranding = false;
+    app.ConfigureEmailBranding = false;
+});
+```
+
+Disable only the surface an operator owns. For example, keep `ConfigureEmailBranding = true` when email branding should remain startup-managed.
 
 Open:
 
@@ -160,7 +175,7 @@ Open:
 /sqlos/admin/auth/settings
 ```
 
-Use **Auth Page** to edit the hosted title, subtitle, logo, colors, layout, signup, and credential list. Use **Email Branding** to edit the application name and email-specific logo/colors.
+Use **Auth Page** to edit the hosted title, subtitle, logo, colors, layout, signup, and credential list. Use **Email Branding** to edit the application name and email-specific logo/colors. Each **Logo upload** control reads the selected image into the adjacent data-URL field; save the form after choosing the file. Clear the email logo field when email should reuse the AuthPage logo.
 
 Dashboard changes are persisted immediately. They affect newly rendered pages and messages; they do not rewrite email already submitted to a provider.
 
@@ -178,7 +193,7 @@ Use the right surface for each concern:
 | Completely custom auth message layout/provider payload | `BuildMessage` callbacks or custom sender |
 | Custom headless browser/native UI | Your frontend |
 
-Headless Auth uses the same SqlOS OAuth and credential state machine, but your application renders the screens. AuthPage branding does not style that custom UI. Built-in auth email can still use SqlOS email branding independently.
+Headless Auth uses the same SqlOS OAuth and credential state machine, but your application renders the screens. SqlOS includes the resolved AuthPage settings in the headless view model; your frontend may reuse those values, but SqlOS does not apply the layout or styling to custom UI. Built-in auth email can still use SqlOS email branding independently.
 
 ## 7. Verify the full journey
 
@@ -204,7 +219,7 @@ Use a development capture sender or inbox you control. Never paste a live OTP, i
 ### Ownership and restart
 
 - with seeds configured, change one value in the dashboard, restart, and confirm the seed is reapplied;
-- without seeds, change the dashboard value, restart, and confirm the persisted operator value remains;
+- without explicit seeds—and with the applicable `UseSingleApplication` branding flags disabled—change the dashboard value, restart, and confirm the persisted operator value remains;
 - verify preview and production load their intended logo data URL from their own configuration source.
 
 ## 8. Run the relevant regression tests
