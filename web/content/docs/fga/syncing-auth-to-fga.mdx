@@ -7,6 +7,8 @@ section: fga
 
 When using both AuthServer and FGA, you need to sync authenticated users into the FGA model so they can be authorized. The typical pattern is to sync on login.
 
+This page maps an AuthServer membership to a direct FGA grant. If the application's source of truth uses teams, follow [Authorize teams with FGA groups](/docs/guides/fga-groups) for group membership, inherited grants, and removal semantics.
+
 ## The pattern
 
 After login, provision the authenticated user as an FGA subject, provision any non-entity organization resource, and map the auth membership to an explicit FGA grant:
