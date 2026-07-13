@@ -1,0 +1,286 @@
+---
+title: "Let customer admins set up enterprise SSO"
+description: "Delegate one organization's SAML setup without granting access to the SqlOS operator dashboard."
+order: 4
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Give each customer a one-organization SSO setup portal"
+  href="/docs/guides/saml-sso"
+  actionLabel="Operator-managed SAML"
+>
+  Your platform keeps global control. The customer IT admin receives a one-time link that can configure only their organization's SAML connection.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - An active SqlOS organization
+  - A host authorization rule that decides which customer admins may manage that organization's SSO
+  - A registered browser client with an exact redirect URI for the SAML test
+  - A public HTTPS SqlOS origin and, for self-serve domain verification, access to the customer's public DNS
+</Callout>
+
+This guide uses the bundled hosted portal. If your platform team owns the entire setup, use [Set up SAML SSO](/docs/guides/saml-sso) instead. The [SAML reference](/docs/authserver/saml-sso) documents every route and contract after you choose a setup model.
+
+![A platform operator issues a one-organization setup link that lets a customer IT admin verify DNS and connect an identity provider](/docs/guides-customer-managed-sso.svg)
+
+## Understand the trust boundary
+
+The setup portal is not a customer-facing copy of the global dashboard.
+
+| Actor or credential | What it can do | What it cannot do |
+| --- | --- | --- |
+| Platform operator | Create, list, and revoke setup sessions for an organization; retain normal dashboard/admin authorization | Delegate global operator authority through a setup link |
+| Authorized host backend | Resolve a trusted organization from its authenticated customer-admin context and call `SqlOSSsoPortalService.CreateSessionAsync` | Treat a request-body organization ID as authorization |
+| One-time setup URL | Open exactly one portal session for the organization embedded in the stored setup record | Be reused after its first successful open |
+| Portal continuation cookie | Select a provider, manage enrollment policy, verify a domain, import metadata, activate/disable, test, and optionally revoke matching organization sessions | List users, clients, other organizations, or global dashboard pages |
+
+SqlOS stores hashes of both the one-time link token and the continuation token. The first successful open consumes the link and sets the `sqlos_sso_portal` cookie. The cookie is HttpOnly, `SameSite=Lax`, scoped to `/sqlos/admin/auth/sso-portal`, marked Secure on HTTPS, bounded by the link expiration, and rejected after the configured idle timeout. Revoking the setup session invalidates its continuation cookie too.
+
+<Callout type="warning" title="Treat the setup URL as a credential">
+  Deliver it through your authenticated admin product, a carefully addressed transactional email, or a controlled support channel. Do not put it in application logs, analytics, issue trackers, chat previews, or screenshots. A copied URL is usable until its first open, revocation, or expiration.
+</Callout>
+
+## 1. Configure the portal
+
+The defaults enable the hosted portal and setup API, issue links for seven days, expire an idle continuation session after two hours, and require a verified domain for self-serve activation. Choose shorter lifetimes that fit your support workflow and reserve domains owned by your platform:
+
+```csharp
+options.AuthServer.PublicOrigin =
+    builder.Configuration["SqlOS:PublicOrigin"]
+    ?? throw new InvalidOperationException("SqlOS:PublicOrigin is required.");
+
+options.AuthServer.ConfigureSsoPortal(portal =>
+{
+    portal.DefaultLinkLifetime = TimeSpan.FromDays(2);
+    portal.SessionIdleTimeout = TimeSpan.FromMinutes(30);
+    portal.UseHostedPortal = true;
+    portal.RequireVerifiedDomainForActivation = true;
+    portal.ReservedDomainRoots.Add("yourapp.com");
+});
+```
+
+`PublicOrigin` must be the canonical external origin, such as `https://identity.example.com`, with no path, query, or fragment. SqlOS uses it when generating the credential-bearing setup URL. Do not let an untrusted request `Host` value choose the URL you deliver to a customer.
+
+Reserved roots include their subdomains: reserving `yourapp.com` also rejects `login.yourapp.com`. SqlOS also rejects wildcard domains, IP addresses, malformed DNS names, and `localhost` unless `AllowLocalhostDomainVerification` is explicitly enabled.
+
+### Use your own portal UI
+
+To render the customer experience inside your product, exchange the one-time link as usual, redirect the opened session to your UI, and drive the same state machine through the headless setup API:
+
+```csharp
+options.AuthServer.ConfigureSsoPortal(portal =>
+{
+    portal.UseHostedPortal = false;
+    portal.BuildUiUrl = context =>
+        $"https://admin.example.com/sso/setup" +
+        $"?session_id={context.SessionId}&view={context.View}";
+    portal.HeadlessApiBasePath = "/sqlos/admin/auth/sso-portal/api/setup";
+});
+```
+
+The API still authenticates with the HttpOnly portal cookie. Keep it on the SqlOS origin or configure credentialed browser requests deliberately. `BuildUiUrl` controls browser presentation; it does not widen the organization stored in the portal session.
+
+## 2. Make the narrow production edge exception
+
+Most deployments protect `/sqlos/admin/*` with an operator-only identity proxy or private network. Customers still need to reach the delegated portal, so allow only the portal start, UI, and setup API paths:
+
+```text
+/sqlos/admin/auth/sso-portal*
+```
+
+Keep the dashboard root and all other `/sqlos/admin/*` routes behind the operator boundary. Do not expose `/sqlos/admin/auth/api/*` to make setup links work; link creation, listing, and revocation remain privileged platform operations. If you move `HeadlessApiBasePath`, review that exact path at the edge instead.
+
+See [Production Readiness](/docs/guides/production-readiness#2-protect-the-right-routes) for the complete route policy.
+
+## 3. Create the one-organization setup link
+
+### From the SqlOS dashboard
+
+Open `/sqlos/admin/auth/organizations`, select the organization, open its **SSO** tab, and create a setup link. You can optionally preselect Microsoft Entra, Okta, Google Workspace, or Generic SAML. The organization page lists its setup sessions and lets an operator revoke any pending or opened session.
+
+### From an authorized host backend
+
+Use a host endpoint when setup starts in your own customer-admin product. Authenticate the access token, enforce your customer SSO-admin policy, and derive both the organization and actor from trusted server-owned state:
+
+```csharp
+var customerAdmin = app.MapGroup("/api/customer-admin")
+    .RequireSqlOSAccessToken(apiAudience);
+
+customerAdmin.MapPost("/sso/setup-link", async (
+    CreateSetupLinkRequest request,
+    HttpContext http,
+    ICustomerSsoAuthorization customerSsoAuthorization,
+    SqlOSSsoPortalService portal,
+    CancellationToken ct) =>
+{
+    var token = http.GetSqlOSValidatedToken();
+    if (token?.UserId is not { Length: > 0 } userId ||
+        token.OrganizationId is not { Length: > 0 } organizationId)
+    {
+        return Results.Forbid();
+    }
+
+    if (!await customerSsoAuthorization.CanManageSsoAsync(
+        userId,
+        organizationId,
+        ct))
+    {
+        return Results.Forbid();
+    }
+
+    var session = await portal.CreateSessionAsync(
+        new SqlOSCreateSsoPortalSessionRequest(
+            OrganizationId: organizationId,
+            CreatedByUserId: userId,
+            Provider: request.Provider),
+        http,
+        ct);
+
+    return Results.Ok(new
+    {
+        session.Id,
+        session.SetupUrl,
+        session.ExpiresAt
+    });
+});
+
+public sealed record CreateSetupLinkRequest(string? Provider);
+```
+
+`SqlOSSsoPortalService` performs organization scoping but does not decide whether this caller is one of your customer administrators. Keep that authorization in the host policy. Never accept the effective organization from the request body.
+
+The platform may also create the link through `POST /sqlos/admin/auth/api/sso-portal/sessions`, but that route requires the normal operator session. Deliver only `setupUrl`; do not expose other admin APIs to the customer.
+
+## 4. Have the customer admin configure the IdP
+
+The customer opens the URL once. SqlOS exchanges its token for the continuation cookie and opens the portal on the selected provider. A second open of the same URL returns an already-used error; issue a new link instead of trying to recover the token.
+
+The portal shows the service-provider values using the IdP's own labels:
+
+| Provider | SqlOS SP Entity ID goes in | SqlOS ACS URL goes in | Bring back to SqlOS |
+| --- | --- | --- | --- |
+| Microsoft Entra | **Identifier (Entity ID)** | **Reply URL (ACS URL)** | **Federation Metadata XML** |
+| Okta | **Audience URI (SP Entity ID)** | **Single sign-on URL** | **IdP metadata** |
+| Google Workspace | **Entity ID** | **ACS URL** | **IdP metadata** |
+| Generic SAML | **SP Entity ID** | **ACS URL** | **SAML metadata XML** |
+
+For Okta, set Name ID format to `EmailAddress` and map `email`, `first_name`, and `last_name`. For every provider, the assertion must supply a stable subject and a usable email. Existing-member linking depends on a verified local email; JIT uses the asserted email to create or attach identity, so configure the real tenant identity rather than an unrelated alias. Configure at least one assigned IdP user before testing.
+
+## 5. Choose enrollment policy deliberately
+
+Portal-created connections default to:
+
+- **Require SSO for existing members**: on (`AutoLinkByEmail = true`)
+- **Allow JIT provisioning**: off (`AutoProvisionUsers = false`)
+
+The policy affects both home realm discovery and SAML identity resolution:
+
+| Identity state | Conservative defaults | With JIT provisioning on |
+| --- | --- | --- |
+| Existing active member with a verified matching email | HRD routes to SSO; the first valid assertion links the IdP subject to the existing user without creating another user or membership | Same result |
+| Existing active SqlOS user who is not a member | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may add the missing organization membership |
+| Unknown user | HRD does not route to this SSO connection, and a connection-directed assertion is denied | A valid assertion may create the user, verified email, and membership |
+| Inactive user, organization, or membership | Denied; JIT does not reactivate offboarded access | Still denied until a separate trusted workflow reactivates it |
+
+Turn JIT on only when the customer's IdP assignment is authoritative for tenant membership. Keep it off for invitation- or admin-managed onboarding. Turning **Require SSO for existing members** off leaves existing unlinked members on another configured login method; it does not silently email-link them during SAML sign-in.
+
+## 6. Verify domain ownership
+
+The customer enters a domain such as `acme.com`. SqlOS creates a `pending_ownership` claim and displays an opaque TXT record:
+
+```text
+Type:  TXT
+Name:  _sqlos-verify.acme.com
+Value: sqlos-domain-verification=<opaque-value>
+```
+
+After the customer publishes it, **Check DNS** asks the configured `ISqlOSDomainDnsVerifier` for the exact value. The default verifier uses public DNS-over-HTTPS. A missing or not-yet-propagated record stays `pending_ownership`, records the last check and error, and keeps activation blocked. Retrying is safe after DNS propagation.
+
+An active domain claim cannot be reused by another organization. Hosts with internal DNS or a provider-specific DNS API can replace `ISqlOSDomainDnsVerifier`.
+
+<Callout type="warning" title="PrimaryDomain is a compatibility fallback">
+  Home realm discovery prefers an active verified domain. If no self-serve domain claim exists, an operator-managed `Organization.PrimaryDomain` can satisfy the legacy setup path. Once the customer starts a pending domain claim, that claim must become active before delegated activation; a primary domain does not bypass the pending verification.
+</Callout>
+
+## 7. Validate, import, and activate metadata
+
+Paste or upload the full IdP metadata XML. **Validate metadata** confirms that SqlOS can parse an IdP entity ID, SSO endpoint, and signing certificate. **Save metadata** imports the values but deliberately leaves the connection disabled with status `ready_to_activate`.
+
+Review the parsed IdP entity ID and SSO URL, then select **Activate connection**. Activation requires complete metadata plus the domain condition above. It enables the connection for home realm discovery; it does not sign anyone out.
+
+To rotate IdP metadata later, create a new setup session (or use the operator dashboard), validate and import the replacement XML, review it, and activate again. **Disable connection** stops new SSO routing without deleting the stored configuration.
+
+## 8. Test with fresh state and S256 PKCE
+
+Register the browser client and its exact redirect URI before testing. In the bundled portal, enter the client ID and exact redirect URI; the portal generates fresh state, verifier, and S256 challenge with Web Crypto for each test.
+
+A host-owned portal must send all of these fields to `POST /sqlos/admin/auth/sso-portal/api/setup/test`:
+
+```json
+{
+  "clientId": "acme-web",
+  "redirectUri": "https://app.example.com/auth/callback",
+  "state": "<fresh-high-entropy-state>",
+  "codeChallenge": "<base64url-sha256-of-fresh-verifier>",
+  "codeChallengeMethod": "S256"
+}
+```
+
+Generate a new state and verifier for every attempt. The verifier is 43–128 RFC 7636 unreserved characters; base64url-encoding 32 random bytes produces the recommended 43-character value. The challenge is `BASE64URL(SHA256(ASCII(verifier)))`. `plain`, a missing challenge, or a redirect URI that differs by path, case, port, or trailing slash is rejected. Never reuse state or a verifier across attempts.
+
+The test should redirect to the external IdP. Completing it requires a real IdP application, an assigned IdP user, valid signed metadata, and matching assertion attributes; local metadata can prove portal readiness but cannot emulate an external login.
+
+## 9. Prove home realm discovery
+
+Start the normal hosted or headless login flow and enter an eligible `user@acme.com` address.
+
+1. HRD matches the active verified `acme.com` claim before considering the legacy primary-domain fallback.
+2. The enrollment policy decides whether this email should route to SSO.
+3. AuthServer creates a PKCE-bound SAML authorization request for the registered client and exact redirect URI.
+4. The IdP posts the signed assertion to the connection's ACS URL.
+5. SqlOS validates it and returns an authorization code plus the original state.
+6. The client exchanges the code with the original verifier at `/sqlos/auth/token`.
+
+Check that the resulting session uses SAML authentication and that the user and membership outcome matches the policy table. A non-matching domain should continue to another configured login method.
+
+## 10. Operate and revoke safely
+
+Creating a new setup link does not invalidate earlier links. Revoke obsolete setup sessions from the organization SSO tab, especially after a support handoff or accidental disclosure. Link/session revocation affects only the delegated setup credential; it does not revoke end-user OAuth sessions.
+
+Activation also does not revoke active end-user sessions. If existing matching-domain members must immediately sign in again through SSO, use the separate **Revoke organization sessions** action and confirm it explicitly. It requires an active connection and active verified domain, then revokes matching-domain OAuth/refresh sessions and hosted AuthPage sessions for that organization. It does not revoke users from other domains or organizations.
+
+Portal creation, open, close, revoke, provider selection, enrollment-policy changes, domain verification, metadata import, activation, disable, tests, and organization-session revocation write organization-scoped audit events. Review them in **Governance → Audit Logs**.
+
+## Run the example flow
+
+Start the shared example stack:
+
+```bash
+cd examples/SqlOS.Example.Web
+npm ci
+
+cd /path/to/SqlOS
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Sign in at `http://localhost:3010`, then open `http://localhost:3010/retail/sso`. The page calls `POST /api/sso-portal-links` with the signed-in token, derives the organization from `org_id`, creates a link, and opens the bundled portal.
+
+For a local portal-only test, create the organization with a primary domain before opening the portal. That exercises the operator-managed fallback without publishing DNS. To exercise self-serve verification, use a domain whose TXT record you control or replace `ISqlOSDomainDnsVerifier` with a local test implementation. Neither shortcut proves a real SAML login: that still requires an external IdP, matching metadata, an assigned user, and a successful signed callback.
+
+## Expected outcome
+
+- Customer IT admins configure only their organization without global dashboard access.
+- The setup URL is single-use and replaceable through a new, independently revocable session.
+- DNS ownership, metadata readiness, enrollment policy, and PKCE test status are visible before activation.
+- Eligible matching-domain users route through SSO; other users follow the configured fallback policy.
+- Session revocation happens only through the separate confirm-gated action.
+
+## Next steps
+
+- [SAML SSO reference](/docs/authserver/saml-sso)
+- [Home realm discovery](/docs/authserver/home-realm-discovery)
+- [Dashboard and operator API security](/docs/authserver/dashboard-overview)
+- [Production readiness](/docs/guides/production-readiness)
+- [Entra SAML testing supplement](https://github.com/ross-slaney/sqlos/blob/main/docs/ENTRA_SSO.md)

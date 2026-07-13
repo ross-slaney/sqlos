@@ -100,6 +100,8 @@ For the end-to-end workflow, see [Brand hosted authentication and email](/docs/g
 
 Open an organization, choose the **SSO** tab, and create a setup link when a customer IT admin should configure SAML themselves. The link is scoped to one organization, can be revoked from the same tab, and opens `/sqlos/admin/auth/sso-portal` instead of the full dashboard.
 
+Follow [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso) for the full platform and customer-admin journey, including edge routing, token handling, DNS ownership, enrollment policy, testing, and revocation.
+
 The portal shows Microsoft Entra, Okta, Google Workspace, and generic SAML setup paths. It displays copy-ready SP Entity ID and ACS URL values, verifies the customer email domain through a DNS TXT record, accepts pasted or uploaded metadata XML, validates the IdP entity ID, SSO URL, and signing certificate, then lets the customer activate, disable, replace metadata, and run a SAML test redirect.
 
 Portal launch, open, revoke, provider selection, domain verification, metadata import, activation, disable, and test actions are audit logged with the organization id.

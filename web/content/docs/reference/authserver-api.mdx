@@ -1306,6 +1306,8 @@ var result = await hrdService.DiscoverAsync(
 
 Manages self-serve organization domain claims for delegated SSO setup. The default verification path is DNS TXT through `ISqlOSDomainDnsVerifier`; hosts can replace that interface without depending on Azure or any specific DNS provider.
 
+Use [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso) for the end-to-end trust boundary and customer workflow before calling these lower-level services directly.
+
 ### StartVerificationAsync
 
 Create or reuse a pending domain claim and return the TXT ownership record.

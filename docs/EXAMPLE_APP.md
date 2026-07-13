@@ -75,6 +75,7 @@ For local-only SSO portal testing without publishing DNS, create the organizatio
 
 For a customer-tenant SAML walkthrough with Microsoft Entra ID, use:
 
+- [Customer-managed enterprise SSO](../web/content/docs/guides/customer-managed-sso.mdx)
 - [Entra SSO Testing](ENTRA_SSO.md)
 
 For OIDC setup, use:
