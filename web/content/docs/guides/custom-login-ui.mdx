@@ -98,7 +98,7 @@ app.MapSqlOS();
 
 `BuildUiUrl` is the mode switch. When it exists, `/sqlos/auth/authorize` redirects browser interaction to your page. There is no separate dashboard toggle.
 
-The default JSON API is `/sqlos/auth/headless`. `HeadlessApiBasePath` can move it, and `EnableApi = false` removes it. The returned view model includes its effective `headlessApiBasePath`; use that value when your deployment customizes the route.
+The default JSON API is `/sqlos/auth/headless`. `HeadlessApiBasePath` can move it, and `EnableApi = false` removes it. The examples below use the default. If your host moves it, configure the frontend's initial request URL to the same exact path, then compare it with the returned model's effective `headlessApiBasePath` and stop on a mismatch.
 
 Treat the URL values as presentation and flow context, not proof of identity. Load the saved request from SqlOS before rendering; the returned model contains the request's persisted `uiContext` when you supplied one to `/authorize`. Avoid logging full authorize-page URLs because callback errors and opaque pending state can appear in the query.
 
@@ -123,7 +123,9 @@ An app and identity host on unrelated sites are cross-site. `AllowCredentials()`
 The custom page begins at `/authorize`, not at a password endpoint. Generate the verifier and state with Web Crypto and keep them only for the current tab's callback:
 
 ```ts
-const AUTH = "https://identity.relaydesk.example/sqlos/auth";
+const IDENTITY_ORIGIN = "https://identity.relaydesk.example";
+const AUTH = `${IDENTITY_ORIGIN}/sqlos/auth`;
+const HEADLESS = `${AUTH}/headless`;
 const CLIENT_ID = "relaydesk-web";
 const REDIRECT_URI = "https://app.relaydesk.example/auth/callback";
 
@@ -220,7 +222,7 @@ async function loadRequest(route: URLSearchParams): Promise<HeadlessViewModel> {
   const requestId = route.get("request");
   if (!requestId) throw new Error("The authorization request ID is missing.");
 
-  const url = new URL(`${AUTH}/headless/requests/${requestId}`);
+  const url = new URL(`${HEADLESS}/requests/${requestId}`);
   for (const name of ["view", "error", "pendingToken", "email", "displayName"]) {
     const value = route.get(name);
     if (value) url.searchParams.set(name, value);
@@ -232,7 +234,12 @@ async function loadRequest(route: URLSearchParams): Promise<HeadlessViewModel> {
   });
 
   if (!response.ok) throw new Error("The authorization request expired or is invalid.");
-  return response.json() as Promise<HeadlessViewModel>;
+
+  const model = await response.json() as HeadlessViewModel;
+  if (model.headlessApiBasePath !== new URL(HEADLESS).pathname) {
+    throw new Error("The configured headless API path does not match the server.");
+  }
+  return model;
 }
 ```
 
@@ -249,7 +256,7 @@ async function postAction(
   path: string,
   body: unknown,
 ): Promise<HeadlessActionResult> {
-  const response = await fetch(`${AUTH}/headless${path}`, {
+  const response = await fetch(`${HEADLESS}${path}`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
