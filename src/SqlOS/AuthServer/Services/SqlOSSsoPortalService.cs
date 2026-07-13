@@ -492,12 +492,19 @@ public sealed class SqlOSSsoPortalService
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        // Refresh-based organization switching keeps the session's original
+        // organization as its default. Consumed refresh rows are therefore the
+        // durable lineage proving that this session also issued tokens for the
+        // SSO organization and must be included in its cutoff.
         var sessions = eligibleUserIds.Count == 0
             ? []
             : await _context.Set<SqlOSSession>()
-                .Where(x => x.OrganizationId == session.OrganizationId
-                    && x.RevokedAt == null
-                    && eligibleUserIds.Contains(x.UserId))
+                .Where(x => x.RevokedAt == null
+                    && eligibleUserIds.Contains(x.UserId)
+                    && (x.OrganizationId == session.OrganizationId
+                        || _context.Set<SqlOSRefreshToken>().Any(refreshToken =>
+                            refreshToken.SessionId == x.Id
+                            && refreshToken.ReplacementOrganizationId == session.OrganizationId)))
                 .ToListAsync(cancellationToken);
 
         var sessionIds = sessions.Select(x => x.Id).ToList();
@@ -505,6 +512,14 @@ public sealed class SqlOSSsoPortalService
             ? []
             : await _context.Set<SqlOSRefreshToken>()
                 .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+        var authPageSessions = eligibleUserIds.Count == 0
+            ? []
+            : await _context.Set<SqlOSTemporaryToken>()
+                .Where(x => x.Purpose == SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose
+                    && x.OrganizationId == session.OrganizationId
+                    && x.ConsumedAt == null
+                    && eligibleUserIds.Contains(x.UserId!))
                 .ToListAsync(cancellationToken);
 
         foreach (var activeSession in sessions)
@@ -518,6 +533,11 @@ public sealed class SqlOSSsoPortalService
             refreshToken.RevokedAt = now;
         }
 
+        foreach (var authPageSession in authPageSessions)
+        {
+            authPageSession.ConsumedAt = now;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPortalAuditAsync(
             "sso.portal.organization_sessions.revoked",
@@ -527,7 +547,8 @@ public sealed class SqlOSSsoPortalService
             {
                 connectionId = connection.Id,
                 domain = domain.Domain,
-                revokedSessions = sessions.Count
+                revokedSessions = sessions.Count,
+                invalidatedAuthPageSessions = authPageSessions.Count
             },
             cancellationToken);
 
@@ -792,7 +813,13 @@ public sealed class SqlOSSsoPortalService
             if (!string.IsNullOrWhiteSpace(request.ClientId) && !string.IsNullOrWhiteSpace(request.RedirectUri))
             {
                 authorizationUrl = await samlService.CreateAuthorizationUrlAsync(
-                    new SqlOSAuthorizationUrlRequest(state.Connection.Id, request.ClientId, request.RedirectUri),
+                    new SqlOSAuthorizationUrlRequest(
+                        state.Connection.Id,
+                        request.ClientId,
+                        request.RedirectUri,
+                        request.State ?? string.Empty,
+                        request.CodeChallenge ?? string.Empty,
+                        request.CodeChallengeMethod ?? string.Empty),
                     cancellationToken);
             }
 

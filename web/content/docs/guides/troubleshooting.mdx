@@ -14,6 +14,8 @@ section: guides
 
 You'll learn how to diagnose connection, OAuth callback, SAML, and migration problems quickly.
 
+![Troubleshooting flow from symptom through configuration, runtime, and persisted evidence](/docs/guides-troubleshooting.svg)
+
 ## SQL Server connection
 
 **Symptom:** App fails at startup with connection string errors.
@@ -26,7 +28,7 @@ You'll learn how to diagnose connection, OAuth callback, SAML, and migration pro
 
 **Symptom:** EF or raw SQL errors referencing `SqlOS_*` tables.
 
-- Ensure `app.MapSqlOS()` runs and the app has started at least once.
+- Ensure the host has started with `AddSqlOS<TContext>(...)` registered. Schema bootstrap runs from the SqlOS hosted service during startup; `MapSqlOS()` maps HTTP routes but does not create the schema.
 - If your migrations run first, call `SqlOSBootstrapper.InitializeAsync()` before migrating (see [Configuration](/docs/guides/configuration#schema-ownership)).
 
 ## OAuth redirect / callback mismatch
@@ -40,7 +42,7 @@ You'll learn how to diagnose connection, OAuth callback, SAML, and migration pro
 
 **Symptom:** Cannot access `/sqlos/admin/auth/`.
 
-- Check `SqlOS:Dashboard:AuthMode` and `Password` in `appsettings.json`.
+- Check the `options.Dashboard.AuthMode` and `options.Dashboard.Password` values assigned in your `AddSqlOS` callback. SqlOS does not bind the `SqlOS` configuration section automatically.
 - After repeated failures, dashboard throttling may return `429` — wait for the lockout window.
 
 ## SAML

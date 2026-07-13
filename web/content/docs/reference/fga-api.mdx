@@ -1,11 +1,11 @@
 ---
 title: "FGA API Reference"
-description: "Complete method reference for CheckAccess, GetAuthorizationFilter, CreateResource, PagedSpec, and more."
+description: "Application-facing access checks, entity-backed resources, grants, and FGA query helpers."
 order: 10
 section: reference
 ---
 
-Complete reference for every public method in the FGA module.
+This page documents the application-facing FGA surface. The recommended path is `SqlOSDbContext<TContext>` plus `ISqlOSResourceEntity` for protected domain rows, explicit subject provisioning, and explicit role grants. Public schema/bootstrap implementation classes are not intended as normal application extension points.
 
 ## ISqlOSFgaAuthService
 
@@ -45,7 +45,7 @@ if (!access.Allowed)
 
 ### HasCapabilityAsync
 
-Check if a subject has a specific permission at root level — i.e., anywhere in the resource tree. Use for global capability gates.
+Check whether a subject has a permission on the configured FGA root resource. Use it for an intentionally global capability granted at root; it does not scan for the permission on arbitrary descendants.
 
 ```csharp
 var canEdit = await authService.HasCapabilityAsync(subjectId, "CHAIN_EDIT");
@@ -62,7 +62,7 @@ if (!canEdit)
 
 **Returns**
 
-`Task<bool>` — `true` if the subject has any grant with a role that includes the permission.
+`Task<bool>` — the result of `CheckAccessAsync(subjectId, permissionKey, RootResourceId)`.
 
 ---
 
@@ -87,7 +87,7 @@ var chains = await dbContext.Chains
 | `subjectId` | `string` | The subject to filter for. |
 | `permissionKey` | `string` | The permission key that determines which resources are visible. |
 
-**Type constraint**: `T : IHasResourceId` — the entity must expose a `ResourceId` property.
+**Type constraint**: `T : IHasResourceId` — the entity must expose a `ResourceId` property. Protected domain entities should usually implement `ISqlOSResourceEntity`, which extends `IHasResourceId` and lets `SqlOSDbContext<TContext>` sync backing resource rows during EF saves.
 
 **Returns**
 
@@ -119,41 +119,69 @@ var trace = await authService.TraceResourceAccessAsync(
 
 ---
 
-## SqlOSFgaConvenienceExtensions
+## SqlOS.Extensions
 
-Extension methods that reduce endpoint boilerplate. Available via `using SqlOS.Fga.Extensions`.
+Canonical SDK helpers for resource lifecycle, subject provisioning, and role grants. Available via `using SqlOS.Extensions`.
 
 ---
 
-### CreateResource
+### Resource Lifecycle APIs
 
-Create an `SqlOSFgaResource` in the hierarchy. Adds to the change tracker but does **not** call `SaveChangesAsync`. Returns the resource ID so you can assign it to your domain entity.
+For protected application rows, implement `ISqlOSResourceEntity` and let `SqlOSDbContext<TContext>` synchronize `SqlOSFgaResource` rows during `SaveChanges` / `SaveChangesAsync`.
 
 ```csharp
-var resourceId = context.CreateResource(
-    parentId: "retail_root",
-    name: request.Name,
-    resourceTypeId: "chain"
-);
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = "";
+    public string OrganizationId { get; set; } = "";
+    public string Name { get; set; } = "";
 
-var chain = new Chain { ResourceId = resourceId, Name = request.Name };
-context.Chains.Add(chain);
-await context.SaveChangesAsync();
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string ParentResourceId => $"org::{OrganizationId}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
 ```
 
-**Parameters**
+Manual resource APIs remain available for resources that are not backed by domain entities:
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `context` | `ISqlOSFgaDbContext` | Yes | The DbContext (called as extension method). |
-| `parentId` | `string` | Yes | Parent resource ID in the hierarchy. |
-| `name` | `string` | Yes | Display name for the resource. |
-| `resourceTypeId` | `string` | Yes | Resource type identifier (e.g., `"chain"`, `"location"`). |
-| `id` | `string?` | No | Custom resource ID. If `null`, a GUID is generated. |
+| Method | Use |
+| --- | --- |
+| `CreateResourceAsync(...)` | Strict create with a generated resource ID. |
+| `CreateResourceWithIdAsync(...)` | Strict create with an explicit stable resource ID. |
+| `ProvisionResourceWithIdAsync(...)` | Idempotent create/update for explicit non-entity resources. |
+| `DeleteResourceAsync(...)` | Delete one resource and its direct grants without cascading child resources. |
 
-**Returns**
+---
 
-`string` — the resource ID (either the provided `id` or the auto-generated GUID).
+### Subject and Grant APIs
+
+Subjects are provisioned explicitly. Grants never create subjects implicitly.
+
+| Method | Use |
+| --- | --- |
+| `ProvisionUserSubjectAsync(...)` | Idempotently provision a user FGA subject and typed user row. |
+| `ProvisionAgentSubjectAsync(...)` | Idempotently provision an agent FGA subject and typed agent row. |
+| `ProvisionServiceAccountSubjectAsync(...)` | Idempotently provision a service-account FGA subject and typed service-account row. |
+| `GrantRoleAsync(...)` | Idempotently grant a role by key or ID to an existing subject/resource. |
+| `RevokeRoleAsync(...)` | Remove a role grant by key or ID if it exists. |
+
+---
+
+## SqlOS.Fga.Extensions
+
+Lower-level/read-side FGA convenience extensions. Available via `using SqlOS.Fga.Extensions`.
+
+### CreateResource
+
+`CreateResource(...)` is a lower-level/manual lifecycle helper kept for manual FGA samples and existing code. Do not use it as the normal protected-entity creation path. For protected application rows, prefer `ISqlOSResourceEntity` plus `SqlOSDbContext<TContext>`.
+
+```csharp
+// Manual lifecycle sample only.
+var resourceId = context.CreateResource("retail_root", request.Name, "chain");
+```
 
 ---
 
@@ -227,10 +255,19 @@ var spec = PagedSpec.For<Chain>(c => c.Id)
 | `For<T>(idSelector)` | `Expression<Func<T, string>>` | Start builder with the ID/tiebreaker column. |
 | `.RequirePermission(key)` | `string` | Set the FGA permission key for authorization filtering. |
 | `.SortByString(name, selector, isDefault?)` | `string`, `Expression<Func<T, string>>`, `bool` | Register a named string sort column. |
-| `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string>>[]` | Add text search across the given fields. |
+| `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string?>>[]` | Add text search across the given fields. |
 | `.Where(predicate)` | `Expression<Func<T, bool>>` | Add a static filter. |
-| `.Configure(action)` | `Action<IQueryable<T>>` | Configure the query (e.g., `.Include()`). |
+| `.Configure(configurator)` | `Func<IQueryable<T>, IQueryable<T>>` | Return a configured query (for example `query => query.Include(...)`). |
 | `.Build(pageSize, cursor, sortBy, sortDir)` | `int`, `string?`, `string?`, `string?` | Build the final `PagedSpecification<T>`. |
+
+The exact query-configuration signature is:
+
+```csharp
+public PagedSpecificationBuilder<T> Configure(
+    Func<IQueryable<T>, IQueryable<T>> configurator)
+```
+
+The function must return the query it configures. An `Action<IQueryable<T>>` is not accepted.
 
 ---
 
@@ -254,9 +291,10 @@ var result = await executor.ExecuteAsync(
         LocationCount = c.Locations.Count
     });
 
-// result.Items     — the page of DTOs
-// result.NextCursor — pass to next request for pagination
-// result.HasMore   — whether more pages exist
+// result.Data        — the page of DTOs
+// result.PageSize    — the clamped page size used
+// result.NextCursor  — pass to the next request
+// result.HasNextPage — whether NextCursor is non-null
 ```
 
 **Parameters**
@@ -277,9 +315,10 @@ var result = await executor.ExecuteAsync(
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Items` | `List<TDto>` | The current page of results. |
+| `Data` | `List<TDto>` | The current page of results. |
+| `PageSize` | `int` | The page size used by the result. |
 | `NextCursor` | `string?` | Opaque cursor for the next page. `null` if no more pages. |
-| `HasMore` | `bool` | Whether additional pages exist. |
+| `HasNextPage` | `bool` | `true` when `NextCursor` is not `null`. |
 
 ---
 
@@ -305,9 +344,26 @@ var total = await executor.CountAsync(context.Chains, spec, subjectId);
 
 ---
 
+## ISqlOSResourceEntity
+
+Recommended resource lifecycle contract for protected application rows. It extends `IHasResourceId` and gives `SqlOSDbContext<TContext>` enough metadata to create, update, and delete backing FGA resources during EF saves.
+
+```csharp
+public interface ISqlOSResourceEntity : IHasResourceId
+{
+    string ResourceTypeId { get; }
+    string ResourceName { get; }
+    string? ParentResourceId { get; }
+    string? ResourceDescription { get; }
+    bool ResourceIsActive { get; }
+}
+```
+
+---
+
 ## IHasResourceId
 
-Interface that connects domain entities to FGA resources. Required for `GetAuthorizationFilterAsync`, `AuthorizedDetailAsync`, and `ISpecificationExecutor`.
+Lower-level filter contract that exposes an entity's FGA resource ID. Required for `GetAuthorizationFilterAsync`, `AuthorizedDetailAsync`, and `ISpecificationExecutor`. `ISqlOSResourceEntity` extends this interface and is the recommended contract for normal protected domain rows.
 
 ```csharp
 public interface IHasResourceId
@@ -316,7 +372,7 @@ public interface IHasResourceId
 }
 ```
 
-**Implementation**
+**Lower-level implementation**
 
 ```csharp
 public class Chain : IHasResourceId

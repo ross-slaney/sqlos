@@ -164,6 +164,25 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUntrustedHostBeforeFetch()
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        options.ClientRegistration.Cimd.TrustedHosts.Add("trusted.example.test");
+        var httpFactory = new FakeHttpClientFactory(_ =>
+            throw new InvalidOperationException("Untrusted metadata must not be fetched."));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://untrusted.example.test/oauth/client.json",
+            "https://untrusted.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*is not trusted*");
+        httpFactory.RequestCount.Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsMismatchedClientId()
     {
         using var context = CreateContext();
@@ -210,6 +229,29 @@ public sealed class SqlOSCimdClientServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Redirect URI*");
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsCimdRedirectPathCaseMismatch()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Exact Redirect MCP Client",
+              "redirect_uris": ["https://client.example.test/Auth/Callback"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/auth/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Redirect URI*not allowed*");
     }
 
     [TestMethod]
@@ -337,7 +379,7 @@ public sealed class SqlOSCimdClientServiceTests
         IHttpClientFactory httpClientFactory)
     {
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var cimd = new SqlOSCimdClientService(context, options, httpClientFactory, crypto);
         return new SqlOSClientResolutionService(context, options, cimd);
     }

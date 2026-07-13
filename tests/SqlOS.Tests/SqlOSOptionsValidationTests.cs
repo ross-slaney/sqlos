@@ -101,6 +101,21 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenSigningKeyCleanupIsShorterThanJwksGrace()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.DefaultSigningKeyGraceWindowDays = 7;
+            options.AuthServer.DefaultSigningKeyRetiredCleanupDays = 6;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*DefaultSigningKeyRetiredCleanupDays must be at least DefaultSigningKeyGraceWindowDays*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_RegistersTransactionalEmailService()
     {
         var services = new ServiceCollection();
@@ -186,5 +201,75 @@ public sealed class SqlOSOptionsValidationTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*AuthServer.ClientRegistration.Dcr.RateLimitWindow must be greater than zero.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenCalendarConnectSessionLifetimeIsNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.Calendar.ConnectSessionLifetime = TimeSpan.Zero;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Calendar.ConnectSessionLifetime must be greater than zero.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenCalendarSyncWindowsAreInvalid()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.Calendar.AccessTokenRefreshSkew = TimeSpan.FromSeconds(-1);
+            options.Calendar.SyncWindowPastDays = -1;
+            options.Calendar.SyncWindowFutureDays = 0;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Calendar.AccessTokenRefreshSkew must be zero or greater.*")
+            .WithMessage("*Calendar.SyncWindowPastDays must be zero or greater.*")
+            .WithMessage("*Calendar.SyncWindowFutureDays must be greater than zero.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenCalendarSchedulerIsMisconfigured()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.ConfigureCalendar(calendar => calendar.ConfigureSyncScheduler(scheduler =>
+            {
+                scheduler.Interval = TimeSpan.Zero;
+                scheduler.SyncEvery = TimeSpan.Zero;
+                scheduler.MaxConnectionsPerRun = 0;
+            }));
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Calendar.SyncScheduler.Interval must be greater than zero.*")
+            .WithMessage("*Calendar.SyncScheduler.SyncEvery must be greater than zero.*")
+            .WithMessage("*Calendar.SyncScheduler.MaxConnectionsPerRun must be greater than zero.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Allows_DisabledCalendarSchedulerWithInvalidIntervals()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.ConfigureCalendar(calendar => calendar.ConfigureSyncScheduler(scheduler =>
+            {
+                scheduler.Enabled = false;
+                scheduler.Interval = TimeSpan.Zero;
+            }));
+        });
+
+        act.Should().NotThrow();
     }
 }

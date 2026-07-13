@@ -5,7 +5,6 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.Models;
 using SqlOS.Example.Api.Services;
-using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Example.Api.Endpoints;
@@ -182,6 +181,12 @@ public static class ExampleEndpoints
                 return Results.BadRequest(new { error = "Token must include sub and org_id to create workspaces." });
             }
 
+            var workspaceName = request.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(workspaceName))
+            {
+                return Results.BadRequest(new { error = "Workspace name is required." });
+            }
+
             await fgaService.EnsureUserAccessAsync(subjectId, organizationId, cancellationToken);
             var organizationResourceId = ExampleFgaService.GetOrganizationResourceId(organizationId);
             var access = await authService.CheckAccessAsync(subjectId, ExampleFgaService.WorkspaceManagePermission, organizationResourceId);
@@ -190,14 +195,15 @@ public static class ExampleEndpoints
                 return Results.Json(new { error = "Permission denied" }, statusCode: 403);
             }
 
+            var workspaceId = $"wrk_{Guid.NewGuid():N}"[..28];
             var workspace = new Workspace
             {
-                Id = $"wrk_{Guid.NewGuid():N}"[..28],
+                Id = workspaceId,
                 OrganizationId = organizationId,
-                Name = request.Name,
+                ResourceId = ExampleFgaService.GetWorkspaceResourceId(workspaceId),
+                Name = workspaceName,
                 CreatedAt = DateTime.UtcNow
             };
-            workspace.ResourceId = fgaService.CreateWorkspaceResource(workspace);
 
             context.Workspaces.Add(workspace);
             await context.SaveChangesAsync(cancellationToken);

@@ -5,7 +5,7 @@ order: 5
 section: fga
 ---
 
-Resources are a tree. One parent per node (root has none). For access checks, FGA walks **up** from the target node to root and looks for grants.
+Resources are a tree. One parent per node; root has none. For access checks, FGA walks **up** from the target node to root and looks for grants.
 
 ## Tree structure
 
@@ -14,51 +14,70 @@ Model your app's hierarchy as nested resources:
 ```
 root
 ├── org::acme (Organization)
-│   ├── chain-1 (Chain)
-│   │   ├── location-1 (Location)
-│   │   │   ├── item-1 (Inventory)
-│   │   │   └── item-2 (Inventory)
-│   │   └── location-2 (Location)
-│   └── chain-2 (Chain)
+│   ├── workspace::1 (Workspace)
+│   │   └── document::1 (Document)
+│   └── workspace::2 (Workspace)
 └── org::globex (Organization)
-    └── chain-3 (Chain)
+    └── workspace::3 (Workspace)
 ```
 
-## Create a resource
+## Entity-backed hierarchy
 
-Use `CreateResource` to add a node to the tree:
+For protected application rows, implement `ISqlOSResourceEntity` and return the parent resource ID from `ParentResourceId`.
 
 ```csharp
-var resourceId = context.CreateResource(
-    parentId: "org::acme",
-    name: "New Chain",
-    resourceTypeId: "chain"
-);
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = "";
+    public string OrganizationId { get; set; } = "";
+    public string Name { get; set; } = "";
+
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string ParentResourceId => $"org::{OrganizationId}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
 ```
 
-With a custom ID:
+When the entity is saved, `SqlOSDbContext<TContext>` creates or updates the resource at that point in the hierarchy.
 
 ```csharp
-var resourceId = context.CreateResource(
-    parentId: "root",
-    name: "Acme Corp",
-    resourceTypeId: "organization",
-    id: $"org::{org.Id}"
-);
+db.Workspaces.Add(new Workspace
+{
+    Id = workspaceId,
+    ResourceId = $"workspace::{workspaceId:D}",
+    OrganizationId = organizationId,
+    Name = "Operations"
+});
+
+await db.SaveChangesAsync(ct);
 ```
 
-`CreateResource` adds the resource to the EF Core change tracker. Call `SaveChangesAsync` to persist.
+## Non-entity roots
+
+Use manual resource APIs for hierarchy nodes that are not application rows, such as tenant or organization roots:
+
+```csharp
+await db.ProvisionResourceWithIdAsync(
+    $"org::{organization.Id}",
+    "organization",
+    organization.Name,
+    parentResourceId: "root",
+    cancellationToken: ct);
+```
 
 ## How inheritance works
 
-When checking `CHAIN_VIEW` on `chain-1`:
+When checking `WORKSPACE_VIEW` on `workspace::1`:
 
-1. Check grants directly on `chain-1`
-2. Check grants on `org::acme` (parent)
-3. Check grants on `root` (grandparent)
-4. If any ancestor has a grant with a role that includes `CHAIN_VIEW`, access is allowed
+1. Check grants directly on `workspace::1`.
+2. Check grants on `org::acme`.
+3. Check grants on `root`.
+4. If any ancestor has a grant with a role that includes `WORKSPACE_VIEW`, access is allowed.
 
-This means a single grant at the organization level gives access to everything underneath, without creating per-resource grants.
+This means a single grant at the organization level can authorize resources underneath it without creating per-resource grants.
 
 ## Browse in the dashboard
 

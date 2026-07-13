@@ -6,8 +6,12 @@ param location string = resourceGroup().location
 @description('Project prefix for naming.')
 param projectPrefix string
 
+@description('Optional ACR name override when the default name is globally taken.')
+param acrNameOverride string = ''
+
 var compactPrefix = toLower(replace(projectPrefix, '-', ''))
-var acrName = take('${compactPrefix}prodacr', 50)
+var defaultAcrName = take('${compactPrefix}prodacr', 50)
+var acrName = empty(acrNameOverride) ? defaultAcrName : acrNameOverride
 var containerAppEnvName = '${projectPrefix}-prod-env'
 var logAnalyticsName = '${projectPrefix}-prod-logs'
 var uamiName = '${projectPrefix}-prod-uami'

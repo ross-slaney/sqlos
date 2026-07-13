@@ -2,7 +2,7 @@ using SqlOS.AuthServer.Models;
 
 namespace SqlOS.AuthServer.Services;
 
-public sealed class SqlOSValidationSigningKeyCache
+internal sealed class SqlOSValidationSigningKeyCache
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, CacheEntry> _entries = new(StringComparer.Ordinal);
@@ -52,7 +52,8 @@ public sealed class SqlOSValidationSigningKeyCache
             Kid = key.Kid,
             Algorithm = key.Algorithm,
             PublicKeyPem = key.PublicKeyPem,
-            PrivateKeyPem = key.PrivateKeyPem,
+            CustodyProvider = key.CustodyProvider,
+            KeyReference = key.KeyReference,
             IsActive = key.IsActive,
             ActivatedAt = key.ActivatedAt,
             RetiredAt = key.RetiredAt

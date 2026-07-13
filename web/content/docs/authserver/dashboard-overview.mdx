@@ -11,7 +11,16 @@ The dashboard is admin UI inside your app. It covers AuthServer, Audit Logs, com
 
 Default path is `DashboardBasePath` (`/sqlos`). Register SqlOS. Call `app.MapSqlOS()` after `Build()`.
 
-Example: `http://localhost:5062/sqlos/`. Protect it with a password in `appsettings.json` (or env vars).
+Example: `http://localhost:5062/sqlos/`. Protect it by assigning dashboard options in the `AddSqlOS` callback:
+
+```csharp
+options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+options.Dashboard.Password =
+    builder.Configuration["SqlOS:Dashboard:Password"]
+    ?? throw new InvalidOperationException("SqlOS dashboard password is required.");
+```
+
+The password can come from user secrets, an environment variable, or another configuration provider, but SqlOS does not bind the `SqlOS` configuration section automatically.
 
 ![Dashboard home](/docs/dashboard-home.png)
 
@@ -21,12 +30,48 @@ Example: `http://localhost:5062/sqlos/`. Protect it with a password in `appsetti
 
 Password mode includes dashboard-specific per-IP throttling, global backoff for distributed failures, temporary lockout, and audit events for login success, login failure, rate-limit rejection, lockout, and logout. Treat those built-in controls as a baseline, not as the only protection for a publicly reachable admin surface.
 
+## Authenticate operator API calls
+
+Routes under `/sqlos/admin/**` are operator surfaces, not public management APIs. The dashboard UI is the normal interactive client. For durable automation, prefer a trusted backend that injects the relevant SqlOS service and authorizes the caller, or put the routes behind your identity-aware operator boundary.
+
+In password dashboard mode, a short-lived `curl` session can use a cookie jar. This example reads the password without placing it in shell history and uses `jq` only to JSON-escape the value:
+
+```bash
+export SQLOS_DASHBOARD_COOKIE_JAR="$(mktemp)"
+read -rsp "SqlOS dashboard password: " SQLOS_DASHBOARD_PASSWORD && echo
+
+jq -n --arg password "$SQLOS_DASHBOARD_PASSWORD" '{password: $password}' \
+  | curl --fail --silent --show-error \
+      -c "$SQLOS_DASHBOARD_COOKIE_JAR" \
+      -H 'Content-Type: application/json' \
+      --data-binary @- \
+      http://localhost:5062/sqlos/dashboard-auth/login
+
+unset SQLOS_DASHBOARD_PASSWORD
+```
+
+Admin API examples in this documentation use:
+
+```bash
+curl -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  http://localhost:5062/sqlos/admin/auth/api/organizations
+```
+
+The cookie jar contains an operator session. Restrict its permissions, never commit it, and delete it when finished:
+
+```bash
+rm -f "$SQLOS_DASHBOARD_COOKIE_JAR"
+unset SQLOS_DASHBOARD_COOKIE_JAR
+```
+
+With callback dashboard auth, authenticate through the host's configured operator flow instead; a password-mode cookie cannot bypass that boundary. See [Production Readiness](/docs/guides/production-readiness#dashboard-and-admin-api) before exposing any admin route.
+
 ## Auth Server pages
 
 | Page | URL | What you can do |
 | --- | --- | --- |
 | Organizations | `/sqlos/admin/auth/organizations` | Create tenants, set primary domains for SSO |
-| Users | `/sqlos/admin/auth/users` | Create users, assign passwords |
+| Users | `/sqlos/admin/auth/users` | Create users with an optional initial password; send reset email for password users |
 | Memberships | `/sqlos/admin/auth/memberships` | Link users to organizations with roles and manage invitations |
 | Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs |
 | OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |

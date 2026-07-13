@@ -7,16 +7,30 @@ section: fga
 
 `AuthorizedDetailAsync` fetches a single entity, checks authorization, and returns the appropriate HTTP result. It handles 404, 403, and 200 in one call.
 
+This helper is for read-side authorization. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; `AuthorizedDetailAsync` only needs the inherited `IHasResourceId` contract to check access for a fetched row.
+
+It does not authenticate the caller. Validate a bearer token for this API's exact audience before running the FGA check, and derive the subject from that validated token rather than from client input or an unvalidated JWT.
+
 ## Usage
 
 ```csharp
-app.MapGet("/api/chains/{id}", async (
+using SqlOS.AuthServer.Extensions;
+using SqlOS.Extensions;
+
+const string apiAudience = "https://api.acme.test";
+
+var api = app.MapGroup("/api")
+    .RequireSqlOSAccessToken(apiAudience);
+
+api.MapGet("/chains/{id}", async (
     string id,
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
     HttpContext http) =>
 {
-    var subjectId = http.GetSubjectId();
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+        return Results.Unauthorized();
 
     return await authService.AuthorizedDetailAsync(
         context.Chains.Include(c => c.Locations),

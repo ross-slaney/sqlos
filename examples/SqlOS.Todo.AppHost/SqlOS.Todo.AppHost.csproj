@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAspireHost>true</IsAspireHost>
+    <UserSecretsId>sqlos-todo-apphost</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\SqlOS.Example.AspNetCoreWeb\SqlOS.Example.AspNetCoreWeb.csproj" />
     <ProjectReference Include="..\SqlOS.Todo.Api\SqlOS.Todo.Api.csproj" />
   </ItemGroup>
 </Project>

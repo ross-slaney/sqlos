@@ -104,7 +104,7 @@
     // --- Subject type to route mapping ---
 
     function subjectTypeToRoute(typeId) {
-        const map = { 'user': 'users', 'agent': 'agents', 'service_account': 'service-accounts', 'user_group': 'user-groups' };
+        const map = { 'user': 'users', 'agent': 'agents', 'service_account': 'service-accounts', 'group': 'user-groups', 'user_group': 'user-groups' };
         return map[typeId] || 'users';
     }
 

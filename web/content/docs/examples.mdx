@@ -1,0 +1,109 @@
+---
+title: "Example applications"
+description: "Choose a runnable .NET, browser, mobile, or CLI reference implementation for SqlOS."
+order: 2
+---
+
+<Banner
+  eyebrow="Runnable reference apps"
+  title="Start from a working flow, then copy only the boundary you need"
+  href="/docs/quickstarts/aspnet-core-login"
+  actionLabel="Run the .NET login"
+>
+  The repository includes complete applications for ASP.NET Core, .NET APIs, Next.js, Angular, Expo, and a .NET CLI. Each sample documents what is production-shaped, what is local convenience, and how its authentication and authorization contracts fit together.
+</Banner>
+
+## Choose by the result you need
+
+<CardGrid cols={2}>
+  <Card title="Native ASP.NET Core login" description="Razor Pages, built-in OAuth middleware, PKCE, encrypted cookies, a protected API call, and revoking logout." href="/docs/quickstarts/aspnet-core-login" />
+  <Card title="Smallest complete backend" description="One Todo API with hosted login, SQL Server, bearer tokens, Swagger, and FGA-filtered data." href="/docs/quickstarts/run-todo" />
+  <Card title="Broad product tour" description="Two APIs and ASP.NET Core, Next.js, and Angular clients orchestrated with .NET Aspire." href="/docs/quickstarts/run-example-stack" />
+  <Card title="Terminal OAuth" description="A .NET CLI using Device Authorization Grant, token polling, refresh, and protected Todo commands." href="/docs/authserver/cli-oauth" />
+</CardGrid>
+
+## Path 1: the .NET-first stack
+
+Run one command from the repository root:
+
+```bash
+dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
+```
+
+This starts a persistent SQL Server container, the Todo API and embedded SqlOS host at `http://localhost:5080`, and the Razor Pages client at `http://localhost:5090`. Aspire reports resource health at its authenticated `https://localhost:18890` dashboard.
+
+![SqlOS hosted sign-in used by the runnable .NET client](/docs/auth-signin-page.png)
+
+The browser journey is deliberately ordinary ASP.NET Core:
+
+1. the application issues an authentication challenge;
+2. the generic OAuth handler creates protected state, a correlation cookie, and PKCE material;
+3. SqlOS hosts user and organization sign-in;
+4. middleware owns the `/signin-sqlos` callback and code exchange;
+5. the application calls protected `/api/me` and creates its encrypted cookie;
+6. logout revokes the remote refresh token and session, then removes the local cookie.
+
+Read the [ASP.NET Core sample guide on GitHub](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.AspNetCoreWeb) for the source tour, security decisions, and troubleshooting.
+
+## Path 2: compare application architectures
+
+The full stack adds the broader example API, Next.js, and Angular:
+
+```bash
+npm ci --prefix examples/SqlOS.Example.Web
+npm ci --prefix examples/SqlOS.Example.AngularWeb
+dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
+```
+
+Use it to compare a server-rendered .NET client with hosted and headless browser flows, optional social/OTP providers, multi-client registration, retail resource hierarchies, and identity-dependent EF results.
+
+![Retail administrator view from the full example application](/docs/retail-app-admin-dashboard.png)
+
+The AppHost starts these user-facing surfaces:
+
+| Surface | Local URL | What to inspect |
+| --- | --- | --- |
+| ASP.NET Core | `http://localhost:5090` | Native middleware, cookie session, protected Todo identity |
+| Next.js | `http://localhost:3010` | Hosted/headless choice, account and MFA, retail/FGA UI |
+| Angular | `http://localhost:4200` | Browser PKCE and the same retail authorization model |
+| Example API | `http://localhost:5062/swagger` | Application-owned API contract |
+| SqlOS dashboard | `http://localhost:5062/sqlos` | Identity, clients, sessions, providers, and FGA administration |
+| Todo API | `http://localhost:5080` | Focused hosted-auth and authorization sample |
+
+The authenticated Aspire dashboard URL is printed at startup; its configured listener is `https://localhost:18888`.
+
+## Complete catalog
+
+| Project | Runtime status | Best source material |
+| --- | --- | --- |
+| `SqlOS.Example.AspNetCoreWeb` | Launched by both AppHosts; implements login, refresh, protected API, and revoking logout | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.AspNetCoreWeb) |
+| `SqlOS.Todo.Api` | Canonical focused API; real-SQL integration coverage | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Todo.Api) |
+| `SqlOS.Example.Api` | Broad embedded platform example; real-SQL integration coverage | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.Api) |
+| `SqlOS.Example.Web` | AppHost-launched Next.js client; production build checked | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.Web) |
+| `SqlOS.Example.AngularWeb` | AppHost-launched Angular client; production build checked | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.AngularWeb) |
+| `SqlOS.Todo.Cli` | Separately launched .NET client; backend device/API contracts are integration-tested, while the executable needs a manual smoke | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Todo.Cli) |
+| `SqlOS.Example.ExpoApp` | Separately launched reference client; TypeScript-checked, but not an AppHost or end-to-end browser-test target | [README and source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.ExpoApp) |
+| `SqlOS.Example.Tests` | Fast tests for ASP.NET Core refresh, ticket renewal, and logout fallback | [Test source](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Example.Tests) |
+
+The root [example catalog](https://github.com/ross-slaney/sqlos/tree/main/examples) documents every project, port, provider setting, persistence rule, and test command.
+
+## What the examples intentionally do not hide
+
+- Password sign-in works without a third-party provider. Email, phone, social, and calendar flows require the provider settings named in each README.
+- AppHost SQL data persists between runs. A stale user, client, or grant may be database state rather than a seeding failure.
+- The ASP.NET Core sample stores tokens in its encrypted authentication ticket for teaching clarity; larger deployments should consider a server-side `ITicketStore`.
+- Expo is not launched by Aspire and needs simulator/device callback and network configuration.
+- Backend protocol and authorization paths have real-SQL integration tests. The JavaScript client builds are checked, but the repository does not currently claim browser-automation coverage for every frontend journey.
+
+Those boundaries are part of the reference implementation. They tell you which code is a trustworthy integration contract and which choices you still need to make for your own deployment.
+
+## Verify before you copy
+
+```bash
+dotnet build SqlOS.sln
+dotnet test examples/SqlOS.Example.Tests/SqlOS.Example.Tests.csproj
+dotnet test examples/SqlOS.Todo.IntegrationTests/SqlOS.Todo.IntegrationTests.csproj
+dotnet test examples/SqlOS.Example.IntegrationTests/SqlOS.Example.IntegrationTests.csproj
+```
+
+Continue with [production readiness](/docs/guides/production-readiness) before adapting a local callback, cookie, secret, key ring, or persistent sample database to a deployed environment.

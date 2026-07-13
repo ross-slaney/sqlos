@@ -1,60 +1,60 @@
 ---
 title: "Creating Resources"
-description: "Add resources to the FGA hierarchy."
+description: "Create FGA resources through entity-backed sync or manual APIs."
 order: 13
 section: fga
 ---
 
-`CreateResource` is a convenience extension on `ISqlOSFgaDbContext` that creates an `SqlOSFgaResource` and adds it to the change tracker.
+The recommended path for protected application rows is to make the EF entity implement `ISqlOSResourceEntity`. When the app derives its DbContext from `SqlOSDbContext<TContext>`, SqlOS creates, updates, and deletes the backing `SqlOSFgaResource` row during `SaveChanges` / `SaveChangesAsync`.
 
-## Usage
+## Entity-backed resources
 
 ```csharp
-// Auto-generated ID
-var resourceId = context.CreateResource(
-    parentId: "retail_root",
-    name: "Walmart",
-    resourceTypeId: "chain"
-);
+public sealed class Workspace : ISqlOSResourceEntity
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string OrganizationId { get; set; } = "";
 
-// Custom ID
-var orgResourceId = context.CreateResource(
-    parentId: "root",
-    name: "Acme Corp",
+    public string ResourceTypeId => "workspace";
+    public string ResourceName => Name;
+    public string ParentResourceId => $"org::{OrganizationId}";
+    public string? ResourceDescription => null;
+    public bool ResourceIsActive => true;
+}
+```
+
+Assign a stable `ResourceId` before saving the entity:
+
+```csharp
+var workspaceId = Guid.NewGuid();
+var workspace = new Workspace
+{
+    Id = workspaceId,
+    ResourceId = $"workspace::{workspaceId:D}",
+    OrganizationId = organizationId,
+    Name = request.Name.Trim()
+};
+
+db.Workspaces.Add(workspace);
+await db.SaveChangesAsync(ct);
+```
+
+`SqlOSDbContext<TContext>` validates the resource type, parent resource, self-parenting, and obvious cycles before it writes the `SqlOSFgaResource` row.
+
+## Manual resources
+
+Use manual resource APIs only for resources that are not represented by an application entity, such as tenant roots, organization roots, or external resources.
+
+```csharp
+await db.ProvisionResourceWithIdAsync(
+    $"org::{organization.Id}",
     resourceTypeId: "organization",
-    id: $"org::{org.Id}"
-);
+    name: organization.Name,
+    parentResourceId: "root",
+    isActive: organization.IsActive,
+    cancellationToken: ct);
 ```
 
-## Method signature
-
-```csharp
-public static string CreateResource(
-    this ISqlOSFgaDbContext context,
-    string parentId,
-    string name,
-    string resourceTypeId,
-    string? id = null);
-```
-
-| Parameter | Description |
-| --- | --- |
-| `parentId` | Parent resource ID in the hierarchy |
-| `name` | Display name |
-| `resourceTypeId` | Resource type (e.g., `chain`, `location`) |
-| `id` | Optional. If null, a GUID is generated |
-
-Returns the resource ID (generated or custom).
-
-## Transaction behavior
-
-`CreateResource` adds the resource to the EF Core change tracker but does not call `SaveChangesAsync`. Save it alongside your domain entity in one transaction:
-
-```csharp
-var resourceId = context.CreateResource("retail_root", request.Name, "chain");
-
-var chain = new Chain { ResourceId = resourceId, Name = request.Name };
-context.Chains.Add(chain);
-
-await context.SaveChangesAsync(); // saves both the resource and the chain
-```
+For strict creates, use `CreateResourceAsync(...)` or `CreateResourceWithIdAsync(...)`. For deletes, use `DeleteResourceAsync(...)`; it deletes the resource and direct grants, but it does not cascade child resources.
