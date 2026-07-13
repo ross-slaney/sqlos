@@ -61,7 +61,7 @@ Headless apps still let SqlOS run the auth state machine. Your UI posts actions 
 | `POST /sqlos/auth/headless/signup/email-otp/start` | Start a new-user OTP signup |
 | `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify OTP signup and issue the redirect |
 
-The start responses include `challengeToken`, masked email, expiry, and resend timing. Signup start also includes `signupToken`. Store those values in page state only long enough to verify the code.
+The headless start view includes `challengeToken`, `email`, and an `info` message containing the masked address. Signup start also includes `signupToken`. It does not currently expose expiry or resend timestamps; use your configured cooldown for the local button state and keep the server rate limit authoritative. Store both raw tokens only long enough to verify the code, and replace both after a signup resend. The direct SDK start results do include `MaskedEmail`, `ExpiresAt`, and `NextAllowedSendAt`.
 
 <Callout type="warning" title="Keep HRD in front of OTP">
   If the email belongs to an organization with required SSO, SqlOS redirects to SSO before creating an OTP challenge. Do not bypass `identify` or the OTP start response handling in a headless UI.

@@ -1,0 +1,127 @@
+---
+title: "Calendar Integration"
+description: "Google Calendar and Microsoft 365 calendar connections with connection-only, read-pull, and two-way modes."
+order: 18
+section: authserver
+---
+
+SqlOS stores calendar OAuth tokens encrypted at rest, refreshes them automatically, and optionally imports normalized events — per **user** or per **organization**. Provider credentials are reused from your seeded [Google](/docs/authserver/google-oidc) / [Microsoft](/docs/authserver/microsoft-oidc) social connections; sign-in flows never request calendar scopes.
+
+For a walkthrough, see the [calendar integration guide](/docs/guides/calendar-integration).
+
+## Integration modes
+
+```csharp
+public enum SqlOSCalendarIntegrationMode
+{
+    ConnectionOnly, // SqlOS stores tokens; your app calls Google/Graph directly
+    ReadPull,       // SqlOS imports events/busy blocks on a schedule
+    TwoWay          // SqlOS pushes app-created events and pulls changes
+}
+```
+
+`ConnectionOnly` never persists event copies. `ReadPull` and `TwoWay` require a provider refresh token; the connect flow fails fast when one is not granted.
+
+## Scopes
+
+| Provider | Read | Two-way writes |
+|----------|------|----------------|
+| Google | `https://www.googleapis.com/auth/calendar.readonly` | + `https://www.googleapis.com/auth/calendar.events` |
+| Microsoft | `offline_access`, `Calendars.Read` | `offline_access`, `Calendars.ReadWrite` |
+
+SqlOS adds `openid email` so the granting account is recorded, sends `access_type=offline&prompt=consent` to Google, and accepts a custom scope list via `SqlOSStartCalendarConnectRequest.Scopes`.
+
+## Connect flow
+
+1. Your backend calls `SqlOSCalendarService.StartConnectAsync(...)` with the OIDC connection id, mode, owner (`UserId` **or** `OrganizationId`), and an absolute `ReturnUri`.
+2. Redirect the browser to the returned `AuthorizationUrl` (PKCE + single-use state, `Calendar.ConnectSessionLifetime` window).
+3. The provider redirects to the SqlOS-owned callback: `{AuthServer.BasePath}/calendar/callback`.
+4. SqlOS exchanges the code, encrypts both tokens with Data Protection, records the granting account, and redirects to `ReturnUri` with `?calendarConnectionId=...` or `?error=...`.
+
+Add the callback URI to the provider app registration:
+
+```
+https://your-app.example.com/sqlos/auth/calendar/callback
+```
+
+## Service surface
+
+`SqlOSCalendarService` (scoped, registered by `AddSqlOS`):
+
+- `StartConnectAsync` / `HandleConnectCallbackAsync` / `CompleteConnectAsync` — connect flow
+- `ListConnectionsAsync`, `GetConnectionAsync` — summaries (never token material)
+- `GetAccessTokenAsync` — short-lived provider token, transparently refreshed within `Calendar.AccessTokenRefreshSkew`
+- `ListProviderCalendarsAsync` — live calendar list from the provider
+- `EnableCalendarSyncAsync` — choose which calendars a connection syncs
+- `ListEventsAsync` — normalized events (read-pull/two-way only)
+- `DisconnectAsync` — revokes and clears stored tokens
+- `ForceRefreshAsync` — admin force refresh
+
+`SqlOSCalendarSyncService`:
+
+- `SyncConnectionAsync` — pull one connection now (auto-enrolls the primary calendar on first sync)
+- `CreateEventAsync` — two-way event creation with a local `push` copy
+- `SyncDueConnectionsAsync` — used by the background scheduler
+
+All owner-scoped reads accept `forUserId` / `forOrganizationId` and fail closed when the connection belongs to someone else.
+
+## Options
+
+```csharp
+builder.AddSqlOS<AppDbContext>(db => db.UseSqlServer(cs), options =>
+{
+    options.ConfigureCalendar(calendar =>
+    {
+        calendar.SyncWindowPastDays = 30;        // read-pull import window
+        calendar.SyncWindowFutureDays = 90;
+        calendar.AccessTokenRefreshSkew = TimeSpan.FromMinutes(5);
+        calendar.ConfigureSyncScheduler(scheduler =>
+        {
+            scheduler.Enabled = true;            // background sync worker
+            scheduler.Interval = TimeSpan.FromMinutes(5);
+            scheduler.SyncEvery = TimeSpan.FromMinutes(15);
+            scheduler.MaxConnectionsPerRun = 25;
+        });
+        calendar.OnTwoWayConflictAsync = (conflict, ct) =>
+            Task.FromResult(SqlOSCalendarConflictDecision.PreferProvider);
+    });
+});
+```
+
+Set `options.Calendar.Enabled = false` to skip mapping the callback and admin endpoints entirely.
+
+## Sync behavior
+
+- Incremental cursors: Google `syncToken`, Microsoft Graph delta links. Expired cursors fall back to a full-window pull automatically.
+- Cancelled provider events remove the local copy.
+- Two-way conflicts (a provider change to an event created through SqlOS) are delegated to `OnTwoWayConflictAsync`; the provider version wins by default.
+- Sync results update per-calendar health (`LastSyncStatus`, `LastSyncError`, `EventCount`) and the connection status (`Active`/`Error`).
+
+## Admin API and dashboard
+
+Dashboard: **`/sqlos/admin/calendar/connections`** — status, owner, granted account, last sync, per-calendar cursor health, plus force sync, token refresh, and disconnect actions.
+
+Admin API (dashboard-session guarded, mirrors the other admin surfaces):
+
+```
+GET  /sqlos/admin/calendar/api/connections?search=&includeRevoked=&page=&pageSize=
+GET  /sqlos/admin/calendar/api/connections/{id}
+POST /sqlos/admin/calendar/api/connections/{id}/sync
+POST /sqlos/admin/calendar/api/connections/{id}/refresh
+POST /sqlos/admin/calendar/api/connections/{id}/disconnect
+GET  /sqlos/admin/calendar/api/summary
+```
+
+## Audit events
+
+`calendar.connect.start`, `calendar.connection.created`, `calendar.connect.error`, `calendar.connection.synced`, `calendar.sync.failed`, `calendar.connection.refresh_failed`, `calendar.connection.disconnected`, `calendar.event.created`.
+
+## Schema
+
+Migration `026` adds `SqlOSCalendarConnections` (encrypted tokens, mode, owner, status), `SqlOSCalendarSyncStates` (per-calendar cursors and health), and `SqlOSCalendarEvents` (normalized copies, unique per provider event).
+
+## Failure modes
+
+- **"The provider did not return a refresh token"** — the Google account previously consented without offline access; SqlOS forces `prompt=consent`, so this usually means a Workspace policy stripped it, or a custom scope list dropped `offline_access` (Microsoft).
+- **Connection status `Error`** — the last refresh or sync failed; see `LastError` in the dashboard, fix the underlying grant, then use **Refresh token** or reconnect.
+- **410 / expired cursor** — handled automatically with a full re-pull; no action needed.

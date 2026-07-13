@@ -119,6 +119,103 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task AppleOidcCallback_ForgedUserEmailCannotLinkVictim_ThroughHttpProtocol()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var attackerEmail = $"apple-attacker-{suffix}@example.com";
+        var victimEmail = $"apple-victim-{suffix}@example.com";
+        await CreateUserAsync(victimEmail, "Apple Victim", null);
+        var connectionId = await UpsertAppleConnectionAsync();
+        var astralName = string.Concat(Enumerable.Repeat("😀", 150));
+
+        var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
+        {
+            email = attackerEmail,
+            connectionId
+        });
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var authorizationUrl = startJson.RootElement.GetProperty("authorizationUrl").GetString()!;
+        var state = ExtractQueryValue(new Uri(authorizationUrl), "state")!;
+        var nonce = ExtractQueryValue(new Uri(authorizationUrl), "nonce")!;
+
+        var callbackResponse = await ExampleApiFixture.Client.PostAsync(
+            $"/api/v1/auth/oidc/callback/{connectionId}",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["code"] = $"success:{attackerEmail}:{nonce}",
+                ["state"] = state,
+                ["user"] = $"{{\"email\":\"{victimEmail}\",\"name\":{{\"firstName\":\"{astralName}\",\"lastName\":\"Account\"}}}}"
+            }));
+        callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var handoff = ExtractQueryValue(callbackResponse.Headers.Location!, "handoff");
+        handoff.Should().NotBeNullOrWhiteSpace();
+
+        var completeResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/complete", new { handoff });
+        completeResponse.EnsureSuccessStatusCode();
+        var completeJson = JsonDocument.Parse(await completeResponse.Content.ReadAsStringAsync());
+        completeJson.RootElement.GetProperty("user").GetProperty("email").GetString().Should().Be(attackerEmail);
+        var displayName = completeJson.RootElement.GetProperty("user").GetProperty("displayName").GetString()!;
+        displayName.Length.Should().BeLessThanOrEqualTo(200);
+        char.IsHighSurrogate(displayName[^1]).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task OidcUserInfo_SubMismatch_ReturnsGenericProtocolError()
+    {
+        var email = $"sub-mismatch-{Guid.NewGuid():N}@example.com";
+        var connectionId = await UpsertOidcConnectionAsync("Google");
+
+        var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
+        {
+            email,
+            connectionId
+        });
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var authorizationUrl = startJson.RootElement.GetProperty("authorizationUrl").GetString()!;
+        var state = ExtractQueryValue(new Uri(authorizationUrl), "state")!;
+        var nonce = ExtractQueryValue(new Uri(authorizationUrl), "nonce")!;
+        var code = Uri.EscapeDataString($"userinfo-sub-mismatch:{email}:{nonce}");
+
+        var callbackResponse = await ExampleApiFixture.Client.GetAsync(
+            $"/api/v1/auth/oidc/callback/{connectionId}?code={code}&state={Uri.EscapeDataString(state)}");
+
+        callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        ExtractQueryValue(callbackResponse.Headers.Location!, "handoff").Should().BeNull();
+        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The social login could not be completed.");
+    }
+
+    [TestMethod]
+    public async Task OidcSplitEmailVerification_CannotLinkVictim_ThroughHttpProtocol()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var attackerEmail = $"split-attacker-{suffix}@example.com";
+        var victimEmail = $"split-victim-{suffix}@example.com";
+        await CreateUserAsync(victimEmail, "Split Victim", null);
+        var connectionId = await UpsertOidcConnectionAsync("Google");
+
+        var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
+        {
+            email = attackerEmail,
+            connectionId
+        });
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var authorizationUrl = startJson.RootElement.GetProperty("authorizationUrl").GetString()!;
+        var state = ExtractQueryValue(new Uri(authorizationUrl), "state")!;
+        var nonce = ExtractQueryValue(new Uri(authorizationUrl), "nonce")!;
+        var code = Uri.EscapeDataString($"split-claims:{attackerEmail}:{victimEmail}:{nonce}");
+
+        var callbackResponse = await ExampleApiFixture.Client.GetAsync(
+            $"/api/v1/auth/oidc/callback/{connectionId}?code={code}&state={Uri.EscapeDataString(state)}");
+
+        callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        ExtractQueryValue(callbackResponse.Headers.Location!, "handoff").Should().BeNull();
+        ExtractQueryValue(callbackResponse.Headers.Location!, "error").Should().Be("The social login could not be completed.");
+    }
+
+    [TestMethod]
     public async Task CustomOidcFlow_Works_ThroughBackendEndpoints()
     {
         var email = $"custom-oidc-{Guid.NewGuid():N}@example.com";
@@ -143,6 +240,57 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         completeResponse.EnsureSuccessStatusCode();
         var completeJson = JsonDocument.Parse(await completeResponse.Content.ReadAsStringAsync());
         completeJson.RootElement.GetProperty("user").GetProperty("email").GetString().Should().Be(email);
+    }
+
+    [TestMethod]
+    public async Task OidcComplete_WhenOrganizationRequiresMfa_ReturnsChallengeInsteadOfTokens()
+    {
+        var email = $"oidc-mfa-{Guid.NewGuid():N}@example.com";
+        var organizationId = await CreateOrganizationAsync($"OIDC MFA Org {Guid.NewGuid():N}");
+        var userId = await CreateUserAsync(email, "OIDC MFA User", null);
+        await CreateMembershipAsync(organizationId, userId, "member");
+
+        var policyResponse = await ExampleApiFixture.Client.PutAsJsonAsync(
+            $"/sqlos/admin/auth/api/organizations/{organizationId}/mfa-policy",
+            new
+            {
+                isEnabled = true,
+                requireMfaForAllUsers = true,
+                requireMfaForOwnersAndAdmins = false,
+                userSelfEnrollmentEnabled = true,
+                recoveryCodesEnabled = true,
+                requiredRoles = new[] { "owner", "admin" },
+                availableFactors = new[] { "totp", "recovery_code" }
+            });
+        policyResponse.EnsureSuccessStatusCode();
+
+        var connectionId = await UpsertCustomConnectionAsync();
+        var startResponse = await ExampleApiFixture.Client.PostAsJsonAsync("/api/v1/auth/oidc/start", new
+        {
+            email,
+            connectionId
+        });
+        startResponse.EnsureSuccessStatusCode();
+        var startJson = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var authorizationUrl = startJson.RootElement.GetProperty("authorizationUrl").GetString()!;
+        var state = ExtractQueryValue(new Uri(authorizationUrl), "state")!;
+        var nonce = ExtractQueryValue(new Uri(authorizationUrl), "nonce")!;
+
+        var callbackResponse = await ExampleApiFixture.Client.GetAsync(
+            $"/api/v1/auth/oidc/callback/{connectionId}?code=success:{Uri.EscapeDataString(email)}:{Uri.EscapeDataString(nonce)}&state={Uri.EscapeDataString(state)}");
+        callbackResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var handoff = ExtractQueryValue(callbackResponse.Headers.Location!, "handoff");
+
+        var completeResponse = await ExampleApiFixture.Client.PostAsJsonAsync(
+            "/api/v1/auth/oidc/complete",
+            new { handoff });
+        completeResponse.EnsureSuccessStatusCode();
+        var completeJson = JsonDocument.Parse(await completeResponse.Content.ReadAsStringAsync());
+
+        completeJson.RootElement.GetProperty("requiresMfa").GetBoolean().Should().BeTrue();
+        completeJson.RootElement.GetProperty("requiresMfaEnrollment").GetBoolean().Should().BeTrue();
+        completeJson.RootElement.GetProperty("mfaToken").GetString().Should().NotBeNullOrWhiteSpace();
+        completeJson.RootElement.TryGetProperty("accessToken", out _).Should().BeFalse();
     }
 
     [TestMethod]

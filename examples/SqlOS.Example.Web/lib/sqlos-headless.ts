@@ -139,9 +139,8 @@ export async function headlessPasswordLogin(requestId: string, email: string, pa
 export async function headlessRequestPasswordResetEmail(
   email: string,
   requestId?: string | null,
-  resetUrlTemplate?: string | null,
 ): Promise<HeadlessPasswordResetRequestResult> {
-  return headlessPostJson<HeadlessPasswordResetRequestResult>("/password/forgot", { email, requestId, resetUrlTemplate });
+  return headlessPostJson<HeadlessPasswordResetRequestResult>("/password/forgot", { email, requestId });
 }
 
 export async function headlessResetPassword(token: string, newPassword: string): Promise<void> {

@@ -1,11 +1,13 @@
 ---
 title: "Token Validation"
-description: "Validate access tokens and extract user claims."
+description: "Validate access tokens for protected APIs."
 order: 28
 section: authserver
 ---
 
-Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token.
+Access tokens are RS256 JWTs. Validate on the server for each API call and always require the audience for the API that will process the token. SqlOS SDK/middleware validation is session-aware; plain JWKS validation is not.
+
+SqlOS validation is stateful: after signature, issuer, audience, and JWT lifetime checks, it loads the current session and requires that the session is not revoked or idle/absolutely expired. It also requires an active user and, for organization-scoped tokens, an active organization and membership. This is what makes logout and offboarding visible before the JWT's `exp` time.
 
 ## Resource-server middleware
 
@@ -23,12 +25,17 @@ The middleware rejects requests at startup if `ExpectedAudience` is empty. On su
 
 ```csharp
 var validated = httpContext.GetSqlOSValidatedToken();
-var userId = validated?.UserId;
+var clientId = validated?.ClientId;
+var audience = validated?.Audience;
 ```
+
+Use `GetSqlOSValidatedToken()` for token diagnostics or auth-server metadata. Your app should still resolve the current FGA subject explicitly from the authenticated principal or from its own API-key/session mapping.
 
 ## Validate with the SDK
 
 ```csharp
+using System.IdentityModel.Tokens.Jwt;
+
 var bearerToken = httpContext.Request.Headers.Authorization.ToString();
 if (!bearerToken.StartsWith("Bearer "))
     return Results.Unauthorized();
@@ -42,42 +49,35 @@ var validated = await authService.ValidateAccessTokenAsync(
 if (validated == null)
     return Results.Unauthorized();
 
-// Use the validated claims
-var userId = validated.UserId;
+var subjectId = validated.Principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+if (string.IsNullOrWhiteSpace(subjectId))
+    return Results.Unauthorized();
+
 var orgId = validated.OrganizationId;
 ```
 
-## Middleware pattern
+`ValidateAccessTokenAsync` validates issuer, signature, JWT lifetime, exact audience, and that the referenced SqlOS session exists and is not revoked or absolutely expired. It does not apply the session idle timeout to each already-issued access token; idle expiry is enforced when the client refreshes.
 
-The example app uses middleware to extract the subject ID from multiple auth methods:
+## Resolve subjects in application code
+
+SqlOS FGA APIs take explicit `subjectId` values. For bearer tokens, a typical app-owned resolver reads the JWT subject claim from the authenticated principal:
 
 ```csharp
-public static string? GetSubjectId(this HttpContext http, string expectedAudience)
-{
-    // Bearer JWT
-    var auth = http.Request.Headers.Authorization.ToString();
-    if (auth.StartsWith("Bearer "))
-    {
-        var token = auth["Bearer ".Length..].Trim();
-        var validated = http.RequestServices
-            .GetRequiredService<SqlOSAuthService>()
-            .ValidateAccessTokenAsync(token, expectedAudience, ct).Result;
-        return validated?.UserId;
-    }
+using System.IdentityModel.Tokens.Jwt;
 
-    // API key (service accounts)
-    if (http.Request.Headers.TryGetValue("X-Api-Key", out var apiKey))
-        return apiKey.ToString();
+var subjectId = http.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+if (string.IsNullOrWhiteSpace(subjectId))
+    return Results.Unauthorized();
 
-    // Agent token
-    if (http.Request.Headers.TryGetValue("X-Agent-Token", out var agentToken))
-        return agentToken.ToString();
-
-    return null;
-}
+await db.ProvisionUserSubjectAsync(
+    subjectId,
+    displayName: subjectId,
+    cancellationToken: ct);
 ```
 
-`ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session state, but it intentionally does not validate `aud`.
+If your app accepts API keys, agent tokens, or another credential type, resolve those credentials to the relevant service-account or agent subject ID in your own request layer, then pass that explicit subject ID to FGA.
+
+`ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync` exists only for diagnostics and token introspection flows that do not authenticate a protected API request. It validates issuer, signature, lifetime, and session existence/revocation/absolute expiry, but it intentionally does not validate `aud`.
 
 ## JWKS for external validation
 
@@ -93,11 +93,13 @@ And the OAuth metadata endpoint:
 GET /sqlos/auth/.well-known/oauth-authorization-server
 ```
 
+JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session revocation, idle expiry, user deactivation, organization deactivation, or membership removal until the JWT expires. Use `UseSqlOSAccessTokenValidation`, `RequireSqlOSAccessToken`, or `ValidateAccessTokenAsync` when immediate lifecycle enforcement matters. If a resource server must remain JWKS-only, keep access-token lifetimes short and treat that delay as an explicit deployment tradeoff.
+
 ## Token claims
 
 | Claim | Description |
 | --- | --- |
-| `sub` | User ID |
+| `sub` | User subject ID |
 | `sid` | Session ID |
 | `client_id` | OAuth client |
 | `org_id` | Organization (if scoped) |

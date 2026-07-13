@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuditLogs;
 using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Dtos;
-using SqlOS.Example.Api.FgaRetail.Middleware;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
@@ -26,7 +25,7 @@ public static class LocationEndpoints
             string? search = null,
             string? cursor = null) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
             var spec = new GetLocationsSpecification(pageSize, search) { Cursor = cursor };
             var result = await executor.ExecuteAsync(
                 context.Locations, spec, subjectId,
@@ -54,7 +53,7 @@ public static class LocationEndpoints
             string? search = null,
             string? cursor = null) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
             var spec = new GetLocationsSpecification(pageSize, search, chainId) { Cursor = cursor };
             var result = await executor.ExecuteAsync(
                 context.Locations, spec, subjectId,
@@ -79,7 +78,7 @@ public static class LocationEndpoints
             ISqlOSFgaAuthService authService,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             return await authService.AuthorizedDetailAsync(
                 context.Locations.Include(l => l.Chain).Include(l => l.InventoryItems),
@@ -111,7 +110,7 @@ public static class LocationEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var chain = await context.Chains.FirstOrDefaultAsync(c => c.Id == chainId);
             if (chain is null) return Results.NotFound();
@@ -119,6 +118,8 @@ public static class LocationEndpoints
             var access = await authService.CheckAccessAsync(subjectId, RetailPermissionKeys.LocationEdit, chain.ResourceId);
             if (!access.Allowed) return Results.Json(new { error = "Permission denied" }, statusCode: 403);
 
+            // Retail is the lower-level/manual FGA sample. Recommended app entities use
+            // ISqlOSResourceEntity and let SqlOSDbContext sync resources on SaveChanges.
             var resourceId = context.CreateResource(chain.ResourceId, request.Name, RetailResourceTypeIds.Location);
 
             var location = new Location
@@ -181,7 +182,7 @@ public static class LocationEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var location = await context.Locations.Include(l => l.Chain).FirstOrDefaultAsync(l => l.Id == id);
             if (location is null) return Results.NotFound();
@@ -242,7 +243,7 @@ public static class LocationEndpoints
             RetailAuditService audit,
             HttpContext http) =>
         {
-            var subjectId = http.GetSubjectId();
+            var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
 
             var location = await context.Locations.Include(l => l.Chain).FirstOrDefaultAsync(l => l.Id == id);
             if (location is null) return Results.NotFound();

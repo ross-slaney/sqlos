@@ -23,6 +23,8 @@ You'll learn how to build an FGA filter and apply it in EF Core queries for list
 
 List endpoints return only rows the current subject may read — in one SQL round-trip.
 
+![FGA Access Tester used to verify the same permission enforced by an EF query filter](/docs/dashboard-access-tester.png)
+
 ## Steps
 
 1. **Inject** `ISqlOSFgaAuthService` in your endpoint or service.

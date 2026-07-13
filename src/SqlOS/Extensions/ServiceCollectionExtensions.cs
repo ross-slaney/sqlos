@@ -7,6 +7,8 @@ using SqlOS.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Services;
+using SqlOS.Calendar.Interfaces;
+using SqlOS.Calendar.Services;
 using SqlOS.Dashboard;
 using SqlOS.Email.Configuration;
 using SqlOS.Email.Interfaces;
@@ -38,13 +40,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.AuthServer));
         services.AddSingleton(Options.Create(options.Fga));
         services.AddSingleton(Options.Create(options.Email));
+        services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
         services.AddHttpClient();
-        services.AddHttpClient(nameof(SqlOSCimdClientService))
-            .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+        services.AddHttpClient(nameof(SqlOSOidcAuthService), client =>
+        {
+            client.Timeout = SqlOSOidcAuthService.ProviderHttpTimeout;
+        })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
             {
                 AllowAutoRedirect = false
             });
+        services.AddHttpClient(nameof(SqlOSCimdClientService))
+            .ConfigurePrimaryHttpMessageHandler(SqlOSCimdHttpHandlerFactory.Create);
         services.AddHttpClient<ISqlOSDomainDnsVerifier, SqlOSDnsOverHttpsDomainVerifier>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);
@@ -90,6 +98,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSSsoAuthorizationService>();
         services.AddScoped<SqlOSOrganizationDomainService>();
         services.AddScoped<SqlOSSsoPortalService>();
+        services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSGoogleCalendarAdapter>();
+        services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSMicrosoftGraphCalendarAdapter>();
+        services.AddScoped<SqlOSCalendarService>();
+        services.AddScoped<SqlOSCalendarSyncService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
         services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();
@@ -97,6 +109,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSFgaFunctionInitializer>();
         services.AddScoped<SqlOSFgaSchemaInitializer>();
         services.AddHostedService<SqlOSSigningKeyRotationService>();
+        services.AddHostedService<SqlOSCalendarSyncHostedService>();
         services.AddHostedService<SqlOSBootstrapHostedService>();
         services.AddSingleton<IStartupFilter, SqlOSPipelineStartupFilter>();
 

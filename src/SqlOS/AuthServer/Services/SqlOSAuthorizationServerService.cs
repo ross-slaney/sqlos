@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -113,8 +115,17 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("A state value is required.");
         }
 
+        if (input.State.Length > 2048)
+        {
+            throw new InvalidOperationException("State cannot exceed 2048 characters.");
+        }
+
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
-        if (client.RequirePkce)
+        var isPublicClient = string.Equals(
+            client.TokenEndpointAuthMethod,
+            "none",
+            StringComparison.Ordinal);
+        if (client.RequirePkce || isPublicClient)
         {
             if (string.IsNullOrWhiteSpace(input.CodeChallenge))
             {
@@ -124,6 +135,12 @@ public sealed class SqlOSAuthorizationServerService
             if (!string.Equals(input.CodeChallengeMethod, "S256", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Only S256 PKCE is supported.");
+            }
+
+            if (!_cryptoService.IsValidS256PkceCodeChallenge(input.CodeChallenge))
+            {
+                throw new InvalidOperationException(
+                    "PKCE code challenge must be a 43-character RFC 7636 S256 value.");
             }
         }
 
@@ -268,11 +285,19 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
+        var user = await _context.Set<SqlOSUser>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == emailRecord.UserId, cancellationToken);
+        if (user == null || !user.IsActive)
+        {
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "inactive_user", cancellationToken);
+            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
         credential.LastUsedAt = DateTime.UtcNow;
         await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == emailRecord.UserId, cancellationToken);
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
         return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
@@ -642,21 +667,74 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        if (!string.Equals(payload.Flow, "authorization", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
+        {
+            throw new InvalidOperationException("MFA challenge is not valid for hosted authorization.");
+        }
+
+        if (payload.EnrollmentRequired)
+        {
+            throw new InvalidOperationException("MFA enrollment must be completed with its challenge-bound enrollment proof.");
+        }
+
+        await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
         token.ConsumedAt = DateTime.UtcNow;
         return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
     }
 
-    public async Task<string> CompleteMfaChallengeWithoutCodeAsync(
+    public async Task<string> VerifyMfaTotpEnrollmentAsync(
         string mfaToken,
-        string factorMethod,
+        string enrollmentToken,
+        string code,
+        string authorizationRequestId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        var token = await _cryptoService.FindTemporaryTokenAsync(SqlOSAuthService.MfaChallengePurpose, mfaToken, cancellationToken)
-            ?? throw new InvalidOperationException("MFA challenge is invalid or expired.");
-        token.ConsumedAt = DateTime.UtcNow;
-        return await CompleteConsumedMfaChallengeAsync(token, factorMethod, httpContext, cancellationToken);
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (SupportsDatabaseTransactions() && _context.Database.CurrentTransaction == null)
+            {
+                transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            await GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+            var verification = await _authService.VerifyTotpEnrollmentForAuthorizationChallengeAsync(
+                new SqlOSTotpEnrollmentVerifyRequest(enrollmentToken, code, mfaToken),
+                authorizationRequestId,
+                cancellationToken);
+            var redirect = await CompleteConsumedMfaChallengeAsync(
+                verification.ChallengeToken,
+                SqlOSMfaFactorTypes.Totp,
+                httpContext,
+                cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return redirect;
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     private async Task<string> CompleteConsumedMfaChallengeAsync(
@@ -728,6 +806,11 @@ public sealed class SqlOSAuthorizationServerService
             organizationId,
             authenticationMethod,
             "authorization",
+            evaluation.EnrollmentRequired,
+            evaluation.EnrollmentRequired
+                ? evaluation.AvailableFactors.Where(static factor =>
+                    string.Equals(factor, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)).ToArray()
+                : Array.Empty<string>(),
             authorizationRequest.Id,
             authorizationRequest.Resource,
             cancellationToken);
@@ -752,9 +835,17 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        await RequireActiveLifecycleAsync(
+            user.Id,
+            organizationId: null,
+            "authorization_subject",
+            allowPendingInvitationMembership: false,
+            cancellationToken);
+
+        SqlOSInvitationAcceptanceResult? invitationAcceptance = null;
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
-            var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
+            invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
                 authorizationRequest.InvitationId,
                 user.Id,
                 saveChanges: false,
@@ -762,6 +853,13 @@ public sealed class SqlOSAuthorizationServerService
                 cancellationToken);
             organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
         }
+
+        await RequireActiveLifecycleAsync(
+            user.Id,
+            organizationId,
+            "authorization_code_issue",
+            invitationAcceptance is { MembershipCreated: true } or { MembershipReactivated: true },
+            cancellationToken);
 
         var client = authorizationRequest.ClientApplication
             ?? await _context.Set<SqlOSClientApplication>()
@@ -811,7 +909,19 @@ public sealed class SqlOSAuthorizationServerService
         authorizationRequest.ResolvedAuthMethod = authenticationMethod;
         authorizationRequest.ResolvedOrganizationId = organizationId;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+
         await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
 
         var query = new Dictionary<string, string?>
@@ -825,6 +935,43 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
+
+    private async Task RequireActiveLifecycleAsync(
+        string userId,
+        string? organizationId,
+        string boundary,
+        bool allowPendingInvitationMembership,
+        CancellationToken cancellationToken)
+    {
+        var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
+            _context,
+            userId,
+            organizationId,
+            cancellationToken);
+        if (lifecycle.IsActive
+            || (allowPendingInvitationMembership
+                && string.Equals(lifecycle.Reason, "membership_inactive", StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        await SqlOSAuthLifecyclePolicy.RevokeForDenialAsync(
+            _context,
+            userId,
+            organizationId,
+            lifecycle,
+            DateTime.UtcNow,
+            cancellationToken);
+        SqlOSAuthLifecyclePolicy.AddDeniedAudit(
+            _context,
+            _cryptoService.GenerateId("aud"),
+            boundary,
+            lifecycle,
+            userId,
+            organizationId);
+        await _context.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException("Authentication session is no longer active.");
     }
 
     public async Task<SqlOSTokenEndpointResult> ExchangeAuthorizationCodeAsync(
@@ -873,8 +1020,8 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authorization code was not issued for this client.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.RedirectUri)
-            && !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(request.RedirectUri)
+            || !string.Equals(authorizationCode.RedirectUri, request.RedirectUri, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Redirect URI does not match the authorization request.");
         }
@@ -900,7 +1047,14 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         authorizationCode.ConsumedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization code is no longer valid.", ex);
+        }
 
         var tokens = await _authService.CreateSessionTokensForUserAsync(
             authorizationCode.User!,
@@ -1014,6 +1168,12 @@ public sealed class SqlOSAuthorizationServerService
 
     private SqlOSTotpMfaService RequireTotpMfaService()
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
+
+    private bool SupportsDatabaseTransactions()
+        => !string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.InMemory", StringComparison.Ordinal);
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+        => exception.InnerException is SqlException { Number: 2601 or 2627 };
 }
 
 public sealed record SqlOSAuthorizeRequestInput(

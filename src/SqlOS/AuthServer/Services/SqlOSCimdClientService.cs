@@ -48,6 +48,8 @@ public sealed class SqlOSCimdClientService
             throw new InvalidOperationException($"Client '{clientId}' is inactive.");
         }
 
+        await EnforceFetchPolicyAsync(clientIdUri, clientId, httpContext, cancellationToken);
+
         if (existingClient != null && !ShouldRefreshMetadata(existingClient))
         {
             ValidateRedirectUri(existingClient.RedirectUrisJson, redirectUri, clientId);
@@ -55,8 +57,6 @@ public sealed class SqlOSCimdClientService
             await _context.SaveChangesAsync(cancellationToken);
             return new SqlOSResolvedClient(existingClient, "cimd");
         }
-
-        await EnforceFetchPolicyAsync(clientIdUri, clientId, httpContext, cancellationToken);
 
         var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSCimdClientService));
         using var request = new HttpRequestMessage(HttpMethod.Get, clientIdUri);
@@ -75,7 +75,27 @@ public sealed class SqlOSCimdClientService
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_options.ClientRegistration.Cimd.HttpTimeout);
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        HttpResponseMessage response;
+        try
+        {
+            response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException
+            || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            await RecordAuditAsync(
+                "client.cimd.fetch-failed",
+                clientId,
+                new
+                {
+                    reason = ex is OperationCanceledException ? "timeout" : "network-policy-or-transport"
+                },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document fetch failed.", ex);
+        }
+
+        using (response)
+        {
         var now = DateTime.UtcNow;
 
         if (response.StatusCode == HttpStatusCode.NotModified && existingClient != null)
@@ -148,14 +168,14 @@ public sealed class SqlOSCimdClientService
         }
 
         var rawJson = Encoding.UTF8.GetString(payload);
-        using var document = JsonDocument.Parse(payload);
         ParsedCimdDocument parsed;
         try
         {
+            using var document = JsonDocument.Parse(payload);
             parsed = ParseMetadataDocument(document.RootElement, clientId, redirectUri);
             await EnforceTrustPolicyAsync(clientIdUri, parsed, httpContext, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or JsonException)
         {
             await RecordAuditAsync(
                 "client.cimd.validation-failed",
@@ -185,6 +205,7 @@ public sealed class SqlOSCimdClientService
         }
 
         return new SqlOSResolvedClient(client, "cimd", requiresFreshConsent);
+        }
     }
 
     private async Task EnforceFetchPolicyAsync(
@@ -253,12 +274,6 @@ public sealed class SqlOSCimdClientService
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        if (_options.ClientRegistration.Cimd.TrustedHosts.Count > 0
-            && !_options.ClientRegistration.Cimd.TrustedHosts.Contains(clientIdUri.Host, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Client metadata host '{clientIdUri.Host}' is not trusted.");
-        }
-
         var trustPolicy = _options.ClientRegistration.Cimd.TrustPolicy;
         if (trustPolicy == null)
         {
@@ -381,7 +396,7 @@ public sealed class SqlOSCimdClientService
         }
 
         var redirectUris = SqlOSAdminService.DeserializeJsonList(redirectUrisJson);
-        if (!redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+        if (!redirectUris.Contains(redirectUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
         }
@@ -390,7 +405,7 @@ public sealed class SqlOSCimdClientService
     private static bool HasSecuritySensitiveMetadataChange(SqlOSClientApplication existingClient, ParsedCimdDocument parsed)
     {
         var existingRedirects = SqlOSAdminService.DeserializeJsonList(existingClient.RedirectUrisJson);
-        var redirectsChanged = !existingRedirects.SequenceEqual(parsed.RedirectUris, StringComparer.OrdinalIgnoreCase);
+        var redirectsChanged = !existingRedirects.SequenceEqual(parsed.RedirectUris, StringComparer.Ordinal);
         var authMethodChanged = !string.Equals(existingClient.TokenEndpointAuthMethod, parsed.TokenEndpointAuthMethod, StringComparison.Ordinal);
         var grantTypesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.GrantTypesJson)
             .SequenceEqual(parsed.GrantTypes, StringComparer.Ordinal);
@@ -460,7 +475,7 @@ public sealed class SqlOSCimdClientService
         }
 
         if (!string.IsNullOrWhiteSpace(redirectUri)
-            && !redirectUris.Contains(redirectUri, StringComparer.OrdinalIgnoreCase))
+            && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
         {
             throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
         }
@@ -579,7 +594,7 @@ public sealed class SqlOSCimdClientService
         return IsUnsafeAddress(address);
     }
 
-    private static bool IsUnsafeAddress(IPAddress address)
+    internal static bool IsUnsafeAddress(IPAddress address)
     {
         if (address.IsIPv4MappedToIPv6)
         {

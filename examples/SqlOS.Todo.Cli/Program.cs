@@ -162,7 +162,7 @@ static async Task EnsureAccessTokenAsync(HttpClient http)
         throw new InvalidOperationException("Not signed in. Run `login` first.");
     }
 
-    var discovery = await DiscoverAsync(http);
+    var discovery = await DiscoverAsync(http, tokens.ApiBase);
     var response = await PostFormAsync(http, discovery.TokenEndpoint, new Dictionary<string, string?>
     {
         ["grant_type"] = "refresh_token",
@@ -182,9 +182,10 @@ static async Task EnsureAccessTokenAsync(HttpClient http)
     });
 }
 
-static async Task<Discovery> DiscoverAsync(HttpClient http)
+static async Task<Discovery> DiscoverAsync(HttpClient http, string? apiBaseOverride = null)
 {
-    var apiBase = Environment.GetEnvironmentVariable("SQLOS_TODO_API_ORIGIN")?.TrimEnd('/')
+    var apiBase = apiBaseOverride?.TrimEnd('/')
+        ?? Environment.GetEnvironmentVariable("SQLOS_TODO_API_ORIGIN")?.TrimEnd('/')
         ?? "http://localhost:5080";
     using var sampleResponse = await http.GetAsync($"{apiBase}/sample/config");
     using var sampleJson = await ReadJsonOrThrowAsync(sampleResponse);

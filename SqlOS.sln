@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlOS.Todo.Cli", "examples\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlOS.Todo.IntegrationTests", "examples\SqlOS.Todo.IntegrationTests\SqlOS.Todo.IntegrationTests.csproj", "{07FC3461-34EE-4257-B20E-502FAD9E60FE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlOS.Example.AspNetCoreWeb", "examples\SqlOS.Example.AspNetCoreWeb\SqlOS.Example.AspNetCoreWeb.csproj", "{496897E8-901F-4502-A77A-002B48357F86}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -201,6 +203,18 @@ Global
 		{07FC3461-34EE-4257-B20E-502FAD9E60FE}.Release|x64.Build.0 = Release|Any CPU
 		{07FC3461-34EE-4257-B20E-502FAD9E60FE}.Release|x86.ActiveCfg = Release|Any CPU
 		{07FC3461-34EE-4257-B20E-502FAD9E60FE}.Release|x86.Build.0 = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|x64.Build.0 = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Debug|x86.Build.0 = Debug|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|Any CPU.Build.0 = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|x64.ActiveCfg = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|x64.Build.0 = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|x86.ActiveCfg = Release|Any CPU
+		{496897E8-901F-4502-A77A-002B48357F86}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -219,5 +233,6 @@ Global
 		{092AAED7-60EA-4B21-BA96-1DC0A542EC4F} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 		{42141840-CADC-4891-A0B8-4A148B9FA916} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 		{07FC3461-34EE-4257-B20E-502FAD9E60FE} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
+		{496897E8-901F-4502-A77A-002B48357F86} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 	EndGlobalSection
 EndGlobal

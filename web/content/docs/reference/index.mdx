@@ -1,0 +1,65 @@
+---
+title: "Reference"
+description: "Source-aligned reference for SqlOS 3.18.0 hosting, authentication, authorization, and integration APIs."
+order: 7
+section: reference
+---
+
+<Banner
+  eyebrow="Reference"
+  title="SqlOS 3.18.0 application API"
+  href="/docs/getting-started"
+  actionLabel="Start with a guide"
+>
+  This section documents the application-facing API shipped by the current `SqlOS` package. Use a guide for a complete workflow; use reference pages when you need an exact namespace, signature, option, return type, or route.
+</Banner>
+
+## Package information
+
+| Item | Value |
+| --- | --- |
+| Package | `SqlOS` |
+| Current source version | `3.18.0` |
+| Assembly | `SqlOS.dll` |
+| Target framework | `net9.0` |
+| EF Core provider | SQL Server, EF Core 9 |
+| ASP.NET Core | Framework reference supplied by the package |
+
+The package now emits and packs `SqlOS.xml` for IDE help and generated-reference tooling. Missing-member warning `CS1591` is temporarily suppressed because XML comments are not yet complete across every public implementation type; overloaded-member `cref` warning `CS0419` is also suppressed until member-level docs are generated. The curated pages below therefore describe the supported application integration surface; they do not claim that every public class in the assembly is a recommended extension point.
+
+## Start here
+
+| Reference | Use it for |
+| --- | --- |
+| [Hosting API](/docs/reference/hosting-api) | `SqlOSDbContext<TContext>`, `AddSqlOS`, `UseSingleApplication`, `MapSqlOS`, and token-protected route groups |
+| [.NET SDK map](/docs/reference/sdk-reference) | DI services, contracts, namespaces, and task-oriented examples |
+| [AuthServer API](/docs/reference/authserver-api) | Exact authentication, invitation, token, MFA, OIDC, and administrative service methods |
+| [FGA API](/docs/reference/fga-api) | Access checks, EF query filters, resource synchronization, grants, and cursor pagination |
+| [HTTP protocol API](/docs/reference/api-reference) | OAuth discovery, authorization, token, hosted, headless, and optional registration routes |
+| [Audit Logs](/docs/reference/audit-logs) | `ISqlOSAuditLogService`, event queries, and CSV export |
+| [Standalone identity host](/docs/reference/standalone-identity-server) | Advanced multi-application deployments |
+| [Glossary](/docs/reference/glossary) | Plain-English identity, OAuth, SAML, FGA, and ASP.NET Core terminology |
+
+### Recent authentication additions
+
+Phone-code authentication is part of the current AuthServer service surface. Configure it with `SqlOSAuthServerOptions.ConfigurePhoneOtp(...)`, then use `RequestPhoneOtpAsync` / `VerifyPhoneOtpAsync` for sign-in or `RequestPhoneOtpSignupAsync` / `VerifyPhoneOtpSignupAsync` for signup. The request/result records are in `SqlOS.AuthServer.Contracts`; see [AuthServer API: Phone OTP](/docs/reference/authserver-api#phone-otp-sign-in-and-signup).
+
+## Integration layers
+
+Choose the highest-level API that fits the application:
+
+1. **One application:** derive from `SqlOSDbContext<TContext>`, call the combined `builder.AddSqlOS<TContext>(...)` overload, configure `UseSingleApplication(...)`, then call `app.MapSqlOS()`.
+2. **Application services:** inject `SqlOSAuthService`, `ISqlOSFgaAuthService`, `ISqlOSAuditLogService`, `ISqlOSTransactionalEmailService`, or `SqlOSCalendarService` for backend workflows.
+3. **Advanced host control:** use explicit client seeds, headless auth, device clients, CIMD/DCR, application assignments, or the lower-level EF/service registration APIs only when the simpler layer cannot express the topology.
+
+## Reference conventions
+
+- Signatures mirror the current C# source.
+- Optional parameters show their source defaults.
+- Exceptions list documented validation failures, not every exception an EF provider, network client, or callback can throw.
+- Dashboard admin routes are operator implementation endpoints. They are not presented as a general-purpose public management API.
+- Routes under `examples/` belong to sample applications and are never part of the `SqlOS` package contract.
+
+## Version drift checks
+
+The docs build verifies the package version, target framework, high-level source symbols, XML documentation setting, known contract names, common stale example patterns, and documentation-image integrity. It complements compilation and tests; it is not a substitute for them.

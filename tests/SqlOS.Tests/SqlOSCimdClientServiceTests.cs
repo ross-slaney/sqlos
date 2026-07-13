@@ -216,6 +216,41 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task SecureTransport_RejectsAllowedHostnameWhenDnsResolvesToPrivateAddress()
+    {
+        var resolvedHosts = new List<string>();
+        using var handler = SqlOSCimdHttpHandlerFactory.Create((host, _) =>
+        {
+            resolvedHosts.Add(host);
+            return ValueTask.FromResult(new[] { IPAddress.Parse("127.0.0.1") });
+        });
+        using var client = new HttpClient(handler);
+
+        var act = async () => await client.GetAsync("http://metadata.example.test/client.json");
+
+        await act.Should().ThrowAsync<HttpRequestException>()
+            .WithMessage("*non-public address*");
+        resolvedHosts.Should().Equal("metadata.example.test");
+    }
+
+    [TestMethod]
+    public async Task SecureTransport_RejectsMixedPublicAndPrivateDnsAnswers()
+    {
+        using var handler = SqlOSCimdHttpHandlerFactory.Create((_, _) =>
+            ValueTask.FromResult(new[]
+            {
+                IPAddress.Parse("93.184.216.34"),
+                IPAddress.Parse("10.0.0.12")
+            }));
+        using var client = new HttpClient(handler);
+
+        var act = async () => await client.GetAsync("http://metadata.example.test/client.json");
+
+        await act.Should().ThrowAsync<HttpRequestException>()
+            .WithMessage("*non-public address*");
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsRedirectResponsesWithoutFollowing()
     {
         using var context = CreateContext();
@@ -277,6 +312,27 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUntrustedHostBeforeFetch()
+    {
+        using var context = CreateContext();
+        var options = CreateOptions();
+        options.ClientRegistration.Cimd.TrustedHosts.Add("trusted.example.test");
+        var httpFactory = new FakeHttpClientFactory(_ =>
+            throw new InvalidOperationException("Untrusted metadata must not be fetched."));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://untrusted.example.test/oauth/client.json",
+            "https://untrusted.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*validation failed*");
+        httpFactory.RequestCount.Should().Be(0);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("not trusted"))).Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsMismatchedClientId()
     {
         using var context = CreateContext();
@@ -321,6 +377,31 @@ public sealed class SqlOSCimdClientServiceTests
         var act = async () => await resolver.ResolveRequiredClientAsync(
             "https://client.example.test/oauth/client.json",
             "https://client.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*validation failed*");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"
+            && (x.DataJson ?? string.Empty).Contains("Redirect URI"))).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsCimdRedirectPathCaseMismatch()
+    {
+        using var context = CreateContext();
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Exact Redirect MCP Client",
+              "redirect_uris": ["https://client.example.test/Auth/Callback"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/auth/callback");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*validation failed*");
@@ -460,7 +541,7 @@ public sealed class SqlOSCimdClientServiceTests
         IHttpClientFactory httpClientFactory)
     {
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var cimd = new SqlOSCimdClientService(context, options, httpClientFactory, crypto);
         return new SqlOSClientResolutionService(context, options, cimd);
     }
