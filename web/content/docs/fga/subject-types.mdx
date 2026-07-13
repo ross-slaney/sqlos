@@ -74,6 +74,8 @@ await subjectService.AddToGroupAsync(subjectId, group.Id, ct);
 
 Groups are subjects with type `group`, but groups cannot be members of other groups.
 
+For the complete membership, grant, inherited-access, and removal workflow, follow [Authorize teams with FGA groups](/docs/guides/fga-groups). That guide also explains why `SqlOSFgaUserGroup.Id` is used for membership while `SubjectId` is used for grants.
+
 ## Authentication by subject type
 
 Authentication is application code. A bearer token, API key, or agent token can map to a user, service account, or agent subject, but FGA receives only the resolved `subjectId`.
