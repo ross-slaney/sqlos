@@ -1,0 +1,285 @@
+---
+title: "Add sign-in to a terminal app"
+description: "Authenticate a CLI with browser-based device authorization, refresh tokens, and a resource-bound API token."
+order: 5
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Sign in from a terminal without handling passwords"
+  href="/docs/authserver/cli-oauth"
+  actionLabel="Device flow reference"
+>
+  Register a public CLI client, send the user to SqlOS AuthPage, poll safely for tokens, and protect the target API with an exact audience.
+</Banner>
+
+![Terminal sign-in from a CLI through SqlOS AuthPage to a resource-bound API token](/docs/guides-terminal-auth.svg)
+
+This guide adds sign-in to **Forge**, a fictional .NET CLI for a deployment API at `https://api.forge.test`. Forge prints a short browser URL and user code, the operator signs in through SqlOS, and the CLI receives an access token without opening a localhost listener or collecting a password.
+
+<Callout type="info" title="Use device authorization for terminals">
+  Device Authorization Grant is a good fit for CLIs, SSH sessions, and machines where a callback listener is unreliable. If your desktop app already owns a secure loopback or claimed HTTPS callback, use authorization code with PKCE instead.
+</Callout>
+
+## What you will build
+
+```text
+Forge CLI
+  ├─ discover SqlOS device and token endpoints
+  ├─ request a device code for https://api.forge.test
+  ├─ print verification_uri_complete and the short user_code
+  ├─ poll the token endpoint at the server-provided interval
+  ├─ store the refresh token in the operating-system credential vault
+  └─ call the Forge API with a resource-bound bearer token
+
+Browser
+  └─ sign in and approve Forge through the existing SqlOS AuthPage
+```
+
+The terminal never receives the user's password. The browser completes the same password, Email OTP, social, SSO, MFA, and organization-selection policies already configured for the SqlOS host.
+
+## Before you start
+
+- SqlOS is registered and `app.MapSqlOS()` maps the auth endpoints.
+- The authorization server has a stable public HTTPS origin in production.
+- The target API validates SqlOS access tokens for its exact audience.
+- The CLI can open a browser as a convenience, but still works when the user must copy the printed URL.
+
+For a runnable baseline, start the [Todo sample](/docs/authserver/todo-sample) and inspect [`examples/SqlOS.Todo.Cli`](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.Todo.Cli).
+
+## 1. Register a public CLI client
+
+Seed client configuration at startup when the application owns the CLI:
+
+```csharp
+const string forgeApi = "https://api.forge.test";
+
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedCliClient(
+        clientId: "forge-cli",
+        name: "Forge CLI",
+        audience: forgeApi,
+        "openid",
+        "profile",
+        "offline_access",
+        "deployments.read",
+        "deployments.write");
+});
+```
+
+`SeedCliClient` creates a public client with no secret or redirect URI. It enables the device-code and refresh-token grants and restricts requested scopes and resources to the configured values.
+
+To manage the client in the dashboard instead, open **Auth Server > Clients**, choose **Create client**, and select **CLI / Device OAuth**. Set the audience to the exact Forge API identifier and add only the scopes the CLI needs.
+
+<Callout type="warning" title="Choose one owner for client configuration">
+  Startup-seeded clients are reapplied on restart. Do not expect dashboard edits to persist for a startup-managed client. Use startup seeding for repeatable deployment configuration or create a dashboard-managed client for operator-owned configuration.
+</Callout>
+
+## 2. Discover endpoints instead of hard-coding them
+
+Read the OAuth authorization-server metadata from the public SqlOS issuer:
+
+```http
+GET https://identity.forge.test/sqlos/auth/.well-known/oauth-authorization-server
+```
+
+Use `device_authorization_endpoint` to begin sign-in and `token_endpoint` for polling and refresh. This keeps the CLI correct when the SqlOS base path or public host changes.
+
+The CLI still needs trusted bootstrap configuration for:
+
+| Value | Forge example | Why it is trusted configuration |
+| --- | --- | --- |
+| Issuer | `https://identity.forge.test/sqlos/auth` | Selects the authorization server whose metadata the CLI accepts |
+| Client ID | `forge-cli` | Identifies the registered public client |
+| Resource | `https://api.forge.test` | Becomes the access token audience required by the API |
+| Scopes | `openid offline_access deployments.read` | Must be a subset of the client's allow-list |
+
+Do not accept an issuer, client ID, or resource returned by an untrusted API response without validating it against CLI configuration.
+
+## 3. Start device authorization
+
+POST form-encoded client, scope, and resource values to the discovered device endpoint:
+
+```csharp
+using var response = await http.PostAsync(
+    metadata.DeviceAuthorizationEndpoint,
+    new FormUrlEncodedContent(new Dictionary<string, string>
+    {
+        ["client_id"] = "forge-cli",
+        ["scope"] = "openid offline_access deployments.read",
+        ["resource"] = "https://api.forge.test"
+    }));
+
+response.EnsureSuccessStatusCode();
+var device = await response.Content.ReadFromJsonAsync<DeviceAuthorizationResponse>()
+    ?? throw new InvalidOperationException("Device authorization returned no body.");
+```
+
+The response contains two credentials with different audiences:
+
+- `user_code` is the short value the person can type in the browser.
+- `device_code` is the secret the CLI uses while polling. Never print or log it.
+
+It also returns `verification_uri`, `verification_uri_complete`, `expires_in`, and `interval`. Print the complete URI and user code before attempting best-effort browser launch:
+
+```csharp
+Console.WriteLine($"Open {device.VerificationUriComplete}");
+Console.WriteLine($"Code: {device.UserCode}");
+```
+
+Always leave the URL visible. Browser launch commonly fails in containers, remote shells, Windows Subsystem for Linux, and minimal Linux environments.
+
+## 4. Let SqlOS complete browser sign-in
+
+The complete verification URI opens `/sqlos/auth/device?user_code=...`. SqlOS resolves the code, runs the configured sign-in and tenant-selection flow, then shows the client name, requested access, resource, expiration, and approve or deny actions.
+
+The CLI should remain useful while it waits: explain that authentication continues in the browser and let the user cancel locally. Do not ask them to paste the browser result back into the terminal.
+
+For a custom sign-in UI, configure [headless auth](/docs/authserver/headless-auth) and reuse the device-bound request. Do not build a separate credential pipeline just for the CLI.
+
+## 5. Poll without overwhelming the server
+
+Wait the returned `interval` before the first request and between later requests. Repeat the same client ID, device code, and resource used at the start:
+
+```csharp
+var interval = TimeSpan.FromSeconds(Math.Max(1, device.Interval));
+var expiresAt = DateTimeOffset.UtcNow.AddSeconds(device.ExpiresIn);
+
+while (DateTimeOffset.UtcNow < expiresAt)
+{
+    await Task.Delay(interval, cancellationToken);
+
+    using var response = await http.PostAsync(
+        metadata.TokenEndpoint,
+        new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["client_id"] = "forge-cli",
+            ["device_code"] = device.DeviceCode,
+            ["resource"] = "https://api.forge.test"
+        }),
+        cancellationToken);
+
+    var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+    if (response.IsSuccessStatusCode)
+    {
+        var tokens = JsonSerializer.Deserialize<TokenResponse>(payload, jsonOptions)
+            ?? throw new InvalidOperationException("Token endpoint returned no body.");
+        await tokenStore.SaveAsync(tokens, cancellationToken);
+        break;
+    }
+
+    var error = JsonSerializer.Deserialize<OAuthError>(payload, jsonOptions);
+    switch (error?.Error)
+    {
+        case "authorization_pending":
+            continue;
+        case "slow_down":
+            interval += TimeSpan.FromSeconds(5);
+            continue;
+        case "access_denied":
+            throw new InvalidOperationException("Sign-in was denied.");
+        case "expired_token":
+            throw new InvalidOperationException("The sign-in code expired. Start again.");
+        default:
+            throw new InvalidOperationException(error?.Description ?? payload);
+    }
+}
+```
+
+Stop polling when the request expires, the user cancels, the browser denies access, or the token endpoint succeeds. A device code is single-use; discard it after any terminal outcome.
+
+## 6. Store, refresh, and remove credentials
+
+Request `offline_access` when the CLI needs to stay signed in. Store the returned refresh token in Keychain, Windows Credential Manager, Secret Service, or another operating-system credential vault. Treat access tokens, refresh tokens, and device codes as secrets:
+
+- never write them to command output, debug logs, shell history, crash reports, or the project directory;
+- isolate credentials by issuer, client ID, account, and resource so environments cannot overwrite each other;
+- refresh shortly before access-token expiry and atomically replace a rotated refresh token;
+- make `logout` remove local credentials and, when supported by your session design, revoke the server-side session too.
+
+The Todo CLI deliberately stores readable JSON so its protocol is easy to inspect. Its local `logout` only deletes that file. Copy the flow, not that storage strategy, into a production CLI.
+
+Refresh through the discovered token endpoint and repeat the resource binding:
+
+```http
+POST /sqlos/auth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&
+client_id=forge-cli&
+refresh_token=<stored-refresh-token>&
+resource=https%3A%2F%2Fapi.forge.test
+```
+
+## 7. Validate the token at the API
+
+Protect the Forge routes with the same exact audience requested by the CLI:
+
+```csharp
+var deployments = app.MapGroup("/api/deployments")
+    .RequireSqlOSAccessToken(validation =>
+    {
+        validation.ExpectedAudience = "https://api.forge.test";
+    });
+```
+
+Send the access token in the standard header:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+Audience validation proves that SqlOS minted the token for the Forge API. It does not prove the user may read or change every deployment. Resolve the actor from the validated token and apply FGA or application policy to each protected operation.
+
+## Test the complete path
+
+- Sign in from a local terminal and from a remote or headless shell where browser launch fails.
+- Confirm the verification page shows the expected client, scopes, resource, and expiration.
+- Deny once and verify the CLI stops on `access_denied`.
+- Let a code expire and verify the CLI stops instead of polling forever.
+- Trigger `slow_down` and verify the delay increases before the next poll.
+- Cancel locally and verify polling ends promptly.
+- Confirm a token for another audience is rejected by the Forge API.
+- Expire an access token, refresh it, and verify the rotated refresh token replaces the old value.
+- Log out and verify the credential vault no longer contains the Forge entry.
+- Confirm logs and diagnostic bundles contain no device, access, or refresh tokens.
+
+## Troubleshooting
+
+### `unauthorized_client` or `invalid_client`
+
+The client is missing, confidential, or not enabled for device authorization. Use `SeedCliClient` or the **CLI / Device OAuth** dashboard preset.
+
+### `invalid_scope`
+
+The requested scopes are not a subset of the registered allow-list. Compare the CLI bootstrap configuration with the client record. Include `offline_access` in both places when refresh tokens are required.
+
+### `invalid_target`
+
+The requested resource does not exactly match the client audience. Use the same value during device authorization, token polling, refresh, and API validation.
+
+### The browser opens the wrong host
+
+Set the authorization server's public origin and trusted forwarded headers for the deployed HTTPS host. Then inspect the discovery document and `verification_uri_complete`; do not patch the returned URL inside the CLI.
+
+### Sign-in succeeds but the API returns `401`
+
+Check issuer, signing-key discovery, token expiry, and exact audience validation. A token issued for another API cannot be reused for Forge.
+
+### Sign-in succeeds but the API returns `403`
+
+Authentication worked, but application authorization denied the operation. Inspect the user's organization, role, grant, or FGA decision instead of changing the OAuth flow.
+
+## Expected outcome
+
+Forge users authenticate in the browser while the CLI receives only resource-bound OAuth tokens. The terminal honors server timing, works without a browser opener, keeps long-lived credentials out of files and logs, and calls an API that still makes its own authorization decision.
+
+## Next steps
+
+- [CLI OAuth reference](/docs/authserver/cli-oauth) for exact endpoints, response fields, and headless approval contracts
+- [Protect an API](/docs/quickstarts/protect-api) for bearer-token validation
+- [Model FGA](/docs/guides/model-fga) for operation and resource authorization
+- [Sessions and tokens](/docs/authserver/sessions-and-tokens) for token lifetime and refresh behavior
