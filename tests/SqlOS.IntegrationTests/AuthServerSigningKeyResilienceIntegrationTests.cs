@@ -323,8 +323,8 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
 
             oldKey.RetiredAt = DateTime.UtcNow.AddDays(-8);
             await context.SaveChangesAsync();
-            (await stack.Crypto.ValidateAccessTokenAsync(oldToken, principal.Client.Audience)).Should().BeNull();
             (await stack.Crypto.CleanupRetiredSigningKeysAsync(TimeSpan.FromDays(7))).Should().Be(1);
+            (await stack.Crypto.ValidateAccessTokenAsync(oldToken, principal.Client.Audience)).Should().BeNull();
             var cleanedJwks = System.Text.Json.JsonSerializer.Serialize(
                 stack.Crypto.GetJwksDocument(await stack.Crypto.GetValidationSigningKeysAsync()));
             cleanedJwks.Should().NotContain(oldKey.Kid).And.Contain(newKey.Kid);
