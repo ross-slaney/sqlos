@@ -47,6 +47,10 @@ SqlOS stores hashes of both the one-time link token and the continuation token. 
 The defaults enable the hosted portal and setup API, issue links for seven days, expire an idle continuation session after two hours, and require a verified domain for self-serve activation. Choose shorter lifetimes that fit your support workflow and reserve domains owned by your platform:
 
 ```csharp
+options.AuthServer.PublicOrigin =
+    builder.Configuration["SqlOS:PublicOrigin"]
+    ?? throw new InvalidOperationException("SqlOS:PublicOrigin is required.");
+
 options.AuthServer.ConfigureSsoPortal(portal =>
 {
     portal.DefaultLinkLifetime = TimeSpan.FromDays(2);
@@ -56,6 +60,8 @@ options.AuthServer.ConfigureSsoPortal(portal =>
     portal.ReservedDomainRoots.Add("yourapp.com");
 });
 ```
+
+`PublicOrigin` must be the canonical external origin, such as `https://identity.example.com`, with no path, query, or fragment. SqlOS uses it when generating the credential-bearing setup URL. Do not let an untrusted request `Host` value choose the URL you deliver to a customer.
 
 Reserved roots include their subdomains: reserving `yourapp.com` also rejects `login.yourapp.com`. SqlOS also rejects wildcard domains, IP addresses, malformed DNS names, and `localhost` unless `AllowLocalhostDomainVerification` is explicitly enabled.
 
@@ -253,7 +259,7 @@ Start the shared example stack:
 
 ```bash
 cd examples/SqlOS.Example.Web
-npm install
+npm ci
 
 cd /path/to/SqlOS
 dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
