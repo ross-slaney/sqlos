@@ -174,6 +174,9 @@ public static class EndpointRouteBuilderExtensions
                         if ((completion.RequiresOrganizationSelection || completion.RequiresMfa)
                             && string.Equals(prompt, "none", StringComparison.Ordinal))
                         {
+                            await authorizationServerService.CancelAuthorizationInteractionAsync(
+                                completion,
+                                cancellationToken);
                             return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                                 authorizationRequest,
                                 "interaction_required",

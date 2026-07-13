@@ -81,7 +81,50 @@ public sealed class SilentSsoSecurityIntegrationTests
         var context = verifyScope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
         (await context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.UserId == userId)).Should().Be(0);
         (await context.Set<SqlOSTemporaryToken>().CountAsync(x =>
-            x.UserId == userId && x.Purpose == SqlOSAuthService.MfaChallengePurpose && x.ConsumedAt == null)).Should().Be(2);
+            x.UserId == userId && x.Purpose == SqlOSAuthService.MfaChallengePurpose && x.ConsumedAt == null)).Should().Be(1);
+        (await context.Set<SqlOSTemporaryToken>().CountAsync(x =>
+            x.UserId == userId && x.Purpose == SqlOSAuthService.MfaChallengePurpose && x.ConsumedAt != null)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task HostedExistingCookie_ReevaluatesMfaAndRendersChallengeWithoutCode()
+    {
+        await using var server = await SilentSsoServer.CreateAsync(headless: false);
+        string cookie;
+        string userId;
+        await using (var scope = server.App.Services.CreateAsyncScope())
+        {
+            var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+            var auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
+            var totp = scope.ServiceProvider.GetRequiredService<SqlOSTotpMfaService>();
+            var authPageSession = scope.ServiceProvider.GetRequiredService<SqlOSAuthPageSessionService>();
+            var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "Hosted Silent MFA User",
+                $"hosted-silent-mfa-{Guid.NewGuid():N}@example.com",
+                "P@ssword123!"));
+            userId = user.Id;
+            var enrollment = await auth.StartTotpEnrollmentAsync(user.Id, new SqlOSTotpEnrollmentStartRequest());
+            await auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+                enrollment.EnrollmentToken,
+                totp.GenerateCodeForTesting(enrollment.Secret)));
+            cookie = await CreateSessionCookieAsync(authPageSession, user, organizationId: null, "password");
+        }
+
+        using var client = server.App.GetTestClient();
+        client.DefaultRequestHeaders.Add("Cookie", cookie);
+        var authorize = await client.GetAsync(BuildAuthorizeUrl("owned-client", "state-hosted-mfa"));
+
+        authorize.StatusCode.Should().Be(HttpStatusCode.OK);
+        authorize.Content.Headers.ContentType!.MediaType.Should().Be("text/html");
+        var html = await authorize.Content.ReadAsStringAsync();
+        html.Should().Contain("action=\"/sqlos/auth/mfa/verify\"");
+        html.Should().Contain("name=\"mfaToken\"");
+
+        await using var verifyScope = server.App.Services.CreateAsyncScope();
+        var context = verifyScope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+        (await context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.UserId == userId)).Should().Be(0);
+        (await context.Set<SqlOSTemporaryToken>().CountAsync(x =>
+            x.UserId == userId && x.Purpose == SqlOSAuthService.MfaChallengePurpose && x.ConsumedAt == null)).Should().Be(1);
     }
 
     [TestMethod]
@@ -209,7 +252,7 @@ public sealed class SilentSsoSecurityIntegrationTests
     {
         public required WebApplication App { get; init; }
 
-        public static async Task<SilentSsoServer> CreateAsync(bool requireMfa = true)
+        public static async Task<SilentSsoServer> CreateAsync(bool requireMfa = true, bool headless = true)
         {
             await using var bootstrapContext = await AspireFixture.CreateIsolatedAuthContextAsync("SilentSso");
             var connectionString = bootstrapContext.Database.GetConnectionString()!;
@@ -234,20 +277,23 @@ public sealed class SilentSsoSecurityIntegrationTests
                 options.AuthServer.Mfa.RequireForAllUsersByDefault = requireMfa;
                 options.AuthServer.Mfa.AllowUserSelfEnrollmentByDefault = true;
                 options.AuthServer.Mfa.RecoveryCodesEnabledByDefault = true;
-                options.AuthServer.UseHeadlessAuthPage(headless =>
+                if (headless)
                 {
-                    headless.BuildUiUrl = route => Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
-                        "https://app.example.test/authorize",
-                        new Dictionary<string, string?>
-                        {
-                            ["request"] = route.RequestId,
-                            ["view"] = route.View,
-                            ["error"] = route.Error,
-                            ["pendingToken"] = route.PendingToken,
-                            ["email"] = route.Email,
-                            ["mfaToken"] = route.MfaToken
-                        });
-                });
+                    options.AuthServer.UseHeadlessAuthPage(headlessOptions =>
+                    {
+                        headlessOptions.BuildUiUrl = route => Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                            "https://app.example.test/authorize",
+                            new Dictionary<string, string?>
+                            {
+                                ["request"] = route.RequestId,
+                                ["view"] = route.View,
+                                ["error"] = route.Error,
+                                ["pendingToken"] = route.PendingToken,
+                                ["email"] = route.Email,
+                                ["mfaToken"] = route.MfaToken
+                            });
+                    });
+                }
             });
             builder.Services.RemoveAll<IHostedService>();
 
