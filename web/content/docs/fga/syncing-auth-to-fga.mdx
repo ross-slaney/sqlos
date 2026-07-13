@@ -5,7 +5,13 @@ order: 14
 section: fga
 ---
 
-When using both AuthServer and FGA, you need to sync authenticated users into the FGA model so they can be authorized. The typical pattern is to sync on login.
+When using both AuthServer and FGA, you need to sync authenticated users into the FGA model so they can be authorized. The typical active-session pattern is to sync on login.
+
+<Callout type="warning" title="Login sync is not the complete lifecycle">
+  The short example below reconciles an active membership and removes the opposite mapped role. Production role changes and offboarding must also reconcile when the membership, user, or organization changes; otherwise an old FGA grant can survive. Follow [Turn AuthServer memberships into FGA access](/docs/guides/authserver-to-fga) for the complete lifecycle, tenant predicates, and the current FGA `IsActive` caveat.
+</Callout>
+
+This page maps an AuthServer membership to a direct FGA grant. If the application's source of truth uses teams, follow [Authorize teams with FGA groups](/docs/guides/fga-groups) for group membership, inherited grants, and removal semantics.
 
 ## The pattern
 
@@ -16,9 +22,9 @@ public async Task EnsureUserAccessAsync(
     string subjectId, string organizationId, CancellationToken ct)
 {
     var user = await _context.Set<SqlOSUser>()
-        .FirstAsync(x => x.Id == subjectId, ct);
+        .FirstAsync(x => x.Id == subjectId && x.IsActive, ct);
     var organization = await _context.Set<SqlOSOrganization>()
-        .FirstAsync(x => x.Id == organizationId, ct);
+        .FirstAsync(x => x.Id == organizationId && x.IsActive, ct);
     var membership = await _context.Set<SqlOSMembership>()
         .FirstAsync(x => x.UserId == subjectId
             && x.OrganizationId == organizationId
@@ -46,6 +52,11 @@ public async Task EnsureUserAccessAsync(
         ? "org_admin"
         : "org_member";
 
+    await _context.RevokeRoleAsync(
+        subjectId,
+        organizationResourceId,
+        roleKey == "org_admin" ? "org_member" : "org_admin",
+        ct);
     await _context.GrantRoleAsync(subjectId, organizationResourceId, roleKey, ct);
     await _context.SaveChangesAsync(ct);
 }
@@ -57,7 +68,7 @@ public async Task EnsureUserAccessAsync(
 
 **ProvisionResourceWithIdAsync** -- creates or updates the organization resource under root. This is a manual resource because the organization is not represented by an `ISqlOSResourceEntity` in this example.
 
-**GrantRoleAsync** -- creates an idempotent grant linking the subject to a role on the organization resource, mapping the auth membership role to an FGA role:
+**RevokeRoleAsync / GrantRoleAsync** -- remove the stale mapped role and create an idempotent grant linking the subject to the current role on the organization resource:
 
 | Auth role | FGA role |
 | --- | --- |
@@ -77,6 +88,8 @@ if (!string.IsNullOrWhiteSpace(tokens.OrganizationId))
 ```
 
 The example app calls this in the token response helper, so every login automatically ensures the user has the right FGA grants based on their auth membership.
+
+Also reconcile from membership role changes, membership removal/deactivation, and user or organization deactivation. Revoke only the explicit role keys owned by this mapping so unrelated manual grants remain intact. The [complete guide](/docs/guides/authserver-to-fga) includes an offboarding-safe implementation.
 
 ## Why sync instead of query auth directly?
 

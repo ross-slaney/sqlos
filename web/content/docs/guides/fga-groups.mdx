@@ -1,0 +1,301 @@
+---
+title: "Authorize teams with FGA groups"
+description: "Grant a role once to a team and resolve inherited access for every member."
+order: 17
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Grant resource access to a team"
+  href="/docs/fga/subject-types"
+  actionLabel="Subject types"
+>
+  Create a Support group, grant it one workspace role, prove inherited list and detail access, then remove a member without editing the group grant.
+</Banner>
+
+<Callout type="info" title="Prerequisites">
+  - Your FGA model already has a workspace resource type
+  - `workspace.view` and `workspace.edit` permissions already exist
+  - A `workspace_editor` role contains both permissions
+  - A `workspace_reader` role contains only `workspace.view` for the direct-grant coexistence check
+  - The target workspace exists in the FGA resource hierarchy
+  - The authenticated user has already been provisioned as an FGA subject
+</Callout>
+
+## Goal
+
+Instead of creating one grant per person, represent a team as an FGA group:
+
+```text
+Support team -- workspace_editor --> workspace::acme
+       |
+       +-- user Alice
+       +-- user Bob
+       +-- service account Support Importer
+```
+
+Every request still authorizes Alice, Bob, or the service account by its own subject id. SqlOS expands that subject to its groups at authorization time.
+
+![Users and a service account inherit a workspace role through one FGA group grant](/docs/guides-fga-groups.svg)
+
+## 1. Keep identity and group membership separate
+
+AuthServer organization memberships and FGA group memberships are different application relationships:
+
+- AuthServer membership says a user belongs to an organization and may receive an organization-scoped session.
+- FGA group membership says an already provisioned subject inherits grants assigned to a logical team.
+
+SqlOS does not automatically copy an AuthServer role or team into an FGA group. Synchronize only from a trusted application workflow after validating the actor, organization, and source-of-truth membership.
+
+For an authenticated request, take the acting user and organization from `GetSqlOSValidatedToken()` or another trusted server-side session. Never let a browser body choose the acting `subjectId`, target `groupId`, role, or tenant.
+
+This guide assumes the resolved FGA subject id is `userSubjectId` and the trusted organization id is `organizationId`. The tenant-owned example also assumes the user subject was provisioned with that `OrganizationId`; if your FGA subjects are global, validate membership through an application-owned user-to-organization table instead.
+
+## 2. Create the group
+
+Inject `ISqlOSFgaSubjectService` and create the team:
+
+```csharp
+var support = await subjectService.CreateGroupAsync(
+    name: "Support",
+    description: "People and services that operate the customer support workspace",
+    groupType: "team",
+    cancellationToken: ct);
+```
+
+The result deliberately has two identifiers:
+
+| Identifier | Represents | Use it for |
+| --- | --- | --- |
+| `support.Id` | The membership container | `AddToGroupAsync` and `RemoveFromGroupAsync` |
+| `support.SubjectId` | The group as an authorization principal | `GrantRoleAsync` and access traces |
+
+<Callout type="warning" title="Do not swap the two group identifiers">
+  Pass `support.Id` when changing membership. Pass `support.SubjectId` when granting the group a role. They identify different rows and are not interchangeable.
+</Callout>
+
+`CreateGroupAsync` persists both the group subject and group record before returning.
+
+`CreateGroupAsync` does not accept an organization id, and group authorization does not add a tenant predicate automatically. For a tenant-owned team, keep the group-to-organization relationship in application data or tag the generated group subject before exposing membership management:
+
+```csharp
+var supportSubject = await db.Set<SqlOSFgaSubject>()
+    .SingleAsync(subject => subject.Id == support.SubjectId, ct);
+
+supportSubject.OrganizationId = organizationId;
+await db.SaveChangesAsync(ct);
+```
+
+`OrganizationId` is metadata your trusted workflow can validate; `CheckAccessAsync` and group resolution do not enforce it for you. A global group may intentionally omit it, but a tenant-owned team needs an equivalent application-owned boundary.
+
+## 3. Add members
+
+Load both sides through the trusted organization boundary, then add the user's FGA **subject** id to the group container:
+
+```csharp
+var memberExists = await db.Set<SqlOSFgaSubject>()
+    .AnyAsync(subject =>
+        subject.Id == userSubjectId &&
+        subject.OrganizationId == organizationId,
+        ct);
+
+var groupExists = await db.Set<SqlOSFgaUserGroup>()
+    .AnyAsync(group =>
+        group.Id == support.Id &&
+        group.Subject != null &&
+        group.Subject.OrganizationId == organizationId,
+        ct);
+
+if (!memberExists || !groupExists)
+{
+    throw new InvalidOperationException("The member and group must belong to the trusted organization.");
+}
+
+await subjectService.AddToGroupAsync(
+    userSubjectId,
+    support.Id,
+    ct);
+```
+
+The package's built-in member types are:
+
+- `user`
+- `agent`
+- `service_account`
+
+Groups cannot contain other groups. `AddToGroupAsync` explicitly rejects a subject whose type is `group`, and group resolution is intentionally one level deep, so there is no recursive or cyclic membership model to operate. The service does not act as a tenant guard or an allowlist for application-defined non-group subject types; if you seed custom subject types, decide their eligibility in the trusted wrapper.
+
+The membership service saves its own changes. You do not need an additional `SaveChangesAsync` after `AddToGroupAsync` or `RemoveFromGroupAsync`.
+
+Sequential retries are idempotent: a later add sees the existing composite membership row, and removing an absent row is a no-op. Two workers racing to add the same new membership can both pass the existence check before one wins the unique insert. Serialize reconciliation per subject/group or treat the duplicate-key loser as convergence after re-reading state.
+
+Group creation, membership changes, and `GrantRoleAsync` do not form one transaction in this workflow: the subject service saves each create/add/remove operation, while the grant is saved separately below. Make reconciliation resumable so partial progress can safely converge.
+
+## 4. Grant one role to the group
+
+Grant the role to the group's authorization subject, then save the new grant:
+
+```csharp
+await db.GrantRoleAsync(
+    support.SubjectId,
+    resourceId: "workspace::acme",
+    roleKeyOrId: "workspace_editor",
+    cancellationToken: ct);
+
+await db.SaveChangesAsync(ct);
+```
+
+`GrantRoleAsync` is idempotent for a normal replay after the earlier grant is visible, but it does not save automatically. Concurrent first writers can still race on the deterministic grant id, so serialize or handle duplicate-key convergence just as you do for membership. It creates one grant:
+
+```text
+subject = support.SubjectId
+role = workspace_editor
+resource = workspace::acme
+```
+
+SqlOS does not copy that grant to each member. When Alice is authorized, the FGA service resolves Alice's subject plus any group subject ids and evaluates all applicable grants.
+
+## 5. Prove inherited detail access
+
+Load the application row through the trusted organization before checking its FGA resource. Authorize the user, not the group:
+
+```csharp
+var workspace = await db.Workspaces
+    .AsNoTracking()
+    .SingleOrDefaultAsync(item =>
+        item.Id == workspaceId &&
+        item.OrganizationId == organizationId,
+        ct);
+
+if (workspace is null)
+{
+    return Results.NotFound();
+}
+
+var result = await fga.CheckAccessAsync(
+    userSubjectId,
+    permissionKey: "workspace.edit",
+    resourceId: workspace.ResourceId);
+
+if (!result.Allowed)
+{
+    return Results.Forbid();
+}
+
+return Results.Ok(new { workspace.Id, workspace.Name });
+```
+
+The organization predicate prevents an application detail route from revealing or authorizing an object outside the active tenant. The normal request should never substitute `support.SubjectId` for the authenticated user. Passing the user subject lets SqlOS consider both direct grants and current group memberships.
+
+In the FGA dashboard's Access Tester, the trace identifies the group and group-owned grant that produced the allow decision.
+
+## 6. Prove inherited list access
+
+The same expansion happens before SqlOS constructs an EF authorization filter:
+
+```csharp
+var filter = await fga.GetAuthorizationFilterAsync<Workspace>(
+    userSubjectId,
+    "workspace.view");
+
+var visibleWorkspaces = await db.Workspaces
+    .Where(x => x.OrganizationId == organizationId)
+    .Where(filter)
+    .OrderBy(x => x.Name)
+    .ToListAsync(ct);
+```
+
+The first predicate binds the query to the trusted token organization. The FGA expression then limits rows to resources available through the user's direct and group grants. Do not treat a group grant as a replacement for the application's tenant boundary.
+
+Build the filter for each authorization request. `GetAuthorizationFilterAsync` resolves the user's current group subject ids and captures them in the returned expression; caching that expression across membership changes can retain a removed group's id.
+
+## 7. Remove a member and verify revocation
+
+First give Alice an independent read-only grant, then remove her from the membership container:
+
+```csharp
+await db.GrantRoleAsync(
+    userSubjectId,
+    resourceId: "workspace::acme",
+    roleKeyOrId: "workspace_reader",
+    cancellationToken: ct);
+await db.SaveChangesAsync(ct);
+
+await subjectService.RemoveFromGroupAsync(
+    userSubjectId,
+    support.Id,
+    ct);
+```
+
+Removal saves immediately. On the next freshly built authorization call, SqlOS no longer expands Alice to `support.SubjectId`, so the group's `workspace_editor` grant no longer applies. Her separate `workspace_reader` grant still does:
+
+```csharp
+var editAfterRemoval = await fga.CheckAccessAsync(
+    userSubjectId,
+    "workspace.edit",
+    "workspace::acme");
+
+var viewAfterRemoval = await fga.CheckAccessAsync(
+    userSubjectId,
+    "workspace.view",
+    "workspace::acme");
+
+if (editAfterRemoval.Allowed || !viewAfterRemoval.Allowed)
+{
+    throw new InvalidOperationException("The group removal or direct grant does not match the expected state.");
+}
+```
+
+Removing membership does not delete the group or its grant. Other Support members retain access. It also does not remove a separate direct grant assigned to Alice: the edit denial proves the group-only permission disappeared, while the view allow proves the direct grant coexists independently.
+
+## 8. Synchronize the lifecycle
+
+Treat FGA group membership as a projection of an application-owned source of truth:
+
+1. authorize the administrator or trusted synchronization worker;
+2. load the subject and team from the trusted organization;
+3. add missing desired memberships;
+4. remove stale memberships, especially during offboarding;
+5. verify the resulting access decision.
+
+Do not expose `AddToGroupAsync` directly from a public DTO. A valid user subject id, group id, and role name are not proof that the caller may join or manage that team.
+
+For bulk or external directory synchronization, make the operation replay-safe and reconcile both additions and removals. Single-worker replays converge cleanly; coordinate concurrent workers as described above.
+
+Group expansion does not itself enforce an AuthServer user, membership, agent, or service-account active state. Validate the authenticated principal lifecycle before FGA and remove stale memberships during offboarding instead of expecting group resolution to infer deactivation.
+
+## 9. Inspect and test the result
+
+Use **Fine-Grained Auth > User Groups** to inspect the group and members. Use **Grants** to inspect the role on `workspace::acme`, then use **Access Tester** with the individual member subject to see the inherited path.
+
+Before production, prove:
+
+- a new member gains detail and list access through the group;
+- a non-member remains denied;
+- repeated add does not duplicate membership;
+- removal makes group-only access disappear;
+- an unrelated direct grant continues to work;
+- an agent or service account can inherit the same group role;
+- adding a group as a member is rejected;
+- a subject and group from another tenant cannot be selected by an unauthorized workflow.
+
+The repository's focused tests cover group lifecycle and subject expansion:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj \
+  --filter FullyQualifiedName~SqlOSFgaSubjectServiceTests
+
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj \
+  --filter "FullyQualifiedName~SqlOSFgaSubjectTypesIntegrationTests|FullyQualifiedName~SqlOSFgaSubjectResolutionIntegrationTests"
+```
+
+The Retail example's **Walmart Regional Managers** group also demonstrates users and an agent inheriting one group grant.
+
+## Next steps
+
+- [Subject Types](/docs/fga/subject-types)
+- [Grants](/docs/fga/grants)
+- [Access Checks](/docs/fga/checking-a-permission)
+- [List Filtering](/docs/fga/list-filter)
+- [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga)

@@ -14,6 +14,10 @@ section: guides
 
 You'll learn how to create a SAML connection, share metadata with your customer’s IdP, and route users by email domain.
 
+<Callout type="info" title="Choose who runs setup">
+  This guide is the **operator-managed** path: your platform team uses the protected SqlOS dashboard. To give a customer IT admin a one-time, one-organization portal instead, follow [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso).
+</Callout>
+
 <Callout type="info" title="Prerequisites">
   - An organization in SqlOS with a **primary email domain** set
   - IdP metadata (XML) or manual Entity ID / ACS URL from your customer
@@ -29,7 +33,7 @@ Existing organization members with verified `@acme.com` email automatically use 
 
 1. Open **`/sqlos/admin/auth/`** → SSO / SAML for the target organization.
 2. Create a **draft** SAML connection. Note the **Entity ID** and **ACS URL** SqlOS generates.
-3. Send those values to the customer’s IT admin (or use the [Admin Portal pattern](/docs/authserver/saml-sso) from your product).
+3. Send those values to the customer’s IT admin. If they should complete setup without global dashboard access, switch to the [customer-managed SSO guide](/docs/guides/customer-managed-sso).
 4. Import the IdP **metadata XML** (or paste certificate and endpoints manually).
 5. Review the **Access policy**. The portal default requires SSO for existing members and leaves JIT provisioning off.
 6. Enable the connection and set or verify the org email domain (e.g. `acme.com`).
@@ -43,6 +47,7 @@ Existing organization members with verified `@acme.com` email automatically use 
 
 ## Next steps
 
+- [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso)
 - [Organizations](/docs/authserver/organizations)
 - [Entra SSO testing notes](https://github.com/ross-slaney/sqlos/blob/main/docs/ENTRA_SSO.md) (repo supplement)
 - [Troubleshooting SAML errors](/docs/guides/troubleshooting)

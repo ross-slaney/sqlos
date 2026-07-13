@@ -21,15 +21,12 @@ Do **not** start here if you are just wiring your own first-party web app. Seed 
 
 ## Turn it on
 
-`CIMD` is enabled in the raw multi-client defaults; `UseSingleApplication` disables it. The helper below opts a single-application host back into portable-client behavior and also turns on resource indicators:
+`CIMD` is disabled by default. The helper below explicitly enables portable-client behavior and resource indicators without requiring a host allowlist:
 
 ```csharp
 builder.AddSqlOS<AppDbContext>(options =>
 {
-    options.AuthServer.EnablePortableMcpClients(registration =>
-    {
-        registration.Cimd.TrustedHosts.Add("clients.example.com");
-    });
+    options.AuthServer.EnablePortableMcpClients();
 });
 ```
 
@@ -45,7 +42,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 ```
 
 <Callout type="warning" title="CIMD performs a server-side fetch">
-  When `TrustedHosts` is empty, any syntactically valid HTTPS client-ID URL with a non-root path is eligible for an outbound metadata request. In production, disable CIMD when portable clients are unnecessary. Otherwise, configure `TrustedHosts` as a pre-fetch allowlist and apply outbound DNS/IP controls that prevent access to loopback, link-local, metadata-service, and private network targets. SqlOS's named CIMD client does not follow HTTP redirects.
+  When `TrustedHosts` is empty, any syntactically valid HTTPS client-ID URL with a non-root path is eligible for an outbound metadata request. SqlOS resolves and connects directly to public addresses only, rejects mixed public/private DNS answers, and does not follow redirects. In production, disable CIMD when portable clients are unnecessary; use `TrustedHosts` as an additional allowlist when your client population is closed.
 </Callout>
 
 Disable it explicitly when the host accepts only seeded or dashboard-managed clients:
@@ -96,8 +93,8 @@ That is the right place for:
 - deny lists
 - environment-specific trust decisions
 
-<Callout type="warning" title="Trust policy is not an egress boundary">
-  In the current runtime, `TrustedHosts` and `TrustPolicy` determine whether fetched metadata is accepted, but they run after the outbound request. Constrain DNS/IP destinations and redirects at the network or `HttpClient` layer so CIMD cannot reach loopback, link-local, private, or cloud metadata-service addresses. Use a preregistered client when that egress boundary is unavailable.
+<Callout type="info" title="Trust policy complements the egress boundary">
+  SqlOS enforces public-address-only connections before sending the HTTP request. `TrustedHosts` and `TrustPolicy` add application-specific acceptance rules; they do not replace the built-in DNS/IP and redirect protections.
 </Callout>
 
 ## Dashboard behavior

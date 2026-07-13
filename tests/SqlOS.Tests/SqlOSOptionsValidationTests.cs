@@ -174,6 +174,19 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_AllowsPortableCimdWithoutHostAllowlist()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.EnablePortableMcpClients();
+        });
+
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
     public void AddSqlOS_Throws_WhenAccessTokenValidationIntervalsAreNegative()
     {
         var services = new ServiceCollection();

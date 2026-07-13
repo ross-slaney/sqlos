@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">AuthServer membership to FGA reconciliation</title>
+  <desc id="desc">A validated user and organization membership flows through a reconciler that removes stale membership roles, grants the current role on the organization resource, and combines a tenant predicate with FGA authorization.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef2ff"/><stop offset="1" stop-color="#ecfdf5"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4f46e5"/><stop offset="1" stop-color="#059669"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="10" stdDeviation="15" flood-opacity=".12"/></filter>
+    <style>.eye{font:700 15px system-ui;letter-spacing:2px;fill:#4338ca}.title{font:750 42px system-ui;fill:#111827}.sub{font:400 19px system-ui;fill:#64748b}.h{font:700 19px system-ui;fill:#111827}.p{font:500 15px system-ui;fill:#64748b}.mono{font:700 13px ui-monospace,monospace;fill:#3730a3}.ok{font:700 14px system-ui;fill:#047857}.white{font:700 16px system-ui;fill:#fff}</style>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <text x="64" y="76" class="eye">AUTHSERVER → FGA</text>
+  <text x="64" y="124" class="title">Reconcile membership before authorizing data</text>
+  <text x="64" y="159" class="sub">Trusted identity selects the tenant; explicit mapped grants and tenant predicates enforce it.</text>
+  <g filter="url(#shadow)">
+    <rect x="64" y="238" width="260" height="260" rx="26" fill="#fff"/>
+    <rect x="378" y="238" width="260" height="260" rx="26" fill="#fff"/>
+    <rect x="692" y="238" width="260" height="260" rx="26" fill="#fff"/>
+    <rect x="1006" y="238" width="210" height="260" rx="26" fill="#fff"/>
+  </g>
+  <circle cx="105" cy="282" r="23" fill="#e0e7ff"/><path d="M95 282h20m-10-10v20" stroke="#4f46e5" stroke-width="4" stroke-linecap="round"/>
+  <text x="140" y="289" class="h">Validated token</text>
+  <text x="88" y="340" class="p">sub: user_42</text><text x="88" y="368" class="p">org_id: acme</text>
+  <rect x="88" y="408" width="212" height="45" rx="12" fill="#eef2ff"/><text x="194" y="436" text-anchor="middle" class="mono">SERVER-TRUSTED</text>
+  <circle cx="419" cy="282" r="23" fill="url(#brand)"/><path d="M409 282h20m-10-10v20" stroke="#fff" stroke-width="4"/>
+  <text x="454" y="289" class="h">Reconciler</text>
+  <text x="402" y="340" class="p">Re-read active membership</text><text x="402" y="368" class="p">Revoke stale mapped role</text><text x="402" y="396" class="p">Grant current role</text>
+  <rect x="402" y="422" width="212" height="31" rx="10" fill="#dcfce7"/><text x="508" y="443" text-anchor="middle" class="ok">IDEMPOTENT</text>
+  <circle cx="733" cy="282" r="23" fill="#d1fae5"/><path d="M722 291h22v-18h-22z" fill="#059669"/>
+  <text x="768" y="289" class="h">Organization root</text>
+  <text x="716" y="340" class="p">Resource: org::acme</text><text x="716" y="368" class="p">Role: org_admin</text><text x="716" y="396" class="p">Children: workspaces</text>
+  <rect x="716" y="422" width="212" height="31" rx="10" fill="#ecfdf5"/><text x="822" y="443" text-anchor="middle" class="mono">TENANT-SCOPED</text>
+  <circle cx="1047" cy="282" r="23" fill="#e0e7ff"/><path d="M1037 272h20v20h-20z" fill="#4f46e5"/>
+  <text x="1082" y="289" class="h">Data query</text>
+  <text x="1030" y="340" class="p">org predicate</text><text x="1030" y="368" class="p">+ FGA filter</text>
+  <rect x="1030" y="408" width="162" height="45" rx="12" fill="url(#brand)"/><text x="1111" y="436" text-anchor="middle" class="white">ALLOW</text>
+  <path d="M324 368h54M638 368h54M952 368h54" stroke="#818cf8" stroke-width="6" stroke-linecap="round"/>
+  <path d="m362 355 16 13-16 13m314-26 16 13-16 13m314-26 16 13-16 13" fill="none" stroke="#4f46e5" stroke-width="4"/>
+  <rect x="171" y="557" width="938" height="100" rx="24" fill="#fff" stroke="#c7d2fe"/>
+  <text x="640" y="592" text-anchor="middle" class="h">Lifecycle contract</text>
+  <text x="640" y="623" text-anchor="middle" class="p">promote: remove member → grant admin · downgrade: remove admin → grant member · offboard: remove both mapped roles</text>
+</svg>

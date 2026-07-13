@@ -53,10 +53,7 @@ public static class ServiceCollectionExtensions
                 AllowAutoRedirect = false
             });
         services.AddHttpClient(nameof(SqlOSCimdClientService))
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-            {
-                AllowAutoRedirect = false
-            });
+            .ConfigurePrimaryHttpMessageHandler(SqlOSCimdHttpHandlerFactory.Create);
         services.AddHttpClient<ISqlOSDomainDnsVerifier, SqlOSDnsOverHttpsDomainVerifier>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

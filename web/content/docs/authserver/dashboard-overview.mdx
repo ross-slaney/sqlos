@@ -92,13 +92,15 @@ Audit Logs are a top-level governance surface. Filter by organization, applicati
 
 ## Auth emails
 
-The Auth Page settings screen includes email branding for built-in OTP and invitation emails. It stores the application name, logo data URL, primary color, accent color, and background color used by the default templates.
+The Auth Page settings screen includes email branding for built-in OTP, invitation, and password-reset emails. It stores the application name, logo data URL, primary color, accent color, and background color used by the default templates.
 
-For setup details, see [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/authserver/invitations), and [Email Branding](/docs/authserver/email-branding).
+For the end-to-end workflow, see [Brand hosted authentication and email](/docs/guides/auth-branding). Exact feature references remain in [Email OTP](/docs/authserver/email-otp), [Email Invitations](/docs/authserver/invitations), and [Email Branding](/docs/authserver/email-branding).
 
 ## Delegated SSO setup
 
 Open an organization, choose the **SSO** tab, and create a setup link when a customer IT admin should configure SAML themselves. The link is scoped to one organization, can be revoked from the same tab, and opens `/sqlos/admin/auth/sso-portal` instead of the full dashboard.
+
+Follow [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso) for the full platform and customer-admin journey, including edge routing, token handling, DNS ownership, enrollment policy, testing, and revocation.
 
 The portal shows Microsoft Entra, Okta, Google Workspace, and generic SAML setup paths. It displays copy-ready SP Entity ID and ACS URL values, verifies the customer email domain through a DNS TXT record, accepts pasted or uploaded metadata XML, validates the IdP entity ID, SSO URL, and signing certificate, then lets the customer activate, disable, replace metadata, and run a SAML test redirect.
 

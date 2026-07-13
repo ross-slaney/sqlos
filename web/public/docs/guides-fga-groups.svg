@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Team authorization through an FGA group</title>
+  <desc id="desc">Two users and a service account join a Support group. One workspace editor grant on the group gives each member inherited access to the Acme workspace.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#081424"/>
+      <stop offset="1" stop-color="#16233d"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#020617" flood-opacity=".45"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="675" rx="28" fill="url(#bg)"/>
+  <circle cx="1070" cy="40" r="190" fill="#8b5cf6" opacity=".10"/>
+  <circle cx="80" cy="650" r="230" fill="#14b8a6" opacity=".08"/>
+  <text x="70" y="78" fill="#a5b4fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" font-weight="700">FGA USER GROUPS</text>
+  <text x="70" y="126" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="39" font-weight="750">Grant once. Authorize every member.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="62" y="205" width="270" height="332" rx="22" fill="#101b30" stroke="#334155"/>
+    <text x="90" y="247" fill="#94a3b8" font-family="Inter, ui-sans-serif, system-ui" font-size="16" font-weight="650">MEMBERS</text>
+    <circle cx="110" cy="302" r="26" fill="#0f766e"/>
+    <circle cx="110" cy="302" r="9" fill="#ccfbf1"/>
+    <text x="153" y="309" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="21" font-weight="700">Alice</text>
+    <text x="153" y="333" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">subj_alice</text>
+    <circle cx="110" cy="393" r="26" fill="#1d4ed8"/>
+    <circle cx="110" cy="393" r="9" fill="#dbeafe"/>
+    <text x="153" y="400" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="21" font-weight="700">Bob</text>
+    <text x="153" y="424" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">subj_bob</text>
+    <rect x="84" y="463" width="52" height="52" rx="14" fill="#7c3aed"/>
+    <path d="M98 480h24v18H98zm5 18v6m14-6v6" fill="none" stroke="#ede9fe" stroke-width="4" stroke-linejoin="round"/>
+    <text x="153" y="482" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="18" font-weight="700">Support Importer</text>
+    <text x="153" y="506" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">service_account</text>
+
+    <rect x="457" y="239" width="286" height="238" rx="26" fill="#172554" stroke="#818cf8" stroke-width="2"/>
+    <circle cx="600" cy="305" r="42" fill="#4338ca"/>
+    <circle cx="583" cy="300" r="12" fill="#e0e7ff"/>
+    <circle cx="617" cy="300" r="12" fill="#e0e7ff"/>
+    <path d="M565 339c8-22 28-32 35-32s27 10 35 32" fill="none" stroke="#e0e7ff" stroke-width="7" stroke-linecap="round"/>
+    <text x="540" y="385" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="27" font-weight="750">Support</text>
+    <text x="512" y="417" fill="#c7d2fe" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">Id: grp_support</text>
+    <text x="495" y="445" fill="#c7d2fe" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">SubjectId: subj_support</text>
+
+    <rect x="872" y="227" width="266" height="260" rx="24" fill="#101b30" stroke="#334155"/>
+    <rect x="902" y="263" width="206" height="58" rx="14" fill="#14532d"/>
+    <text x="922" y="299" fill="#dcfce7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700">workspace_editor</text>
+    <text x="902" y="368" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui" font-size="24" font-weight="750">Acme Workspace</text>
+    <text x="902" y="402" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">workspace::acme</text>
+    <rect x="902" y="432" width="95" height="29" rx="14" fill="#0f766e"/>
+    <text x="922" y="452" fill="#ccfbf1" font-family="Inter, ui-sans-serif, system-ui" font-size="13" font-weight="700">INHERITED</text>
+  </g>
+
+  <path d="M350 357h84" stroke="#818cf8" stroke-width="5" stroke-linecap="round"/>
+  <path d="m419 345 16 12-16 12" fill="none" stroke="#818cf8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="354" y="337" fill="#94a3b8" font-family="Inter, ui-sans-serif, system-ui" font-size="14">membership</text>
+  <path d="M766 357h82" stroke="#4ade80" stroke-width="5" stroke-linecap="round"/>
+  <path d="m833 345 16 12-16 12" fill="none" stroke="#4ade80" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="785" y="337" fill="#86efac" font-family="Inter, ui-sans-serif, system-ui" font-size="14">one grant</text>
+
+  <rect x="325" y="568" width="550" height="58" rx="17" fill="#0f172a" stroke="#334155"/>
+  <text x="363" y="604" fill="#cbd5e1" font-family="Inter, ui-sans-serif, system-ui" font-size="18">Authorize each request with the member's own subject id</text>
+</svg>

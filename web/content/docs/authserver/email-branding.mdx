@@ -5,7 +5,9 @@ order: 11
 section: authserver
 ---
 
-Email Branding controls the built-in templates for Email OTP and organization invitations.
+Email Branding controls the built-in templates for Email OTP, organization invitations, and password reset.
+
+For the complete browser-and-email workflow, follow [Brand hosted authentication and email](/docs/guides/auth-branding).
 
 Use it when you want a client-ready branded email without owning every HTML template. Use `BuildMessage` delegates when you need a fully custom layout, copy, localization strategy, or provider-specific payload.
 
@@ -89,11 +91,11 @@ Both contexts include resolved branding so custom templates can reuse the dashbo
 
 ## Runtime behavior
 
-SqlOS resolves branding in this order:
+SqlOS resolves email visual branding in this order:
 
 1. Email-specific settings from the dashboard or `SeedAuthEmails(...)`.
 2. AuthPage logo/colors for visual fallback.
-3. `EmailOtp.ApplicationName`.
-4. `SqlOS`.
+
+The email application name comes from stored email branding. Before one exists, SqlOS initializes it from `Invitations.ApplicationName`, then `EmailOtp.ApplicationName`, then `SqlOS`.
 
 Invitation emails can override the application name with `ConfigureInvitations(invites => invites.ApplicationName = "...")`.

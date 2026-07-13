@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -42,12 +43,12 @@ public sealed class SqlOSCimdClientService
             return null;
         }
 
-        EnforceTrustedHost(clientIdUri);
-
         if (existingClient != null && (!existingClient.IsActive || existingClient.DisabledAt != null))
         {
             throw new InvalidOperationException($"Client '{clientId}' is inactive.");
         }
+
+        await EnforceFetchPolicyAsync(clientIdUri, clientId, cancellationToken);
 
         if (existingClient != null && !ShouldRefreshMetadata(existingClient))
         {
@@ -74,7 +75,27 @@ public sealed class SqlOSCimdClientService
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_options.ClientRegistration.Cimd.HttpTimeout);
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        HttpResponseMessage response;
+        try
+        {
+            response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException
+            || ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            await RecordAuditAsync(
+                "client.cimd.fetch-failed",
+                clientId,
+                new
+                {
+                    reason = ex is OperationCanceledException ? "timeout" : "network-policy-or-transport"
+                },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document fetch failed.", ex);
+        }
+
+        using (response)
+        {
         var now = DateTime.UtcNow;
 
         if (response.StatusCode == HttpStatusCode.NotModified && existingClient != null)
@@ -87,6 +108,21 @@ public sealed class SqlOSCimdClientService
             return new SqlOSResolvedClient(existingClient, "cimd");
         }
 
+        if (IsRedirectStatus(response.StatusCode))
+        {
+            await RecordAuditAsync(
+                "client.cimd.fetch-failed",
+                clientId,
+                new
+                {
+                    status_code = (int)response.StatusCode,
+                    reason = "redirect",
+                    redirect_location = response.Headers.Location?.ToString()
+                },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document fetch failed.");
+        }
+
         if (response.StatusCode != HttpStatusCode.OK)
         {
             await RecordAuditAsync(
@@ -97,27 +133,26 @@ public sealed class SqlOSCimdClientService
                     status_code = (int)response.StatusCode
                 },
                 cancellationToken);
-            throw new InvalidOperationException($"Client metadata document fetch failed for '{clientId}' with status {(int)response.StatusCode}.");
+            throw new InvalidOperationException("Client metadata document fetch failed.");
         }
 
         if (!HasJsonMediaType(response.Content.Headers.ContentType?.MediaType))
         {
-            throw new InvalidOperationException($"Client metadata document for '{clientId}' must be JSON.");
+            await RecordAuditAsync(
+                "client.cimd.validation-failed",
+                clientId,
+                new
+                {
+                    error = "Client metadata document must be JSON."
+                },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document validation failed.");
         }
 
-        var payload = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token);
-        if (payload.Length > _options.ClientRegistration.Cimd.MaxMetadataBytes)
-        {
-            throw new InvalidOperationException($"Client metadata document for '{clientId}' exceeds the allowed size.");
-        }
-
-        var rawJson = Encoding.UTF8.GetString(payload);
-        using var document = JsonDocument.Parse(payload);
-        ParsedCimdDocument parsed;
+        byte[] payload;
         try
         {
-            parsed = ParseMetadataDocument(document.RootElement, clientId, redirectUri);
-            await EnforceTrustPolicyAsync(clientIdUri, parsed, httpContext, cancellationToken);
+            payload = await ReadBoundedMetadataAsync(response.Content, _options.ClientRegistration.Cimd.MaxMetadataBytes, timeoutCts.Token);
         }
         catch (InvalidOperationException ex)
         {
@@ -129,7 +164,28 @@ public sealed class SqlOSCimdClientService
                     error = ex.Message
                 },
                 cancellationToken);
-            throw;
+            throw new InvalidOperationException("Client metadata document validation failed.", ex);
+        }
+
+        var rawJson = Encoding.UTF8.GetString(payload);
+        ParsedCimdDocument parsed;
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            parsed = ParseMetadataDocument(document.RootElement, clientId, redirectUri);
+            await EnforceTrustPolicyAsync(clientIdUri, parsed, httpContext, cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or JsonException)
+        {
+            await RecordAuditAsync(
+                "client.cimd.validation-failed",
+                clientId,
+                new
+                {
+                    error = ex.Message
+                },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document validation failed.", ex);
         }
 
         var requiresFreshConsent = existingClient != null && HasSecuritySensitiveMetadataChange(existingClient, parsed);
@@ -149,6 +205,39 @@ public sealed class SqlOSCimdClientService
         }
 
         return new SqlOSResolvedClient(client, "cimd", requiresFreshConsent);
+        }
+    }
+
+    private async Task EnforceFetchPolicyAsync(
+        Uri clientIdUri,
+        string clientId,
+        CancellationToken cancellationToken)
+    {
+        if (IsUnsafeMetadataHost(clientIdUri.Host))
+        {
+            await ThrowFetchPolicyFailureAsync(clientId, "Client metadata host is not allowed.", cancellationToken);
+        }
+
+        var cimdOptions = _options.ClientRegistration.Cimd;
+        if (cimdOptions.TrustedHosts.Count > 0
+            && !cimdOptions.TrustedHosts.Contains(clientIdUri.Host, StringComparer.OrdinalIgnoreCase))
+        {
+            await ThrowFetchPolicyFailureAsync(clientId, "Client metadata host is not trusted.", cancellationToken);
+        }
+
+    }
+
+    private async Task ThrowFetchPolicyFailureAsync(string clientId, string error, CancellationToken cancellationToken)
+    {
+        await RecordAuditAsync(
+            "client.cimd.validation-failed",
+            clientId,
+            new
+            {
+                error
+            },
+            cancellationToken);
+        throw new InvalidOperationException("Client metadata document validation failed.");
     }
 
     private async Task EnforceTrustPolicyAsync(
@@ -178,18 +267,6 @@ public sealed class SqlOSCimdClientService
         if (!decision.Allowed)
         {
             throw new InvalidOperationException(decision.Reason ?? $"Client metadata host '{clientIdUri.Host}' was rejected by trust policy.");
-        }
-    }
-
-    private void EnforceTrustedHost(Uri clientIdUri)
-    {
-        if (_options.ClientRegistration.Cimd.TrustedHosts.Count > 0
-            && !_options.ClientRegistration.Cimd.TrustedHosts.Contains(
-                clientIdUri.Host,
-                StringComparer.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Client metadata host '{clientIdUri.Host}' is not trusted.");
         }
     }
 
@@ -431,6 +508,114 @@ public sealed class SqlOSCimdClientService
         return !string.IsNullOrWhiteSpace(uri.AbsolutePath) && !string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal);
     }
 
+    private static async Task<byte[]> ReadBoundedMetadataAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is long contentLength && contentLength > maxBytes)
+        {
+            throw new InvalidOperationException("Client metadata document exceeds the allowed size.");
+        }
+
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var memory = new MemoryStream(Math.Min(maxBytes, 81920));
+        var buffer = new byte[Math.Clamp(maxBytes, 1, 81920)];
+
+        while (true)
+        {
+            var bytesRead = await stream.ReadAsync(buffer, cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            if (memory.Length + bytesRead > maxBytes)
+            {
+                throw new InvalidOperationException("Client metadata document exceeds the allowed size.");
+            }
+
+            memory.Write(buffer, 0, bytesRead);
+        }
+
+        return memory.ToArray();
+    }
+
+    private static bool IsRedirectStatus(HttpStatusCode statusCode)
+        => (int)statusCode is >= 300 and <= 399;
+
+    private static bool IsUnsafeMetadataHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return true;
+        }
+
+        var normalizedHost = host.Trim().Trim('[', ']').TrimEnd('.');
+        if (string.Equals(normalizedHost, "localhost", StringComparison.OrdinalIgnoreCase)
+            || normalizedHost.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!IPAddress.TryParse(normalizedHost, out var address))
+        {
+            return false;
+        }
+
+        return IsUnsafeAddress(address);
+    }
+
+    internal static bool IsUnsafeAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (IPAddress.IsLoopback(address))
+        {
+            return true;
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return IsUnsafeIPv4Address(address.GetAddressBytes());
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return IsUnsafeIPv6Address(address.GetAddressBytes());
+        }
+
+        return true;
+    }
+
+    private static bool IsUnsafeIPv4Address(byte[] bytes)
+        => bytes[0] == 0
+            || bytes[0] == 10
+            || bytes[0] == 127
+            || (bytes[0] == 100 && bytes[1] is >= 64 and <= 127)
+            || (bytes[0] == 169 && bytes[1] == 254)
+            || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+            || (bytes[0] == 192 && bytes[1] == 0)
+            || (bytes[0] == 192 && bytes[1] == 168)
+            || (bytes[0] == 198 && bytes[1] is 18 or 19)
+            || (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100)
+            || (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113)
+            || bytes[0] >= 224;
+
+    private static bool IsUnsafeIPv6Address(byte[] bytes)
+        => bytes.All(static value => value == 0)
+            || bytes[0] == 0xff
+            || (bytes[0] & 0xfe) == 0xfc
+            || bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80
+            || bytes.Take(12).All(static value => value == 0)
+            || bytes[0] == 0x01 && bytes[1] == 0x00 && bytes.Skip(2).Take(6).All(static value => value == 0)
+            || bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x02 && bytes[4] == 0 && bytes[5] == 0
+            || bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8
+            || bytes[0] == 0x20 && bytes[1] == 0x02;
+
     private static string GetRequiredString(JsonElement root, string propertyName, string clientId)
     {
         var value = GetOptionalString(root, propertyName);
@@ -495,7 +680,7 @@ public sealed class SqlOSCimdClientService
     {
         if (string.IsNullOrWhiteSpace(mediaType))
         {
-            return true;
+            return false;
         }
 
         return string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
