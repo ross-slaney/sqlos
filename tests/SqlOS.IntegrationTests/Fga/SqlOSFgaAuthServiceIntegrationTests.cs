@@ -103,18 +103,30 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     [TestMethod]
     public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndEfFilter()
     {
-        var permission = await Context.Set<SqlOSFgaPermission>().SingleAsync(p => p.Key == "TEST_VIEW");
-        permission.ResourceTypeId = "team";
+        var suffix = Guid.NewGuid().ToString("N");
+        var permission = new SqlOSFgaPermission
+        {
+            Id = $"perm_typed_deny_{suffix}",
+            Key = $"TYPED_DENY_{suffix}",
+            Name = "Team-only permission",
+            ResourceTypeId = "team"
+        };
+        Context.Set<SqlOSFgaPermission>().Add(permission);
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
+        {
+            RoleId = FgaTestDataSeeder.SystemAdminRoleId,
+            PermissionId = permission.Id
+        });
         await Context.SaveChangesAsync();
 
         var point = await _authService.CheckAccessAsync(
             FgaTestDataSeeder.SystemAdminSubjectId,
-            "TEST_VIEW",
+            permission.Key,
             FgaTestDataSeeder.TestProjectResourceId);
         var trace = await _authService.TraceResourceAccessAsync(
             FgaTestDataSeeder.SystemAdminSubjectId,
             FgaTestDataSeeder.TestProjectResourceId,
-            "TEST_VIEW");
+            permission.Key);
         Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity
         {
             Id = $"typed_{Guid.NewGuid():N}",
@@ -123,7 +135,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         await Context.SaveChangesAsync();
         var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(
             FgaTestDataSeeder.SystemAdminSubjectId,
-            "TEST_VIEW");
+            permission.Key);
 
         Assert.IsFalse(point.Allowed);
         Assert.IsTrue(point.Error?.Contains("does not apply to resource type project", StringComparison.Ordinal));
@@ -138,13 +150,25 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     [TestMethod]
     public async Task TypeScopedPermission_AllowsTargetTypeViaAncestorGrant()
     {
-        var permission = await Context.Set<SqlOSFgaPermission>().SingleAsync(p => p.Key == "TEST_VIEW");
-        permission.ResourceTypeId = "project";
+        var suffix = Guid.NewGuid().ToString("N");
+        var permission = new SqlOSFgaPermission
+        {
+            Id = $"perm_typed_allow_{suffix}",
+            Key = $"TYPED_ALLOW_{suffix}",
+            Name = "Project permission",
+            ResourceTypeId = "project"
+        };
+        Context.Set<SqlOSFgaPermission>().Add(permission);
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
+        {
+            RoleId = FgaTestDataSeeder.AgencyAdminRoleId,
+            PermissionId = permission.Id
+        });
         await Context.SaveChangesAsync();
 
         var result = await _authService.CheckAccessAsync(
             FgaTestDataSeeder.AgencyAdminSubjectId,
-            "TEST_VIEW",
+            permission.Key,
             FgaTestDataSeeder.TestProjectResourceId);
 
         Assert.IsTrue(result.Allowed, "a permission scoped to the target type should still inherit through an ancestor grant");
