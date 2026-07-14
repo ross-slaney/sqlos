@@ -55,7 +55,8 @@ public class SqlOSFgaDashboardMiddleware
     {
         var path = context.Request.Path.Value ?? "";
 
-        if (!path.StartsWith(_pathPrefix, StringComparison.OrdinalIgnoreCase))
+        if (!path.Equals(_pathPrefix, StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith(_pathPrefix + "/", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;

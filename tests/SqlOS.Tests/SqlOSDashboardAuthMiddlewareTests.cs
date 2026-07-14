@@ -14,6 +14,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Fga.Dashboard;
 using SqlOS.Security;
 using SqlOS.Tests.Infrastructure;
 
@@ -186,6 +187,79 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\" src=");
     }
 
+    [TestMethod]
+    public async Task DashboardPathPrefix_RejectsLookalikeSegment()
+    {
+        using var harness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = null;
+        });
+
+        var response = await harness.GetAsync("/sqlos-evil/admin/auth");
+
+        response.StatusCode.Should().Be(StatusCodes.Status418ImATeapot,
+            "lookalike paths must continue to the host pipeline instead of entering dashboard authorization");
+    }
+
+    [TestMethod]
+    public async Task DashboardPassThrough_RequiresCompleteAdminFamilySegment()
+    {
+        using var harness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = null;
+        });
+
+        var lookalike = await harness.GetAsync("/sqlos/admin/fga-evil", "?embed=1");
+        var realFamily = await harness.GetAsync("/sqlos/admin/fga/resources", "?embed=1");
+
+        lookalike.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        realFamily.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+    }
+
+    [TestMethod]
+    public async Task FgaDashboardPathPrefix_RejectsLookalikeSegment()
+    {
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        await using var provider = services.BuildServiceProvider();
+        var options = new SqlOSDashboardOptions();
+        var middleware = new SqlOSFgaDashboardMiddleware(
+            context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status418ImATeapot;
+                return Task.CompletedTask;
+            },
+            "/sqlos/admin/fga",
+            new TestHostEnvironment(),
+            options,
+            provider.GetRequiredService<SqlOSDashboardSessionService>(),
+            Options.Create(new SqlOSOptions()));
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Request.Path = "/sqlos/admin/fga-evil";
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+    }
+
+    [TestMethod]
+    public async Task DashboardClientReturnPath_UsesExactOrChildSegmentBoundary()
+    {
+        var files = new ManifestEmbeddedFileProvider(
+            typeof(SqlOSDashboardMiddleware).Assembly,
+            "Dashboard/wwwroot");
+        await using var stream = files.GetFileInfo("app.js").CreateReadStream();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var source = await reader.ReadToEndAsync();
+
+        source.Should().Contain("parsed.pathname === dashboardBasePath");
+        source.Should().Contain("parsed.pathname.startsWith(`${dashboardBasePath}/`)");
+        source.Should().NotContain("parsed.pathname.startsWith(dashboardBasePath || \"/\")");
+    }
+
     private static DashboardMiddlewareHarness CreateHarness(
         Action<SqlOSDashboardOptions>? configure = null,
         bool scimEnabled = false)
@@ -214,7 +288,11 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
 
         var provider = services.BuildServiceProvider(validateScopes: true);
         var middleware = new SqlOSDashboardMiddleware(
-            _ => Task.CompletedTask,
+            context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status418ImATeapot;
+                return Task.CompletedTask;
+            },
             "/sqlos",
             new TestHostEnvironment(),
             dashboardOptions,
@@ -250,6 +328,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         public Task<DashboardResponse> GetDashboardAsync()
             => SendAsync(HttpMethods.Get, "/sqlos/admin/auth/organizations", null, "203.0.113.60");
 
+        public Task<DashboardResponse> GetAsync(string path, string? queryString = null)
+            => SendAsync(HttpMethods.Get, path, null, "203.0.113.61", queryString);
+
         public async Task<List<SqlOSAuditEvent>> ListAuditEventsAsync()
         {
             using var scope = _services.CreateScope();
@@ -263,7 +344,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             string method,
             string path,
             string? body,
-            string ipAddress)
+            string ipAddress,
+            string? queryString = null)
         {
             using var scope = _services.CreateScope();
             var context = new DefaultHttpContext
@@ -272,6 +354,10 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             };
             context.Request.Method = method;
             context.Request.Path = path;
+            if (!string.IsNullOrWhiteSpace(queryString))
+            {
+                context.Request.QueryString = new QueryString(queryString);
+            }
             context.Request.Scheme = Uri.UriSchemeHttps;
             context.Connection.RemoteIpAddress = IPAddress.Parse(ipAddress);
             context.Response.Body = new MemoryStream();
