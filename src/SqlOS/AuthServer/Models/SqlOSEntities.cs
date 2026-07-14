@@ -815,6 +815,18 @@ public sealed class SqlOSAuthorizationRequest
     public SqlOSInvitation? Invitation { get; set; }
 }
 
+public sealed class SqlOSSamlReplay
+{
+    public string Id { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public string ResponseId { get; set; } = string.Empty;
+    public string AssertionId { get; set; } = string.Empty;
+    public DateTime ConsumedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+
+    public SqlOSSsoConnection? Connection { get; set; }
+}
+
 public sealed class SqlOSAuthorizationCode
 {
     public string Id { get; set; } = string.Empty;

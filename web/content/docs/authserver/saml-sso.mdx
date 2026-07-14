@@ -246,7 +246,9 @@ For metadata rotation, open the delegated portal again or use the dashboard, pas
 4. AuthServer binds the client, exact registered redirect URI (including path case), state, and validated S256 challenge to the SAML authorization request, then redirects to the IdP.
 5. User authenticates at the IdP.
 6. IdP POSTs a SAML Response to the ACS URL.
-7. AuthServer validates the assertion and returns an authorization code plus the original state to the registered redirect URI.
+7. AuthServer validates the assertion, requires an explicitly bounded bearer `SubjectConfirmationData`, and atomically records the signed Response ID and Assertion ID before returning an authorization code. Reuse of either identifier on the same connection is rejected, including concurrent replay.
 8. The client posts the code, client ID, exact redirect URI, and verifier to `/sqlos/auth/token`. Missing, wrong, downgraded, or `plain` PKCE is rejected.
 
 Use canonical `/sqlos/auth/authorize` and `/sqlos/auth/token` for hosted clients. The explicit `/sqlos/auth/sso/authorization-url` helper is retained for connection-directed flows, but it requires `state`, `codeChallenge`, and `codeChallengeMethod: "S256"` and produces the same PKCE-bound authorization-code record. The old `/sqlos/auth/token/exchange` and `/sqlos/auth/saml/login/{connectionId}` routes are retired.
+
+Replay protection uses SqlOS's existing SQL database and expires records after the assertion validity window plus clock skew. It is automatic: applications do not configure a cache or external coordination service.
