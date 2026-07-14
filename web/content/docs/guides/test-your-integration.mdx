@@ -257,7 +257,7 @@ Start with one test in every row, then add cases for the features you enable.
 
 | Area | Happy-path proof | Negative proof |
 | --- | --- | --- |
-| Startup/schema | Fresh database boots and a second start is idempotent | Bad connection or failed migration keeps the revision unhealthy |
+| Startup/schema | Fresh database boots, scripts are deterministically ledgered, and a second start is idempotent | Bad connection fails startup; an interrupted script is retried without skipping same-version siblings |
 | Discovery/JWKS | Published issuer and endpoints match the public origin; active key validates a token | Internal host/scheme never appears in metadata or links |
 | Authorization code + PKCE | Hosted sign-in returns one exchangeable code and the expected state | Wrong verifier, redirect URI, client, reused code, or expired request fails |
 | Token validation | Correct issuer, signature, lifetime, and exact audience reach the API | Missing, malformed, expired, wrong-audience, or wrong-issuer token returns `401` |
