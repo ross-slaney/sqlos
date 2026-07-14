@@ -85,6 +85,25 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
         ex.Which.Error.Should().Be("invalid_redirect_uri");
     }
 
+    [DataTestMethod]
+    [DataRow("ftp://localhost/callback")]
+    [DataRow("custom-scheme://127.0.0.1/callback")]
+    public async Task RegisterAsync_RejectsNonHttpLoopbackRedirectUris(string redirectUri)
+    {
+        using var context = CreateContext();
+        var service = CreateService(context, CreateOptions(), new SqlOSDynamicClientRegistrationRateLimiter());
+        var httpContext = CreateHttpContext("10.0.0.3");
+
+        var act = async () => await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Bad Loopback Redirect",
+            RedirectUris = [redirectUri]
+        }, httpContext);
+
+        var ex = await act.Should().ThrowAsync<SqlOSClientRegistrationException>();
+        ex.Which.Error.Should().Be("invalid_redirect_uri");
+    }
+
     [TestMethod]
     public async Task RegisterAsync_RejectsWhenDisabled()
     {

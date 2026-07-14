@@ -82,6 +82,85 @@ public sealed class SqlOSCimdClientServiceTests
         httpFactory.RequestCount.Should().Be(1);
     }
 
+    [DataTestMethod]
+    [DataRow("http://client.example.test/callback")]
+    [DataRow("ftp://client.example.test/callback")]
+    [DataRow("custom-scheme://client.example.test/callback")]
+    [DataRow("ftp://localhost/callback")]
+    public async Task ResolveRequiredClientAsync_RejectsUnsafeRedirectUriSchemes(string redirectUri)
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/client.json";
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Unsafe Redirect Client",
+              "redirect_uris": ["{{redirectUri}}"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, redirectUri);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+        var audit = await context.Set<SqlOSAuditEvent>()
+            .SingleAsync(x => x.EventType == "client.cimd.validation-failed");
+        audit.DataJson.Should().Contain("must use HTTPS or an HTTP loopback address");
+        (await context.Set<SqlOSClientApplication>().AnyAsync()).Should().BeFalse();
+    }
+
+    [DataTestMethod]
+    [DataRow("http://localhost/callback")]
+    [DataRow("http://127.0.0.1:49152/callback")]
+    [DataRow("http://[::1]:49152/callback")]
+    public async Task ResolveRequiredClientAsync_AllowsHttpLoopbackRedirectUris(string redirectUri)
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/client.json";
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Native Client",
+              "redirect_uris": ["{{redirectUri}}"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(clientId, redirectUri);
+
+        resolved.Client.RedirectUrisJson.Should().Contain(redirectUri);
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsLoopbackWhenDisabledForDcrAndCimd()
+    {
+        using var context = CreateContext();
+        const string clientId = "https://client.example.test/oauth/client.json";
+        const string redirectUri = "http://127.0.0.1:49152/callback";
+        var options = CreateOptions();
+        options.ClientRegistration.Dcr.AllowLoopbackRedirectUris = false;
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            $$"""
+            {
+              "client_id": "{{clientId}}",
+              "client_name": "Native Client",
+              "redirect_uris": ["{{redirectUri}}"],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+        var resolver = CreateResolver(context, options, httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(clientId, redirectUri);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+    }
+
     [TestMethod]
     public async Task ResolveRequiredClientAsync_UsesFreshCachedCimdClientWithoutRefetch()
     {
@@ -115,6 +194,43 @@ public sealed class SqlOSCimdClientServiceTests
         resolved.Client.Id.Should().Be(existing.Id);
         resolved.ResolutionKind.Should().Be("cimd");
         httpFactory.RequestCount.Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUnsafeRedirectFromFreshCacheWithoutRefetch()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_cached_unsafe",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Unsafe Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"http://attacker.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddMinutes(-1),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        await context.SaveChangesAsync();
+        var httpFactory = new FakeHttpClientFactory(_ => throw new InvalidOperationException("Unsafe cached metadata must not be fetched or accepted."));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(existing.ClientId, "http://attacker.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+        httpFactory.RequestCount.Should().Be(0);
+        var audit = await context.Set<SqlOSAuditEvent>()
+            .SingleAsync(x => x.EventType == "client.cimd.validation-failed");
+        audit.DataJson.Should().Contain("must use HTTPS or an HTTP loopback address");
     }
 
     [TestMethod]
@@ -159,6 +275,45 @@ public sealed class SqlOSCimdClientServiceTests
         resolved.ResolutionKind.Should().Be("cimd");
         resolved.Client.MetadataExpiresAt.Should().BeAfter(DateTime.UtcNow);
         httpFactory.RequestCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUnsafeCachedRedirectAfterNotModifiedResponse()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_cached_unsafe_304",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Unsafe Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"http://attacker.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-1),
+            MetadataEtag = "\"unsafe-v1\"",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        await context.SaveChangesAsync();
+        var httpFactory = new FakeHttpClientFactory(_ => new HttpResponseMessage(HttpStatusCode.NotModified));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            existing.ClientId,
+            "http://attacker.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+        httpFactory.RequestCount.Should().Be(1);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"))
+            .Should().BeTrue();
     }
 
     [TestMethod]

@@ -598,6 +598,56 @@ public sealed class TodoSampleIntegrationTests
     }
 
     [TestMethod]
+    public async Task CimdClient_RejectsInsecureMetadataRedirect_WithoutRedirectingToClient()
+    {
+        const string clientMetadataUrl = "https://portable.todo.test/clients/insecure.json";
+        const string insecureRedirectUri = "http://attacker.example.test/callback";
+
+        await using var factory = TodoApiFixture.CreateFactory(builder =>
+        {
+            builder.UseSetting("TodoSample:EnableHeadless", "true");
+            builder.UseSetting("TodoSample:CimdTrustedHosts:0", "portable.todo.test");
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<IHttpClientFactory>(new FakeTodoCimdHttpClientFactory(new Dictionary<string, string>
+                {
+                    [clientMetadataUrl] = JsonSerializer.Serialize(new Dictionary<string, object?>
+                    {
+                        ["client_id"] = clientMetadataUrl,
+                        ["client_name"] = "Insecure Portable Client",
+                        ["redirect_uris"] = new[] { insecureRedirectUri },
+                        ["grant_types"] = new[] { "authorization_code", "refresh_token" },
+                        ["response_types"] = new[] { "code" },
+                        ["token_endpoint_auth_method"] = "none"
+                    })
+                }));
+            });
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var codeVerifier = CreateCodeVerifier();
+
+        var response = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = clientMetadataUrl,
+            ["redirect_uri"] = insecureRedirectUri,
+            ["state"] = "attacker-state",
+            ["scope"] = "openid profile",
+            ["code_challenge"] = CreateCodeChallenge(codeVerifier),
+            ["code_challenge_method"] = "S256"
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        response.Headers.Location.Should().NotBeNull();
+        response.Headers.Location!.Host.Should().Be("todo.example.test");
+        response.Headers.Location.AbsoluteUri.Should().NotContain(insecureRedirectUri);
+        response.Headers.Location.AbsoluteUri.Should().Contain("error=The%20authorization%20request%20is%20invalid.");
+    }
+
+    [TestMethod]
     public async Task DcrClient_CanRegister_AndUseAuthorizationCodeFlow_WhenEnabled()
     {
         const string redirectUri = "https://dcr.todo.test/callback";

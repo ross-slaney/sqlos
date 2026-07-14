@@ -248,17 +248,14 @@ public sealed class SqlOSDynamicClientRegistrationService
                     $"Redirect URI '{redirectUri}' is not a valid absolute URI.");
             }
 
-            var isHttps = _options.ClientRegistration.Dcr.AllowHttpsRedirectUris
-                && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-            var isLoopback = _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris
-                && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase));
-
-            if (!isHttps && !isLoopback)
+            if (!SqlOSRedirectUriPolicy.IsAllowed(
+                    uri,
+                    _options.ClientRegistration.Dcr.AllowHttpsRedirectUris,
+                    _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris))
             {
                 throw new SqlOSClientRegistrationException(
                     "invalid_redirect_uri",
-                    $"Redirect URI '{redirectUri}' must use https or a loopback localhost redirect.");
+                    $"Redirect URI '{redirectUri}' must use HTTPS or an HTTP loopback address.");
             }
         }
 
