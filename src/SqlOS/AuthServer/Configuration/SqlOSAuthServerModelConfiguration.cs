@@ -798,6 +798,17 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSSamlReplay>(entity =>
+        {
+            entity.ToTable("SqlOSSamlReplays", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ResponseId).HasMaxLength(450);
+            entity.Property(x => x.AssertionId).HasMaxLength(450);
+            entity.HasIndex(x => new { x.ConnectionId, x.ResponseId }).IsUnique();
+            entity.HasIndex(x => new { x.ConnectionId, x.AssertionId }).IsUnique();
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+
         modelBuilder.Entity<SqlOSAuthorizationCode>(entity =>
         {
             entity.ToTable("SqlOSAuthorizationCodes", schema, t => t.ExcludeFromMigrations());

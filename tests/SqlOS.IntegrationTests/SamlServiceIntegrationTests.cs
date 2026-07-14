@@ -206,6 +206,101 @@ public sealed class SamlServiceIntegrationTests
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
     }
 
+    [DataTestMethod]
+    [DataRow(true, false, DisplayName = "Duplicate response ID is rejected")]
+    [DataRow(false, true, DisplayName = "Duplicate assertion ID is rejected")]
+    public async Task SignedSamlResponses_WithEitherDuplicateIdentifier_AreRejectedAcrossAuthorizationRequests(
+        bool reuseResponseId,
+        bool reuseAssertionId)
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Replay {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "replay");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSReplayIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id, "Replay SSO", $"urn:replay:{Guid.NewGuid():N}:idp", "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(), true, false, "email", "first_name", "last_name"));
+        var responseId = $"_{Guid.NewGuid():N}";
+        var assertionId = $"_{Guid.NewGuid():N}";
+
+        var firstFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var firstResponse = BuildSignedSamlResponse(
+            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@example.com", "Replay", "User",
+            firstFlow, responseId: responseId, assertionId: assertionId);
+        (await saml.HandleAcsAsync(connection.Id, firstResponse, firstFlow.RelayState)).Should().Contain("code=");
+
+        var secondFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var duplicateResponse = BuildSignedSamlResponse(
+            certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@example.com", "Replay", "User",
+            secondFlow,
+            responseId: reuseResponseId ? responseId : $"_{Guid.NewGuid():N}",
+            assertionId: reuseAssertionId ? assertionId : $"_{Guid.NewGuid():N}");
+        var action = async () => await saml.HandleAcsAsync(connection.Id, duplicateResponse, secondFlow.RelayState);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML response has already been consumed.");
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponses_WithDuplicateIdentifiersConcurrently_AllowExactlyOne()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Concurrent replay {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "concurrent-replay");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSConcurrentReplayIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id, "Concurrent Replay SSO", $"urn:concurrent-replay:{Guid.NewGuid():N}:idp", "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(), true, false, "email", "first_name", "last_name"));
+        var firstFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var secondFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var responseId = $"_{Guid.NewGuid():N}";
+        var assertionId = $"_{Guid.NewGuid():N}";
+        var email = $"concurrent-replay-{Guid.NewGuid():N}@example.com";
+        var firstResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Replay", "User", firstFlow,
+            responseId: responseId, assertionId: assertionId);
+        var secondResponse = BuildSignedSamlResponse(certificate, connection.IdentityProviderEntityId, email, "Replay", "User", secondFlow,
+            responseId: responseId, assertionId: assertionId);
+
+        await using var firstContext = CreateIsolatedContext();
+        await using var secondContext = CreateIsolatedContext();
+        var firstService = CreateSamlService(firstContext);
+        var secondService = CreateSamlService(secondContext);
+        var results = await Task.WhenAll(
+            CaptureAcsAsync(firstService, connection.Id, firstResponse, firstFlow.RelayState),
+            CaptureAcsAsync(secondService, connection.Id, secondResponse, secondFlow.RelayState));
+
+        results.Count(x => x.Redirect?.Contains("code=", StringComparison.Ordinal) == true).Should().Be(1);
+        results.Count(x => x.Error?.Message == "SAML response has already been consumed.").Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task SignedSamlResponse_WithoutBearerConfirmationExpiry_IsRejected()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Missing confirmation expiry {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "missing-expiry");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSMissingExpiryIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id, "Missing Expiry SSO", $"urn:missing-expiry:{Guid.NewGuid():N}:idp", "https://idp.example.test/sso",
+            certificate.ExportCertificatePem(), true, false, "email", "first_name", "last_name"));
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(
+            certificate, connection.IdentityProviderEntityId, $"expiry-{Guid.NewGuid():N}@example.com", "Expiry", "User", flow,
+            mutateBeforeSigning: (_, _, assertion) => assertion
+                .GetElementsByTagName("SubjectConfirmationData", "urn:oasis:names:tc:SAML:2.0:assertion")
+                .OfType<XmlElement>().Single().RemoveAttribute("NotOnOrAfter"));
+
+        var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState);
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SAML subject confirmation mismatch.");
+    }
+
     [TestMethod]
     public async Task LegacyTemporaryRelayState_CannotReachSamlCodeIssuance()
     {
@@ -1220,6 +1315,29 @@ public sealed class SamlServiceIntegrationTests
         return new TestSqlOSDbContext(dbOptions);
     }
 
+    private static SqlOSSamlService CreateSamlService(TestSqlOSDbContext context)
+    {
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        return new SqlOSSamlService(context, options, new SqlOSAdminService(context, options, crypto), crypto);
+    }
+
+    private static async Task<(string? Redirect, Exception? Error)> CaptureAcsAsync(
+        SqlOSSamlService service,
+        string connectionId,
+        string response,
+        string relayState)
+    {
+        try
+        {
+            return (await service.HandleAcsAsync(connectionId, response, relayState), null);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex);
+        }
+    }
+
     private static SqlOSSsoAuthorizationService BuildSsoAuthorizationService(TestSqlOSDbContext context)
     {
         var options = Options.Create(AspireFixture.Options);
@@ -1373,11 +1491,13 @@ public sealed class SamlServiceIntegrationTests
         string? inResponseTo = null,
         DateTime? notBefore = null,
         DateTime? notOnOrAfter = null,
+        string? responseId = null,
+        string? assertionId = null,
         Action<XmlDocument, XmlElement, XmlElement>? mutateBeforeSigning = null,
         Action<XmlDocument, XmlElement>? mutateAfterSigning = null)
     {
-        var responseId = $"_{Guid.NewGuid():N}";
-        var assertionId = $"_{Guid.NewGuid():N}";
+        responseId ??= $"_{Guid.NewGuid():N}";
+        assertionId ??= $"_{Guid.NewGuid():N}";
         var issueInstant = DateTime.UtcNow.ToString("o");
         var effectiveAudience = audience ?? AspireFixture.Options.Issuer;
         var effectiveRecipient = recipient ?? flow.AssertionConsumerServiceUrl;

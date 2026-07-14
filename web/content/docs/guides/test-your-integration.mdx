@@ -268,7 +268,7 @@ Start with one test in every row, then add cases for the features you enable.
 | Auth-to-FGA bridge | Login subject is provisioned and receives the intended role/resource grant | Unknown subject or missing resource never gains an implicit grant |
 | Email/phone OTP | Captured code completes once and produces the expected session | Wrong, expired, replayed, or mismatched challenge cannot authenticate |
 | Invitation | Bound email accepts once and creates only the intended membership | Wrong email, revoked/expired token, or replay creates no membership |
-| OIDC/SAML | Signed response maps the intended identity and organization | Bad nonce/signature/audience/time/`InResponseTo`, disabled connection, and JIT-off user fail |
+| OIDC/SAML | Signed response maps the intended identity and organization | Bad nonce/signature/audience/time/`InResponseTo`, missing bearer expiry, replayed response/assertion IDs, disabled connection, and JIT-off user fail |
 | Dashboard | Configured operator can access root, page, and admin API | Anonymous caller is redirected, `401`, or `404` according to the surface; auth routes remain public |
 | Data Protection | Replacement instance sharing the key ring reads existing protected material | Test configuration with a different/lost key ring fails visibly and safely |
 | Upgrade | Current build upgrades a restored previous-version database and completes smoke tests | Rollback/recovery procedure is exercised against an incompatible schema copy |
@@ -282,7 +282,7 @@ Use these as patterns, not as a substitute for product tests:
 - [Dashboard password protection](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/SqlOSExampleApiIntegrationTests.cs) checks the root shell and AuthServer, FGA, and email admin APIs before and after login/logout.
 - [Refresh and logout](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.IntegrationTests/SqlOSExampleWebAuthIntegrationTests.cs) verifies session revocation.
 - [Signing-key replacement resilience](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/AuthServerSigningKeyResilienceIntegrationTests.cs) exercises database-persisted keys across service instances.
-- [SAML rejection cases](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/SamlServiceIntegrationTests.cs) cover signatures, audience, response correlation, expiry, SHA-1, and unsafe XML.
+- [SAML rejection cases](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/SamlServiceIntegrationTests.cs) cover signatures, audience, response correlation, strict bearer expiry, sequential/concurrent replay, SHA-1, and unsafe XML.
 - [Authorization-code concurrency](https://github.com/ross-slaney/sqlos/blob/main/tests/SqlOS.IntegrationTests/OAuthArtifactConcurrencyIntegrationTests.cs) proves single consumption under parallel requests.
 
 ## Keep the database deterministic

@@ -156,11 +156,12 @@ public sealed class SqlOSSamlService
 
             var samlState = ReadSamlRequestState(authorizationRequest.UiContextJson)
                 ?? throw new InvalidOperationException("SAML request state is missing.");
-            var principal = ParseAndValidateAssertion(
+            var assertion = ParseAndValidateAssertion(
                 samlResponse,
                 connection,
                 new SamlValidationContext(samlState.RequestId, samlState.AssertionConsumerServiceUrl, _adminService.GetServiceProviderEntityId()));
-            return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, principal, httpContext, cancellationToken);
+            await ConsumeReplayIdentifiersAsync(connection.Id, assertion, cancellationToken);
+            return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, assertion.Principal, httpContext, cancellationToken);
         }
 
         throw new InvalidOperationException("SAML authorization request is invalid or expired.");
@@ -282,7 +283,7 @@ public sealed class SqlOSSamlService
         return $"{connection.SingleSignOnUrl}{separator}{query}";
     }
 
-    private SqlOSSamlPrincipal ParseAndValidateAssertion(
+    private ValidatedSamlAssertion ParseAndValidateAssertion(
         string base64Response,
         SqlOSSsoConnection connection,
         SamlValidationContext validationContext)
@@ -303,11 +304,14 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("SAML response is invalid.");
         }
 
+        var responseId = RequireSamlIdentifier(responseElement, "response");
+
         var assertionNodes = responseElement.SelectNodes("saml:Assertion", ns);
         if (assertionNodes == null || assertionNodes.Count != 1 || assertionNodes[0] is not XmlElement assertionElement)
         {
             throw new InvalidOperationException("SAML response must contain exactly one assertion.");
         }
+        var assertionId = RequireSamlIdentifier(assertionElement, "assertion");
 
         var signedElement = ValidateSignature(xmlDoc, connection.X509CertificatePem, ns);
         if (!ReferenceEquals(signedElement, responseElement) && !ReferenceEquals(signedElement, assertionElement))
@@ -335,7 +339,7 @@ public sealed class SqlOSSamlService
         }
 
         ValidateResponseCorrelation(responseElement, validationContext);
-        ValidateAssertionConditions(assertionElement, validationContext, ns);
+        var expiresAt = ValidateAssertionConditions(assertionElement, validationContext, ns);
 
         var nameId = assertionElement.SelectSingleNode("saml:Subject/saml:NameID", ns)?.InnerText
             ?? throw new InvalidOperationException("SAML assertion NameID missing.");
@@ -355,7 +359,54 @@ public sealed class SqlOSSamlService
             }
         }
 
-        return new SqlOSSamlPrincipal(issuer, nameId, attributes);
+        return new ValidatedSamlAssertion(
+            new SqlOSSamlPrincipal(issuer, nameId, attributes),
+            responseId,
+            assertionId,
+            expiresAt + SamlClockSkew);
+    }
+
+    private async Task ConsumeReplayIdentifiersAsync(
+        string connectionId,
+        ValidatedSamlAssertion assertion,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await _context.Set<SqlOSSamlReplay>()
+            .Where(x => x.ExpiresAt <= now)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        var replay = new SqlOSSamlReplay
+        {
+            Id = _cryptoService.GenerateId("srp"),
+            ConnectionId = connectionId,
+            ResponseId = assertion.ResponseId,
+            AssertionId = assertion.AssertionId,
+            ConsumedAt = now,
+            ExpiresAt = assertion.ReplayExpiresAt
+        };
+        _context.Set<SqlOSSamlReplay>().Add(replay);
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            _context.Set<SqlOSSamlReplay>().Remove(replay);
+            throw new InvalidOperationException("SAML response has already been consumed.", ex);
+        }
+    }
+
+    private static string RequireSamlIdentifier(XmlElement element, string kind)
+    {
+        var id = element.GetAttribute("ID");
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 450)
+        {
+            throw new InvalidOperationException($"SAML {kind} ID is missing or invalid.");
+        }
+
+        return id;
     }
 
     private static XmlDocument LoadSamlDocument(string xml)
@@ -516,7 +567,7 @@ public sealed class SqlOSSamlService
         }
     }
 
-    private static void ValidateAssertionConditions(XmlElement assertionElement, SamlValidationContext validationContext, XmlNamespaceManager ns)
+    private static DateTime ValidateAssertionConditions(XmlElement assertionElement, SamlValidationContext validationContext, XmlNamespaceManager ns)
     {
         var now = DateTime.UtcNow;
         var conditions = assertionElement.SelectSingleNode("saml:Conditions", ns) as XmlElement
@@ -551,6 +602,8 @@ public sealed class SqlOSSamlService
         {
             throw new InvalidOperationException("SAML subject confirmation mismatch.");
         }
+
+        return notOnOrAfter;
     }
 
     private static bool IsValidSubjectConfirmation(XmlElement subjectConfirmationData, SamlValidationContext validationContext, DateTime now)
@@ -575,7 +628,7 @@ public sealed class SqlOSSamlService
         }
 
         var notOnOrAfter = ParseSamlDateTimeOrNull(subjectConfirmationData.GetAttribute("NotOnOrAfter"));
-        return !notOnOrAfter.HasValue || now - SamlClockSkew < notOnOrAfter.Value;
+        return notOnOrAfter.HasValue && now - SamlClockSkew < notOnOrAfter.Value;
     }
 
     private static DateTime? ParseSamlDateTimeOrNull(string? value)
@@ -904,6 +957,11 @@ public sealed class SqlOSSamlService
     private sealed record SamlRequestState(string RequestId, string AssertionConsumerServiceUrl);
     private sealed record SamlValidationContext(string RequestId, string AssertionConsumerServiceUrl, string Audience);
     private sealed record SqlOSSamlPrincipal(string Issuer, string Subject, Dictionary<string, string> Attributes);
+    private sealed record ValidatedSamlAssertion(
+        SqlOSSamlPrincipal Principal,
+        string ResponseId,
+        string AssertionId,
+        DateTime ReplayExpiresAt);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
         => exception.InnerException is SqlException { Number: 2601 or 2627 };

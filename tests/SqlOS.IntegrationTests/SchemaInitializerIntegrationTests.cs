@@ -14,6 +14,8 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
+    private const int CurrentSchemaVersion = 31;
+
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
     {
@@ -247,7 +249,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
-            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -287,7 +289,7 @@ public sealed class SchemaInitializerIntegrationTests
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_Target"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_ClientApplicationId_RevokedAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSApplicationAssignments", "IX_SqlOSApplicationAssignments_OrganizationId_RevokedAt"));
-            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
@@ -319,7 +321,7 @@ public sealed class SchemaInitializerIntegrationTests
             await initializer.EnsureSchemaAsync();
             await initializer.EnsureSchemaAsync();
 
-            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
             foreach (var column in new[] { "UserName", "PrimaryEmail", "FormattedName", "GivenName", "FamilyName", "DeletedAt", "OwnsUserLifecycle" })
             {
                 Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSScimExternalIds", column));
@@ -464,7 +466,7 @@ public sealed class SchemaInitializerIntegrationTests
                     context,
                     "SELECT [State] FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_upgrade'"));
             Assert.AreEqual(
-                30,
+                CurrentSchemaVersion,
                 await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
@@ -513,7 +515,7 @@ public sealed class SchemaInitializerIntegrationTests
                     context,
                     "SELECT LEN([State]) FROM [dbo].[SqlOSAuthorizationRequests] WHERE [Id] = 'req_state_wide'"));
             Assert.AreEqual(
-                30,
+                CurrentSchemaVersion,
                 await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
