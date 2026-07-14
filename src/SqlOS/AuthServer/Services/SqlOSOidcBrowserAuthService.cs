@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Security;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
@@ -504,17 +505,20 @@ public sealed class SqlOSOidcBrowserAuthService
     }
 
     private static IResult RenderCallbackError(string message)
-        => Results.Content(
-            $"""
+        => new SqlOSHostedHtmlResult(
+            $$"""
             <html>
-              <head><title>SqlOS social login error</title></head>
-              <body style="font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px;">
+              <head>
+                <title>SqlOS social login error</title>
+                <style>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
+              </head>
+              <body>
                 <h1>SqlOS social login error</h1>
-                <p>{System.Net.WebUtility.HtmlEncode(message)}</p>
+                <p>{{System.Net.WebUtility.HtmlEncode(message)}}</p>
               </body>
             </html>
             """,
-            "text/html");
+            StatusCodes.Status400BadRequest);
 
     private static async Task<OidcCallbackInput> ReadCallbackInputAsync(HttpContext httpContext, CancellationToken cancellationToken)
     {

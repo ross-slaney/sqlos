@@ -1,0 +1,48 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
+using SqlOS.Configuration;
+
+namespace SqlOS.Security;
+
+internal sealed class SqlOSBrowserSecurityHeaders
+{
+    private static readonly Regex InlineElementPattern = new(
+        "<(script|style)(?![^>]*\\bnonce\\s*=)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    private readonly SqlOSBrowserSecurityOptions _options;
+
+    public SqlOSBrowserSecurityHeaders(IOptions<SqlOSOptions> options)
+    {
+        _options = options.Value.BrowserSecurity;
+    }
+
+    public void ApplyBaseline(HttpResponse response)
+    {
+        response.Headers["X-Frame-Options"] = "DENY";
+        response.Headers["X-Content-Type-Options"] = "nosniff";
+        response.Headers["Referrer-Policy"] = "no-referrer";
+    }
+
+    public string PrepareHtml(HttpContext context, string html)
+    {
+        ApplyBaseline(context.Response);
+        var nonce = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(18));
+        var policy = _options.ContentSecurityPolicy.Replace(
+            SqlOSBrowserSecurityOptions.NoncePlaceholder,
+            nonce,
+            StringComparison.Ordinal);
+        context.Response.Headers["Content-Security-Policy"] =
+            $"{policy.Trim().TrimEnd(';')}; frame-ancestors 'none'";
+
+        var encodedNonce = WebUtility.HtmlEncode(nonce);
+        return InlineElementPattern.Replace(
+            html,
+            match => $"<{match.Groups[1].Value} nonce=\"{encodedNonce}\"");
+    }
+}

@@ -23,6 +23,7 @@ public sealed class SqlOSOptions
 
     public string DashboardBasePath { get; set; } = "/sqlos";
     public SqlOSDashboardOptions Dashboard { get; } = new();
+    public SqlOSBrowserSecurityOptions BrowserSecurity { get; } = new();
     public SqlOSFgaOptions Fga { get; } = new();
     public SqlOSAuthServerOptions AuthServer { get; } = new();
     public SqlOSEmailOptions Email { get; } = new();
@@ -77,6 +78,23 @@ public sealed class SqlOSOptions
         configure(Calendar);
         return this;
     }
+}
+
+public sealed class SqlOSBrowserSecurityOptions
+{
+    /// <summary>
+    /// Placeholder replaced with a fresh nonce on every SqlOS HTML response.
+    /// </summary>
+    public const string NoncePlaceholder = "{nonce}";
+
+    /// <summary>
+    /// Content Security Policy applied to hosted SqlOS HTML. SqlOS always appends
+    /// <c>frame-ancestors 'none'</c>; callers cannot relax the anti-framing boundary.
+    /// </summary>
+    public string ContentSecurityPolicy { get; set; } =
+        "default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; " +
+        "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
+        "script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}'";
 }
 
 public sealed class SqlOSDashboardOptions

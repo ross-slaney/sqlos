@@ -15,6 +15,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Fga.Dashboard;
+using SqlOS.Security;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -167,6 +168,26 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task DashboardShell_IncludesLockedSecurityHeadersAndNonce()
+    {
+        using var harness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = _ => Task.FromResult(true);
+        });
+
+        var response = await harness.GetDashboardAsync();
+
+        response.XFrameOptions.Should().Be("DENY");
+        response.ContentTypeOptions.Should().Be("nosniff");
+        response.ReferrerPolicy.Should().Be("no-referrer");
+        response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
+        response.ContentSecurityPolicy.Should().NotContain("unsafe-inline");
+        response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\">");
+        response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\" src=");
+    }
+
+    [TestMethod]
     public async Task DashboardPathPrefix_RejectsLookalikeSegment()
     {
         using var harness = CreateHarness(options =>
@@ -214,7 +235,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             "/sqlos/admin/fga",
             new TestHostEnvironment(),
             options,
-            provider.GetRequiredService<SqlOSDashboardSessionService>());
+            provider.GetRequiredService<SqlOSDashboardSessionService>(),
+            Options.Create(new SqlOSOptions()));
         var context = new DefaultHttpContext { RequestServices = provider };
         context.Request.Path = "/sqlos/admin/fga-evil";
 
@@ -255,11 +277,14 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         services.AddDbContext<TestSqlOSInMemoryDbContext>(options =>
             options.UseInMemoryDatabase(databaseName));
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TestSqlOSInMemoryDbContext>());
+        var sqlosOptions = new SqlOSOptions();
+        services.AddSingleton(Options.Create(sqlosOptions));
         services.AddSingleton(Options.Create(new SqlOSAuthServerOptions()));
         services.AddScoped<SqlOSCryptoService>();
         services.AddScoped<SqlOSAdminService>();
         services.AddSingleton<SqlOSDashboardSessionService>();
         services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
+        services.AddSingleton<SqlOSBrowserSecurityHeaders>();
 
         var provider = services.BuildServiceProvider(validateScopes: true);
         var middleware = new SqlOSDashboardMiddleware(
@@ -273,7 +298,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             dashboardOptions,
             scimEnabled,
             provider.GetRequiredService<SqlOSDashboardSessionService>(),
-            provider.GetRequiredService<SqlOSDashboardLoginThrottlingService>());
+            provider.GetRequiredService<SqlOSDashboardLoginThrottlingService>(),
+            provider.GetRequiredService<IOptions<SqlOSOptions>>());
 
         return new DashboardMiddlewareHarness(provider, middleware);
     }
@@ -356,7 +382,15 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
                 ? retryAfterValues.ToString()
                 : null;
 
-            return new DashboardResponse(context.Response.StatusCode, responseBody, setCookie, retryAfter);
+            return new DashboardResponse(
+                context.Response.StatusCode,
+                responseBody,
+                setCookie,
+                retryAfter,
+                context.Response.Headers["X-Frame-Options"].ToString(),
+                context.Response.Headers["X-Content-Type-Options"].ToString(),
+                context.Response.Headers["Referrer-Policy"].ToString(),
+                context.Response.Headers["Content-Security-Policy"].ToString());
         }
 
         public void Dispose()
@@ -367,7 +401,11 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         int StatusCode,
         string Body,
         string[] SetCookie,
-        string? RetryAfter);
+        string? RetryAfter,
+        string XFrameOptions,
+        string ContentTypeOptions,
+        string ReferrerPolicy,
+        string ContentSecurityPolicy);
 
     private sealed class TestHostEnvironment : IHostEnvironment
     {

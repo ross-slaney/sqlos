@@ -196,6 +196,10 @@ For local development, `dotnet user-secrets set "SqlOS:Dashboard:Password" "..."
 
 Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict network access in production.
 
+## Hosted UI security headers
+
+Hosted auth and dashboard HTML use a restrictive nonce-based Content Security Policy and deny framing automatically. No setting is required for the built-in UI. If a reviewed customization loads scripts, styles, images, or fonts from another origin, set `options.BrowserSecurity.ContentSecurityPolicy` and keep the required `{nonce}` placeholder. `frame-ancestors 'none'` is always enforced and cannot be overridden. See [Production Readiness](/docs/guides/production-readiness#keep-the-hosted-ui-browser-boundary-intact) for the default headers and a customization example.
+
 ## Schema ownership
 
 SqlOS runs its own SQL scripts on startup. Your EF migrations **do not** own SqlOS tables. If you need SqlOS tables before your migrations, call `SqlOSBootstrapper.InitializeAsync()` once first.

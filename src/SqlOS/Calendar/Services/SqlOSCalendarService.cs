@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Security;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
@@ -894,17 +895,20 @@ public sealed class SqlOSCalendarService
         => httpContext?.Connection.RemoteIpAddress?.ToString();
 
     private static IResult RenderCallbackError(string message)
-        => Results.Content(
-            $"""
+        => new SqlOSHostedHtmlResult(
+            $$"""
             <html>
-              <head><title>SqlOS calendar connect error</title></head>
-              <body style="font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px;">
+              <head>
+                <title>SqlOS calendar connect error</title>
+                <style>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
+              </head>
+              <body>
                 <h1>SqlOS calendar connect error</h1>
-                <p>{System.Net.WebUtility.HtmlEncode(message)}</p>
+                <p>{{System.Net.WebUtility.HtmlEncode(message)}}</p>
               </body>
             </html>
             """,
-            "text/html");
+            StatusCodes.Status400BadRequest);
 
     internal sealed record SqlOSProviderEndpoints(string AuthorizationEndpoint, string TokenEndpoint);
 }

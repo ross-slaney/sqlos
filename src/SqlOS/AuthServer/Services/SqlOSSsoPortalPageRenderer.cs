@@ -54,9 +54,11 @@ public static class SqlOSSsoPortalPageRenderer
                 button.danger { background: #991b1b; }
                 button:disabled { opacity: .45; cursor: not-allowed; }
                 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+                .row-between { justify-content: space-between; }
                 .check-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
                 .check-row input { width: auto; margin-top: 2px; }
                 .field-grid { display: grid; gap: 10px; }
+                .field-grid-spaced { margin-top: 12px; }
                 label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 700; }
                 input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fff; color: var(--ink); }
                 textarea { min-height: 180px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
@@ -115,14 +117,14 @@ public static class SqlOSSsoPortalPageRenderer
                     </aside>
                     <div class="stack">
                         <section class="panel">
-                            <div class="row" style="justify-content: space-between;">
+                            <div class="row row-between">
                                 <div>
                                     <h2>Service Provider Values</h2>
                                     <p>Copy these into the identity provider application.</p>
                                 </div>
                                 <span id="setup-status" class="badge"></span>
                             </div>
-                            <div id="sp-values" class="field-grid" style="margin-top: 12px;"></div>
+                            <div id="sp-values" class="field-grid field-grid-spaced"></div>
                         </section>
                         <section class="panel">
                             <h2 id="guide-title">Setup Steps</h2>

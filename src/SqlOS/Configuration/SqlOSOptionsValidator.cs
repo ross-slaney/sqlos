@@ -56,6 +56,7 @@ internal static class SqlOSOptionsValidator
         }
 
         ValidateDashboardLoginThrottlingOptions(options.Dashboard.LoginThrottling, errors);
+        ValidateBrowserSecurityOptions(options.BrowserSecurity, errors);
 
         var issuer = ValidateAbsoluteUri(options.AuthServer.Issuer, "AuthServer.Issuer", errors);
         if (issuer != null && authBasePath != null)
@@ -114,6 +115,60 @@ internal static class SqlOSOptionsValidator
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
         }
     }
+
+    private static void ValidateBrowserSecurityOptions(
+        SqlOSBrowserSecurityOptions options,
+        List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(options.ContentSecurityPolicy))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot be empty.");
+            return;
+        }
+
+        if (options.ContentSecurityPolicy.Contains('\r') || options.ContentSecurityPolicy.Contains('\n'))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy must be a single header-safe line.");
+        }
+
+        var scriptDirective = FindCspDirective(options.ContentSecurityPolicy, "script-src");
+        var styleDirective = FindCspDirective(options.ContentSecurityPolicy, "style-src");
+        if (scriptDirective == null
+            || !scriptDirective.Contains(SqlOSBrowserSecurityOptions.NoncePlaceholder, StringComparison.Ordinal))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy script-src must include the {nonce} placeholder.");
+        }
+
+        if (styleDirective == null
+            || !styleDirective.Contains(SqlOSBrowserSecurityOptions.NoncePlaceholder, StringComparison.Ordinal))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy style-src must include the {nonce} placeholder.");
+        }
+
+        if (scriptDirective != null
+            && (scriptDirective.Contains("'unsafe-inline'", StringComparison.OrdinalIgnoreCase)
+                || scriptDirective.Contains("'unsafe-eval'", StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy script-src cannot allow unsafe-inline or unsafe-eval.");
+        }
+
+        if (styleDirective != null
+            && styleDirective.Contains("'unsafe-inline'", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy style-src cannot allow unsafe-inline.");
+        }
+
+        if (options.ContentSecurityPolicy.Contains("frame-ancestors", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot configure frame-ancestors; SqlOS always enforces frame-ancestors 'none'.");
+        }
+    }
+
+    private static string? FindCspDirective(string policy, string directiveName)
+        => policy.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(directive =>
+                directive.Equals(directiveName, StringComparison.OrdinalIgnoreCase)
+                || directive.StartsWith(directiveName + " ", StringComparison.OrdinalIgnoreCase));
 
     private static void ValidateMfaOptions(SqlOSMfaOptions options, List<string> errors)
     {

@@ -99,6 +99,32 @@ public sealed class AuthPageCsrfIntegrationTests
         session.AuthenticationMethod.Should().Be("password");
     }
 
+    [TestMethod]
+    public async Task HostedAuthPage_UsesLockedBrowserSecurityHeadersAndPerResponseNonce()
+    {
+        await using var server = await AuthPageCsrfServer.CreateAsync();
+        using var client = server.App.GetTestClient();
+        client.BaseAddress = new Uri(TrustedOrigin);
+
+        var first = await client.GetAsync("/sqlos/auth/login");
+        var second = await client.GetAsync("/sqlos/auth/login");
+        var firstHtml = await first.Content.ReadAsStringAsync();
+        var secondHtml = await second.Content.ReadAsStringAsync();
+        var firstNonce = Regex.Match(firstHtml, "<style nonce=\"([A-Za-z0-9_-]+)\"").Groups[1].Value;
+        var secondNonce = Regex.Match(secondHtml, "<style nonce=\"([A-Za-z0-9_-]+)\"").Groups[1].Value;
+
+        first.Headers.GetValues("X-Frame-Options").Should().ContainSingle("DENY");
+        first.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
+        first.Headers.GetValues("Referrer-Policy").Should().ContainSingle("no-referrer");
+        var policy = first.Headers.GetValues("Content-Security-Policy").Single();
+        policy.Should().Contain("frame-ancestors 'none'");
+        policy.Should().Contain($"'nonce-{firstNonce}'");
+        policy.Should().NotContain("unsafe-inline");
+        firstHtml.Should().Contain($"<script nonce=\"{firstNonce}\">");
+        firstNonce.Should().NotBeNullOrWhiteSpace();
+        secondNonce.Should().NotBe(firstNonce, "every HTML response receives a fresh nonce");
+    }
+
     private static string ExtractInputValue(string html, string name)
     {
         var match = Regex.Match(

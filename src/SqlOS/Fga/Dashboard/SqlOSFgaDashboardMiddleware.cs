@@ -5,12 +5,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
+using SqlOS.Security;
 
 namespace SqlOS.Fga.Dashboard;
 
@@ -22,6 +24,7 @@ public class SqlOSFgaDashboardMiddleware
     private readonly SqlOSDashboardOptions _dashboardOptions;
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly IFileProvider _fileProvider;
+    private readonly SqlOSBrowserSecurityHeaders _securityHeaders;
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
     private const int MaxAncestorTraversalDepth = 50;
@@ -36,13 +39,15 @@ public class SqlOSFgaDashboardMiddleware
         string pathPrefix,
         IHostEnvironment environment,
         SqlOSDashboardOptions dashboardOptions,
-        SqlOSDashboardSessionService sessionService)
+        SqlOSDashboardSessionService sessionService,
+        IOptions<SqlOSOptions> hostOptions)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
         _isDevelopment = environment.IsDevelopment();
         _dashboardOptions = dashboardOptions;
         _sessionService = sessionService;
+        _securityHeaders = new SqlOSBrowserSecurityHeaders(hostOptions);
         _fileProvider = CreateFileProvider();
     }
 
@@ -58,6 +63,7 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         var relativePath = path[_pathPrefix.Length..].TrimStart('/');
+        _securityHeaders.ApplyBaseline(context.Response);
         var isApiRequest = relativePath.StartsWith("api/", StringComparison.OrdinalIgnoreCase);
 
         if (!await IsAuthorizedAsync(context))
@@ -1040,6 +1046,7 @@ public class SqlOSFgaDashboardMiddleware
             var html = await reader.ReadToEndAsync();
             html = html.Replace("__SQL_OS_FGA_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(GetDashboardShellPrefix().TrimEnd('/')), StringComparison.Ordinal);
             html = html.Replace("__SQL_OS_BASE_PATH__", GetDashboardShellPrefix().TrimEnd('/'), StringComparison.Ordinal);
+            html = _securityHeaders.PrepareHtml(context, html);
             await context.Response.WriteAsync(html);
             return;
         }

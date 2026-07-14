@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Security;
 
@@ -240,7 +241,8 @@ internal sealed class SqlOSHostedHtmlResult(string html, int statusCode) : IResu
 
     public async Task ExecuteAsync(HttpContext httpContext)
     {
-        var responseHtml = html;
+        var securityHeaders = httpContext.RequestServices.GetRequiredService<SqlOSBrowserSecurityHeaders>();
+        var responseHtml = securityHeaders.PrepareHtml(httpContext, html);
         if (PostFormPattern.IsMatch(responseHtml))
         {
             var antiforgery = httpContext.RequestServices.GetRequiredService<SqlOSHostedFormAntiforgery>();

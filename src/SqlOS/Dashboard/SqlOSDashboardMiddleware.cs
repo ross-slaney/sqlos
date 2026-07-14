@@ -2,10 +2,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.Json;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
+using SqlOS.Security;
 
 namespace SqlOS.Dashboard;
 
@@ -24,6 +26,7 @@ public sealed class SqlOSDashboardMiddleware
     private readonly SqlOSDashboardSessionService _sessionService;
     private readonly SqlOSDashboardLoginThrottlingService _loginThrottlingService;
     private readonly IFileProvider _fileProvider;
+    private readonly SqlOSBrowserSecurityHeaders _securityHeaders;
 
     public SqlOSDashboardMiddleware(
         RequestDelegate next,
@@ -32,7 +35,8 @@ public sealed class SqlOSDashboardMiddleware
         SqlOSDashboardOptions options,
         bool scimEnabled,
         SqlOSDashboardSessionService sessionService,
-        SqlOSDashboardLoginThrottlingService loginThrottlingService)
+        SqlOSDashboardLoginThrottlingService loginThrottlingService,
+        IOptions<SqlOSOptions> hostOptions)
     {
         _next = next;
         _pathPrefix = pathPrefix.TrimEnd('/');
@@ -41,6 +45,7 @@ public sealed class SqlOSDashboardMiddleware
         _options = options;
         _sessionService = sessionService;
         _loginThrottlingService = loginThrottlingService;
+        _securityHeaders = new SqlOSBrowserSecurityHeaders(hostOptions);
         _fileProvider = CreateFileProvider();
     }
 
@@ -67,6 +72,8 @@ public sealed class SqlOSDashboardMiddleware
             await _next(context);
             return;
         }
+
+        _securityHeaders.ApplyBaseline(context.Response);
 
         if (IsDashboardAuthEndpoint(relativePath))
         {
@@ -482,6 +489,7 @@ public sealed class SqlOSDashboardMiddleware
             JsonSerializer.Serialize(new { scimEnabled = _scimEnabled }),
             StringComparison.Ordinal);
         html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
+        html = _securityHeaders.PrepareHtml(context, html);
         await context.Response.WriteAsync(html);
     }
 
