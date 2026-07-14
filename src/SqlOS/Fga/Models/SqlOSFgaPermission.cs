@@ -6,6 +6,8 @@ namespace SqlOS.Fga.Models;
 /// </summary>
 public class SqlOSFgaPermission
 {
+    internal const int MaxKeyLength = 450;
+
     public string Id { get; set; } = string.Empty;
     public string? ResourceTypeId { get; set; }
     public string Key { get; set; } = string.Empty;

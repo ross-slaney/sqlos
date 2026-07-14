@@ -394,6 +394,17 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public void FgaSeedDsl_RejectsPermissionKeysThatCannotBeIndexed()
+    {
+        var seed = new SqlOSFgaSeedBuilder();
+
+        var act = () => seed.Permission("perm_oversized", new string('K', 451), "Oversized", "workspace");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*permission keys cannot exceed 450 characters*");
+    }
+
+    [TestMethod]
     public void SeedDeviceFlowClient_CreatesDeviceFlowPublicClient()
     {
         var options = new SqlOSAuthServerOptions();

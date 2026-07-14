@@ -93,6 +93,11 @@ public sealed class SqlOSFgaSeedBuilder
     {
         var normalizedId = RequireValue(id, nameof(id));
         var normalizedKey = RequireValue(key, nameof(key));
+        if (normalizedKey.Length > SqlOSFgaPermission.MaxKeyLength)
+        {
+            throw new InvalidOperationException(
+                $"FGA permission keys cannot exceed {SqlOSFgaPermission.MaxKeyLength} characters.");
+        }
         if (_permissionsById.TryGetValue(normalizedId, out var existingPermission))
         {
             _permissionsByKey.Remove(existingPermission.Key);

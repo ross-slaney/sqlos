@@ -1338,7 +1338,7 @@ public class SqlOSFgaDashboardMiddleware
     private static async Task HandleCreatePermission(HttpContext context, ISqlOSFgaDbContext dbContext)
     {
         var body = await JsonSerializer.DeserializeAsync<CreatePermissionRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrEmpty(body.Key) || string.IsNullOrEmpty(body.Name))
+        if (body == null || string.IsNullOrWhiteSpace(body.Key) || string.IsNullOrWhiteSpace(body.Name))
         {
             context.Response.StatusCode = 400;
             await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
@@ -1346,6 +1346,13 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         var permissionKey = body.Key.Trim();
+        if (permissionKey.Length > SqlOSFgaPermission.MaxKeyLength)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"{{\"error\":\"Permission keys cannot exceed {SqlOSFgaPermission.MaxKeyLength} characters.\"}}");
+            return;
+        }
+
         if (await dbContext.Set<SqlOSFgaPermission>().AnyAsync(p => p.Key == permissionKey))
         {
             context.Response.StatusCode = StatusCodes.Status409Conflict;

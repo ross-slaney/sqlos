@@ -9,6 +9,16 @@ BEGIN
 END
 GO
 
+IF EXISTS (
+    SELECT 1
+    FROM [{Schema}].[{Permissions}]
+    WHERE LEN([Key]) > 450
+)
+BEGIN
+    THROW 51001, 'SqlOS cannot index FGA permission keys longer than 450 characters. Shorten those permission keys and restart.', 1;
+END
+GO
+
 ALTER TABLE [{Schema}].[{Permissions}]
 ALTER COLUMN [Key] NVARCHAR(450) NOT NULL;
 GO
