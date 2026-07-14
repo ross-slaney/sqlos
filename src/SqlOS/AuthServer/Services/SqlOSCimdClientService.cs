@@ -52,7 +52,7 @@ public sealed class SqlOSCimdClientService
 
         if (existingClient != null && !ShouldRefreshMetadata(existingClient))
         {
-            ValidateRedirectUri(existingClient.RedirectUrisJson, redirectUri, clientId);
+            await ValidateCachedRedirectUrisAsync(existingClient.RedirectUrisJson, redirectUri, clientId, cancellationToken);
             existingClient.LastSeenAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
             return new SqlOSResolvedClient(existingClient, "cimd");
@@ -104,7 +104,7 @@ public sealed class SqlOSCimdClientService
             existingClient.MetadataExpiresAt = ResolveMetadataExpiry(response, now);
             existingClient.LastSeenAt = now;
             await _context.SaveChangesAsync(cancellationToken);
-            ValidateRedirectUri(existingClient.RedirectUrisJson, redirectUri, clientId);
+            await ValidateCachedRedirectUrisAsync(existingClient.RedirectUrisJson, redirectUri, clientId, cancellationToken);
             return new SqlOSResolvedClient(existingClient, "cimd");
         }
 
@@ -360,17 +360,46 @@ public sealed class SqlOSCimdClientService
         return now.Add(_options.ClientRegistration.Cimd.DefaultCacheTtl);
     }
 
-    private static void ValidateRedirectUri(string redirectUrisJson, string? redirectUri, string clientId)
+    private async Task ValidateCachedRedirectUrisAsync(
+        string redirectUrisJson,
+        string? redirectUri,
+        string clientId,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(redirectUri))
+        try
         {
-            return;
+            var redirectUris = SqlOSAdminService.DeserializeJsonList(redirectUrisJson);
+            ValidateRedirectUriPolicy(redirectUris, clientId);
+            if (!string.IsNullOrWhiteSpace(redirectUri)
+                && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
+            }
         }
-
-        var redirectUris = SqlOSAdminService.DeserializeJsonList(redirectUrisJson);
-        if (!redirectUris.Contains(redirectUri, StringComparer.Ordinal))
+        catch (InvalidOperationException ex)
         {
-            throw new InvalidOperationException($"Redirect URI '{redirectUri}' is not allowed for client '{clientId}'.");
+            await RecordAuditAsync(
+                "client.cimd.validation-failed",
+                clientId,
+                new { error = ex.Message },
+                cancellationToken);
+            throw new InvalidOperationException("Client metadata document validation failed.", ex);
+        }
+    }
+
+    private void ValidateRedirectUriPolicy(IEnumerable<string> redirectUris, string clientId)
+    {
+        foreach (var redirectUri in redirectUris)
+        {
+            if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var parsedRedirectUri)
+                || !SqlOSRedirectUriPolicy.IsAllowed(
+                    parsedRedirectUri,
+                    _options.ClientRegistration.Dcr.AllowHttpsRedirectUris,
+                    _options.ClientRegistration.Dcr.AllowLoopbackRedirectUris))
+            {
+                throw new InvalidOperationException(
+                    $"Client metadata document for '{clientId}' contains redirect URI '{redirectUri}' that must use HTTPS or an HTTP loopback address.");
+            }
         }
     }
 
@@ -418,7 +447,7 @@ public sealed class SqlOSCimdClientService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private static ParsedCimdDocument ParseMetadataDocument(JsonElement root, string clientId, string? redirectUri)
+    private ParsedCimdDocument ParseMetadataDocument(JsonElement root, string clientId, string? redirectUri)
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
@@ -438,13 +467,7 @@ public sealed class SqlOSCimdClientService
             throw new InvalidOperationException($"Client metadata document for '{clientId}' must include at least one redirect URI.");
         }
 
-        foreach (var uri in redirectUris)
-        {
-            if (!Uri.TryCreate(uri, UriKind.Absolute, out _))
-            {
-                throw new InvalidOperationException($"Client metadata document for '{clientId}' contains an invalid redirect URI '{uri}'.");
-            }
-        }
+        ValidateRedirectUriPolicy(redirectUris, clientId);
 
         if (!string.IsNullOrWhiteSpace(redirectUri)
             && !redirectUris.Contains(redirectUri, StringComparer.Ordinal))
