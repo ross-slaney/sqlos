@@ -70,7 +70,7 @@ public sealed class SchemaInitializerIntegrationTests
         try
         {
             var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                .UseSqlServer(databaseConnectionString)
+                .UseSqlServer(databaseConnectionString, sql => sql.EnableRetryOnFailure())
                 .Options;
             await using var context = new TestSqlOSDbContext(dbOptions);
             var initializer = new SqlOSSchemaInitializer(

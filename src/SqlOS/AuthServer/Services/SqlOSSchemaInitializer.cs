@@ -70,11 +70,19 @@ END";
             // completed, while every member of a duplicate-version group is rerun because
             // the old marker cannot tell which member committed before a crash.
             var currentVersionScriptCount = orderedMigrations.Count(x => x.Version == currentVersion);
-            foreach (var migration in orderedMigrations.Where(x =>
-                         x.Version < currentVersion
-                         || (x.Version == currentVersion && currentVersionScriptCount == 1)))
+            var legacyAppliedMigrations = orderedMigrations.Where(x =>
+                    x.Version < currentVersion
+                    || (x.Version == currentVersion && currentVersionScriptCount == 1))
+                .ToList();
+            await ExecuteInTransactionAsync(async () =>
             {
-                await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
+                foreach (var migration in legacyAppliedMigrations)
+                {
+                    await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
+                }
+            }, cancellationToken);
+            foreach (var migration in legacyAppliedMigrations)
+            {
                 appliedMigrations.Add(migration.ResourceName);
             }
         }
@@ -91,10 +99,11 @@ END";
         foreach (var migration in pendingMigrations)
         {
             _logger.LogInformation("Running SqlOS schema migration {Version}: {Name}", migration.Version, migration.Name);
-            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-            await RunScriptAsync(migration.ResourceName, cancellationToken);
-            await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await ExecuteInTransactionAsync(async () =>
+            {
+                await RunScriptAsync(migration.ResourceName, cancellationToken);
+                await RecordAppliedMigrationAsync(schema, migration, cancellationToken);
+            }, cancellationToken);
         }
 
         var targetVersion = orderedMigrations.Max(x => x.Version);
@@ -189,6 +198,17 @@ END";
         return _context.Database.ExecuteSqlRawAsync(sql,
             [new SqlParameter("@scriptName", migration.ResourceName), new SqlParameter("@version", migration.Version)],
             cancellationToken);
+    }
+
+    private async Task ExecuteInTransactionAsync(Func<Task> operation, CancellationToken cancellationToken)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            await operation();
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     private async Task RunScriptAsync(string resourceName, CancellationToken cancellationToken)
