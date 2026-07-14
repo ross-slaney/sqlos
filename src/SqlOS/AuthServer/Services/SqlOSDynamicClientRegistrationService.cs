@@ -255,7 +255,7 @@ public sealed class SqlOSDynamicClientRegistrationService
             {
                 throw new SqlOSClientRegistrationException(
                     "invalid_redirect_uri",
-                    $"Redirect URI '{redirectUri}' must use https or a loopback localhost redirect.");
+                    $"Redirect URI '{redirectUri}' must use HTTPS or an HTTP loopback address.");
             }
         }
 

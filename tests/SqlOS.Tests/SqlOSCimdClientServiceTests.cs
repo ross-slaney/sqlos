@@ -278,6 +278,45 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_RejectsUnsafeCachedRedirectAfterNotModifiedResponse()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_cached_unsafe_304",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Unsafe Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"http://attacker.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-1),
+            MetadataEtag = "\"unsafe-v1\"",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        await context.SaveChangesAsync();
+        var httpFactory = new FakeHttpClientFactory(_ => new HttpResponseMessage(HttpStatusCode.NotModified));
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var act = async () => await resolver.ResolveRequiredClientAsync(
+            existing.ClientId,
+            "http://attacker.example.test/callback");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Client metadata document validation failed.");
+        httpFactory.RequestCount.Should().Be(1);
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.validation-failed"))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsTrustPolicyDenial()
     {
         using var context = CreateContext();
