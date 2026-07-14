@@ -77,6 +77,31 @@ public sealed class SqlOSPipelineStartupFilterTests
             && message.Contains("return 404 outside Development", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public void Configure_DevelopmentOnlyDashboard_EmitsUnauthenticatedDevelopmentWarning()
+    {
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment
+        {
+            EnvironmentName = Environments.Development
+        });
+        services.AddSingleton(Options.Create(new SqlOSOptions()));
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
+
+        using var provider = services.BuildServiceProvider();
+        var appBuilder = new ApplicationBuilder(provider);
+        var logger = new RecordingLogger<SqlOSPipelineStartupFilter>();
+
+        new SqlOSPipelineStartupFilter(logger).Configure(_ => { })(appBuilder);
+
+        logger.Messages.Should().ContainSingle(message =>
+            message.Contains("available without a login", StringComparison.Ordinal)
+            && message.Contains("Do not use Development in a production deployment", StringComparison.Ordinal));
+    }
+
     private sealed class RecordingLogger<T> : ILogger<T>
     {
         public List<string> Messages { get; } = [];

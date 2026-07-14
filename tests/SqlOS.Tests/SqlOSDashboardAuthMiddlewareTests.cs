@@ -223,6 +223,21 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         context.Response.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
     }
 
+    [TestMethod]
+    public async Task DashboardClientReturnPath_UsesExactOrChildSegmentBoundary()
+    {
+        var files = new ManifestEmbeddedFileProvider(
+            typeof(SqlOSDashboardMiddleware).Assembly,
+            "Dashboard/wwwroot");
+        await using var stream = files.GetFileInfo("app.js").CreateReadStream();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var source = await reader.ReadToEndAsync();
+
+        source.Should().Contain("parsed.pathname === dashboardBasePath");
+        source.Should().Contain("parsed.pathname.startsWith(`${dashboardBasePath}/`)");
+        source.Should().NotContain("parsed.pathname.startsWith(dashboardBasePath || \"/\")");
+    }
+
     private static DashboardMiddlewareHarness CreateHarness(
         Action<SqlOSDashboardOptions>? configure = null,
         bool scimEnabled = false)
