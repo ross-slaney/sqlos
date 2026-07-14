@@ -956,7 +956,7 @@
             </div>`;
 
         $('#modal').innerHTML = html;
-        $('#modal-overlay').style.display = 'flex';
+        $('#modal-overlay').hidden = false;
 
         $('#role-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
@@ -1007,7 +1007,7 @@
             </div>`;
 
         $('#modal').innerHTML = html;
-        $('#modal-overlay').style.display = 'flex';
+        $('#modal-overlay').hidden = false;
 
         $('#add-perm-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
@@ -1094,7 +1094,7 @@
             </div>`;
 
         $('#modal').innerHTML = html;
-        $('#modal-overlay').style.display = 'flex';
+        $('#modal-overlay').hidden = false;
 
         $('#perm-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
@@ -1372,7 +1372,7 @@
     }
 
     function closeModal() {
-        $('#modal-overlay').style.display = 'none';
+        $('#modal-overlay').hidden = true;
     }
 
     async function openGrantModal(subjectId, resourceId) {
@@ -1417,7 +1417,7 @@
         </div>`;
 
         $('#modal').innerHTML = html;
-        $('#modal-overlay').style.display = 'flex';
+        $('#modal-overlay').hidden = false;
 
         $('#grant-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };

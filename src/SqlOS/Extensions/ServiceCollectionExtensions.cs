@@ -20,6 +20,7 @@ using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Services;
 using SqlOS.Hosting;
 using SqlOS.Services;
+using SqlOS.Security;
 
 namespace SqlOS.Extensions;
 
@@ -45,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(Options.Create(options.Calendar));
         services.AddDataProtection();
         services.AddSingleton<SqlOSHostedFormAntiforgery>();
+        services.AddSingleton<SqlOSBrowserSecurityHeaders>();
         services.AddHttpClient();
         services.AddHttpClient(nameof(SqlOSOidcAuthService), client =>
         {

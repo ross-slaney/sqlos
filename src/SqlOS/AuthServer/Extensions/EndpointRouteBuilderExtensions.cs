@@ -3481,14 +3481,13 @@ public static class EndpointRouteBuilderExtensions
                 await authService.VerifyEmailAsync(
                     new SqlOSVerifyEmailRequest(context.Request.Query["token"].ToString()),
                     cancellationToken);
-                return Results.Content(BuildEmailVerificationPage(error: null), contentType: "text/html");
+                return HostedHtml(BuildEmailVerificationPage(error: null));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Content(
+                return HostedHtml(
                     BuildEmailVerificationPage(await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken)),
-                    contentType: "text/html",
-                    statusCode: StatusCodes.Status400BadRequest);
+                    StatusCodes.Status400BadRequest);
             }
         });
 
@@ -4043,12 +4042,12 @@ public static class EndpointRouteBuilderExtensions
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Content(SqlOSSsoPortalPageRenderer.RenderStartError(ex.Message), "text/html; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+                return HostedHtml(SqlOSSsoPortalPageRenderer.RenderStartError(ex.Message), StatusCodes.Status400BadRequest);
             }
         });
 
         portal.MapGet("", (SqlOSSsoPortalService portalService) => portalService.IsHostedPortalEnabled
-            ? Results.Content(SqlOSSsoPortalPageRenderer.RenderShell(), "text/html; charset=utf-8")
+            ? HostedHtml(SqlOSSsoPortalPageRenderer.RenderShell())
             : Results.NotFound());
 
         var api = portal.MapGroup("/api");

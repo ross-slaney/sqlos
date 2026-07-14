@@ -56,6 +56,7 @@ internal static class SqlOSOptionsValidator
         }
 
         ValidateDashboardLoginThrottlingOptions(options.Dashboard.LoginThrottling, errors);
+        ValidateBrowserSecurityOptions(options.BrowserSecurity, errors);
 
         var issuer = ValidateAbsoluteUri(options.AuthServer.Issuer, "AuthServer.Issuer", errors);
         if (issuer != null && authBasePath != null)
@@ -112,6 +113,34 @@ internal static class SqlOSOptionsValidator
         {
             throw new InvalidOperationException(
                 "Invalid SqlOS configuration:" + Environment.NewLine + string.Join(Environment.NewLine, errors.Select(static error => $"- {error}")));
+        }
+    }
+
+    private static void ValidateBrowserSecurityOptions(
+        SqlOSBrowserSecurityOptions options,
+        List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(options.ContentSecurityPolicy))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot be empty.");
+            return;
+        }
+
+        if (options.ContentSecurityPolicy.Contains('\r') || options.ContentSecurityPolicy.Contains('\n'))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy must be a single header-safe line.");
+        }
+
+        if (!options.ContentSecurityPolicy.Contains(
+                SqlOSBrowserSecurityOptions.NoncePlaceholder,
+                StringComparison.Ordinal))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy must include the {nonce} placeholder for SqlOS inline scripts and styles.");
+        }
+
+        if (options.ContentSecurityPolicy.Contains("frame-ancestors", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot configure frame-ancestors; SqlOS always enforces frame-ancestors 'none'.");
         }
     }
 

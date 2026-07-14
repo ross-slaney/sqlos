@@ -222,6 +222,7 @@ td a:hover, .tree-resource-name:hover { color: var(--amber-600); }
 
 /* ── Modal ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-overlay[hidden] { display: none; }
 .modal { background: #fff; border-radius: 8px; padding: 0; min-width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid var(--zinc-200); }
 .modal h3 { padding: 1rem 1.25rem; border-bottom: 1px solid var(--zinc-200); font-size: 0.95rem; font-weight: 600; }
 .modal-field { padding: 0 1.25rem; margin-top: 0.75rem; }

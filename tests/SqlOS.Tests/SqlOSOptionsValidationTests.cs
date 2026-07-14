@@ -152,6 +152,21 @@ public sealed class SqlOSOptionsValidationTests
         act.Should().NotThrow();
     }
 
+    [DataTestMethod]
+    [DataRow("default-src 'self'; script-src 'self'")]
+    [DataRow("default-src 'self'; script-src 'nonce-{nonce}'; frame-ancestors https://example.test")]
+    [DataRow("default-src 'self'; script-src 'nonce-{nonce}'\r\nX-Test: injected")]
+    public void AddSqlOS_RejectsUnsafeBrowserSecurityPolicy(string policy)
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.BrowserSecurity.ContentSecurityPolicy = policy);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*BrowserSecurity.ContentSecurityPolicy*");
+    }
+
     [TestMethod]
     public void AddSqlOS_SingleApplicationOriginDerivesIssuerWithoutPublicOriginSetup()
     {
