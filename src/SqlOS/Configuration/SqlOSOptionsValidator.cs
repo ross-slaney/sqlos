@@ -131,11 +131,31 @@ internal static class SqlOSOptionsValidator
             errors.Add("BrowserSecurity.ContentSecurityPolicy must be a single header-safe line.");
         }
 
-        if (!options.ContentSecurityPolicy.Contains(
-                SqlOSBrowserSecurityOptions.NoncePlaceholder,
-                StringComparison.Ordinal))
+        var scriptDirective = FindCspDirective(options.ContentSecurityPolicy, "script-src");
+        var styleDirective = FindCspDirective(options.ContentSecurityPolicy, "style-src");
+        if (scriptDirective == null
+            || !scriptDirective.Contains(SqlOSBrowserSecurityOptions.NoncePlaceholder, StringComparison.Ordinal))
         {
-            errors.Add("BrowserSecurity.ContentSecurityPolicy must include the {nonce} placeholder for SqlOS inline scripts and styles.");
+            errors.Add("BrowserSecurity.ContentSecurityPolicy script-src must include the {nonce} placeholder.");
+        }
+
+        if (styleDirective == null
+            || !styleDirective.Contains(SqlOSBrowserSecurityOptions.NoncePlaceholder, StringComparison.Ordinal))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy style-src must include the {nonce} placeholder.");
+        }
+
+        if (scriptDirective != null
+            && (scriptDirective.Contains("'unsafe-inline'", StringComparison.OrdinalIgnoreCase)
+                || scriptDirective.Contains("'unsafe-eval'", StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy script-src cannot allow unsafe-inline or unsafe-eval.");
+        }
+
+        if (styleDirective != null
+            && styleDirective.Contains("'unsafe-inline'", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("BrowserSecurity.ContentSecurityPolicy style-src cannot allow unsafe-inline.");
         }
 
         if (options.ContentSecurityPolicy.Contains("frame-ancestors", StringComparison.OrdinalIgnoreCase))
@@ -143,6 +163,12 @@ internal static class SqlOSOptionsValidator
             errors.Add("BrowserSecurity.ContentSecurityPolicy cannot configure frame-ancestors; SqlOS always enforces frame-ancestors 'none'.");
         }
     }
+
+    private static string? FindCspDirective(string policy, string directiveName)
+        => policy.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(directive =>
+                directive.Equals(directiveName, StringComparison.OrdinalIgnoreCase)
+                || directive.StartsWith(directiveName + " ", StringComparison.OrdinalIgnoreCase));
 
     private static void ValidateMfaOptions(SqlOSMfaOptions options, List<string> errors)
     {

@@ -18,6 +18,7 @@ using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Models;
 using SqlOS.Calendar.Services;
 using SqlOS.Configuration;
+using SqlOS.Security;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -132,7 +133,9 @@ public sealed class SqlOSCalendarEndpointsTests
 
         var callback = await client.GetAsync("/sqlos/auth/calendar/callback?code=success:missing@example.com");
 
-        callback.StatusCode.Should().Be(HttpStatusCode.OK);
+        callback.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        callback.Headers.GetValues("Content-Security-Policy").Single().Should().Contain("'nonce-");
+        callback.Headers.GetValues("X-Frame-Options").Single().Should().Be("DENY");
         (await callback.Content.ReadAsStringAsync()).Should().Contain("SqlOS calendar connect error");
     }
 
@@ -155,6 +158,7 @@ public sealed class SqlOSCalendarEndpointsTests
                     services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TestSqlOSInMemoryDbContext>());
                     services.AddSingleton(Options.Create(sqlosOptions));
                     services.AddSingleton(Options.Create(sqlosOptions.AuthServer));
+                    services.AddSingleton<SqlOSBrowserSecurityHeaders>();
                     services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
                     services.AddSingleton<IHttpClientFactory, FakeCalendarProviderHttpClientFactory>();
                     services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSGoogleCalendarAdapter>();

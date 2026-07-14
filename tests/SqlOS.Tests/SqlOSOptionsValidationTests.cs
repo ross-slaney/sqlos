@@ -154,6 +154,9 @@ public sealed class SqlOSOptionsValidationTests
 
     [DataTestMethod]
     [DataRow("default-src 'self'; script-src 'self'")]
+    [DataRow("default-src 'self'; script-src 'nonce-{nonce}'; style-src 'self'")]
+    [DataRow("default-src 'self'; script-src 'self' 'unsafe-inline' 'nonce-{nonce}'; style-src 'nonce-{nonce}'")]
+    [DataRow("default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'unsafe-inline' 'nonce-{nonce}'")]
     [DataRow("default-src 'self'; script-src 'nonce-{nonce}'; frame-ancestors https://example.test")]
     [DataRow("default-src 'self'; script-src 'nonce-{nonce}'\r\nX-Test: injected")]
     public void AddSqlOS_RejectsUnsafeBrowserSecurityPolicy(string policy)
