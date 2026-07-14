@@ -101,6 +101,80 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndEfFilter()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var permission = new SqlOSFgaPermission
+        {
+            Id = $"perm_typed_deny_{suffix}",
+            Key = $"TYPED_DENY_{suffix}",
+            Name = "Team-only permission",
+            ResourceTypeId = "team"
+        };
+        Context.Set<SqlOSFgaPermission>().Add(permission);
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
+        {
+            RoleId = FgaTestDataSeeder.SystemAdminRoleId,
+            PermissionId = permission.Id
+        });
+        await Context.SaveChangesAsync();
+
+        var point = await _authService.CheckAccessAsync(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            permission.Key,
+            FgaTestDataSeeder.TestProjectResourceId);
+        var trace = await _authService.TraceResourceAccessAsync(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            FgaTestDataSeeder.TestProjectResourceId,
+            permission.Key);
+        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity
+        {
+            Id = $"typed_{Guid.NewGuid():N}",
+            ResourceId = FgaTestDataSeeder.TestProjectResourceId
+        });
+        await Context.SaveChangesAsync();
+        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            permission.Key);
+
+        Assert.IsFalse(point.Allowed);
+        Assert.IsTrue(point.Error?.Contains("does not apply to resource type project", StringComparison.Ordinal));
+        Assert.IsFalse(trace.AccessGranted);
+        Assert.IsTrue(trace.DenialReason?.Contains("applies to resource type 'team'", StringComparison.Ordinal));
+        Assert.IsFalse(await Context.Set<LifecycleProtectedEntity>()
+            .Where(x => x.ResourceId == FgaTestDataSeeder.TestProjectResourceId)
+            .Where(filter)
+            .AnyAsync());
+    }
+
+    [TestMethod]
+    public async Task TypeScopedPermission_AllowsTargetTypeViaAncestorGrant()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var permission = new SqlOSFgaPermission
+        {
+            Id = $"perm_typed_allow_{suffix}",
+            Key = $"TYPED_ALLOW_{suffix}",
+            Name = "Project permission",
+            ResourceTypeId = "project"
+        };
+        Context.Set<SqlOSFgaPermission>().Add(permission);
+        Context.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
+        {
+            RoleId = FgaTestDataSeeder.AgencyAdminRoleId,
+            PermissionId = permission.Id
+        });
+        await Context.SaveChangesAsync();
+
+        var result = await _authService.CheckAccessAsync(
+            FgaTestDataSeeder.AgencyAdminSubjectId,
+            permission.Key,
+            FgaTestDataSeeder.TestProjectResourceId);
+
+        Assert.IsTrue(result.Allowed, "a permission scoped to the target type should still inherit through an ancestor grant");
+    }
+
+    [TestMethod]
     public async Task InactiveUser_IsDeniedByPointCheckAndEfFilterDespiteExistingGrant()
     {
         var subjectService = CreateSubjectService();

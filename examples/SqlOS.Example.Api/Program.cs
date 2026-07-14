@@ -269,7 +269,7 @@ builder.AddSqlOS<ExampleAppDbContext>(
                 "perm_workspace_manage",
                 ExampleFgaService.WorkspaceManagePermission,
                 "Manage workspaces",
-                ExampleFgaService.WorkspaceResourceTypeId);
+                ExampleFgaService.OrganizationResourceTypeId);
             seed.Role(
                 "role_org_member",
                 ExampleFgaService.OrgMemberRole,

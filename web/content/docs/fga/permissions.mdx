@@ -7,6 +7,8 @@ section: fga
 
 A permission is a capability key scoped to a resource type. Permissions define what actions can be performed on which kinds of resources.
 
+Permission keys are globally unique and limited to 450 characters. Startup seeding rejects duplicates and oversized keys immediately, while the database constraint protects dashboard and concurrent writes.
+
 ## Define permissions in startup
 
 ```csharp
@@ -64,7 +66,9 @@ public class SqlOSFgaPermission
 {
     public string Id { get; set; }
     public string Key { get; set; }            // "CHAIN_VIEW"
-    public string DisplayName { get; set; }    // "View Chain"
-    public string ResourceTypeId { get; set; } // "chain"
+    public string Name { get; set; }           // "View Chain"
+    public string? ResourceTypeId { get; set; }// "chain"
 }
 ```
+
+`ResourceTypeId` applies to the resource being authorized. A role granted on a parent may still provide a `chain` permission to a descendant chain, but that permission cannot authorize a location or inventory resource. A `null` resource type is intentionally unscoped and can apply to any resource type.

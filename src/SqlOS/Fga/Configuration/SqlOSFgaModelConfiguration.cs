@@ -112,6 +112,8 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.Permissions, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Key).HasMaxLength(SqlOSFgaPermission.MaxKeyLength);
+            entity.HasIndex(e => e.Key).IsUnique();
             entity.HasOne(e => e.ResourceType)
                 .WithMany(rt => rt.Permissions)
                 .HasForeignKey(e => e.ResourceTypeId)

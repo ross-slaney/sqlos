@@ -108,6 +108,29 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task EnsureSchema_V6Migration_EnforcesUniquePermissionKeys()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var initializer = new SqlOSFgaSchemaInitializer(
+            Context,
+            Options.Create(new SqlOSFgaOptions()),
+            loggerFactory.CreateLogger<SqlOSFgaSchemaInitializer>());
+
+        await initializer.EnsureSchemaAsync();
+
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaPermissions", "UX_SqlOSFgaPermissions_Key"));
+
+        Context.Set<SqlOS.Fga.Models.SqlOSFgaPermission>().Add(new()
+        {
+            Id = $"perm_duplicate_{Guid.NewGuid():N}",
+            Key = "TEST_VIEW",
+            Name = "Duplicate View"
+        });
+        await Assert.ThrowsExceptionAsync<DbUpdateException>(() => Context.SaveChangesAsync());
+        Context.ChangeTracker.Clear();
+    }
+
+    [TestMethod]
     public async Task EnsureSchema_SetsCorrectVersion()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
@@ -119,7 +142,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         var version = await GetSchemaVersionAsync();
-        Assert.IsTrue(version >= 5, $"Schema version should be at least 5, was {version}");
+        Assert.IsTrue(version >= 6, $"Schema version should be at least 6, was {version}");
     }
 
     private async Task<bool> TableExistsAsync(string tableName)

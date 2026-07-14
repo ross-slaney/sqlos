@@ -63,6 +63,7 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         definition.Should().Contain("ug.IsActive = 1");
         definition.Should().Contain("OPENJSON(@SubjectIds)");
         definition.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
+        definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId");
     }
 
     private static async Task<string> GetFunctionDefinitionAsync()
