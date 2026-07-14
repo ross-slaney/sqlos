@@ -125,7 +125,7 @@ SqlOS still enforces its own dashboard policy inside the process. Edge protectio
 
 ## 3. Harden dashboard access
 
-The default dashboard mode is `DevelopmentOnly`. Without an authorization callback, it is available only when the host environment is Development and returns `404` in production. For an operator-accessible production dashboard, configure password mode explicitly:
+The default dashboard mode is `DevelopmentOnly`. Without an authorization callback, it is available without a login only when the host environment is Development and returns `404` otherwise. SqlOS logs a startup warning in either case so an accidentally deployed `Development` environment is visible in operational logs. Dashboard and admin path families are matched on complete URL segments, so lookalike paths such as `/sqlos-evil` or `/sqlos/admin/fga-evil` are never treated as SqlOS surfaces. For an operator-accessible production dashboard, configure password mode explicitly:
 
 ```csharp
 options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;

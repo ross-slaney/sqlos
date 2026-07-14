@@ -47,7 +47,7 @@ public sealed class SqlOSDashboardMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value ?? string.Empty;
-        if (!path.StartsWith(_pathPrefix, StringComparison.OrdinalIgnoreCase))
+        if (!IsPathOrChild(path, _pathPrefix))
         {
             await _next(context);
             return;
@@ -355,50 +355,50 @@ public sealed class SqlOSDashboardMiddleware
 
     private bool ShouldPassThrough(string relativePath, bool embedMode)
     {
-        if (relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "admin/fga"))
         {
             return true;
         }
 
-        if (relativePath.StartsWith("admin/email/api/", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "admin/email/api"))
         {
             return true;
         }
 
-        if (relativePath.StartsWith("admin/audit/api/", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "admin/audit/api"))
         {
             return true;
         }
 
-        if (relativePath.StartsWith("admin/calendar/api/", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "admin/calendar/api"))
         {
             return true;
         }
 
-        if (relativePath.StartsWith("auth/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/auth/api/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/auth/sso-portal", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/auth/.well-known/", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/auth/saml/", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "auth")
+            || IsPathOrChild(relativePath, "admin/auth/api")
+            || IsPathOrChild(relativePath, "admin/auth/sso-portal")
+            || IsPathOrChild(relativePath, "admin/auth/.well-known")
+            || IsPathOrChild(relativePath, "admin/auth/saml"))
         {
             return true;
         }
 
         if (Path.HasExtension(relativePath)
-            && (relativePath.StartsWith("admin/auth/", StringComparison.OrdinalIgnoreCase)
-                || relativePath.StartsWith("admin/fga/", StringComparison.OrdinalIgnoreCase)
-                || relativePath.StartsWith("admin/audit/", StringComparison.OrdinalIgnoreCase)
-                || relativePath.StartsWith("admin/email/", StringComparison.OrdinalIgnoreCase)
-                || relativePath.StartsWith("admin/calendar/", StringComparison.OrdinalIgnoreCase)))
+            && (IsPathOrChild(relativePath, "admin/auth")
+                || IsPathOrChild(relativePath, "admin/fga")
+                || IsPathOrChild(relativePath, "admin/audit")
+                || IsPathOrChild(relativePath, "admin/email")
+                || IsPathOrChild(relativePath, "admin/calendar")))
         {
             return true;
         }
 
-        if (embedMode && (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase)
-                          || relativePath.StartsWith("admin/fga", StringComparison.OrdinalIgnoreCase)
-                          || relativePath.StartsWith("admin/audit", StringComparison.OrdinalIgnoreCase)
-                          || relativePath.StartsWith("admin/email", StringComparison.OrdinalIgnoreCase)
-                          || relativePath.StartsWith("admin/calendar", StringComparison.OrdinalIgnoreCase)))
+        if (embedMode && (IsPathOrChild(relativePath, "admin/auth")
+                          || IsPathOrChild(relativePath, "admin/fga")
+                          || IsPathOrChild(relativePath, "admin/audit")
+                          || IsPathOrChild(relativePath, "admin/email")
+                          || IsPathOrChild(relativePath, "admin/calendar")))
         {
             return true;
         }
@@ -427,10 +427,10 @@ public sealed class SqlOSDashboardMiddleware
             return true;
         }
 
-        if (relativePath.StartsWith("admin/auth", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/audit", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/email", StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith("admin/calendar", StringComparison.OrdinalIgnoreCase))
+        if (IsPathOrChild(relativePath, "admin/auth")
+            || IsPathOrChild(relativePath, "admin/audit")
+            || IsPathOrChild(relativePath, "admin/email")
+            || IsPathOrChild(relativePath, "admin/calendar"))
         {
             return true;
         }
@@ -494,6 +494,17 @@ public sealed class SqlOSDashboardMiddleware
 
     private static IFileProvider CreateFileProvider()
         => new ManifestEmbeddedFileProvider(typeof(SqlOSDashboardMiddleware).Assembly, "Dashboard/wwwroot");
+
+    private static bool IsPathOrChild(string path, string prefix)
+    {
+        if (string.IsNullOrEmpty(prefix))
+        {
+            return path.StartsWith("/", StringComparison.Ordinal);
+        }
+
+        return path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private sealed record DashboardLoginRequest(string Password);
 }

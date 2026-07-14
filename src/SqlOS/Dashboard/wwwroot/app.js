@@ -421,7 +421,10 @@
                 return `${dashboardBasePath}/`;
             }
 
-            if (!parsed.pathname.startsWith(dashboardBasePath || "/")) {
+            const isDashboardPath = dashboardBasePath === "/"
+                ? parsed.pathname.startsWith("/")
+                : parsed.pathname === dashboardBasePath || parsed.pathname.startsWith(`${dashboardBasePath}/`);
+            if (!isDashboardPath) {
                 return `${dashboardBasePath}/`;
             }
 
