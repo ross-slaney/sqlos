@@ -98,6 +98,13 @@ public sealed class SqlOSFgaSeedBuilder
             _permissionsByKey.Remove(existingPermission.Key);
         }
 
+        if (_permissionsByKey.TryGetValue(normalizedKey, out var permissionWithSameKey)
+            && !string.Equals(permissionWithSameKey.Id, normalizedId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"FGA permission key '{normalizedKey}' is already assigned to permission '{permissionWithSameKey.Id}'. Permission keys must be unique.");
+        }
+
         var permission = new SqlOSFgaPermission
         {
             Id = normalizedId,

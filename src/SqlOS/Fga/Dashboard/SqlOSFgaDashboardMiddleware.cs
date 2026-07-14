@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -1247,7 +1248,7 @@ public class SqlOSFgaDashboardMiddleware
     private static async Task HandleCreateRole(HttpContext context, ISqlOSFgaDbContext dbContext)
     {
         var body = await JsonSerializer.DeserializeAsync<CreateRoleRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrEmpty(body.Key) || string.IsNullOrEmpty(body.Name))
+        if (body == null || string.IsNullOrWhiteSpace(body.Key) || string.IsNullOrWhiteSpace(body.Name))
         {
             context.Response.StatusCode = 400;
             await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
@@ -1344,17 +1345,34 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
+        var permissionKey = body.Key.Trim();
+        if (await dbContext.Set<SqlOSFgaPermission>().AnyAsync(p => p.Key == permissionKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync("{\"error\":\"A permission with this key already exists. Permission keys must be unique.\"}");
+            return;
+        }
+
         var permId = $"perm_{Guid.NewGuid():N}"[..30];
         var perm = new SqlOSFgaPermission
         {
             Id = permId,
-            Key = body.Key,
-            Name = body.Name,
+            Key = permissionKey,
+            Name = body.Name.Trim(),
             Description = body.Description,
             ResourceTypeId = body.ResourceTypeId
         };
         dbContext.Set<SqlOSFgaPermission>().Add(perm);
-        await dbContext.SaveChangesAsync();
+        try
+        {
+            await dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.GetBaseException() is SqlException { Number: 2601 or 2627 })
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync("{\"error\":\"A permission with this key already exists. Permission keys must be unique.\"}");
+            return;
+        }
 
         var created = await dbContext.Set<SqlOSFgaPermission>()
             .Include(p => p.ResourceType)

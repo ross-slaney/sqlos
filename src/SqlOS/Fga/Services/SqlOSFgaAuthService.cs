@@ -61,6 +61,24 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             return new SqlOSFgaAccessCheckResult { Allowed = false, Trace = trace, Error = $"Permission {permissionKey} not found" };
         }
 
+        if (permission.ResourceTypeId != null
+            && !string.Equals(permission.ResourceTypeId, resource.ResourceTypeId, StringComparison.Ordinal))
+        {
+            trace.Add(new SqlOSFgaAccessTrace
+            {
+                Step = "Permission Scope",
+                Detail = $"Permission {permission.Name} applies to resource type {permission.ResourceTypeId}, not {resource.ResourceTypeId}",
+                ResourceId = resource.Id,
+                ResourceName = resource.Name,
+            });
+            return new SqlOSFgaAccessCheckResult
+            {
+                Allowed = false,
+                Trace = trace,
+                Error = $"Permission {permissionKey} does not apply to resource type {resource.ResourceTypeId}"
+            };
+        }
+
         trace.Add(new SqlOSFgaAccessTrace
         {
             Step = "Permission",
@@ -188,6 +206,15 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         }
 
         trace.PermissionName = permission.Name;
+
+        if (permission.ResourceTypeId != null
+            && !string.Equals(permission.ResourceTypeId, resource.ResourceTypeId, StringComparison.Ordinal))
+        {
+            trace.AccessGranted = false;
+            trace.DenialReason = $"Permission '{permissionKey}' applies to resource type '{permission.ResourceTypeId}', not '{resource.ResourceTypeId}'.";
+            trace.DecisionSummary = $"Access denied because permission '{permissionKey}' is not valid for this resource type.";
+            return trace;
+        }
 
         var allSubjects = await ResolveSubjectsWithInfoAsync(subjectId);
         trace.SubjectsChecked = allSubjects;

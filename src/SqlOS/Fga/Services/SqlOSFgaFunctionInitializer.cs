@@ -70,6 +70,13 @@ RETURN
     LEFT JOIN [{schema}].[{tables.Agents}] ag ON s.Id = ag.SubjectId
     WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
       AND rp.PermissionId = @PermissionId
+      AND EXISTS (
+          SELECT 1
+          FROM [{schema}].[{tables.Resources}] target
+          INNER JOIN [{schema}].[{tables.Permissions}] permission ON permission.Id = @PermissionId
+          WHERE target.Id = @ResourceId
+            AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId)
+      )
       AND (s.SubjectTypeId <> 'user' OR u.IsActive = 1)
       AND (s.SubjectTypeId <> 'service_account' OR (sa.SubjectId IS NOT NULL AND (sa.ExpiresAt IS NULL OR sa.ExpiresAt > GETUTCDATE())))
       AND (s.SubjectTypeId <> 'group' OR ug.IsActive = 1)

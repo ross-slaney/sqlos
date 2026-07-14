@@ -382,6 +382,18 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public void FgaSeedDsl_RejectsDuplicatePermissionKeysBeforeStartup()
+    {
+        var seed = new SqlOSFgaSeedBuilder();
+        seed.Permission("perm_read_one", "CHECKLIST_READ", "Read", "workspace");
+
+        var act = () => seed.Permission("perm_read_two", "CHECKLIST_READ", "Duplicate Read", "workspace");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*permission key 'CHECKLIST_READ'*must be unique*");
+    }
+
+    [TestMethod]
     public void SeedDeviceFlowClient_CreatesDeviceFlowPublicClient()
     {
         var options = new SqlOSAuthServerOptions();

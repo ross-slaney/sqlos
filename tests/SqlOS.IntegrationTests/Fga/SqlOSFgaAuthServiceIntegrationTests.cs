@@ -101,6 +101,56 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
+    public async Task TypeScopedPermission_DeniesDifferentTargetType_InPointTraceAndEfFilter()
+    {
+        var permission = await Context.Set<SqlOSFgaPermission>().SingleAsync(p => p.Key == "TEST_VIEW");
+        permission.ResourceTypeId = "team";
+        await Context.SaveChangesAsync();
+
+        var point = await _authService.CheckAccessAsync(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            "TEST_VIEW",
+            FgaTestDataSeeder.TestProjectResourceId);
+        var trace = await _authService.TraceResourceAccessAsync(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            FgaTestDataSeeder.TestProjectResourceId,
+            "TEST_VIEW");
+        Context.Set<LifecycleProtectedEntity>().Add(new LifecycleProtectedEntity
+        {
+            Id = $"typed_{Guid.NewGuid():N}",
+            ResourceId = FgaTestDataSeeder.TestProjectResourceId
+        });
+        await Context.SaveChangesAsync();
+        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(
+            FgaTestDataSeeder.SystemAdminSubjectId,
+            "TEST_VIEW");
+
+        Assert.IsFalse(point.Allowed);
+        Assert.IsTrue(point.Error?.Contains("does not apply to resource type project", StringComparison.Ordinal));
+        Assert.IsFalse(trace.AccessGranted);
+        Assert.IsTrue(trace.DenialReason?.Contains("applies to resource type 'team'", StringComparison.Ordinal));
+        Assert.IsFalse(await Context.Set<LifecycleProtectedEntity>()
+            .Where(x => x.ResourceId == FgaTestDataSeeder.TestProjectResourceId)
+            .Where(filter)
+            .AnyAsync());
+    }
+
+    [TestMethod]
+    public async Task TypeScopedPermission_AllowsTargetTypeViaAncestorGrant()
+    {
+        var permission = await Context.Set<SqlOSFgaPermission>().SingleAsync(p => p.Key == "TEST_VIEW");
+        permission.ResourceTypeId = "project";
+        await Context.SaveChangesAsync();
+
+        var result = await _authService.CheckAccessAsync(
+            FgaTestDataSeeder.AgencyAdminSubjectId,
+            "TEST_VIEW",
+            FgaTestDataSeeder.TestProjectResourceId);
+
+        Assert.IsTrue(result.Allowed, "a permission scoped to the target type should still inherit through an ancestor grant");
+    }
+
+    [TestMethod]
     public async Task InactiveUser_IsDeniedByPointCheckAndEfFilterDespiteExistingGrant()
     {
         var subjectService = CreateSubjectService();
