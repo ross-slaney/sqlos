@@ -195,12 +195,12 @@ SqlOS protects JWT private signing keys automatically; there is no signing-key f
 SqlOS owns its tables separately from your EF Core migrations. At host startup, `SqlOSBootstrapHostedService` calls `SqlOSBootstrapper`, which:
 
 1. discovers embedded, numbered AuthServer SQL scripts;
-2. applies pending scripts in ascending order and updates `SqlOSSchema`;
+2. applies pending scripts in deterministic version/name order and records each completed script in `SqlOSAppliedMigrations`;
 3. ensures an active signing key, settings, templates, and startup seeds;
 4. applies the FGA scripts tracked by `SqlOSFgaSchema`;
 5. creates or verifies FGA functions and seed data when enabled.
 
-The current initializers execute SQL batches directly. They do **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
+Each AuthServer script and its ledger entry commit in one transaction, so an interrupted startup safely retries the unrecorded script. The initializer does **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
 
 Use this rollout sequence:
 

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -51,10 +52,69 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSCalendarConnections",
                      "SqlOSCalendarSyncStates",
                      "SqlOSCalendarEvents",
-                     "SqlOSSchema"
+                     "SqlOSSchema",
+                     "SqlOSAppliedMigrations"
                  })
         {
             Assert.IsTrue(await TableExistsAsync(table), $"Table {table} should exist.");
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_ResumesMissingSameVersionScripts_AndRecordsDeterministicOrder()
+    {
+        var databaseName = $"SqlOSLedger_{Guid.NewGuid():N}"[..30];
+        var databaseConnectionString = BuildDatabaseConnectionString(databaseName);
+        await CreateDatabaseAsync(databaseName);
+
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(databaseConnectionString, sql => sql.EnableRetryOnFailure())
+                .Options;
+            await using var context = new TestSqlOSDbContext(dbOptions);
+            var initializer = new SqlOSSchemaInitializer(
+                context,
+                Options.Create(AspireFixture.Options),
+                LoggerFactory.Create(b => b.AddConsole()).CreateLogger<SqlOSSchemaInitializer>());
+
+            await initializer.EnsureSchemaAsync();
+
+            var initialOrder = await ReadAppliedMigrationOrderAsync(context);
+            var expectedOrder = initialOrder
+                .OrderBy(ParseMigrationVersion)
+                .ThenBy(x => x, StringComparer.Ordinal)
+                .ToList();
+            CollectionAssert.AreEqual(expectedOrder, initialOrder,
+                "Migration order must be version-first and script-name deterministic.");
+
+            await context.Database.ExecuteSqlRawAsync("""
+                DROP TABLE [dbo].[SqlOSEmailDeliveries];
+                DROP TABLE [dbo].[SqlOSEmailTemplates];
+                DROP TABLE [dbo].[SqlOSPasswordLoginBuckets];
+                DELETE FROM [dbo].[SqlOSAppliedMigrations]
+                WHERE [ScriptName] IN (
+                    'SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql',
+                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql');
+                UPDATE [dbo].[SqlOSSchema] SET [Version] = 17;
+                """);
+
+            await initializer.EnsureSchemaAsync();
+
+            Assert.AreEqual(3, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM [dbo].[SqlOSAppliedMigrations] WHERE [Version] = 17"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginBuckets'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailTemplates'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailDeliveries'"));
+            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+        }
+        finally
+        {
+            SqlConnection.ClearAllPools();
+            await DropDatabaseAsync(databaseName);
         }
     }
 
@@ -974,6 +1034,36 @@ public sealed class SchemaInitializerIntegrationTests
         {
             await connection.CloseAsync();
         }
+    }
+
+    private static async Task<List<string>> ReadAppliedMigrationOrderAsync(DbContext context)
+    {
+        var connection = context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT [ScriptName] FROM [dbo].[SqlOSAppliedMigrations] ORDER BY [Sequence]";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var result = new List<string>();
+            while (await reader.ReadAsync())
+            {
+                result.Add(reader.GetString(0));
+            }
+
+            return result;
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
+    private static int ParseMigrationVersion(string scriptName)
+    {
+        var match = Regex.Match(scriptName, @"\.Schema\.(\d+)_", RegexOptions.CultureInvariant);
+        Assert.IsTrue(match.Success, $"Unexpected migration resource name: {scriptName}");
+        return int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string BuildDatabaseConnectionString(string databaseName)
