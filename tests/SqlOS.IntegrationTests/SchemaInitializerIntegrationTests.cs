@@ -111,7 +111,7 @@ public sealed class SchemaInitializerIntegrationTests
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailTemplates'"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailDeliveries'"));
-            Assert.AreEqual(30, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
+            Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }
         finally
         {
