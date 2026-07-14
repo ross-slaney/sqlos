@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.Configuration;
 using SqlOS.Fga.Dashboard;
@@ -14,6 +15,13 @@ namespace SqlOS.Hosting;
 /// </summary>
 internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 {
+    private readonly ILogger<SqlOSPipelineStartupFilter> _logger;
+
+    public SqlOSPipelineStartupFilter(ILogger<SqlOSPipelineStartupFilter> logger)
+    {
+        _logger = logger;
+    }
+
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
     {
         var services = app.ApplicationServices;
@@ -26,6 +34,23 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 
         var environment = services.GetRequiredService<IHostEnvironment>();
         var prefix = hostOptions.DashboardBasePath.TrimEnd('/');
+
+        if (hostOptions.Dashboard.AuthMode == SqlOSDashboardAuthMode.DevelopmentOnly
+            && hostOptions.Dashboard.AuthorizationCallback == null)
+        {
+            if (environment.IsDevelopment())
+            {
+                _logger.LogWarning(
+                    "SqlOS dashboard authentication is DevelopmentOnly and the host environment is Development. " +
+                    "The dashboard and admin APIs are available without a login. Do not use Development in a production deployment.");
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "SqlOS dashboard authentication is DevelopmentOnly. The dashboard and admin APIs return 404 outside Development. " +
+                    "Configure Dashboard.AuthMode = Password or Dashboard.AuthorizationCallback before exposing operator access.");
+            }
+        }
 
         // Apply only the host-configured, trusted ForwardedHeaders options. The
         // startup filter must do this before dashboard middleware so dashboard
