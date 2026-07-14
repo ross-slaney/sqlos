@@ -6,9 +6,7 @@ BEGIN
         [ResponseId] NVARCHAR(450) NOT NULL,
         [AssertionId] NVARCHAR(450) NOT NULL,
         [ConsumedAt] DATETIME2 NOT NULL,
-        [ExpiresAt] DATETIME2 NOT NULL,
-        CONSTRAINT [FK_SqlOSSamlReplays_SsoConnections_ConnectionId]
-            FOREIGN KEY ([ConnectionId]) REFERENCES [{Schema}].[SqlOSSsoConnections]([Id]) ON DELETE CASCADE
+        [ExpiresAt] DATETIME2 NOT NULL
     );
 
     CREATE UNIQUE INDEX [UX_SqlOSSamlReplays_Connection_Response]

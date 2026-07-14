@@ -807,10 +807,6 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => new { x.ConnectionId, x.ResponseId }).IsUnique();
             entity.HasIndex(x => new { x.ConnectionId, x.AssertionId }).IsUnique();
             entity.HasIndex(x => x.ExpiresAt);
-            entity.HasOne(x => x.Connection)
-                .WithMany()
-                .HasForeignKey(x => x.ConnectionId)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SqlOSAuthorizationCode>(entity =>

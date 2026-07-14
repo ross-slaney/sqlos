@@ -206,8 +206,12 @@ public sealed class SamlServiceIntegrationTests
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
     }
 
-    [TestMethod]
-    public async Task SignedSamlResponses_WithDuplicateIdentifiers_AreRejectedAcrossAuthorizationRequests()
+    [DataTestMethod]
+    [DataRow(true, false, DisplayName = "Duplicate response ID is rejected")]
+    [DataRow(false, true, DisplayName = "Duplicate assertion ID is rejected")]
+    public async Task SignedSamlResponses_WithEitherDuplicateIdentifier_AreRejectedAcrossAuthorizationRequests(
+        bool reuseResponseId,
+        bool reuseAssertionId)
     {
         var (_, admin, saml) = CreateSamlServices();
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Replay {Guid.NewGuid():N}", null));
@@ -230,7 +234,9 @@ public sealed class SamlServiceIntegrationTests
         var secondFlow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
         var duplicateResponse = BuildSignedSamlResponse(
             certificate, connection.IdentityProviderEntityId, $"replay-{Guid.NewGuid():N}@example.com", "Replay", "User",
-            secondFlow, responseId: responseId, assertionId: assertionId);
+            secondFlow,
+            responseId: reuseResponseId ? responseId : $"_{Guid.NewGuid():N}",
+            assertionId: reuseAssertionId ? assertionId : $"_{Guid.NewGuid():N}");
         var action = async () => await saml.HandleAcsAsync(connection.Id, duplicateResponse, secondFlow.RelayState);
 
         await action.Should().ThrowAsync<InvalidOperationException>()

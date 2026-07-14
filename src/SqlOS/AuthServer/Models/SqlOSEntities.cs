@@ -823,8 +823,6 @@ public sealed class SqlOSSamlReplay
     public string AssertionId { get; set; } = string.Empty;
     public DateTime ConsumedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
-
-    public SqlOSSsoConnection? Connection { get; set; }
 }
 
 public sealed class SqlOSAuthorizationCode

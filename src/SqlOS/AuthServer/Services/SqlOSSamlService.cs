@@ -373,7 +373,7 @@ public sealed class SqlOSSamlService
     {
         var now = DateTime.UtcNow;
         await _context.Set<SqlOSSamlReplay>()
-            .Where(x => x.ConnectionId == connectionId && x.ExpiresAt <= now)
+            .Where(x => x.ExpiresAt <= now)
             .ExecuteDeleteAsync(cancellationToken);
 
         var replay = new SqlOSSamlReplay
