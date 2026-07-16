@@ -71,9 +71,29 @@ public sealed class SqlOSAuthorizationServerService
 
         var origin = GetPublicOrigin(httpContext);
         var basePath = _options.BasePath.TrimEnd('/');
-        var grantTypes = _options.DeviceAuthorization.Enabled
-            ? new[] { SqlOSOAuthGrantTypes.AuthorizationCode, SqlOSOAuthGrantTypes.RefreshToken, SqlOSOAuthGrantTypes.DeviceCode }
-            : new[] { SqlOSOAuthGrantTypes.AuthorizationCode, SqlOSOAuthGrantTypes.RefreshToken };
+        var grantTypes = new List<string>
+        {
+            SqlOSOAuthGrantTypes.AuthorizationCode,
+            SqlOSOAuthGrantTypes.RefreshToken
+        };
+        if (_options.DeviceAuthorization.Enabled)
+        {
+            grantTypes.Add(SqlOSOAuthGrantTypes.DeviceCode);
+        }
+        var machineGrantConfigurations = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .Where(x => x.IsActive
+                && x.DisabledAt == null
+                && x.ClientType == "confidential"
+                && x.TokenEndpointAuthMethod == "client_secret_basic")
+            .Select(x => x.GrantTypesJson)
+            .ToListAsync(cancellationToken);
+        if (machineGrantConfigurations.Any(json =>
+            SqlOSAdminService.DeserializeJsonList(json)
+                .Contains(SqlOSOAuthGrantTypes.ClientCredentials, StringComparer.Ordinal)))
+        {
+            grantTypes.Add(SqlOSOAuthGrantTypes.ClientCredentials);
+        }
 
         return new SqlOSAuthorizationServerMetadataDto
         {
@@ -85,10 +105,12 @@ public sealed class SqlOSAuthorizationServerService
                 : null,
             JwksUri = $"{origin}{basePath}/.well-known/jwks.json",
             ResponseTypesSupported = ["code"],
-            GrantTypesSupported = grantTypes,
+            GrantTypesSupported = grantTypes.ToArray(),
             CodeChallengeMethodsSupported = ["S256"],
             ScopesSupported = scopes,
-            TokenEndpointAuthMethodsSupported = ["none"],
+            TokenEndpointAuthMethodsSupported = grantTypes.Contains(SqlOSOAuthGrantTypes.ClientCredentials)
+                ? ["none", "client_secret_basic"]
+                : ["none"],
             RegistrationEndpoint = _options.ClientRegistration.Dcr.Enabled
                 ? $"{origin}{basePath}/register"
                 : null,

@@ -527,6 +527,51 @@ public sealed class SqlOSCryptoService
         return $"{signingInput}.{Base64UrlEncoder.Encode(signature)}";
     }
 
+    public async Task<string> CreateServiceAccessTokenAsync(
+        string subjectId,
+        SqlOSClientApplication client,
+        string audience,
+        IReadOnlyList<string> scopes,
+        string? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        var key = await EnsureActiveSigningKeyCoreAsync(validateExistingCustody: false, cancellationToken);
+        var now = DateTime.UtcNow;
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [JwtRegisteredClaimNames.Iss] = _options.Issuer,
+            [JwtRegisteredClaimNames.Sub] = subjectId,
+            [JwtRegisteredClaimNames.Aud] = audience,
+            [JwtRegisteredClaimNames.Nbf] = EpochTime.GetIntDate(now),
+            [JwtRegisteredClaimNames.Iat] = EpochTime.GetIntDate(now),
+            [JwtRegisteredClaimNames.Exp] = EpochTime.GetIntDate(now.Add(_options.AccessTokenLifetime)),
+            ["client_id"] = client.ClientId,
+            ["azp"] = client.ClientId,
+            ["token_kind"] = "service",
+            ["scope"] = string.Join(' ', scopes)
+        };
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            payload["org_id"] = organizationId;
+        }
+
+        var header = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
+            [JwtHeaderParameterNames.Typ] = "JWT",
+            [JwtHeaderParameterNames.Kid] = key.Kid
+        };
+        var encodedHeader = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(header));
+        var encodedPayload = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(payload));
+        var signingInput = $"{encodedHeader}.{encodedPayload}";
+        var signature = await _signingKeyCustody.SignAsync(
+            ToDescriptor(key),
+            Encoding.ASCII.GetBytes(signingInput),
+            cancellationToken);
+        VerifySignature(key, Encoding.ASCII.GetBytes(signingInput), signature);
+        return $"{signingInput}.{Base64UrlEncoder.Encode(signature)}";
+    }
+
     public async Task<SqlOSValidatedToken?> ValidateAccessTokenAsync(
         string rawToken,
         string expectedAudience,
@@ -599,7 +644,44 @@ public sealed class SqlOSCryptoService
             var sessionId = principal.FindFirstValue("sid");
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                return null;
+                if (!string.Equals(principal.FindFirstValue("token_kind"), "service", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                var serviceSubjectId = principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+                var serviceClientId = principal.FindFirstValue("client_id");
+                if (string.IsNullOrWhiteSpace(serviceSubjectId) || string.IsNullOrWhiteSpace(serviceClientId))
+                {
+                    return null;
+                }
+
+                var serviceNow = DateTime.UtcNow;
+                var serviceAccount = await _context.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.SubjectId == serviceSubjectId
+                        && x.ClientId == serviceClientId
+                        && (x.ExpiresAt == null || x.ExpiresAt > serviceNow), cancellationToken);
+                var serviceClient = await _context.Set<SqlOSClientApplication>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.ClientId == serviceClientId && x.IsActive && x.DisabledAt == null, cancellationToken);
+                var serviceSubject = await _context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == serviceSubjectId && x.SubjectTypeId == "service_account", cancellationToken);
+                if (serviceAccount == null || serviceSubject == null || serviceClient == null
+                    || !SqlOSAdminService.DeserializeJsonList(serviceClient.GrantTypesJson)
+                        .Contains(SqlOSOAuthGrantTypes.ClientCredentials, StringComparer.Ordinal))
+                {
+                    return null;
+                }
+
+                return new SqlOSValidatedToken(
+                    principal,
+                    string.Empty,
+                    null,
+                    principal.FindFirstValue("org_id"),
+                    serviceClientId,
+                    principal.FindFirstValue("aud"));
             }
 
             var now = DateTime.UtcNow;
