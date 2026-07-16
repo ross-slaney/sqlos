@@ -199,23 +199,33 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         var connectionString = Context.Database.GetConnectionString()
             ?? throw new InvalidOperationException("The integration database has no connection string.");
-        var updater = CreateContext(connectionString);
-        await using (updater)
+        await using var firstUpdater = CreateContext(connectionString);
+        await using var secondUpdater = CreateContext(connectionString);
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task RunInitializerAsync(TestSqlOSDbContext updater)
         {
             var initializer = new SqlOSFgaFunctionInitializer(
                 updater,
                 Options.Create(new SqlOSFgaOptions()),
                 loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
 
-            var updates = Task.Run(async () =>
+            await startGate.Task;
+            for (var i = 0; i < 5; i++)
             {
-                for (var i = 0; i < 5; i++)
-                {
-                    await initializer.EnsureFunctionsExistAsync();
-                }
-            });
+                await initializer.EnsureFunctionsExistAsync();
+            }
+        }
 
-            var reads = Enumerable.Range(0, 20).Select(async _ =>
+        var updates = new[]
+        {
+            RunInitializerAsync(firstUpdater),
+            RunInitializerAsync(secondUpdater)
+        };
+        var reads = Enumerable.Range(0, 10).Select(async _ =>
+        {
+            await startGate.Task;
+            for (var attempt = 0; attempt < 5; attempt++)
             {
                 await using var connection = new SqlConnection(connectionString);
                 await connection.OpenAsync();
@@ -232,13 +242,12 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
                     "@subjectIds",
                     JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }));
                 command.Parameters.AddWithValue("@permissionId", FgaTestDataSeeder.ViewPermissionId);
-                return Convert.ToInt32(await command.ExecuteScalarAsync());
-            });
+                Convert.ToInt32(await command.ExecuteScalarAsync()).Should().Be(1);
+            }
+        }).ToArray();
 
-            var results = await Task.WhenAll(reads.Append(updates.ContinueWith(_ => 1)));
-            await updates;
-            results.Should().OnlyContain(count => count == 1);
-        }
+        startGate.SetResult();
+        await Task.WhenAll(updates.Concat(reads));
     }
 
     private static TestSqlOSDbContext CreateContext(string connectionString)
