@@ -92,7 +92,7 @@ public sealed class SqlOSPipelineStartupFilterTests
     }
 
     [TestMethod]
-    public void Configure_PublicThrottleWithTrustAllForwarding_EmitsSafetyWarning()
+    public void Configure_PublicThrottleWithOnlyLoopbackForwardingTrust_EmitsSafetyWarning()
     {
         var options = new SqlOSOptions();
         options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
@@ -109,6 +109,7 @@ public sealed class SqlOSPipelineStartupFilterTests
             forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
             forwarded.KnownProxies.Clear();
             forwarded.KnownNetworks.Clear();
+            forwarded.KnownProxies.Add(IPAddress.Loopback);
         });
 
         using var provider = services.BuildServiceProvider();
@@ -118,7 +119,7 @@ public sealed class SqlOSPipelineStartupFilterTests
         new SqlOSPipelineStartupFilter(logger).Configure(_ => { })(appBuilder);
 
         logger.Messages.Should().Contain(message =>
-            message.Contains("no KnownProxies or KnownNetworks", StringComparison.Ordinal)
+            message.Contains("no non-loopback KnownProxies or KnownNetworks", StringComparison.Ordinal)
             && message.Contains("rate-limit buckets", StringComparison.Ordinal));
     }
 

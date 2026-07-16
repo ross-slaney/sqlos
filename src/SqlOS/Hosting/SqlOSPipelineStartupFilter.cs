@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Net;
 using SqlOS.Configuration;
 using SqlOS.Fga.Dashboard;
 using RootDashboardMiddleware = SqlOS.Dashboard.SqlOSDashboardMiddleware;
@@ -59,11 +60,10 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             || hostOptions.AuthServer.ClientRegistration.Dcr.Enabled;
         if (publicThrottleSurface
             && forwardedHeaders?.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedFor) == true
-            && forwardedHeaders.KnownProxies.Count == 0
-            && forwardedHeaders.KnownNetworks.Count == 0)
+            && !HasNonLoopbackTrustedProxy(forwardedHeaders))
         {
             _logger.LogWarning(
-                "SqlOS public throttling is enabled while X-Forwarded-For has no KnownProxies or KnownNetworks. " +
+                "SqlOS public throttling is enabled while X-Forwarded-For has no non-loopback KnownProxies or KnownNetworks. " +
                 "Configure trusted proxy boundaries or disable X-Forwarded-For processing; untrusted forwarded client addresses can bypass or collapse rate-limit buckets.");
         }
 
@@ -80,4 +80,8 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 
         next(app);
     };
+
+    private static bool HasNonLoopbackTrustedProxy(ForwardedHeadersOptions options)
+        => options.KnownProxies.Any(address => !IPAddress.IsLoopback(address))
+           || options.KnownNetworks.Any(network => !IPAddress.IsLoopback(network.Prefix));
 }
