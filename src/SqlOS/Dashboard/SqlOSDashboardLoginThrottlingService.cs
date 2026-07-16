@@ -1,18 +1,30 @@
 using SqlOS.Configuration;
+using SqlOS.Security;
 
 namespace SqlOS.Dashboard;
 
 public sealed class SqlOSDashboardLoginThrottlingService
 {
-    private const string UnknownClientIp = "unknown";
-    private readonly object _sync = new();
-    private readonly Dictionary<string, FailureBucket> _ipFailures = new(StringComparer.Ordinal);
-    private readonly FailureBucket _globalFailures = new();
+    private const string IpScope = "dashboard-ip";
+    private const string GlobalScope = "dashboard-global";
+    private const string GlobalKey = "all";
+    private readonly ISqlOSRateLimitStore _store;
 
-    public SqlOSDashboardLoginThrottleRejection? GetRejection(
+    public SqlOSDashboardLoginThrottlingService()
+        : this(new SqlOSInMemoryRateLimitStore())
+    {
+    }
+
+    internal SqlOSDashboardLoginThrottlingService(ISqlOSRateLimitStore store)
+    {
+        _store = store;
+    }
+
+    public async Task<SqlOSDashboardLoginThrottleRejection?> GetRejectionAsync(
         string? clientIp,
         SqlOSDashboardLoginThrottlingOptions options,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         if (!options.Enabled)
         {
@@ -20,36 +32,33 @@ public sealed class SqlOSDashboardLoginThrottlingService
         }
 
         var normalizedIp = NormalizeClientIp(clientIp);
-        lock (_sync)
+        var ipState = await _store.GetAsync(
+            IpScope,
+            normalizedIp,
+            now,
+            options.Window,
+            cancellationToken);
+        if (ipState?.LockedUntil is { } ipLockedUntil && ipLockedUntil > now)
         {
-            if (_ipFailures.TryGetValue(normalizedIp, out var ipBucket))
-            {
-                ResetIfExpired(ipBucket, options, now);
-                if (ipBucket.LockedUntil is { } ipLockedUntil && ipLockedUntil > now)
-                {
-                    return new SqlOSDashboardLoginThrottleRejection("ip", ipLockedUntil);
-                }
-
-                if (ipBucket.Count == 0)
-                {
-                    _ipFailures.Remove(normalizedIp);
-                }
-            }
-
-            ResetIfExpired(_globalFailures, options, now);
-            if (_globalFailures.LockedUntil is { } globalLockedUntil && globalLockedUntil > now)
-            {
-                return new SqlOSDashboardLoginThrottleRejection("global", globalLockedUntil);
-            }
-
-            return null;
+            return new SqlOSDashboardLoginThrottleRejection("ip", ipLockedUntil);
         }
+
+        var globalState = await _store.GetAsync(
+            GlobalScope,
+            GlobalKey,
+            now,
+            options.Window,
+            cancellationToken);
+        return globalState?.LockedUntil is { } globalLockedUntil && globalLockedUntil > now
+            ? new SqlOSDashboardLoginThrottleRejection("global", globalLockedUntil)
+            : null;
     }
 
-    public SqlOSDashboardLoginLockoutResult RecordFailure(
+    public async Task<SqlOSDashboardLoginLockoutResult> RecordFailureAsync(
         string? clientIp,
         SqlOSDashboardLoginThrottlingOptions options,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         if (!options.Enabled)
         {
@@ -57,22 +66,33 @@ public sealed class SqlOSDashboardLoginThrottlingService
         }
 
         var normalizedIp = NormalizeClientIp(clientIp);
-        lock (_sync)
-        {
-            var ipBucket = GetActiveIpBucket(normalizedIp, options, now);
-            var perIpLockedUntil = RecordFailure(ipBucket, options.MaxFailuresPerIp, options.LockoutDuration, now);
+        var ipState = await _store.IncrementAsync(
+            IpScope,
+            normalizedIp,
+            options.MaxFailuresPerIp,
+            options.Window,
+            options.LockoutDuration,
+            now,
+            cancellationToken);
+        var globalState = await _store.IncrementAsync(
+            GlobalScope,
+            GlobalKey,
+            options.MaxGlobalFailures,
+            options.Window,
+            options.LockoutDuration,
+            now,
+            cancellationToken);
 
-            ResetIfExpired(_globalFailures, options, now);
-            var globalLockedUntil = RecordFailure(_globalFailures, options.MaxGlobalFailures, options.LockoutDuration, now);
-
-            return new SqlOSDashboardLoginLockoutResult(perIpLockedUntil, globalLockedUntil);
-        }
+        return new SqlOSDashboardLoginLockoutResult(
+            ipState.LockedUntil,
+            globalState.LockedUntil);
     }
 
-    public void RecordSuccess(
+    public async Task RecordSuccessAsync(
         string? clientIp,
         SqlOSDashboardLoginThrottlingOptions options,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         if (!options.Enabled)
         {
@@ -80,90 +100,12 @@ public sealed class SqlOSDashboardLoginThrottlingService
         }
 
         var normalizedIp = NormalizeClientIp(clientIp);
-        lock (_sync)
-        {
-            _ipFailures.Remove(normalizedIp);
-
-            ResetIfExpired(_globalFailures, options, now);
-            if (_globalFailures.LockedUntil is null && _globalFailures.Count > 0)
-            {
-                _globalFailures.Count--;
-                if (_globalFailures.Count == 0)
-                {
-                    _globalFailures.WindowStartedAt = null;
-                }
-            }
-        }
-    }
-
-    private FailureBucket GetActiveIpBucket(
-        string clientIp,
-        SqlOSDashboardLoginThrottlingOptions options,
-        DateTimeOffset now)
-    {
-        if (!_ipFailures.TryGetValue(clientIp, out var bucket))
-        {
-            bucket = new FailureBucket();
-            _ipFailures[clientIp] = bucket;
-            return bucket;
-        }
-
-        ResetIfExpired(bucket, options, now);
-        return bucket;
-    }
-
-    private static DateTimeOffset? RecordFailure(
-        FailureBucket bucket,
-        int threshold,
-        TimeSpan lockoutDuration,
-        DateTimeOffset now)
-    {
-        bucket.WindowStartedAt ??= now;
-        bucket.Count++;
-
-        if (bucket.Count < threshold || bucket.LockedUntil is not null)
-        {
-            return null;
-        }
-
-        bucket.LockedUntil = now.Add(lockoutDuration);
-        return bucket.LockedUntil;
-    }
-
-    private static void ResetIfExpired(
-        FailureBucket bucket,
-        SqlOSDashboardLoginThrottlingOptions options,
-        DateTimeOffset now)
-    {
-        if (bucket.LockedUntil is { } lockedUntil)
-        {
-            if (lockedUntil > now)
-            {
-                return;
-            }
-
-            bucket.Count = 0;
-            bucket.WindowStartedAt = null;
-            bucket.LockedUntil = null;
-            return;
-        }
-
-        if (bucket.WindowStartedAt is { } windowStartedAt && now - windowStartedAt >= options.Window)
-        {
-            bucket.Count = 0;
-            bucket.WindowStartedAt = null;
-        }
+        await _store.DeleteAsync(IpScope, normalizedIp, cancellationToken);
+        await _store.DecrementAsync(GlobalScope, GlobalKey, now, cancellationToken);
     }
 
     private static string NormalizeClientIp(string? clientIp)
-        => string.IsNullOrWhiteSpace(clientIp) ? UnknownClientIp : clientIp.Trim();
-
-    private sealed class FailureBucket
-    {
-        public DateTimeOffset? WindowStartedAt { get; set; }
-        public int Count { get; set; }
-        public DateTimeOffset? LockedUntil { get; set; }
-    }
+        => string.IsNullOrWhiteSpace(clientIp) ? SqlOSClientIpAddress.Unknown : clientIp.Trim();
 }
 
 public sealed record SqlOSDashboardLoginThrottleRejection(string Scope, DateTimeOffset RetryAfter);

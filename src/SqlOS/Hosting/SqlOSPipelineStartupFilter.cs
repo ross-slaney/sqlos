@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Net;
 using SqlOS.Configuration;
 using SqlOS.Fga.Dashboard;
 using RootDashboardMiddleware = SqlOS.Dashboard.SqlOSDashboardMiddleware;
@@ -52,6 +54,19 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             }
         }
 
+        var forwardedHeaders = services.GetService<IOptions<ForwardedHeadersOptions>>()?.Value;
+        var publicThrottleSurface =
+            hostOptions.Dashboard.AuthMode == SqlOSDashboardAuthMode.Password
+            || hostOptions.AuthServer.ClientRegistration.Dcr.Enabled;
+        if (publicThrottleSurface
+            && forwardedHeaders?.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedFor) == true
+            && !HasNonLoopbackTrustedProxy(forwardedHeaders))
+        {
+            _logger.LogWarning(
+                "SqlOS public throttling is enabled while X-Forwarded-For has no non-loopback KnownProxies or KnownNetworks. " +
+                "Configure trusted proxy boundaries or disable X-Forwarded-For processing; untrusted forwarded client addresses can bypass or collapse rate-limit buckets.");
+        }
+
         // Apply only the host-configured, trusted ForwardedHeaders options. The
         // startup filter must do this before dashboard middleware so dashboard
         // throttling and audit events see the external client IP and scheme.
@@ -65,4 +80,8 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 
         next(app);
     };
+
+    private static bool HasNonLoopbackTrustedProxy(ForwardedHeadersOptions options)
+        => options.KnownProxies.Any(address => !IPAddress.IsLoopback(address))
+           || options.KnownNetworks.Any(network => !IPAddress.IsLoopback(network.Prefix));
 }

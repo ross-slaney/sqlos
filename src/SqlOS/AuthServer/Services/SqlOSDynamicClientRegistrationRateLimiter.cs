@@ -1,30 +1,38 @@
-using System.Collections.Concurrent;
+using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSDynamicClientRegistrationRateLimiter
 {
-    private readonly ConcurrentDictionary<string, Queue<DateTime>> _registrations = new(StringComparer.Ordinal);
+    private const string Scope = "dcr";
+    private readonly ISqlOSRateLimitStore _store;
 
-    public bool TryConsume(string key, TimeSpan window, int maxRegistrations)
+    public SqlOSDynamicClientRegistrationRateLimiter()
+        : this(new SqlOSInMemoryRateLimitStore())
     {
-        var now = DateTime.UtcNow;
-        var queue = _registrations.GetOrAdd(key, static _ => new Queue<DateTime>());
+    }
 
-        lock (queue)
-        {
-            while (queue.Count > 0 && now - queue.Peek() > window)
-            {
-                queue.Dequeue();
-            }
+    internal SqlOSDynamicClientRegistrationRateLimiter(ISqlOSRateLimitStore store)
+    {
+        _store = store;
+    }
 
-            if (queue.Count >= maxRegistrations)
-            {
-                return false;
-            }
+    public async Task<bool> TryConsumeAsync(
+        string key,
+        TimeSpan window,
+        int maxRegistrations,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await _store.IncrementAsync(
+            Scope,
+            key,
+            checked(maxRegistrations + 1),
+            window,
+            window,
+            now,
+            cancellationToken);
 
-            queue.Enqueue(now);
-            return true;
-        }
+        return state.LockedUntil is null;
     }
 }

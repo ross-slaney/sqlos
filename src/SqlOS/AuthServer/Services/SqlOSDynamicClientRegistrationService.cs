@@ -6,6 +6,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -46,7 +47,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                 throw new SqlOSClientRegistrationException("unsupported_operation", "Dynamic client registration is disabled.");
             }
 
-            EnforceRateLimit(httpContext);
+            await EnforceRateLimitAsync(httpContext, cancellationToken);
 
             var normalized = await NormalizeRequestAsync(request, httpContext, cancellationToken);
             var clientId = await GenerateUniqueClientIdAsync(cancellationToken);
@@ -136,13 +137,17 @@ public sealed class SqlOSDynamicClientRegistrationService
         }
     }
 
-    private void EnforceRateLimit(HttpContext httpContext)
+    private async Task EnforceRateLimitAsync(
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
     {
-        var key = GetIpAddress(httpContext) ?? "unknown";
-        if (_rateLimiter.TryConsume(
+        var key = SqlOSClientIpAddress.Get(httpContext);
+        if (await _rateLimiter.TryConsumeAsync(
                 key,
                 _options.ClientRegistration.Dcr.RateLimitWindow,
-                _options.ClientRegistration.Dcr.MaxRegistrationsPerWindow))
+                _options.ClientRegistration.Dcr.MaxRegistrationsPerWindow,
+                DateTimeOffset.UtcNow,
+                cancellationToken))
         {
             return;
         }
@@ -349,7 +354,7 @@ public sealed class SqlOSDynamicClientRegistrationService
     }
 
     private static string? GetIpAddress(HttpContext httpContext)
-        => httpContext.Connection.RemoteIpAddress?.ToString();
+        => SqlOSClientIpAddress.Get(httpContext);
 
     private sealed record NormalizedDcrRequest(
         string ClientName,

@@ -96,6 +96,10 @@ Use your platform's known proxy or network configuration instead of copying an â
 
 `AddSqlOS` installs a startup filter that runs the configured Forwarded Headers middleware before its dashboard middleware. That ordering makes dashboard login throttling and audit events use the trusted external client IP. Configure `ForwardedHeadersOptions` before building the app; you do not need a second `UseForwardedHeaders()` call solely for SqlOS.
 
+Dashboard password failures and dynamic client registrations use the existing SqlOS database for shared rate-limit buckets. Multiple application instances therefore enforce one per-client and global state without Redis, a cloud rate-limiting service, or another production dependency. The schema is created automatically with the other SqlOS tables and stale buckets are deleted in bounded batches. Directly constructing the limiter classes outside dependency injection uses a bounded in-memory fallback intended for isolated tests and custom hosts, not multi-instance production.
+
+When `X-Forwarded-For` processing is enabled for a password dashboard or DCR, SqlOS warns at startup if `KnownProxies` and `KnownNetworks` are empty or contain only loopback defaults. Do not suppress that warning by trusting every source: either list the actual proxy boundary or disable forwarded client-address processing and use the direct connection address. A loopback sidecar can be intentional, so this remains an operational warning rather than a startup failure. Test both a trusted proxy request and a forged header from an untrusted address before deployment.
+
 ## 2. Protect the right routes
 
 Do not place a blanket edge-authentication rule on `/sqlos/*`. That also captures the OAuth server and hosted sign-in page, causing login redirects, discovery, callbacks, and token exchange to fail.

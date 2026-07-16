@@ -24,7 +24,6 @@ public sealed class SqlOSDashboardMiddleware
     private readonly bool _scimEnabled;
     private readonly SqlOSDashboardOptions _options;
     private readonly SqlOSDashboardSessionService _sessionService;
-    private readonly SqlOSDashboardLoginThrottlingService _loginThrottlingService;
     private readonly IFileProvider _fileProvider;
     private readonly SqlOSBrowserSecurityHeaders _securityHeaders;
 
@@ -35,7 +34,6 @@ public sealed class SqlOSDashboardMiddleware
         SqlOSDashboardOptions options,
         bool scimEnabled,
         SqlOSDashboardSessionService sessionService,
-        SqlOSDashboardLoginThrottlingService loginThrottlingService,
         IOptions<SqlOSOptions> hostOptions)
     {
         _next = next;
@@ -44,12 +42,13 @@ public sealed class SqlOSDashboardMiddleware
         _scimEnabled = scimEnabled;
         _options = options;
         _sessionService = sessionService;
-        _loginThrottlingService = loginThrottlingService;
         _securityHeaders = new SqlOSBrowserSecurityHeaders(hostOptions);
         _fileProvider = CreateFileProvider();
     }
 
-    public async Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(
+        HttpContext context,
+        SqlOSDashboardLoginThrottlingService loginThrottlingService)
     {
         var path = context.Request.Path.Value ?? string.Empty;
         if (!IsPathOrChild(path, _pathPrefix))
@@ -77,7 +76,7 @@ public sealed class SqlOSDashboardMiddleware
 
         if (IsDashboardAuthEndpoint(relativePath))
         {
-            await HandleDashboardAuthRequestAsync(context, relativePath);
+            await HandleDashboardAuthRequestAsync(context, relativePath, loginThrottlingService);
             return;
         }
 
@@ -136,7 +135,10 @@ public sealed class SqlOSDashboardMiddleware
             _options.AuthorizationCallback);
     }
 
-    private async Task HandleDashboardAuthRequestAsync(HttpContext context, string relativePath)
+    private async Task HandleDashboardAuthRequestAsync(
+        HttpContext context,
+        string relativePath,
+        SqlOSDashboardLoginThrottlingService loginThrottlingService)
     {
         var endpoint = relativePath.Length == DashboardAuthPrefix.Length
             ? string.Empty
@@ -196,7 +198,11 @@ public sealed class SqlOSDashboardMiddleware
 
             var clientIp = GetClientIpAddress(context);
             var now = DateTimeOffset.UtcNow;
-            var rejection = _loginThrottlingService.GetRejection(clientIp, _options.LoginThrottling, now);
+            var rejection = await loginThrottlingService.GetRejectionAsync(
+                clientIp,
+                _options.LoginThrottling,
+                now,
+                context.RequestAborted);
             if (rejection != null)
             {
                 await RecordDashboardAuditAsync(
@@ -220,7 +226,11 @@ public sealed class SqlOSDashboardMiddleware
                     clientIp,
                     new { reason = "invalid_password" });
 
-                var lockout = _loginThrottlingService.RecordFailure(clientIp, _options.LoginThrottling, now);
+                var lockout = await loginThrottlingService.RecordFailureAsync(
+                    clientIp,
+                    _options.LoginThrottling,
+                    now,
+                    context.RequestAborted);
                 if (lockout.PerIpLockedUntil is { } perIpLockedUntil)
                 {
                     await RecordDashboardAuditAsync(
@@ -253,7 +263,11 @@ public sealed class SqlOSDashboardMiddleware
                 return;
             }
 
-            _loginThrottlingService.RecordSuccess(clientIp, _options.LoginThrottling, now);
+            await loginThrottlingService.RecordSuccessAsync(
+                clientIp,
+                _options.LoginThrottling,
+                now,
+                context.RequestAborted);
             var allowInsecureCookie = _isDevelopment && !context.Request.IsHttps;
             var expiresAt = _sessionService.CreateSession(context, _pathPrefix, _options.SessionLifetime, allowInsecureCookie);
             await RecordDashboardAuditAsync(
@@ -313,7 +327,7 @@ public sealed class SqlOSDashboardMiddleware
     }
 
     private static string GetClientIpAddress(HttpContext context)
-        => context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        => SqlOSClientIpAddress.Get(context);
 
     private static int GetRetryAfterSeconds(DateTimeOffset retryAfter, DateTimeOffset now)
         => Math.Max(1, (int)Math.Ceiling((retryAfter - now).TotalSeconds));
