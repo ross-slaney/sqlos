@@ -68,6 +68,22 @@ public sealed class SqlOSFgaHierarchyValidatorTests
             .WithMessage("*contains a cycle*");
     }
 
+    [TestMethod]
+    public async Task ValidateExistingDataAsync_ReportsMissingPersistedParent()
+    {
+        await using var context = CreateContext();
+        SeedResources(context, ("orphan", "missing_parent"));
+        await context.SaveChangesAsync();
+        var validator = new SqlOSFgaHierarchyValidator(
+            context,
+            Options.Create(new SqlOSFgaOptions()));
+
+        var act = async () => await validator.ValidateExistingDataAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*'orphan'*missing parent resource 'missing_parent'*repair*");
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
         => new(new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))

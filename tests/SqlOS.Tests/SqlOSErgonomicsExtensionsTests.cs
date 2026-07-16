@@ -173,6 +173,34 @@ public sealed class SqlOSErgonomicsExtensionsTests
     }
 
     [TestMethod]
+    public void ConvenienceHelper_UsesManualModelHierarchyDepth()
+    {
+        var options = new DbContextOptionsBuilder<ManualDepthFgaDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        using var context = new ManualDepthFgaDbContext(options);
+        context.Set<SqlOSFgaResourceType>().AddRange(
+            new SqlOSFgaResourceType { Id = "root", Name = "Root" },
+            new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });
+        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = "root",
+            Name = "Root",
+            ResourceTypeId = "root"
+        });
+        context.SaveChanges();
+        context.CreateResource("root", "Level 1", "workspace", "level_1");
+        context.SaveChanges();
+        context.CreateResource("level_1", "Level 2", "workspace", "level_2");
+        context.SaveChanges();
+
+        Action act = () => context.CreateResource("level_2", "Level 3", "workspace", "level_3");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*configured maximum depth of 2*");
+    }
+
+    [TestMethod]
     public async Task ProvisionResourceWithIdAsync_ValidatesParentAndResourceTypeWhenUpdating()
     {
         using var context = CreateContext();
@@ -507,5 +535,19 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(string subjectId, string permissionKey)
             where T : IHasResourceId
             => throw new NotImplementedException();
+    }
+
+    private sealed class ManualDepthFgaDbContext(DbContextOptions<ManualDepthFgaDbContext> options)
+        : DbContext(options), ISqlOSFgaDbContext
+    {
+        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+            string resourceId,
+            string subjectIds,
+            string permissionId)
+            => throw new NotSupportedException();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.ApplySqlOSFgaModel(options =>
+                options.MaxResourceHierarchyDepth = 2);
     }
 }

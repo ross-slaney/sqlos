@@ -62,7 +62,14 @@ public sealed class SqlOSFgaHierarchyValidator
                     + "Increase Fga.MaxResourceHierarchyDepth or repair the persisted resource hierarchy before startup.");
             }
 
-            currentId = parents.GetValueOrDefault(currentId);
+            if (!parents.TryGetValue(currentId, out var parentId))
+            {
+                throw new InvalidOperationException(
+                    $"FGA resource '{resourceId}' references missing parent resource '{currentId}'. "
+                    + "Repair the persisted resource hierarchy before startup.");
+            }
+
+            currentId = parentId;
             depth++;
         }
     }
