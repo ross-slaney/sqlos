@@ -108,6 +108,42 @@ public class SqlOSUpstreamMfaTrustTests
         decision.Reason.Should().Be("evidence_unrecognized");
     }
 
+    [TestMethod]
+    public void OidcOversizedEvidence_FailsClosedWithoutRetainingOversizedValue()
+    {
+        var connection = new SqlOSOidcConnection
+        {
+            TrustUpstreamMfa = true,
+            AcceptedAmrValuesJson = """["mfa"]"""
+        };
+        var principal = Principal(
+            new Claim("amr", "mfa"),
+            new Claim("amr", new string('x', 501)));
+
+        var decision = SqlOSUpstreamMfaTrust.EvaluateOidc(connection, principal);
+
+        decision.Accepted.Should().BeFalse();
+        decision.Reason.Should().Be("evidence_limits_exceeded");
+        decision.AmrValues.Should().Equal("mfa");
+    }
+
+    [TestMethod]
+    public void SamlTooManyEvidenceValues_FailsClosedAndBoundsAuditEvidence()
+    {
+        var connection = new SqlOSSsoConnection
+        {
+            TrustUpstreamMfa = true,
+            AcceptedAuthnContextClassRefsJson = """["context-0"]"""
+        };
+        var evidence = Enumerable.Range(0, 33).Select(index => $"context-{index}").ToArray();
+
+        var decision = SqlOSUpstreamMfaTrust.EvaluateSaml(connection, evidence);
+
+        decision.Accepted.Should().BeFalse();
+        decision.Reason.Should().Be("evidence_limits_exceeded");
+        decision.SamlAuthnContextClassRefs.Should().HaveCount(32);
+    }
+
     private static ClaimsPrincipal Principal(params Claim[] claims)
         => new(new ClaimsIdentity(claims, "test"));
 }
