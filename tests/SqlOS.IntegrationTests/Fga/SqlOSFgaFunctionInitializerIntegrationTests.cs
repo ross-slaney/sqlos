@@ -1,11 +1,13 @@
 using FluentAssertions;
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
+using SqlOS.IntegrationTests.Infrastructure;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 
@@ -26,6 +28,9 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         // Should not throw when run multiple times
         await initializer.EnsureFunctionsExistAsync();
         await initializer.EnsureFunctionsExistAsync();
+
+        var definition = await GetFunctionDefinitionAsync();
+        definition.Should().Contain("CycleDetected");
     }
 
     [TestMethod]
@@ -42,7 +47,8 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
             await initializer.EnsureFunctionsExistAsync();
 
             var definition = await GetFunctionDefinitionAsync();
-            definition.Should().Contain("WHERE a.Depth < 3");
+            definition.Should().Contain("a.Depth < 3");
+            definition.Should().Contain("truncated.Depth = 3");
         }
         finally
         {
@@ -126,6 +132,121 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         definition.Should().Contain("OPENJSON(@SubjectIds)");
         definition.Should().Contain("JSON_VALUE(@SubjectIds, '$[0]')");
         definition.Should().Contain("permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId");
+    }
+
+    [TestMethod]
+    public async Task CyclicHierarchy_FailsClosedWithoutSqlRecursionFailure()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var initializer = new SqlOSFgaFunctionInitializer(
+            Context,
+            Options.Create(new SqlOSFgaOptions()),
+            loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
+        var suffix = Guid.NewGuid().ToString("N");
+        var first = new SqlOSFgaResource
+        {
+            Id = $"cycle_a_{suffix}",
+            Name = "Cycle A",
+            ResourceTypeId = "agency"
+        };
+        var second = new SqlOSFgaResource
+        {
+            Id = $"cycle_b_{suffix}",
+            ParentId = first.Id,
+            Name = "Cycle B",
+            ResourceTypeId = "agency"
+        };
+        var grant = new SqlOSFgaGrant
+        {
+            Id = $"cycle_grant_{suffix}",
+            SubjectId = FgaTestDataSeeder.SystemAdminSubjectId,
+            ResourceId = first.Id,
+            RoleId = FgaTestDataSeeder.SystemAdminRoleId
+        };
+
+        try
+        {
+            Context.Set<SqlOSFgaResource>().AddRange(first, second);
+            Context.Set<SqlOSFgaGrant>().Add(grant);
+            await Context.SaveChangesAsync();
+            await Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE [dbo].[SqlOSFgaResources] SET ParentId = {second.Id} WHERE Id = {first.Id}");
+            Context.ChangeTracker.Clear();
+            await initializer.EnsureFunctionsExistAsync();
+
+            var visible = await Context.IsResourceAccessible(
+                    first.Id,
+                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                    FgaTestDataSeeder.ViewPermissionId)
+                .AnyAsync();
+
+            visible.Should().BeFalse();
+        }
+        finally
+        {
+            await Context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE [dbo].[SqlOSFgaResources] SET ParentId = NULL WHERE Id = {first.Id}");
+            Context.ChangeTracker.Clear();
+            Context.Set<SqlOSFgaGrant>().Remove(grant);
+            Context.Set<SqlOSFgaResource>().RemoveRange(second, first);
+            await Context.SaveChangesAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateOrAlter_KeepsFunctionCallableDuringRepeatedInitialization()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var connectionString = Context.Database.GetConnectionString()
+            ?? throw new InvalidOperationException("The integration database has no connection string.");
+        var updater = CreateContext(connectionString);
+        await using (updater)
+        {
+            var initializer = new SqlOSFgaFunctionInitializer(
+                updater,
+                Options.Create(new SqlOSFgaOptions()),
+                loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
+
+            var updates = Task.Run(async () =>
+            {
+                for (var i = 0; i < 5; i++)
+                {
+                    await initializer.EnsureFunctionsExistAsync();
+                }
+            });
+
+            var reads = Enumerable.Range(0, 20).Select(async _ =>
+            {
+                await using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT COUNT(*)
+                    FROM [dbo].fn_IsResourceAccessible(
+                        @resourceId,
+                        @subjectIds,
+                        @permissionId)
+                    """;
+                command.Parameters.AddWithValue("@resourceId", FgaTestDataSeeder.TestAgencyResourceId);
+                command.Parameters.AddWithValue(
+                    "@subjectIds",
+                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }));
+                command.Parameters.AddWithValue("@permissionId", FgaTestDataSeeder.ViewPermissionId);
+                return Convert.ToInt32(await command.ExecuteScalarAsync());
+            });
+
+            var results = await Task.WhenAll(reads.Append(updates.ContinueWith(_ => 1)));
+            await updates;
+            results.Should().OnlyContain(count => count == 1);
+        }
+    }
+
+    private static TestSqlOSDbContext CreateContext(string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(connectionString)
+            .Options;
+        return new TestSqlOSDbContext(options);
     }
 
     private static async Task<string> GetFunctionDefinitionAsync()

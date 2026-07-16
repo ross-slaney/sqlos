@@ -1,6 +1,7 @@
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Calendar.Configuration;
 using SqlOS.Email.Configuration;
+using SqlOS.Fga;
 
 namespace SqlOS.Configuration;
 
@@ -60,6 +61,12 @@ internal static class SqlOSOptionsValidator
         if (options.Fga.MaxResourceHierarchyDepth <= 0)
         {
             errors.Add("Fga.MaxResourceHierarchyDepth must be greater than zero.");
+        }
+        else if (options.Fga.MaxResourceHierarchyDepth > SqlOSFgaHierarchyDepth.SqlServerRecursiveCteMaximum)
+        {
+            errors.Add(
+                $"Fga.MaxResourceHierarchyDepth cannot exceed {SqlOSFgaHierarchyDepth.SqlServerRecursiveCteMaximum}, "
+                + "the SQL Server recursive CTE limit used by FGA list authorization.");
         }
 
         var issuer = ValidateAbsoluteUri(options.AuthServer.Issuer, "AuthServer.Issuer", errors);

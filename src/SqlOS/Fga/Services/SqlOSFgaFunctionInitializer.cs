@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 
@@ -31,14 +32,41 @@ public class SqlOSFgaFunctionInitializer
 
     private async Task EnsureIsResourceAccessibleFunctionAsync(CancellationToken cancellationToken)
     {
-        var schema = _options.Schema;
-        var tables = _options.TableNames;
-        var maxDepth = Math.Max(1, _options.MaxResourceHierarchyDepth);
+        var functionSql = BuildIsResourceAccessibleFunctionSql(_options);
 
-        var dropFunctionSql = $"DROP FUNCTION IF EXISTS [{schema}].fn_IsResourceAccessible";
+        try
+        {
+            _logger.LogDebug("Creating or updating fn_IsResourceAccessible TVF...");
+            await _context.Database.ExecuteSqlRawAsync(functionSql, cancellationToken);
+            _logger.LogInformation("fn_IsResourceAccessible TVF is ready.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create or update fn_IsResourceAccessible TVF. Authorization queries may fail.");
+            throw;
+        }
+    }
 
-        var createFunctionSql = $@"
-CREATE FUNCTION [{schema}].fn_IsResourceAccessible(
+    internal static string BuildIsResourceAccessibleFunctionSql(SqlOSFgaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var schema = EscapeIdentifier(options.Schema);
+        var tables = options.TableNames;
+        var resources = EscapeIdentifier(tables.Resources);
+        var grants = EscapeIdentifier(tables.Grants);
+        var rolePermissions = EscapeIdentifier(tables.RolePermissions);
+        var subjects = EscapeIdentifier(tables.Subjects);
+        var users = EscapeIdentifier(tables.Users);
+        var serviceAccounts = EscapeIdentifier(tables.ServiceAccounts);
+        var userGroups = EscapeIdentifier(tables.UserGroups);
+        var agents = EscapeIdentifier(tables.Agents);
+        var permissions = EscapeIdentifier(tables.Permissions);
+        var maxDepth = Math.Max(1, options.MaxResourceHierarchyDepth)
+            .ToString(CultureInfo.InvariantCulture);
+
+        return $@"
+CREATE OR ALTER FUNCTION [{schema}].fn_IsResourceAccessible(
     @ResourceId NVARCHAR(128),
     @SubjectIds NVARCHAR(MAX),
     @PermissionId NVARCHAR(128)
@@ -48,32 +76,54 @@ AS
 RETURN
 (
     WITH ancestors AS (
-        SELECT Id, ParentId, 0 AS Depth
-        FROM [{schema}].[{tables.Resources}]
+        SELECT
+            Id,
+            ParentId,
+            0 AS Depth,
+            CAST(N'|' + Id + N'|' AS NVARCHAR(MAX)) AS VisitedPath,
+            CAST(0 AS BIT) AS CycleDetected
+        FROM [{schema}].[{resources}]
         WHERE Id = @ResourceId AND IsActive = 1
 
         UNION ALL
 
-	        SELECT r.Id, r.ParentId, a.Depth + 1
-	        FROM [{schema}].[{tables.Resources}] r
-	        INNER JOIN ancestors a ON r.Id = a.ParentId
-	        WHERE a.Depth < {maxDepth} AND r.IsActive = 1
-	    )
+        SELECT
+            r.Id,
+            r.ParentId,
+            a.Depth + 1,
+            CAST(a.VisitedPath + r.Id + N'|' AS NVARCHAR(MAX)),
+            CAST(CASE
+                WHEN CHARINDEX(N'|' + r.Id + N'|', a.VisitedPath) > 0 THEN 1
+                ELSE 0
+            END AS BIT)
+        FROM [{schema}].[{resources}] r
+        INNER JOIN ancestors a ON r.Id = a.ParentId
+        WHERE a.Depth < {maxDepth}
+          AND a.CycleDetected = 0
+          AND r.IsActive = 1
+    )
     SELECT TOP 1 a.Id
     FROM ancestors a
-    INNER JOIN [{schema}].[{tables.Grants}] g ON a.Id = g.ResourceId
-    INNER JOIN [{schema}].[{tables.RolePermissions}] rp ON g.RoleId = rp.RoleId
-    INNER JOIN [{schema}].[{tables.Subjects}] s ON g.SubjectId = s.Id
-    LEFT JOIN [{schema}].[{tables.Users}] u ON s.Id = u.SubjectId
-    LEFT JOIN [{schema}].[{tables.ServiceAccounts}] sa ON s.Id = sa.SubjectId
-    LEFT JOIN [{schema}].[{tables.UserGroups}] ug ON s.Id = ug.SubjectId
-    LEFT JOIN [{schema}].[{tables.Agents}] ag ON s.Id = ag.SubjectId
+    INNER JOIN [{schema}].[{grants}] g ON a.Id = g.ResourceId
+    INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
+    INNER JOIN [{schema}].[{subjects}] s ON g.SubjectId = s.Id
+    LEFT JOIN [{schema}].[{users}] u ON s.Id = u.SubjectId
+    LEFT JOIN [{schema}].[{serviceAccounts}] sa ON s.Id = sa.SubjectId
+    LEFT JOIN [{schema}].[{userGroups}] ug ON s.Id = ug.SubjectId
+    LEFT JOIN [{schema}].[{agents}] ag ON s.Id = ag.SubjectId
     WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
       AND rp.PermissionId = @PermissionId
+      AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM ancestors truncated
+          WHERE truncated.Depth = {maxDepth}
+            AND truncated.ParentId IS NOT NULL
+      )
       AND EXISTS (
           SELECT 1
-          FROM [{schema}].[{tables.Resources}] target
-          INNER JOIN [{schema}].[{tables.Permissions}] permission ON permission.Id = @PermissionId
+          FROM [{schema}].[{resources}] target
+          INNER JOIN [{schema}].[{permissions}] permission ON permission.Id = @PermissionId
           WHERE target.Id = @ResourceId
             AND (permission.ResourceTypeId IS NULL OR permission.ResourceTypeId = target.ResourceTypeId)
       )
@@ -83,11 +133,11 @@ RETURN
       AND (s.SubjectTypeId <> 'agent' OR ag.SubjectId IS NOT NULL)
       AND EXISTS (
           SELECT 1
-          FROM [{schema}].[{tables.Subjects}] caller
-          LEFT JOIN [{schema}].[{tables.Users}] callerUser ON caller.Id = callerUser.SubjectId
-          LEFT JOIN [{schema}].[{tables.ServiceAccounts}] callerSa ON caller.Id = callerSa.SubjectId
-          LEFT JOIN [{schema}].[{tables.UserGroups}] callerGroup ON caller.Id = callerGroup.SubjectId
-          LEFT JOIN [{schema}].[{tables.Agents}] callerAgent ON caller.Id = callerAgent.SubjectId
+          FROM [{schema}].[{subjects}] caller
+          LEFT JOIN [{schema}].[{users}] callerUser ON caller.Id = callerUser.SubjectId
+          LEFT JOIN [{schema}].[{serviceAccounts}] callerSa ON caller.Id = callerSa.SubjectId
+          LEFT JOIN [{schema}].[{userGroups}] callerGroup ON caller.Id = callerGroup.SubjectId
+          LEFT JOIN [{schema}].[{agents}] callerAgent ON caller.Id = callerAgent.SubjectId
           WHERE caller.Id = JSON_VALUE(@SubjectIds, '$[0]')
             AND (caller.SubjectTypeId <> 'user' OR callerUser.IsActive = 1)
             AND (caller.SubjectTypeId <> 'service_account' OR (callerSa.SubjectId IS NOT NULL AND (callerSa.ExpiresAt IS NULL OR callerSa.ExpiresAt > GETUTCDATE())))
@@ -97,18 +147,8 @@ RETURN
       AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())
       AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= GETUTCDATE())
 )";
-
-        try
-        {
-            _logger.LogDebug("Creating fn_IsResourceAccessible TVF...");
-            await _context.Database.ExecuteSqlRawAsync(dropFunctionSql, cancellationToken);
-            await _context.Database.ExecuteSqlRawAsync(createFunctionSql, cancellationToken);
-            _logger.LogInformation("fn_IsResourceAccessible TVF created successfully.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create fn_IsResourceAccessible TVF. Authorization queries may fail.");
-            throw;
-        }
     }
+
+    private static string EscapeIdentifier(string identifier)
+        => identifier.Replace("]", "]]", StringComparison.Ordinal);
 }
