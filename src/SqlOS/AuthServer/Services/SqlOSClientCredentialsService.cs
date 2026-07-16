@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -11,6 +12,8 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSClientCredentialsService
 {
+    internal static readonly string DummyCredentialHash =
+        new PasswordHasher<object>().HashPassword(new object(), "sqlos-invalid-client-dummy-secret");
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSCryptoService _crypto;
     private readonly SqlOSAdminService _admin;
@@ -39,10 +42,15 @@ public sealed class SqlOSClientCredentialsService
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
         var grants = client == null ? [] : SqlOSAdminService.DeserializeJsonList(client.GrantTypesJson);
-        var account = client == null ? null : await _context.Set<SqlOSFgaServiceAccount>()
+        var account = await _context.Set<SqlOSFgaServiceAccount>()
             .SingleOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
-        var subject = account == null ? null : await _context.Set<SqlOSFgaSubject>()
-            .SingleOrDefaultAsync(x => x.Id == account.SubjectId, cancellationToken);
+        var subjectIdForLookup = account?.SubjectId ?? "__invalid_service_subject__";
+        var subject = await _context.Set<SqlOSFgaSubject>()
+            .SingleOrDefaultAsync(x => x.Id == subjectIdForLookup, cancellationToken);
+        var candidateSecret = clientSecret.Length <= 256 ? clientSecret : string.Empty;
+        var credentialVerified = _crypto.VerifyPassword(
+            ResolveCredentialHashForVerification(account),
+            candidateSecret);
         var now = DateTime.UtcNow;
         var valid = client != null
             && client.IsActive
@@ -55,7 +63,7 @@ public sealed class SqlOSClientCredentialsService
             && string.Equals(subject.SubjectTypeId, "service_account", StringComparison.Ordinal)
             && (account.ExpiresAt == null || account.ExpiresAt > now)
             && clientSecret.Length is >= 43 and <= 256
-            && _crypto.VerifyPassword(account!.ClientSecretHash, clientSecret);
+            && credentialVerified;
         if (!valid)
         {
             await AuditAsync("oauth.client_credentials.failed", clientId, account?.SubjectId, httpContext, cancellationToken);
@@ -148,6 +156,11 @@ public sealed class SqlOSClientCredentialsService
         }
         return account;
     }
+
+    internal static string ResolveCredentialHashForVerification(SqlOSFgaServiceAccount? account)
+        => string.IsNullOrWhiteSpace(account?.ClientSecretHash)
+            ? DummyCredentialHash
+            : account.ClientSecretHash;
 
     private Task AuditAsync(
         string action,

@@ -82,6 +82,26 @@ public sealed class SqlOSClientCredentialsServiceTests
     }
 
     [TestMethod]
+    public async Task UnknownClient_UsesProcessLocalDummyHashAndPersistsNoCredential()
+    {
+        await using var harness = await CreateHarnessAsync();
+
+        SqlOSClientCredentialsService.ResolveCredentialHashForVerification(null)
+            .Should().BeSameAs(SqlOSClientCredentialsService.DummyCredentialHash);
+        harness.Crypto.VerifyPassword(
+            SqlOSClientCredentialsService.DummyCredentialHash,
+            "unknown-client-secret-with-sufficient-length-123456789").Should().BeFalse();
+        await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
+            "unknown-client",
+            "unknown-client-secret-with-sufficient-length-123456789",
+            "https://api.example.test/ledger",
+            "ledger.read",
+            new DefaultHttpContext(),
+            default));
+        (await harness.Context.Set<SqlOSFgaServiceAccount>().CountAsync()).Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task RotatingStoredHash_InvalidatesPreviouslyIssuedTokenAndOldSecret()
     {
         await using var harness = await CreateHarnessAsync();
