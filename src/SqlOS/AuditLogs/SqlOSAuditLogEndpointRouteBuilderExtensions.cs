@@ -18,7 +18,8 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
         string dashboardBasePath)
     {
         var adminPrefix = $"{dashboardBasePath.TrimEnd('/')}/admin/audit";
-        var api = endpoints.MapGroup($"{adminPrefix}/api");
+        var api = endpoints.MapGroup($"{adminPrefix}/api")
+            .RequireSqlOSAdminAuthorization();
         api.ExcludeFromDescription();
 
         api.MapGet("/events", async (

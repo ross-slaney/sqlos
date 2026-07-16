@@ -18,6 +18,7 @@ using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Models;
 using SqlOS.Calendar.Services;
 using SqlOS.Configuration;
+using SqlOS.Dashboard;
 using SqlOS.Security;
 using SqlOS.Tests.Infrastructure;
 
@@ -160,6 +161,7 @@ public sealed class SqlOSCalendarEndpointsTests
                     services.AddSingleton(Options.Create(sqlosOptions.AuthServer));
                     services.AddSingleton<SqlOSBrowserSecurityHeaders>();
                     services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
+                    services.AddSingleton<SqlOSDashboardSessionService>();
                     services.AddSingleton<IHttpClientFactory, FakeCalendarProviderHttpClientFactory>();
                     services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSGoogleCalendarAdapter>();
                     services.AddSingleton<ISqlOSCalendarProviderAdapter, SqlOSMicrosoftGraphCalendarAdapter>();

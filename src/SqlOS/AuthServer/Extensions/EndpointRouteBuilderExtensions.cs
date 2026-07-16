@@ -45,9 +45,11 @@ public static class EndpointRouteBuilderExtensions
         var adminRoot = endpoints.MapGroup(adminPrefix);
         adminRoot.ExcludeFromDescription();
 
-        var adminApi = adminRoot.MapGroup("/api");
+        var adminApi = adminRoot.MapGroup("/api")
+            .RequireSqlOSAdminAuthorization();
         var ssoSetupApi = endpoints.MapGroup(resolvedSsoSetupApiPath);
         ssoSetupApi.ExcludeFromDescription();
+        ssoSetupApi.AllowSqlOSAdminPublicException("SSO setup APIs require a scoped portal session.");
 
         if (authOptions.EnableScim)
         {
@@ -3581,6 +3583,7 @@ public static class EndpointRouteBuilderExtensions
 
         var ssoPortal = adminRoot.MapGroup("/sso-portal");
         ssoPortal.ExcludeFromDescription();
+        ssoPortal.AllowSqlOSAdminPublicException("SSO portal routes require a scoped portal session token.");
         MapSsoPortalEndpoints(adminApi, ssoPortal, ssoSetupApi);
 
         adminApi.MapGet("/stats", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

@@ -21,7 +21,8 @@ public static class EndpointRouteBuilderExtensions
         var admin = endpoints.MapGroup(prefix);
         admin.ExcludeFromDescription();
 
-        var api = admin.MapGroup("/api");
+        var api = admin.MapGroup("/api")
+            .RequireSqlOSAdminAuthorization();
 
         api.MapGet("/templates", async (
             HttpContext context,
