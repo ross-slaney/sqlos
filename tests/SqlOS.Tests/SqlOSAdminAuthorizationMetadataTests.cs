@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
@@ -20,17 +21,18 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSAdminAuthorizationMetadataTests
 {
-    private const string PortalApiPrefix = "/sqlos/admin/auth/sso-portal/api";
+    private const string PortalPrefix = "/sqlos/admin/auth/sso-portal";
+    private const string PortalApiPrefix = $"{PortalPrefix}/api";
 
     [TestMethod]
-    public async Task AdminApiRouteInventory_RequiresCentralAuthorizationOrExplicitException()
+    public async Task AdminRouteInventory_RequiresCentralAuthorizationOrExplicitException()
     {
         await using var app = await CreateAppAsync(Environments.Production);
 
         var endpoints = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.RoutePattern.RawText?.Contains("/admin/", StringComparison.Ordinal) == true)
-            .Where(endpoint => endpoint.RoutePattern.RawText?.Contains("/api", StringComparison.Ordinal) == true)
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IHttpMethodMetadata>() != null)
             .ToArray();
 
         endpoints.Should().NotBeEmpty();
@@ -45,10 +47,30 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
 
             if (publicException != null)
             {
-                path.Should().StartWith(PortalApiPrefix);
+                path.Should().StartWith(PortalPrefix);
                 publicException.Reason.Should().Contain("portal session");
             }
         }
+    }
+
+    [TestMethod]
+    public async Task AdminAuthorizationFilter_MissingSqlOSOptions_FailsClosedInDevelopment()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development
+        });
+        builder.WebHost.UseTestServer();
+
+        await using var app = builder.Build();
+        app.MapGroup("/admin")
+            .RequireSqlOSAdminAuthorization()
+            .MapGet("/probe", () => Results.Ok());
+        await app.StartAsync();
+
+        var response = await app.GetTestClient().GetAsync("/admin/probe");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [TestMethod]

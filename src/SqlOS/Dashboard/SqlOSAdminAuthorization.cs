@@ -45,12 +45,17 @@ internal sealed class SqlOSAdminAuthorizationFilter : IEndpointFilter
         EndpointFilterDelegate next)
     {
         var services = context.HttpContext.RequestServices;
+        if (services.GetService<SqlOSDashboardSessionService>() == null)
+        {
+            return Results.NotFound();
+        }
+
         var dashboardOptions = services.GetService<IOptions<SqlOSOptions>>()?.Value.Dashboard
-            ?? services.GetService<IOptions<SqlOSAuthServerOptions>>()?.Value.Dashboard
-            ?? new SqlOSDashboardOptions();
+            ?? services.GetService<IOptions<SqlOSAuthServerOptions>>()?.Value.Dashboard;
         var environment = services.GetRequiredService<IHostEnvironment>();
 
-        if (!await IsAuthorizedAsync(context.HttpContext, dashboardOptions, environment))
+        if (dashboardOptions == null
+            || !await IsAuthorizedAsync(context.HttpContext, dashboardOptions, environment))
         {
             return Results.NotFound();
         }
