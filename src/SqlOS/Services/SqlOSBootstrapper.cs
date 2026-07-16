@@ -17,6 +17,7 @@ public sealed class SqlOSBootstrapper
     private readonly SqlOSEmailAdminService _emailAdminService;
     private readonly SqlOSFgaSchemaInitializer _fgaSchemaInitializer;
     private readonly SqlOSFgaFunctionInitializer _fgaFunctionInitializer;
+    private readonly SqlOSFgaHierarchyValidator _fgaHierarchyValidator;
     private readonly SqlOSFgaSeedService _fgaSeedService;
     private readonly ILogger<SqlOSBootstrapper> _logger;
 
@@ -29,6 +30,7 @@ public sealed class SqlOSBootstrapper
         SqlOSEmailAdminService emailAdminService,
         SqlOSFgaSchemaInitializer fgaSchemaInitializer,
         SqlOSFgaFunctionInitializer fgaFunctionInitializer,
+        SqlOSFgaHierarchyValidator fgaHierarchyValidator,
         SqlOSFgaSeedService fgaSeedService,
         ILogger<SqlOSBootstrapper> logger)
     {
@@ -40,6 +42,7 @@ public sealed class SqlOSBootstrapper
         _emailAdminService = emailAdminService;
         _fgaSchemaInitializer = fgaSchemaInitializer;
         _fgaFunctionInitializer = fgaFunctionInitializer;
+        _fgaHierarchyValidator = fgaHierarchyValidator;
         _fgaSeedService = fgaSeedService;
         _logger = logger;
     }
@@ -84,6 +87,8 @@ public sealed class SqlOSBootstrapper
         {
             await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
         }
+
+        await _fgaHierarchyValidator.ValidateExistingDataAsync(cancellationToken);
 
         _logger.LogInformation("SqlOS initialization complete.");
     }

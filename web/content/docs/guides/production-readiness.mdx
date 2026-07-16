@@ -223,6 +223,8 @@ SqlOS owns its tables separately from your EF Core migrations. At host startup, 
 4. applies the FGA scripts tracked by `SqlOSFgaSchema`;
 5. creates or verifies FGA functions and seed data when enabled.
 
+`Fga.MaxResourceHierarchyDepth` is one shared limit for resource synchronization, manual resource helpers, in-process authorization, and the SQL authorization function. Startup validates persisted resources against that limit and fails with the affected resource ID when existing data is deeper or cyclic. Before lowering the value, inspect and repair the stored hierarchy in a restored environment; do not lower it during a rollout and rely on authorization to silently truncate deeper ancestors.
+
 Each AuthServer script and its ledger entry commit in one transaction, so an interrupted startup safely retries the unrecorded script. The initializer does **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
 
 Use this rollout sequence:

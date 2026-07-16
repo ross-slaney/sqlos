@@ -7,8 +7,6 @@ namespace SqlOS.Fga;
 
 internal static class SqlOSResourceEntitySynchronizer
 {
-    private const int DefaultMaxResourceHierarchyDepth = 10;
-
     public static void Sync(DbContext context)
     {
         var changes = GetResourceEntityChanges(context);
@@ -19,7 +17,11 @@ internal static class SqlOSResourceEntitySynchronizer
 
         ValidateUniqueResourceIds(changes);
         var changesById = changes.ToDictionary(change => change.ResourceId, StringComparer.Ordinal);
-        ValidateResourceChanges(context, changes, changesById);
+        ValidateResourceChanges(
+            context,
+            changes,
+            changesById,
+            SqlOSFgaHierarchyDepth.Resolve((ISqlOSFgaDbContext)context));
         ApplyResourceChanges(context, changes);
     }
 
@@ -33,7 +35,12 @@ internal static class SqlOSResourceEntitySynchronizer
 
         ValidateUniqueResourceIds(changes);
         var changesById = changes.ToDictionary(change => change.ResourceId, StringComparer.Ordinal);
-        await ValidateResourceChangesAsync(context, changes, changesById, cancellationToken);
+        await ValidateResourceChangesAsync(
+            context,
+            changes,
+            changesById,
+            SqlOSFgaHierarchyDepth.Resolve((ISqlOSFgaDbContext)context),
+            cancellationToken);
         await ApplyResourceChangesAsync(context, changes, cancellationToken);
     }
 
@@ -59,7 +66,8 @@ internal static class SqlOSResourceEntitySynchronizer
     private static void ValidateResourceChanges(
         DbContext context,
         IReadOnlyCollection<ResourceEntityChange> changes,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById)
+        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
+        int maxDepth)
     {
         foreach (var change in changes.Where(change => change.State != EntityState.Deleted))
         {
@@ -75,7 +83,7 @@ internal static class SqlOSResourceEntitySynchronizer
                 throw new InvalidOperationException($"FGA resource '{change.ParentResourceId}' was not found.");
             }
 
-            EnsureParentChainDoesNotCreateCycle(context, change, changesById);
+            EnsureParentChainDoesNotCreateCycle(context, change, changesById, maxDepth);
         }
 
         foreach (var added in changes.Where(change => change.State == EntityState.Added))
@@ -114,6 +122,7 @@ internal static class SqlOSResourceEntitySynchronizer
         DbContext context,
         IReadOnlyCollection<ResourceEntityChange> changes,
         IReadOnlyDictionary<string, ResourceEntityChange> changesById,
+        int maxDepth,
         CancellationToken cancellationToken)
     {
         foreach (var change in changes.Where(change => change.State != EntityState.Deleted))
@@ -130,7 +139,12 @@ internal static class SqlOSResourceEntitySynchronizer
                 throw new InvalidOperationException($"FGA resource '{change.ParentResourceId}' was not found.");
             }
 
-            await EnsureParentChainDoesNotCreateCycleAsync(context, change, changesById, cancellationToken);
+            await EnsureParentChainDoesNotCreateCycleAsync(
+                context,
+                change,
+                changesById,
+                maxDepth,
+                cancellationToken);
         }
 
         foreach (var added in changes.Where(change => change.State == EntityState.Added))
@@ -255,11 +269,12 @@ internal static class SqlOSResourceEntitySynchronizer
     private static void EnsureParentChainDoesNotCreateCycle(
         DbContext context,
         ResourceEntityChange change,
-        IReadOnlyDictionary<string, ResourceEntityChange> changesById)
+        IReadOnlyDictionary<string, ResourceEntityChange> changesById,
+        int maxDepth)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal) { change.ResourceId };
         var currentId = change.ParentResourceId;
-        var depth = 0;
+        var depth = 1;
 
         while (!string.IsNullOrWhiteSpace(currentId))
         {
@@ -268,9 +283,9 @@ internal static class SqlOSResourceEntitySynchronizer
                 throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
             }
 
-            if (depth > DefaultMaxResourceHierarchyDepth)
+            if (depth > maxDepth)
             {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
             }
 
             currentId = GetParentId(context, currentId, changesById);
@@ -282,11 +297,12 @@ internal static class SqlOSResourceEntitySynchronizer
         DbContext context,
         ResourceEntityChange change,
         IReadOnlyDictionary<string, ResourceEntityChange> changesById,
+        int maxDepth,
         CancellationToken cancellationToken)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal) { change.ResourceId };
         var currentId = change.ParentResourceId;
-        var depth = 0;
+        var depth = 1;
 
         while (!string.IsNullOrWhiteSpace(currentId))
         {
@@ -295,9 +311,9 @@ internal static class SqlOSResourceEntitySynchronizer
                 throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
             }
 
-            if (depth > DefaultMaxResourceHierarchyDepth)
+            if (depth > maxDepth)
             {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
             }
 
             currentId = await GetParentIdAsync(context, currentId, changesById, cancellationToken);

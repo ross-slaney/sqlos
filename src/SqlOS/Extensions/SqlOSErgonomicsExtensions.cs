@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Services;
+using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -17,8 +18,6 @@ namespace SqlOS.Extensions;
 /// </summary>
 public static class SqlOSErgonomicsExtensions
 {
-    private const int DefaultMaxResourceHierarchyDepth = 10;
-
     /// <summary>
     /// Requires every endpoint in a route group to present a valid SqlOS bearer access token
     /// containing the specified audience.
@@ -719,7 +718,8 @@ public static class SqlOSErgonomicsExtensions
 
         var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
         var currentId = parentId;
-        var depth = 0;
+        var depth = 1;
+        var maxDepth = SqlOSFgaHierarchyDepth.Resolve(context);
 
         while (!string.IsNullOrWhiteSpace(currentId))
         {
@@ -728,9 +728,9 @@ public static class SqlOSErgonomicsExtensions
                 throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
             }
 
-            if (depth > DefaultMaxResourceHierarchyDepth)
+            if (depth > maxDepth)
             {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
             }
 
             var localParent = context.Set<SqlOSFgaResource>().Local.FirstOrDefault(r => r.Id == currentId);

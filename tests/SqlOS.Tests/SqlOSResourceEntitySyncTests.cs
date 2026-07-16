@@ -1,6 +1,8 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Extensions;
@@ -96,6 +98,36 @@ public sealed class SqlOSResourceEntitySyncTests
             .ParentId
             .Should()
             .Be("workspace_parent");
+    }
+
+    [TestMethod]
+    public void SaveChanges_UsesConfiguredHierarchyDepthFromApplicationServices()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.AddSqlOS<ResourceEntityTestDbContext>(
+            database => database.UseInMemoryDatabase(Guid.NewGuid().ToString("N")),
+            sqlos => sqlos.Fga.MaxResourceHierarchyDepth = 2);
+
+        using var app = builder.Build();
+        using var scope = app.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ResourceEntityTestDbContext>();
+        SeedFgaCore(context);
+        context.Resources.AddRange(
+            new ResourceBackedEntity { Id = "level_1", Name = "Level 1", ParentId = "root" },
+            new ResourceBackedEntity { Id = "level_2", Name = "Level 2", ParentId = "level_1" });
+        context.SaveChanges();
+
+        context.Resources.Add(new ResourceBackedEntity
+        {
+            Id = "level_3",
+            Name = "Level 3",
+            ParentId = "level_2"
+        });
+
+        Action act = () => context.SaveChanges();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*configured maximum depth of 2*");
     }
 
     [TestMethod]

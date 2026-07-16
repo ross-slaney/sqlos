@@ -128,6 +128,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSFgaSeedService>();
         services.AddScoped<SqlOSFgaFunctionInitializer>();
         services.AddScoped<SqlOSFgaSchemaInitializer>();
+        services.AddScoped<SqlOSFgaHierarchyValidator>();
         services.AddHostedService<SqlOSSigningKeyRotationService>();
         services.AddHostedService<SqlOSCalendarSyncHostedService>();
         services.AddHostedService<SqlOSBootstrapHostedService>();

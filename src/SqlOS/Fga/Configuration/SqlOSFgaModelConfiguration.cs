@@ -14,6 +14,9 @@ public static class SqlOSFgaModelConfiguration
     {
         var schema = options.Schema;
         var tables = options.TableNames;
+        modelBuilder.Model.SetAnnotation(
+            SqlOSFgaHierarchyDepth.ModelAnnotationName,
+            SqlOSFgaHierarchyDepth.Normalize(options.MaxResourceHierarchyDepth));
 
         // SubjectType
         modelBuilder.Entity<SqlOSFgaSubjectType>(entity =>

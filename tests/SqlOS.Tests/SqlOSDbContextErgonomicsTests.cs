@@ -1,12 +1,14 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Tests;
@@ -53,6 +55,22 @@ public sealed class SqlOSDbContextErgonomicsTests
         scope.ServiceProvider.GetRequiredService<ISqlOSAuthServerDbContext>().Should().BeSameAs(context);
         scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>().Should().BeSameAs(context);
         app.Services.GetRequiredService<IOptions<SqlOSOptions>>().Value.Fga.RootResourceId.Should().Be("recommended_setup_root");
+    }
+
+    [TestMethod]
+    public void SqlOSDbContext_CanResolveConfiguredFgaOptionsFromApplicationServices()
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.AddSqlOS<RecommendedSetupTestDbContext>(
+            db => db.UseInMemoryDatabase(Guid.NewGuid().ToString("N")),
+            sqlos => sqlos.Fga.MaxResourceHierarchyDepth = 3);
+
+        using var app = builder.Build();
+        using var scope = app.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<RecommendedSetupTestDbContext>();
+
+        context.GetService<IOptions<SqlOSFgaOptions>>().Value.MaxResourceHierarchyDepth.Should().Be(3);
     }
 
     [TestMethod]

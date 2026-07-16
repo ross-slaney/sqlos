@@ -1,11 +1,14 @@
 using System.Linq.Expressions;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Extensions;
 using SqlOS.Extensions;
 using SqlOS.Fga.Configuration;
+using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.Tests.Infrastructure;
@@ -129,6 +132,72 @@ public sealed class SqlOSErgonomicsExtensionsTests
         await missingResourceType.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*resource type 'workpsace' was not found*");
         context.Set<SqlOSFgaResource>().Local.Should().NotContain(x => x.Id == "workspace_1");
+    }
+
+    [TestMethod]
+    public async Task ResourceHelpers_UseConfiguredHierarchyDepth()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddDbContext<TestSqlOSInMemoryDbContext>(database =>
+            database.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
+        builder.Services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.Fga.MaxResourceHierarchyDepth = 2);
+
+        using var app = builder.Build();
+        using var scope = app.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
+        SeedFgaCore(context);
+        await context.SaveChangesAsync();
+        await context.CreateResourceWithIdAsync("level_1", "workspace", "Level 1", "root");
+        await context.CreateResourceWithIdAsync("level_2", "workspace", "Level 2", "level_1");
+        await context.SaveChangesAsync();
+
+        var ergonomicsAct = async () => await context.CreateResourceWithIdAsync(
+            "level_3",
+            "workspace",
+            "Level 3",
+            "level_2");
+
+        await ergonomicsAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*configured maximum depth of 2*");
+
+        context.ChangeTracker.Clear();
+        Action convenienceAct = () => context.CreateResource(
+            "level_2",
+            "Level 3",
+            "workspace",
+            "level_3");
+
+        convenienceAct.Should().Throw<InvalidOperationException>()
+            .WithMessage("*configured maximum depth of 2*");
+    }
+
+    [TestMethod]
+    public void ConvenienceHelper_UsesManualModelHierarchyDepth()
+    {
+        var options = new DbContextOptionsBuilder<ManualDepthFgaDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        using var context = new ManualDepthFgaDbContext(options);
+        context.Set<SqlOSFgaResourceType>().AddRange(
+            new SqlOSFgaResourceType { Id = "root", Name = "Root" },
+            new SqlOSFgaResourceType { Id = "workspace", Name = "Workspace" });
+        context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+        {
+            Id = "root",
+            Name = "Root",
+            ResourceTypeId = "root"
+        });
+        context.SaveChanges();
+        context.CreateResource("root", "Level 1", "workspace", "level_1");
+        context.SaveChanges();
+        context.CreateResource("level_1", "Level 2", "workspace", "level_2");
+        context.SaveChanges();
+
+        Action act = () => context.CreateResource("level_2", "Level 3", "workspace", "level_3");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*configured maximum depth of 2*");
     }
 
     [TestMethod]
@@ -466,5 +535,19 @@ public sealed class SqlOSErgonomicsExtensionsTests
         public Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(string subjectId, string permissionKey)
             where T : IHasResourceId
             => throw new NotImplementedException();
+    }
+
+    private sealed class ManualDepthFgaDbContext(DbContextOptions<ManualDepthFgaDbContext> options)
+        : DbContext(options), ISqlOSFgaDbContext
+    {
+        public IQueryable<SqlOSFgaAccessibleResource> IsResourceAccessible(
+            string resourceId,
+            string subjectIds,
+            string permissionId)
+            => throw new NotSupportedException();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.ApplySqlOSFgaModel(options =>
+                options.MaxResourceHierarchyDepth = 2);
     }
 }
