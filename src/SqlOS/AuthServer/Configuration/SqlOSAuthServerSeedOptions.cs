@@ -147,6 +147,9 @@ public sealed class SqlOSOidcConnectionSeedOptions
     public string? AppleKeyId { get; set; }
     public string? ApplePrivateKeyPem { get; set; }
     public string? LogoDataUrl { get; set; }
+    public bool TrustUpstreamMfa { get; set; }
+    public List<string> AcceptedAmrValues { get; } = [];
+    public List<string> AcceptedAcrValues { get; } = [];
 
     /// <summary>
     /// Whether the connection should be enabled when first seeded. After the connection exists,

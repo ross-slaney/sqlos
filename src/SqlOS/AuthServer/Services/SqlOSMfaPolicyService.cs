@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Security;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -158,6 +159,7 @@ public sealed class SqlOSMfaPolicyService
 
             if (string.Equals(method, SqlOSMfaFactorTypes.Totp, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(method, SqlOSMfaFactorTypes.RecoveryCode, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(method, SqlOSUpstreamMfaTrust.AuthenticationMethod, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(method, "passkey", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(method, "webauthn", StringComparison.OrdinalIgnoreCase))
             {

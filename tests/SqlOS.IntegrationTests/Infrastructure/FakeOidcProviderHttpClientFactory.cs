@@ -58,7 +58,7 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     access_token = $"{provider}|{code}",
                     token_type = "Bearer",
                     expires_in = 3600,
-                    id_token = CreateIdToken(provider, clientId, parsed.email, parsed.nonce, parsed.isVerified)
+                    id_token = CreateIdToken(provider, clientId, parsed.email, parsed.nonce, parsed.isVerified, parsed.mode)
                 });
             }
 
@@ -200,7 +200,13 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
             return ("user@example.com", "user@example.com", "nonce", true, "success");
         }
 
-        private static string CreateIdToken(string provider, string clientId, string email, string nonce, bool isVerified)
+        private static string CreateIdToken(
+            string provider,
+            string clientId,
+            string email,
+            string nonce,
+            bool isVerified,
+            string mode)
         {
             var now = DateTime.UtcNow;
             var issuer = provider switch
@@ -245,6 +251,14 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     new Claim("nonce", nonce)
                 ]
             };
+            if (string.Equals(mode, "amr-mfa", StringComparison.Ordinal))
+            {
+                claims = [.. claims, new Claim("amr", "pwd"), new Claim("amr", "mfa")];
+            }
+            else if (string.Equals(mode, "acr-loa2", StringComparison.Ordinal))
+            {
+                claims = [.. claims, new Claim("acr", "urn:example:loa:2")];
+            }
 
             var token = new JwtSecurityToken(
                 issuer: issuer,
@@ -254,7 +268,18 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                 expires: now.AddHours(1),
                 signingCredentials: new SigningCredentials(SigningKey, SecurityAlgorithms.RsaSha256));
             token.Header["kid"] = SigningKey.KeyId;
-            return new JwtSecurityTokenHandler().WriteToken(token);
+            var encoded = new JwtSecurityTokenHandler().WriteToken(token);
+            if (!string.Equals(mode, "tampered-amr", StringComparison.Ordinal))
+            {
+                return encoded;
+            }
+
+            var parts = encoded.Split('.');
+            var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(
+                Base64UrlEncoder.DecodeBytes(parts[1]))!;
+            payload["amr"] = new[] { "pwd", "mfa" };
+            parts[1] = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(payload));
+            return string.Join('.', parts);
         }
 
         private static object BuildJwk()

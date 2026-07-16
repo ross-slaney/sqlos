@@ -362,7 +362,9 @@ public sealed record SqlOSCreateSsoConnectionRequest(
     bool AutoLinkByEmail,
     string? EmailAttributeName,
     string? FirstNameAttributeName,
-    string? LastNameAttributeName);
+    string? LastNameAttributeName,
+    bool TrustUpstreamMfa = false,
+    List<string>? AcceptedAuthnContextClassRefs = null);
 
 public static class SqlOSScimGroupMappingMatchTypes
 {
@@ -448,7 +450,10 @@ public sealed record SqlOSCreateOidcConnectionRequest(
     string? AppleTeamId = null,
     string? AppleKeyId = null,
     string? ApplePrivateKeyPem = null,
-    string? LogoDataUrl = null);
+    string? LogoDataUrl = null,
+    bool TrustUpstreamMfa = false,
+    List<string>? AcceptedAmrValues = null,
+    List<string>? AcceptedAcrValues = null);
 
 public sealed record SqlOSUpdateOidcConnectionRequest(
     string DisplayName,
@@ -470,7 +475,10 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     string? AppleTeamId = null,
     string? AppleKeyId = null,
     string? ApplePrivateKeyPem = null,
-    string? LogoDataUrl = null);
+    string? LogoDataUrl = null,
+    bool TrustUpstreamMfa = false,
+    List<string>? AcceptedAmrValues = null,
+    List<string>? AcceptedAcrValues = null);
 
 public sealed record SqlOSAuthorizationUrlRequest(
     string ConnectionId,

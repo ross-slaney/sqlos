@@ -82,6 +82,9 @@ public static partial class EndpointRouteBuilderExtensions
         connection.UseUserInfo,
         connection.AppleTeamId,
         connection.AppleKeyId,
+        connection.TrustUpstreamMfa,
+        AcceptedAmrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAmrValuesJson),
+        AcceptedAcrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAcrValuesJson),
         connection.IsEnabled,
         connection.CreatedAt,
         connection.UpdatedAt
@@ -108,7 +111,10 @@ public static partial class EndpointRouteBuilderExtensions
         string? AppleTeamId,
         string? AppleKeyId,
         string? ApplePrivateKeyPem,
-        string? LogoDataUrl);
+        string? LogoDataUrl,
+        bool TrustUpstreamMfa = false,
+        List<string>? AcceptedAmrValues = null,
+        List<string>? AcceptedAcrValues = null);
 
     private sealed record UpdateOidcConnectionRequest(
         string DisplayName,
@@ -130,7 +136,10 @@ public static partial class EndpointRouteBuilderExtensions
         string? AppleTeamId,
         string? AppleKeyId,
         string? ApplePrivateKeyPem,
-        string? LogoDataUrl);
+        string? LogoDataUrl,
+        bool TrustUpstreamMfa = false,
+        List<string>? AcceptedAmrValues = null,
+        List<string>? AcceptedAcrValues = null);
 
     private sealed record ClientLifecycleRequest(string? Reason);
     private sealed record CreateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true);
