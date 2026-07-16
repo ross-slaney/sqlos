@@ -68,7 +68,12 @@ public static partial class EndpointRouteBuilderExtensions
         MapHostedFactorEndpoints(auth, hostedForms, authPrefix);
         MapHostedSignupEndpoints(auth, hostedForms, authPrefix);
         MapHeadlessAuthEndpoints(headless);
-        MapTokenAndPublicApiEndpoints(auth, hostedForms, authPrefix, authOptions);
+        MapBrowserSessionEndpoints(auth, authPrefix);
+        MapTokenEndpoints(auth);
+        MapClientRegistrationEndpoints(auth, authOptions);
+        MapPublicAccountEndpoints(auth, hostedForms, authPrefix);
+        MapOidcEndpoints(auth);
+        MapSamlEndpoints(auth);
 
         var ssoPortal = adminRoot.MapGroup("/sso-portal");
         ssoPortal.ExcludeFromDescription();
