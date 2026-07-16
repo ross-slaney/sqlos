@@ -152,7 +152,7 @@ public sealed partial class SqlOSAdminService
                     Audience = normalized.Audience,
                     ClientType = normalized.ClientType,
                     RegistrationSource = "seeded",
-                    TokenEndpointAuthMethod = "none",
+                    TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none",
                     GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
@@ -173,7 +173,7 @@ public sealed partial class SqlOSAdminService
             existing.Audience = normalized.Audience;
             existing.ClientType = normalized.ClientType;
             existing.RegistrationSource = "seeded";
-            existing.TokenEndpointAuthMethod = string.IsNullOrWhiteSpace(existing.TokenEndpointAuthMethod) ? "none" : existing.TokenEndpointAuthMethod;
+            existing.TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none";
             existing.GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes);
             existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
                 ? JsonSerializer.Serialize(new[] { "code" })
@@ -2608,6 +2608,7 @@ public sealed partial class SqlOSAdminService
             seed.IsFirstParty,
             seed.AllowNativeHeadlessAuth,
             seed.AllowDeviceAuthorization,
+            seed.EnableClientCredentials,
             seed.ClientType,
             seed.IsActive);
 
@@ -2822,6 +2823,7 @@ public sealed partial class SqlOSAdminService
             request.IsFirstParty,
             request.AllowNativeHeadlessAuth,
             request.AllowDeviceAuthorization,
+            false,
             request.ClientType,
             true);
 
@@ -2836,6 +2838,7 @@ public sealed partial class SqlOSAdminService
         bool isFirstParty,
         bool allowNativeHeadlessAuth,
         bool allowDeviceAuthorization,
+        bool enableClientCredentials,
         string? clientType,
         bool isActive)
     {
@@ -2853,7 +2856,7 @@ public sealed partial class SqlOSAdminService
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        if (normalizedRedirectUris.Count == 0 && !allowDeviceAuthorization)
+        if (normalizedRedirectUris.Count == 0 && !allowDeviceAuthorization && !enableClientCredentials)
         {
             throw new InvalidOperationException($"Client '{normalizedClientId}' must define at least one redirect URI.");
         }
@@ -2876,11 +2879,15 @@ public sealed partial class SqlOSAdminService
             isFirstParty,
             allowNativeHeadlessAuth,
             allowDeviceAuthorization,
-            BuildGrantTypes(normalizedRedirectUris, allowDeviceAuthorization),
+            BuildGrantTypes(normalizedRedirectUris, allowDeviceAuthorization, enableClientCredentials),
+            enableClientCredentials,
             isActive);
     }
 
-    private static List<string> BuildGrantTypes(IReadOnlyCollection<string> redirectUris, bool allowDeviceAuthorization)
+    private static List<string> BuildGrantTypes(
+        IReadOnlyCollection<string> redirectUris,
+        bool allowDeviceAuthorization,
+        bool enableClientCredentials)
     {
         var grants = new List<string>();
         if (redirectUris.Count > 0)
@@ -2893,7 +2900,15 @@ public sealed partial class SqlOSAdminService
             grants.Add(SqlOSOAuthGrantTypes.DeviceCode);
         }
 
-        grants.Add(SqlOSOAuthGrantTypes.RefreshToken);
+        if (enableClientCredentials)
+        {
+            grants.Add(SqlOSOAuthGrantTypes.ClientCredentials);
+        }
+
+        if (redirectUris.Count > 0 || allowDeviceAuthorization)
+        {
+            grants.Add(SqlOSOAuthGrantTypes.RefreshToken);
+        }
         return grants.Distinct(StringComparer.Ordinal).ToList();
     }
 
@@ -2991,6 +3006,7 @@ public sealed partial class SqlOSAdminService
         bool AllowNativeHeadlessAuth,
         bool AllowDeviceAuthorization,
         List<string> GrantTypes,
+        bool EnableClientCredentials,
         bool IsActive);
 
     private sealed record NormalizedAssignmentRequest(

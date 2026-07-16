@@ -105,6 +105,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSPasswordLoginAbuseService>();
         services.AddScoped<SqlOSInvitationService>();
         services.AddScoped<SqlOSDeviceAuthorizationService>();
+        services.AddScoped<SqlOSClientCredentialsService>();
         services.AddScoped<SqlOSCimdClientService>();
         services.AddScoped<SqlOSDynamicClientRegistrationService>();
         services.AddScoped<SqlOSClientResolutionService>();

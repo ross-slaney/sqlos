@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
@@ -31,6 +32,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSClientCredentialsService clientCredentialsService,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -38,6 +40,39 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
+                if (string.Equals(grantType, SqlOSOAuthGrantTypes.ClientCredentials, StringComparison.Ordinal))
+                {
+                    SqlOSClientCredentialsTokenResult clientResult;
+                    try
+                    {
+                        var (clientId, clientSecret) = ReadClientCredentials(context, form);
+                        clientResult = await clientCredentialsService.ExchangeAsync(
+                            clientId,
+                            clientSecret,
+                            form["resource"].ToString(),
+                            form["scope"].ToString(),
+                            context,
+                            cancellationToken);
+                    }
+                    catch (SqlOSClientCredentialsException ex)
+                    {
+                        if (ex.StatusCode == StatusCodes.Status401Unauthorized)
+                        {
+                            context.Response.Headers.WWWAuthenticate = "Basic";
+                        }
+                        return Results.Json(
+                            new { error = ex.Error, error_description = ex.Message },
+                            statusCode: ex.StatusCode);
+                    }
+                    return Results.Ok(new
+                    {
+                        access_token = clientResult.AccessToken,
+                        token_type = "Bearer",
+                        expires_in = Math.Max(1, (int)(clientResult.ExpiresAt - DateTime.UtcNow).TotalSeconds),
+                        scope = string.Join(' ', clientResult.Scopes)
+                    });
+                }
+
                 if (string.Equals(grantType, SqlOSOAuthGrantTypes.DeviceCode, StringComparison.Ordinal))
                 {
                     var deviceResult = await deviceAuthorizationService.PollAsync(
@@ -88,5 +123,34 @@ public static partial class EndpointRouteBuilderExtensions
                 return await PublicOAuthTokenErrorAsync(context, ex, cancellationToken);
             }
         });
+    }
+
+    private static (string ClientId, string ClientSecret) ReadClientCredentials(
+        HttpContext context,
+        IFormCollection form)
+    {
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (AuthenticationHeaderValue.TryParse(authorization, out var parsed)
+            && string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(parsed.Parameter))
+        {
+            try
+            {
+                var decoded = System.Text.Encoding.UTF8.GetString(
+                    Convert.FromBase64String(parsed.Parameter));
+                var separator = decoded.IndexOf(':');
+                if (separator > 0)
+                {
+                    return (
+                        WebUtility.UrlDecode(decoded[..separator]),
+                        WebUtility.UrlDecode(decoded[(separator + 1)..]));
+                }
+            }
+            catch (FormatException)
+            {
+            }
+        }
+
+        return (string.Empty, string.Empty);
     }
 }

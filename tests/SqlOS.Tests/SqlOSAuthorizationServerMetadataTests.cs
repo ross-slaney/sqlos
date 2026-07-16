@@ -99,6 +99,37 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         json.Should().NotContain("resource_parameter_supported");
     }
 
+    [TestMethod]
+    public async Task GetMetadataAsync_AdvertisesClientCredentialsOnlyForConfiguredConfidentialClient()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+        var before = await service.GetMetadataAsync(new DefaultHttpContext());
+        before.GrantTypesSupported.Should().NotContain(SqlOS.AuthServer.Contracts.SqlOSOAuthGrantTypes.ClientCredentials);
+
+        context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Add(new()
+        {
+            Id = "machine-app",
+            ClientId = "machine",
+            Name = "Machine",
+            ClientType = "confidential",
+            TokenEndpointAuthMethod = "client_secret_basic",
+            GrantTypesJson = "[\"client_credentials\"]",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        var after = await service.GetMetadataAsync(new DefaultHttpContext());
+        after.GrantTypesSupported.Should().Contain(SqlOS.AuthServer.Contracts.SqlOSOAuthGrantTypes.ClientCredentials);
+        after.TokenEndpointAuthMethodsSupported.Should().Contain("client_secret_basic");
+    }
+
     private static async Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(
         TestSqlOSInMemoryDbContext context,
         SqlOSAuthServerOptions optionsValue)

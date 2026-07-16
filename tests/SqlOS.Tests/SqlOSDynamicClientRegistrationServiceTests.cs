@@ -69,6 +69,25 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
     }
 
     [TestMethod]
+    public async Task RegisterAsync_CannotCreateClientCredentialsClient()
+    {
+        using var context = CreateContext();
+        var service = CreateService(context, CreateOptions(), new SqlOSDynamicClientRegistrationRateLimiter());
+
+        var act = () => service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Machine Client",
+            RedirectUris = ["https://client.example.test/callback"],
+            GrantTypes = ["client_credentials"],
+            TokenEndpointAuthMethod = "client_secret_basic"
+        }, CreateHttpContext("10.0.0.9"));
+
+        var ex = await act.Should().ThrowAsync<SqlOSClientRegistrationException>();
+        ex.Which.Error.Should().Be("invalid_client_metadata");
+        (await context.Set<SqlOSClientApplication>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task RegisterAsync_RejectsInvalidRedirectUris()
     {
         using var context = CreateContext();

@@ -105,6 +105,8 @@ public sealed class SqlOSClientSeedOptions
     public bool IsFirstParty { get; set; }
     public bool AllowNativeHeadlessAuth { get; set; }
     public bool AllowDeviceAuthorization { get; set; }
+    /// <summary>Enables OAuth client credentials for this confidential, non-browser client.</summary>
+    public bool EnableClientCredentials { get; set; }
     public bool IsActive { get; set; } = true;
 }
 

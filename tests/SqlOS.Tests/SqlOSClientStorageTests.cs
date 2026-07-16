@@ -67,6 +67,33 @@ public sealed class SqlOSClientStorageTests
         client.ResponseTypesJson.Should().Contain("code");
     }
 
+    [TestMethod]
+    public async Task UpsertSeededClientsAsync_ConfiguresExplicitConfidentialServiceClientWithoutRedirects()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.ClientSeeds.Add(new SqlOSClientSeedOptions
+        {
+            ClientId = "worker",
+            Name = "Worker",
+            Audience = "https://api.example.test/jobs",
+            ClientType = "confidential",
+            EnableClientCredentials = true,
+            RequirePkce = false,
+            AllowedScopes = ["jobs.run"]
+        });
+        var options = Options.Create(optionsValue);
+        var admin = new SqlOSAdminService(context, options, TestCryptoService.Create(context, options));
+
+        await admin.UpsertSeededClientsAsync();
+
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync();
+        client.TokenEndpointAuthMethod.Should().Be("client_secret_basic");
+        client.GrantTypesJson.Should().Be("[\"client_credentials\"]");
+        client.RedirectUrisJson.Should().Be("[]");
+        client.RequirePkce.Should().BeFalse();
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
