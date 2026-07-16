@@ -1,0 +1,181 @@
+---
+title: "Your OAuth Clients Belong in Your Codebase"
+description: "Why first-party OAuth clients should be declared, reviewed, tested, and reconciled by the application that depends on them—not recreated in an external dashboard."
+date: "2026-07-14"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", ".NET", "Developer Experience", "Configuration as Code", "SqlOS"]
+---
+
+Most applications already know their authentication topology.
+
+The web application knows its callback URL. The mobile application knows its custom URI scheme. The CLI knows it needs device authorization and refresh tokens. The API knows the audience it accepts. The source code, deployment configuration, and integration tests all depend on those facts.
+
+Then, in a conventional identity platform, someone has to reproduce the same design in a separate administrative system.
+
+Create the client. Choose the grant type. Paste the callback. Add the scopes. Repeat it for development, staging, and production. When the callback changes, merge the application code and remember to change the identity provider at exactly the right time. If a different team owns the dashboard, open a ticket and explain why one string must change.
+
+That is not merely setup friction. It creates two sources of truth for one application contract.
+
+SqlOS takes a different position:
+
+> First-party OAuth clients should be owned by the application that uses them.
+
+The application declares its clients in ordinary .NET code. SqlOS persists those clients in SQL Server and reconciles the declared fields whenever the application starts. The definition is reviewed with the feature that needs it, deployed with that feature, and exercised by the same integration environment.
+
+Authentication still has an operational control plane. It no longer has to begin as a ticket queue.
+
+## The hidden second deployment
+
+Consider a routine callback change from `/signin` to `/auth/callback`.
+
+The code change is easy. The real rollout often is not:
+
+1. update the callback used by the application;
+2. arrange the corresponding identity-provider change;
+3. coordinate which side deploys first;
+4. repeat the operation for every environment;
+5. verify that nobody edited one environment differently six months ago; and
+6. keep the external configuration around for as long as that application version is running.
+
+The identity dashboard has become a second deployment system. Unlike the application deployment, it may not have a pull request, a test suite, an atomic release, or an obvious relationship to the code that relies on it.
+
+A CLI or MCP tool can make the operation faster, but it does not necessarily change the ownership model. Someone—or some pipeline—still performs an imperative action against a remote control plane. The resulting state lives there until another action changes it.
+
+Infrastructure as code improves reviewability, but it usually leaves the client definition in a second repository, state file, deployment pipeline, and permission boundary. That can be appropriate for a centrally operated identity service. It is still coordination overhead for an application describing its own first-party clients.
+
+## Declare the topology once
+
+In SqlOS, a multi-surface application can declare the web and CLI clients alongside its host:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using SqlOS;
+using SqlOS.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("DefaultConnection was not configured.");
+var customerPortalCallback = builder.Configuration["Clients:CustomerPortal:Callback"]
+    ?? throw new InvalidOperationException("Configure the customer portal callback URI.");
+
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        var auth = options.AuthServer;
+        auth.Issuer = "https://identity.example.com/sqlos/auth";
+        auth.DefaultAudience = "https://api.example.com";
+
+        auth.SeedBrowserClient(
+            "customer-portal",
+            "Customer Portal",
+            customerPortalCallback);
+
+        auth.SeedCliClient(
+            "support-cli",
+            "Support CLI",
+            "https://api.example.com",
+            "openid",
+            "profile",
+            "email",
+            "offline_access");
+    });
+
+var app = builder.Build();
+app.MapSqlOS();
+app.Run();
+
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
+    : SqlOSDbContext<AppDbContext>(options);
+```
+
+This is not a script that must be remembered after deployment. It is part of constructing the application.
+
+When the host starts, SqlOS initializes its owned schema and upserts the seeded clients. A fresh database receives the clients. An existing database has the declared names, callbacks, audiences, grant types, scopes, PKCE requirements, and client modes brought back into agreement with the running code.
+
+Environment-specific values can still come from normal .NET configuration. The important distinction is that the application owns the schema and meaning of those values. A production callback may come from environment configuration, but no person must recreate the client shape by clicking through another product.
+
+## Desired state at the application boundary
+
+“Configuration as code” covers several different ideas. The useful property here is narrower and stronger: **the application is the reconciliation boundary**.
+
+| Approach | Where the desired state lives | What makes reality match it |
+| --- | --- | --- |
+| Identity dashboard | Remote administrative database | A person edits forms |
+| CLI or MCP operation | Often a command, prompt, or runbook | Someone invokes the operation |
+| Infrastructure as code | Separate declarative files and state | An infrastructure pipeline applies a plan |
+| SqlOS startup-managed client | The application composition root | The application reconciles it during startup |
+
+This changes the everyday development loop.
+
+A callback change is visible in the pull request that changes the callback handler. A new CLI and its device-flow client can ship together. A test host starts with the same client definitions used by production code. A developer can clone the repository, provide the documented configuration, and get the intended topology without importing someone else's tenant configuration.
+
+If an earlier application version is redeployed, the fields declared by that version are reapplied when it starts. SqlOS does not infer destructive intent from absence: removing a seed does not silently delete an existing client. Destructive lifecycle operations remain explicit.
+
+That boundary matters. Declarative ownership should remove drift, not turn a routine rollback into an accidental client deletion.
+
+## Review the contract where it changes
+
+OAuth client configuration is security-sensitive, but placing it in an administrative dashboard does not automatically make it safer. It can make the change harder to review in context.
+
+A pull request can show that an application is:
+
+- adding a new redirect URI;
+- changing from a browser client to a native client;
+- requesting `offline_access`;
+- enabling device authorization for a CLI;
+- changing the resource audience; or
+- marking an owned client as first party.
+
+The reviewer sees those choices beside the route, token handling, and application behavior that require them. Repository protections can require security approval. Tests can boot the real host and exercise the actual authorization flow. The audit trail connects the decision to a deployable version of the product.
+
+The better division of responsibility is not “developers bypass security.” It is:
+
+> Developers own the authentication topology. Security reviews its policy. SqlOS enforces and persists it.
+
+Central identity teams are still valuable when they set organization-wide policy, manage upstream enterprise connections, respond to incidents, and review dangerous changes. They should not need to transcribe every first-party callback URL from an application ticket into a second system.
+
+## Keep an operational brake
+
+Code ownership should not eliminate incident response.
+
+SqlOS distinguishes startup-managed clients from dashboard-created clients, and the dashboard identifies which clients are managed by startup configuration. Declared fields are reapplied on startup, so casual dashboard edits cannot create long-lived drift.
+
+An explicit operator disable is different. Disabling a client revokes its sessions and refresh tokens, records the action, and survives later startup reconciliation. The application cannot accidentally undo an emergency shutdown merely because its normal seed says the client is active.
+
+That produces a practical control model:
+
+- code owns the client's normal shape;
+- pull requests own routine evolution;
+- secure configuration owns secrets and environment values;
+- operators retain an emergency disable; and
+- dashboard-created clients remain available when runtime administration is genuinely the right model.
+
+This is not “everything must be hard-coded.” It is a deliberate separation between application design, sensitive values, and operational authority.
+
+## Treat the topology as an integration contract
+
+Once client definitions live in the application, they can participate in application testing.
+
+A useful integration test can start the real host against SQL Server, initiate authorization as `customer-portal`, prove that an unregistered callback is rejected, complete PKCE through the registered callback, and verify the resulting audience. A CLI test can use the seeded device-flow client and prove refresh-token behavior.
+
+Those tests are no longer validating a mock configuration that someone must later recreate. They are exercising the code that creates the production topology.
+
+This is especially useful across ephemeral environments. A temporary branch database does not need a matching hand-built identity tenant before the first test can run. Starting the application establishes the first-party client contract it needs.
+
+## OAuth configuration should not be a ticket queue
+
+External identity platforms made centralized administration the default because they are external, multi-tenant control planes. Their dashboards are the product. Application teams necessarily integrate with state owned somewhere else.
+
+An embedded authorization server can invert that relationship.
+
+SqlOS runs with the application, uses its SQL Server, and exposes its composition through .NET. Code-owned clients are a natural consequence of that architecture, but they are more than a convenience API. They remove a second source of truth from one of the most failure-prone parts of shipping an application.
+
+The concise version is:
+
+> **Deploy the application. Its OAuth clients come with it.**
+
+The more important version is this: the team responsible for making an application work can own its authentication contract directly, while security and operations keep the review and emergency controls that actually improve safety.
+
+Your application already knows its clients. Its authorization server should listen.

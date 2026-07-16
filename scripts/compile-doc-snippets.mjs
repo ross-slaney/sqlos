@@ -34,6 +34,14 @@ const snippetSpecs = [
     wrap: asCompleteProgram,
   },
   {
+    name: "code-owned OAuth clients blog complete program",
+    relativePath:
+      "web/content/blog/your-oauth-clients-belong-in-your-codebase.mdx",
+    heading: "## Declare the topology once",
+    marker: "builder.AddSqlOS<AppDbContext>",
+    wrap: asCompleteProgram,
+  },
+  {
     name: "audit-log registration",
     relativePath: "web/content/docs/reference/audit-logs.mdx",
     heading: "## Service registration",
