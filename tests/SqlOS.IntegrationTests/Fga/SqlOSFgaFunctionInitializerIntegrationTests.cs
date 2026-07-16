@@ -1,10 +1,12 @@
 using FluentAssertions;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
+using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
 
 namespace SqlOS.IntegrationTests.Fga;
@@ -44,6 +46,66 @@ public class SqlOSFgaFunctionInitializerIntegrationTests : FgaIntegrationTestBas
         }
         finally
         {
+            var defaultInitializer = new SqlOSFgaFunctionInitializer(
+                Context,
+                Options.Create(new SqlOSFgaOptions()),
+                loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
+            await defaultInitializer.EnsureFunctionsExistAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ConfiguredDepth_AllowsGrantVisibilityAtAcceptedBoundary()
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+        var options = new SqlOSFgaOptions { MaxResourceHierarchyDepth = 2 };
+        var initializer = new SqlOSFgaFunctionInitializer(
+            Context,
+            Options.Create(options),
+            loggerFactory.CreateLogger<SqlOSFgaFunctionInitializer>());
+        var suffix = Guid.NewGuid().ToString("N");
+        var level1 = new SqlOSFgaResource
+        {
+            Id = $"depth_level_1_{suffix}",
+            ParentId = "root",
+            Name = "Depth level 1",
+            ResourceTypeId = "agency"
+        };
+        var level2 = new SqlOSFgaResource
+        {
+            Id = $"depth_level_2_{suffix}",
+            ParentId = level1.Id,
+            Name = "Depth level 2",
+            ResourceTypeId = "project"
+        };
+
+        try
+        {
+            Context.Set<SqlOSFgaResource>().AddRange(level1, level2);
+            await Context.SaveChangesAsync();
+            await initializer.EnsureFunctionsExistAsync();
+            var authService = new SqlOSFgaAuthService(
+                Context,
+                Options.Create(options),
+                loggerFactory.CreateLogger<SqlOSFgaAuthService>());
+
+            var pointCheck = await authService.CheckAccessAsync(
+                FgaTestDataSeeder.SystemAdminSubjectId,
+                "TEST_VIEW",
+                level2.Id);
+            var sqlFilterVisible = await Context.IsResourceAccessible(
+                    level2.Id,
+                    JsonSerializer.Serialize(new[] { FgaTestDataSeeder.SystemAdminSubjectId }),
+                    FgaTestDataSeeder.ViewPermissionId)
+                .AnyAsync();
+
+            pointCheck.Allowed.Should().BeTrue();
+            sqlFilterVisible.Should().BeTrue();
+        }
+        finally
+        {
+            Context.Set<SqlOSFgaResource>().RemoveRange(level2, level1);
+            await Context.SaveChangesAsync();
             var defaultInitializer = new SqlOSFgaFunctionInitializer(
                 Context,
                 Options.Create(new SqlOSFgaOptions()),

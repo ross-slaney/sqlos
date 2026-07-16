@@ -57,6 +57,10 @@ internal static class SqlOSOptionsValidator
 
         ValidateDashboardLoginThrottlingOptions(options.Dashboard.LoginThrottling, errors);
         ValidateBrowserSecurityOptions(options.BrowserSecurity, errors);
+        if (options.Fga.MaxResourceHierarchyDepth <= 0)
+        {
+            errors.Add("Fga.MaxResourceHierarchyDepth must be greater than zero.");
+        }
 
         var issuer = ValidateAbsoluteUri(options.AuthServer.Issuer, "AuthServer.Issuer", errors);
         if (issuer != null && authBasePath != null)

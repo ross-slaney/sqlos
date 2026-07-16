@@ -152,6 +152,18 @@ public sealed class SqlOSOptionsValidationTests
         act.Should().NotThrow();
     }
 
+    [TestMethod]
+    public void AddSqlOS_RejectsNonPositiveFgaHierarchyDepth()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.Fga.MaxResourceHierarchyDepth = 0);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Fga.MaxResourceHierarchyDepth must be greater than zero.*");
+    }
+
     [DataTestMethod]
     [DataRow("default-src 'self'; script-src 'self'")]
     [DataRow("default-src 'self'; script-src 'nonce-{nonce}'; style-src 'self'")]

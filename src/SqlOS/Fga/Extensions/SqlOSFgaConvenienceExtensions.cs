@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using SqlOS.Fga;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 
@@ -11,8 +12,6 @@ namespace SqlOS.Fga.Extensions;
 /// </summary>
 public static class SqlOSFgaConvenienceExtensions
 {
-    private const int DefaultMaxResourceHierarchyDepth = 10;
-
     /// <summary>
     /// Lower-level/manual helper that creates a <see cref="SqlOSFgaResource"/> and adds it to
     /// the context (not yet saved). Use this for manual or ad hoc resource lifecycles. For
@@ -40,7 +39,11 @@ public static class SqlOSFgaConvenienceExtensions
         string? id = null)
     {
         var resourceId = id ?? Guid.NewGuid().ToString();
-        EnsureParentChainDoesNotCreateCycle(context, resourceId, parentId);
+        EnsureParentChainDoesNotCreateCycle(
+            context,
+            resourceId,
+            parentId,
+            SqlOSFgaHierarchyDepth.Resolve(context));
         var resource = new SqlOSFgaResource
         {
             Id = resourceId,
@@ -55,7 +58,8 @@ public static class SqlOSFgaConvenienceExtensions
     private static void EnsureParentChainDoesNotCreateCycle(
         ISqlOSFgaDbContext context,
         string resourceId,
-        string parentId)
+        string parentId,
+        int maxDepth)
     {
         if (string.Equals(resourceId, parentId, StringComparison.Ordinal))
         {
@@ -64,7 +68,7 @@ public static class SqlOSFgaConvenienceExtensions
 
         var visited = new HashSet<string>(StringComparer.Ordinal) { resourceId };
         string? currentId = parentId;
-        var depth = 0;
+        var depth = 1;
 
         while (!string.IsNullOrWhiteSpace(currentId))
         {
@@ -73,9 +77,9 @@ public static class SqlOSFgaConvenienceExtensions
                 throw new InvalidOperationException("FGA resource hierarchy contains a cycle.");
             }
 
-            if (depth > DefaultMaxResourceHierarchyDepth)
+            if (depth > maxDepth)
             {
-                throw new InvalidOperationException($"FGA resource hierarchy exceeds the maximum depth of {DefaultMaxResourceHierarchyDepth}.");
+                throw new InvalidOperationException($"FGA resource hierarchy exceeds the configured maximum depth of {maxDepth}.");
             }
 
             var parent = context.Set<SqlOSFgaResource>()
