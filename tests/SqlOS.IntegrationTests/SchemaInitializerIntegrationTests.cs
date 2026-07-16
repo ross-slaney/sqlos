@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 32;
+    private const int CurrentSchemaVersion = 33;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -61,6 +61,16 @@ public sealed class SchemaInitializerIntegrationTests
         {
             Assert.IsTrue(await TableExistsAsync(table), $"Table {table} should exist.");
         }
+
+        Assert.IsTrue(await ColumnExistsAsync(
+            "SqlOSSsoConnections",
+            "AcceptedAuthnContextClassRefsJson"));
+        Assert.IsTrue(await ColumnExistsAsync(
+            "SqlOSAuthOidcConnections",
+            "AcceptedAmrValuesJson"));
+        Assert.IsTrue(await ColumnExistsAsync(
+            "SqlOSAuthOidcConnections",
+            "AcceptedAcrValuesJson"));
     }
 
     [TestMethod]

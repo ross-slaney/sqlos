@@ -22,6 +22,164 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SamlServiceIntegrationTests
 {
+    private const string TrustedSamlMfaContext =
+        "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken";
+
+    [TestMethod]
+    public async Task SamlAuthnContext_WithoutTrustPolicy_DoesNotSatisfyMfa()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"SAML no trust {Guid.NewGuid():N}",
+            null));
+        var client = await CreateSamlClientAsync(admin, "mfa-no-trust");
+        using var rsa = RSA.Create(2048);
+        var certificateRequest = new CertificateRequest(
+            "CN=SqlOSSamlNoTrust",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using var certificate = certificateRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreatePolicySamlConnectionAsync(
+            admin,
+            organization.Id,
+            certificate,
+            "mfa-no-trust",
+            autoProvisionUsers: true,
+            autoLinkByEmail: true);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var response = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            $"mfa-no-trust-{Guid.NewGuid():N}@example.com",
+            "No",
+            "Trust",
+            flow,
+            authnContextClassRef: TrustedSamlMfaContext);
+
+        await saml.HandleAcsAsync(connection.Id, response, flow.RelayState, default);
+
+        var request = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == flow.RelayState);
+        request.ResolvedAuthMethod.Should().Be("saml");
+    }
+
+    [TestMethod]
+    public async Task SamlTrustedAuthnContext_SatisfiesMfaAndIsAudited()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"SAML trusted {Guid.NewGuid():N}",
+            null));
+        var client = await CreateSamlClientAsync(admin, "mfa-trusted");
+        using var rsa = RSA.Create(2048);
+        var certificateRequest = new CertificateRequest(
+            "CN=SqlOSSamlTrusted",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using var certificate = certificateRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreatePolicySamlConnectionAsync(
+            admin,
+            organization.Id,
+            certificate,
+            "mfa-trusted",
+            autoProvisionUsers: true,
+            autoLinkByEmail: true,
+            trustUpstreamMfa: true,
+            acceptedAuthnContextClassRefs: [TrustedSamlMfaContext]);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var response = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            $"mfa-trusted-{Guid.NewGuid():N}@example.com",
+            "Trusted",
+            "MFA",
+            flow,
+            authnContextClassRef: TrustedSamlMfaContext);
+
+        await saml.HandleAcsAsync(connection.Id, response, flow.RelayState, default);
+
+        var request = await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == flow.RelayState);
+        request.ResolvedAuthMethod.Should().Be("saml+upstream_mfa");
+        var audit = await AspireFixture.SharedContext.Set<SqlOSAuditEvent>()
+            .AsNoTracking()
+            .OrderByDescending(item => item.OccurredAt)
+            .FirstAsync(item => item.EventType == "user.login.saml.assurance"
+                && item.DataJson != null
+                && item.DataJson.Contains(connection.Id));
+        audit.DataJson.Should().Contain("\"Accepted\":true");
+        audit.DataJson.Should().Contain(TrustedSamlMfaContext);
+    }
+
+    [TestMethod]
+    public async Task SamlTamperedAuthnContext_IsRejectedBeforeTrustEvaluation()
+    {
+        var (_, admin, saml) = CreateSamlServices();
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(
+            $"SAML tampered {Guid.NewGuid():N}",
+            null));
+        var client = await CreateSamlClientAsync(admin, "mfa-tampered");
+        using var rsa = RSA.Create(2048);
+        var certificateRequest = new CertificateRequest(
+            "CN=SqlOSSamlTampered",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using var certificate = certificateRequest.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await CreatePolicySamlConnectionAsync(
+            admin,
+            organization.Id,
+            certificate,
+            "mfa-tampered",
+            autoProvisionUsers: true,
+            autoLinkByEmail: true,
+            trustUpstreamMfa: true,
+            acceptedAuthnContextClassRefs: [TrustedSamlMfaContext]);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var response = BuildSignedSamlResponse(
+            certificate,
+            connection.IdentityProviderEntityId,
+            $"mfa-tampered-{Guid.NewGuid():N}@example.com",
+            "Tampered",
+            "MFA",
+            flow,
+            mutateAfterSigning: (_, responseElement) =>
+            {
+                var authnContext = responseElement
+                    .GetElementsByTagName(
+                        "AuthnContextClassRef",
+                        "urn:oasis:names:tc:SAML:2.0:assertion")
+                    .OfType<XmlElement>()
+                    .Single();
+                authnContext.InnerText = TrustedSamlMfaContext;
+            },
+            authnContextClassRef:
+                "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport");
+
+        var action = () => saml.HandleAcsAsync(
+            connection.Id,
+            response,
+            flow.RelayState,
+            default);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*signature*");
+        (await AspireFixture.SharedContext.Set<SqlOSAuthorizationRequest>()
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == flow.RelayState))
+            .ResolvedAuthMethod.Should().BeNull();
+    }
+
     [TestMethod]
     public async Task InactiveUser_OidcAndSamlLogin_IsRejected()
     {
@@ -1448,7 +1606,9 @@ public sealed class SamlServiceIntegrationTests
         X509Certificate2 certificate,
         string prefix,
         bool autoProvisionUsers,
-        bool autoLinkByEmail)
+        bool autoLinkByEmail,
+        bool trustUpstreamMfa = false,
+        List<string>? acceptedAuthnContextClassRefs = null)
     {
         var suffix = Guid.NewGuid().ToString("N");
         return await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
@@ -1461,7 +1621,9 @@ public sealed class SamlServiceIntegrationTests
             AutoLinkByEmail: autoLinkByEmail,
             "email",
             "first_name",
-            "last_name"));
+            "last_name",
+            trustUpstreamMfa,
+            acceptedAuthnContextClassRefs));
     }
 
     private static void RemoveEmailAttributeBeforeSigning(
@@ -1494,7 +1656,8 @@ public sealed class SamlServiceIntegrationTests
         string? responseId = null,
         string? assertionId = null,
         Action<XmlDocument, XmlElement, XmlElement>? mutateBeforeSigning = null,
-        Action<XmlDocument, XmlElement>? mutateAfterSigning = null)
+        Action<XmlDocument, XmlElement>? mutateAfterSigning = null,
+        string? authnContextClassRef = null)
     {
         responseId ??= $"_{Guid.NewGuid():N}";
         assertionId ??= $"_{Guid.NewGuid():N}";
@@ -1511,6 +1674,15 @@ public sealed class SamlServiceIntegrationTests
                 </saml:Conditions>
             """
             : string.Empty;
+        var authnStatementXml = string.IsNullOrWhiteSpace(authnContextClassRef)
+            ? string.Empty
+            : $"""
+                <saml:AuthnStatement AuthnInstant="{issueInstant}">
+                  <saml:AuthnContext>
+                    <saml:AuthnContextClassRef>{SecurityElement.Escape(authnContextClassRef)}</saml:AuthnContextClassRef>
+                  </saml:AuthnContext>
+                </saml:AuthnStatement>
+            """;
         var xml = $"""
         <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="{responseId}" Version="2.0" IssueInstant="{issueInstant}" Destination="{effectiveRecipient}" InResponseTo="{effectiveInResponseTo}">
           <saml:Issuer>{SecurityElement.Escape(issuer)}</saml:Issuer>
@@ -1524,6 +1696,7 @@ public sealed class SamlServiceIntegrationTests
               </saml:SubjectConfirmation>
             </saml:Subject>
             {conditionsXml}
+            {authnStatementXml}
             <saml:AttributeStatement>
               <saml:Attribute Name="email"><saml:AttributeValue>{SecurityElement.Escape(email)}</saml:AttributeValue></saml:Attribute>
               <saml:Attribute Name="first_name"><saml:AttributeValue>{SecurityElement.Escape(firstName)}</saml:AttributeValue></saml:Attribute>

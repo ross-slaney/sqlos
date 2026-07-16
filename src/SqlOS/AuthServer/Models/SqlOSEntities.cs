@@ -166,6 +166,8 @@ public sealed class SqlOSSsoConnection
     public string LastNameAttributeName { get; set; } = "last_name";
     public bool AutoProvisionUsers { get; set; } = true;
     public bool AutoLinkByEmail { get; set; }
+    public bool TrustUpstreamMfa { get; set; }
+    public string AcceptedAuthnContextClassRefsJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -363,6 +365,9 @@ public sealed class SqlOSOidcConnection
     public string? AppleKeyId { get; set; }
     public string? ApplePrivateKeyEncrypted { get; set; }
     public bool IsEnabled { get; set; } = true;
+    public bool TrustUpstreamMfa { get; set; }
+    public string AcceptedAmrValuesJson { get; set; } = "[]";
+    public string AcceptedAcrValuesJson { get; set; } = "[]";
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

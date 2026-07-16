@@ -275,6 +275,9 @@ public sealed partial class SqlOSAdminService
                     AppleTeamId = normalized.AppleTeamId,
                     AppleKeyId = normalized.AppleKeyId,
                     ApplePrivateKeyEncrypted = string.IsNullOrWhiteSpace(seed.ApplePrivateKeyPem) ? null : _cryptoService.ProtectSecret(NormalizePrivateKey(seed.ApplePrivateKeyPem)),
+                    TrustUpstreamMfa = seed.TrustUpstreamMfa,
+                    AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues)),
+                    AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues)),
                     IsEnabled = seed.IsEnabled,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -304,6 +307,9 @@ public sealed partial class SqlOSAdminService
             existing.UseUserInfo = normalized.UseUserInfo;
             existing.AppleTeamId = normalized.AppleTeamId;
             existing.AppleKeyId = normalized.AppleKeyId;
+            existing.TrustUpstreamMfa = seed.TrustUpstreamMfa;
+            existing.AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues));
+            existing.AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues));
             existing.UpdatedAt = DateTime.UtcNow;
 
             // Only overwrite secrets when the seed supplies them, so config without a secret
@@ -550,6 +556,9 @@ public sealed partial class SqlOSAdminService
             AppleTeamId = normalized.AppleTeamId,
             AppleKeyId = normalized.AppleKeyId,
             ApplePrivateKeyEncrypted = string.IsNullOrWhiteSpace(request.ApplePrivateKeyPem) ? null : _cryptoService.ProtectSecret(NormalizePrivateKey(request.ApplePrivateKeyPem)),
+            TrustUpstreamMfa = request.TrustUpstreamMfa,
+            AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAmrValues)),
+            AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAcrValues)),
             IsEnabled = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -610,6 +619,9 @@ public sealed partial class SqlOSAdminService
         connection.UseUserInfo = normalized.UseUserInfo;
         connection.AppleTeamId = normalized.AppleTeamId;
         connection.AppleKeyId = normalized.AppleKeyId;
+        connection.TrustUpstreamMfa = request.TrustUpstreamMfa;
+        connection.AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAmrValues));
+        connection.AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAcrValues));
         connection.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrWhiteSpace(request.ClientSecret))
@@ -652,6 +664,9 @@ public sealed partial class SqlOSAdminService
             X509CertificatePem = request.X509CertificatePem,
             AutoProvisionUsers = request.AutoProvisionUsers,
             AutoLinkByEmail = request.AutoLinkByEmail,
+            TrustUpstreamMfa = request.TrustUpstreamMfa,
+            AcceptedAuthnContextClassRefsJson = JsonSerializer.Serialize(
+                NormalizeTrustValues(request.AcceptedAuthnContextClassRefs)),
             EmailAttributeName = request.EmailAttributeName ?? "email",
             FirstNameAttributeName = request.FirstNameAttributeName ?? "first_name",
             LastNameAttributeName = request.LastNameAttributeName ?? "last_name",
@@ -2282,6 +2297,26 @@ public sealed partial class SqlOSAdminService
         {
             throw new InvalidOperationException("This social login connection requires a client secret.");
         }
+    }
+
+    private static List<string> NormalizeTrustValues(IEnumerable<string>? values)
+    {
+        var normalized = (values ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalized.Count > 32)
+        {
+            throw new InvalidOperationException("Upstream MFA trust policies support at most 32 accepted values.");
+        }
+
+        if (normalized.Any(static value => value.Length > 500))
+        {
+            throw new InvalidOperationException("Upstream MFA trust policy values cannot exceed 500 characters.");
+        }
+
+        return normalized;
     }
 
     private static NormalizedOidcConfiguration NormalizeOidcConfiguration(

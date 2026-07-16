@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Net;
 using System.Security.Cryptography;
@@ -18,6 +19,101 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSOidcAuthServiceTests
 {
+    [TestMethod]
+    public async Task CompleteAuthorization_AmrMfaWithoutTrustPolicy_DoesNotSatisfyMfa()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        const string callbackUri = "https://app.example.local/callback/google";
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            [callbackUri]));
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/google",
+            "amr-mfa:no-trust@example.com:nonce-no-trust",
+            "verifier",
+            "nonce-no-trust",
+            null));
+
+        result.AuthenticationMethod.Should().Be("google");
+        var audit = await context.Set<SqlOSAuditEvent>()
+            .OrderByDescending(item => item.OccurredAt)
+            .FirstAsync(item => item.EventType == "user.login.oidc.success");
+        audit.DataJson.Should().Contain("\"EvidencePresent\":true");
+        audit.DataJson.Should().Contain("\"Accepted\":false");
+        audit.DataJson.Should().Contain("trust_disabled");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_TrustedAmrMfa_AddsAssuranceMethod()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        const string callbackUri = "https://app.example.local/callback/google";
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            [callbackUri]));
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+        connection.TrustUpstreamMfa = true;
+        connection.AcceptedAmrValuesJson = """["mfa"]""";
+        await context.SaveChangesAsync();
+
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            "https://app.example.local/callback/google",
+            "amr-mfa:trusted@example.com:nonce-trusted",
+            "verifier",
+            "nonce-trusted",
+            null));
+
+        result.AuthenticationMethod.Should().Be("google+upstream_mfa");
+        var audit = await context.Set<SqlOSAuditEvent>()
+            .OrderByDescending(item => item.OccurredAt)
+            .FirstAsync(item => item.EventType == "user.login.oidc.success");
+        audit.DataJson.Should().Contain("\"Accepted\":true");
+        audit.DataJson.Should().Contain("\"AcceptedClaim\":\"amr\"");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_TamperedAmrClaim_IsRejectedBeforeTrustEvaluation()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        const string callbackUri = "https://app.example.local/callback/google";
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            [callbackUri]));
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+        connection.TrustUpstreamMfa = true;
+        connection.AcceptedAmrValuesJson = """["mfa"]""";
+        await context.SaveChangesAsync();
+
+        var action = () => oidc.CompleteAuthorizationAsync(
+            new SqlOSCompleteOidcAuthorizationRequest(
+                connection.Id,
+                "example-web",
+                callbackUri,
+                "tampered-amr:tampered@example.com:nonce-tampered",
+                "verifier",
+                "nonce-tampered",
+                null));
+
+        await action.Should().ThrowAsync<SecurityTokenInvalidSignatureException>();
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(item =>
+            item.EventType == "user.login.oidc.success")).Should().BeFalse();
+    }
+
     [TestMethod]
     public async Task CompleteAuthorization_InactiveMappedUser_IsRejectedWithoutIdentityReuse()
     {
@@ -1035,6 +1131,7 @@ public sealed class SqlOSOidcAuthServiceTests
             .Options;
         return new TestSqlOSInMemoryDbContext(options);
     }
+
 
     private static readonly Lazy<string> TestApplePrivateKeyPem = new(() =>
     {

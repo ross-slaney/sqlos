@@ -218,6 +218,8 @@ When `/test` includes `clientId` and `redirectUri`, it must also include a fresh
 | --- | --- | --- |
 | `autoProvisionUsers` | `false` for portal-created connections | Create SqlOS users or memberships from SAML assertions on first login |
 | `autoLinkByEmail` | `true` for portal-created connections | Require existing verified org members to enroll and sign in through SSO |
+| `trustUpstreamMfa` | `false` | Allow this connection to satisfy MFA only through accepted signed `AuthnContextClassRef` values |
+| `acceptedAuthnContextClassRefs` | empty | Exact SAML authentication-context URIs accepted as upstream MFA |
 | `SsoPortal.EnableApi` | `true` | Expose portal and headless setup APIs |
 | `SsoPortal.UseHostedPortal` | `true` | Serve the bundled setup portal |
 | `SsoPortal.BuildUiUrl` | `null` | Redirect opened setup sessions to a host-owned UI |
@@ -226,6 +228,32 @@ When `/test` includes `clientId` and `redirectUri`, it must also include a fresh
 | `SsoPortal.DomainVerificationRecordPrefix` | `_sqlos-verify` | TXT record name prefix |
 | `SsoPortal.DomainVerificationRecordValuePrefix` | `sqlos-domain-verification` | TXT record value prefix |
 | `SsoPortal.ReservedDomainRoots` | empty | Domain roots customers cannot claim |
+
+### Upstream MFA trust
+
+SqlOS extracts `AuthnContextClassRef` only from the signature-covered assertion. A SAML connection does not satisfy local MFA merely because the primary method is `saml`.
+
+Platform-admin connection creation can opt in explicitly:
+
+```json
+{
+  "organizationId": "org_example",
+  "displayName": "Workforce SSO",
+  "identityProviderEntityId": "https://idp.example.com",
+  "singleSignOnUrl": "https://idp.example.com/sso",
+  "x509CertificatePem": "-----BEGIN CERTIFICATE-----...",
+  "autoProvisionUsers": true,
+  "autoLinkByEmail": false,
+  "trustUpstreamMfa": true,
+  "acceptedAuthnContextClassRefs": [
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"
+  ]
+}
+```
+
+Comparisons are exact per connection. Missing or unrecognized context leaves MFA unsatisfied, so the normal local step-up policy runs. Accepted evidence adds `upstream_mfa` alongside the `saml` primary method and records the assertion issuer, accepted class reference, and decision in the audit event.
+
+Only allowlist class references whose meaning you have verified for that IdP tenant. A URI name alone is not a guarantee that the upstream policy actually required a second factor.
 
 ## Provider notes
 

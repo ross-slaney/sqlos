@@ -75,7 +75,10 @@ public static partial class EndpointRouteBuilderExtensions
                 request.AppleTeamId,
                 request.AppleKeyId,
                 request.ApplePrivateKeyPem,
-                request.LogoDataUrl), cancellationToken);
+                request.LogoDataUrl,
+                request.TrustUpstreamMfa,
+                request.AcceptedAmrValues,
+                request.AcceptedAcrValues), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 
@@ -111,7 +114,10 @@ public static partial class EndpointRouteBuilderExtensions
                 request.AppleTeamId,
                 request.AppleKeyId,
                 request.ApplePrivateKeyPem,
-                request.LogoDataUrl), cancellationToken);
+                request.LogoDataUrl,
+                request.TrustUpstreamMfa,
+                request.AcceptedAmrValues,
+                request.AcceptedAcrValues), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 
@@ -214,6 +220,9 @@ public static partial class EndpointRouteBuilderExtensions
                 connection.SingleSignOnUrl,
                 connection.AutoProvisionUsers,
                 connection.AutoLinkByEmail,
+                connection.TrustUpstreamMfa,
+                AcceptedAuthnContextClassRefs =
+                    SqlOSAdminService.DeserializeJsonList(connection.AcceptedAuthnContextClassRefsJson),
                 connection.CreatedAt,
                 connection.UpdatedAt
             });

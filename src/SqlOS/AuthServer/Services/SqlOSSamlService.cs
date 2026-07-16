@@ -14,6 +14,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Security;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -161,7 +162,12 @@ public sealed class SqlOSSamlService
                 connection,
                 new SamlValidationContext(samlState.RequestId, samlState.AssertionConsumerServiceUrl, _adminService.GetServiceProviderEntityId()));
             await ConsumeReplayIdentifiersAsync(connection.Id, assertion, cancellationToken);
-            return await HandleAuthorizationRequestAcsAsync(connection, authorizationRequest, assertion.Principal, httpContext, cancellationToken);
+            return await HandleAuthorizationRequestAcsAsync(
+                connection,
+                authorizationRequest,
+                assertion,
+                httpContext,
+                cancellationToken);
         }
 
         throw new InvalidOperationException("SAML authorization request is invalid or expired.");
@@ -170,7 +176,7 @@ public sealed class SqlOSSamlService
     private async Task<string> HandleAuthorizationRequestAcsAsync(
         SqlOSSsoConnection connection,
         SqlOSAuthorizationRequest authorizationRequest,
-        SqlOSSamlPrincipal principal,
+        ValidatedSamlAssertion assertion,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
@@ -178,6 +184,16 @@ public sealed class SqlOSSamlService
         {
             throw new InvalidOperationException("Authorization request is no longer active.");
         }
+
+        var principal = assertion.Principal;
+        var upstreamMfa = SqlOSUpstreamMfaTrust.EvaluateSaml(
+            connection,
+            assertion.AuthnContextClassRefs);
+        var authenticationMethod = upstreamMfa.Accepted
+            ? SqlOSMfaPolicyService.AddAuthenticationMethod(
+                "saml",
+                SqlOSUpstreamMfaTrust.AuthenticationMethod)
+            : "saml";
 
         var hasAssertedEmail = principal.Attributes.TryGetValue(connection.EmailAttributeName, out var emailValue)
             && !string.IsNullOrWhiteSpace(emailValue);
@@ -189,6 +205,25 @@ public sealed class SqlOSSamlService
         var user = await ResolveUserAsync(connection, principal, email, hasAssertedEmail, organizationId, cancellationToken)
             ?? throw new InvalidOperationException("No user could be resolved from the SAML assertion.");
 
+        await _adminService.RecordAuditAsync(
+            "user.login.saml.assurance",
+            "sso_connection",
+            connection.Id,
+            userId: user.Id,
+            organizationId: organizationId,
+            data: new
+            {
+                connectionId = connection.Id,
+                assertionIssuer = principal.Issuer,
+                upstreamMfa.EvidencePresent,
+                upstreamMfa.Accepted,
+                upstreamMfa.Reason,
+                upstreamMfa.AcceptedClaim,
+                upstreamMfa.AcceptedValue,
+                upstreamMfa.SamlAuthnContextClassRefs
+            },
+            cancellationToken: cancellationToken);
+
         if (_authorizationServerService != null)
         {
             authorizationRequest.ResolvedConnectionId = connection.Id;
@@ -196,7 +231,7 @@ public sealed class SqlOSSamlService
                 authorizationRequest,
                 user,
                 organizationId,
-                "saml",
+                authenticationMethod,
                 httpContext ?? new DefaultHttpContext(),
                 cancellationToken);
         }
@@ -227,13 +262,13 @@ public sealed class SqlOSSamlService
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
-            AuthenticationMethod = "saml",
+            AuthenticationMethod = authenticationMethod,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddMinutes(5)
         });
 
         authorizationRequest.CompletedAt = DateTime.UtcNow;
-        authorizationRequest.ResolvedAuthMethod = "saml";
+        authorizationRequest.ResolvedAuthMethod = authenticationMethod;
         authorizationRequest.ResolvedOrganizationId = organizationId;
         authorizationRequest.ResolvedConnectionId = connection.Id;
         try
@@ -249,7 +284,13 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("Authorization request is no longer active.", ex);
         }
 
-        await _adminService.RecordAuditAsync("user.login.saml", "user", user.Id, userId: user.Id, organizationId: organizationId, cancellationToken: cancellationToken);
+        await _adminService.RecordAuditAsync(
+            "user.login.saml",
+            "user",
+            user.Id,
+            userId: user.Id,
+            organizationId: organizationId,
+            cancellationToken: cancellationToken);
         var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
     }
@@ -359,11 +400,21 @@ public sealed class SqlOSSamlService
             }
         }
 
+        var authnContextClassRefs = assertionElement
+            .SelectNodes("saml:AuthnStatement/saml:AuthnContext/saml:AuthnContextClassRef", ns)?
+            .OfType<XmlNode>()
+            .Select(node => node.InnerText?.Trim())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+
         return new ValidatedSamlAssertion(
             new SqlOSSamlPrincipal(issuer, nameId, attributes),
             responseId,
             assertionId,
-            expiresAt + SamlClockSkew);
+            expiresAt + SamlClockSkew,
+            authnContextClassRefs);
     }
 
     private async Task ConsumeReplayIdentifiersAsync(
@@ -961,7 +1012,8 @@ public sealed class SqlOSSamlService
         SqlOSSamlPrincipal Principal,
         string ResponseId,
         string AssertionId,
-        DateTime ReplayExpiresAt);
+        DateTime ReplayExpiresAt,
+        IReadOnlyList<string> AuthnContextClassRefs);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
         => exception.InnerException is SqlException { Number: 2601 or 2627 };

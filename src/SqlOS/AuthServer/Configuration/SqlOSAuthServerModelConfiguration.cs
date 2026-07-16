@@ -155,6 +155,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSSsoConnections", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.AcceptedAuthnContextClassRefsJson).HasDefaultValue("[]");
             entity.HasOne(x => x.Organization)
                 .WithMany(x => x.SsoConnections)
                 .HasForeignKey(x => x.OrganizationId)
@@ -364,6 +365,8 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.MicrosoftTenant).HasMaxLength(200);
             entity.Property(x => x.AppleTeamId).HasMaxLength(100);
             entity.Property(x => x.AppleKeyId).HasMaxLength(100);
+            entity.Property(x => x.AcceptedAmrValuesJson).HasDefaultValue("[]");
+            entity.Property(x => x.AcceptedAcrValuesJson).HasDefaultValue("[]");
         });
 
         modelBuilder.Entity<SqlOSExternalIdentity>(entity =>

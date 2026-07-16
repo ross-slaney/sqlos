@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.IdentityModel.Tokens.Jwt;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,8 +46,13 @@ public sealed class OidcAuthIntegrationTests
             null,
             null,
             null,
-            customLogo));
+            LogoDataUrl: customLogo,
+            TrustUpstreamMfa: true,
+            AcceptedAmrValues: ["mfa"],
+            AcceptedAcrValues: ["urn:example:loa:2"]));
         connection.LogoDataUrl.Should().Be(customLogo);
+        connection.TrustUpstreamMfa.Should().BeTrue();
+        connection.AcceptedAmrValuesJson.Should().Contain("mfa");
 
         var updated = await admin.UpdateOidcConnectionAsync(connection.Id, new SqlOSUpdateOidcConnectionRequest(
             "Google Login",
@@ -67,11 +73,16 @@ public sealed class OidcAuthIntegrationTests
             null,
             null,
             null,
-            null));
+            LogoDataUrl: null,
+            TrustUpstreamMfa: false,
+            AcceptedAmrValues: [],
+            AcceptedAcrValues: []));
 
         updated.DisplayName.Should().Be("Google Login");
         updated.ClientId.Should().Be("google-client-updated");
         updated.LogoDataUrl.Should().BeNull();
+        updated.TrustUpstreamMfa.Should().BeFalse();
+        updated.AcceptedAmrValuesJson.Should().Be("[]");
 
         var disabled = await admin.SetOidcConnectionEnabledAsync(connection.Id, false);
         disabled.IsEnabled.Should().BeFalse();
@@ -147,6 +158,92 @@ public sealed class OidcAuthIntegrationTests
         tokens.RefreshToken.Should().NotBeNullOrWhiteSpace();
         postMembershipCompletion.OrganizationId.Should().Be(organization.Id);
         (await AspireFixture.SharedContext.Set<SqlOSExternalIdentity>().CountAsync(x => x.OidcConnectionId != null)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task TrustedOidcAmr_ProducesSessionAndTokenAssuranceWithoutLocalStepUp()
+    {
+        await ResetOidcStateAsync();
+
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(
+            AspireFixture.SharedContext,
+            options,
+            AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(
+            AspireFixture.SharedContext,
+            admin,
+            crypto,
+            settings,
+            emailSender,
+            options);
+        var auth = new SqlOSAuthService(
+            AspireFixture.SharedContext,
+            options,
+            admin,
+            crypto,
+            settings,
+            emailOtp);
+        var oidc = new SqlOSOidcAuthService(
+            AspireFixture.SharedContext,
+            admin,
+            crypto,
+            new FakeOidcProviderHttpClientFactory(),
+            NullLogger<SqlOSOidcAuthService>.Instance);
+        var client = await EnsureClientAsync(admin, "example-web-upstream-mfa");
+        var connection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
+            SqlOSOidcProviderType.Google,
+            "Google upstream MFA",
+            "google-client",
+            "google-secret",
+            ["https://app.example.local/callback/google"],
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null));
+        connection.TrustUpstreamMfa = true;
+        connection.AcceptedAmrValuesJson = """["mfa"]""";
+        await AspireFixture.SharedContext.SaveChangesAsync();
+
+        var completion = await oidc.CompleteAuthorizationAsync(
+            new SqlOSCompleteOidcAuthorizationRequest(
+                connection.Id,
+                client.ClientId,
+                "https://app.example.local/callback/google",
+                "amr-mfa:upstream-mfa@example.com:nonce-upstream-mfa",
+                "verifier",
+                "nonce-upstream-mfa",
+                null));
+        var user = await AspireFixture.SharedContext.Set<SqlOSUser>()
+            .SingleAsync(item => item.Id == completion.UserId);
+        var tokens = await auth.CreateSessionTokensForUserAsync(
+            user,
+            client,
+            completion.OrganizationId,
+            completion.AuthenticationMethod,
+            "integration-test",
+            "127.0.0.1");
+
+        completion.AuthenticationMethod.Should().Be("google+upstream_mfa");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(tokens.AccessToken);
+        jwt.Claims.Where(claim => claim.Type == "amr")
+            .Select(claim => claim.Value)
+            .Should().Contain(["google", "upstream_mfa"]);
+        (await crypto.ValidateAccessTokenAsync(tokens.AccessToken, client.Audience))
+            .Should().NotBeNull();
     }
 
     [TestMethod]

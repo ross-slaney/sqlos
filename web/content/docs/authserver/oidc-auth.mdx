@@ -102,6 +102,32 @@ The provider callback is not an identity-claim source. Callback parameters canno
 
 GitHub remains a separate OAuth profile flow: SqlOS uses GitHub's stable numeric user id plus the verified primary address returned by GitHub's email API. It does not mix GitHub profile fields into the OIDC claim pipeline.
 
+### Upstream MFA is never trusted automatically
+
+An OIDC login proves the configured provider authenticated the user; it does not automatically prove that the provider performed MFA. SqlOS reads `amr` and `acr` only from the validated, signed ID token and treats them as assurance evidence only when that specific connection opts in with an explicit allowlist.
+
+Code-owned OIDC seeds can configure the policy without adding runtime infrastructure:
+
+```csharp
+options.AuthServer.SeedOidcConnection(oidc =>
+{
+    oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
+    oidc.DisplayName = "Workforce Entra ID";
+    oidc.ClientId = builder.Configuration["Entra:ClientId"]!;
+    oidc.ClientSecret = builder.Configuration["Entra:ClientSecret"]!;
+    oidc.AllowedCallbackUris.Add(
+        "https://app.example.com/sqlos/auth/oidc/callback/{connectionId}");
+
+    oidc.TrustUpstreamMfa = true;
+    oidc.AcceptedAmrValues.Add("mfa");
+    oidc.AcceptedAcrValues.Add("urn:example:approved-assurance");
+});
+```
+
+`TrustUpstreamMfa` defaults to `false`. Missing evidence, disabled trust, or an unrecognized value leaves MFA unsatisfied, so an organization/client policy that requires MFA continues to local step-up. Accepted evidence keeps the primary method (for example, `microsoft`) and adds the separate `upstream_mfa` assurance method to sessions and tokens. Audit events record whether evidence was missing, untrusted, unrecognized, or accepted.
+
+Treat provider claim semantics as part of the connection configuration. Do not copy an `amr` or `acr` value from another IdP without confirming that your provider and tenant policy assign it the assurance meaning you expect.
+
 ### Backend code (from the example API)
 
 The normal application flow starts at `/sqlos/auth/authorize`; hosted AuthPage invokes the social provider and returns an OAuth authorization code to your application. Use the [ASP.NET Core login quickstart](/docs/quickstarts/aspnet-core-login) for that recommended path.

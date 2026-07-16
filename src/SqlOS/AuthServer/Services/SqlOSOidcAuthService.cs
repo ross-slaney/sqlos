@@ -11,6 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Security;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -164,9 +165,12 @@ public sealed class SqlOSOidcAuthService
             connection = await RequireEnabledConnectionAsync(request.ConnectionId, cancellationToken);
 
             var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
-            var providerUser = resolved.Protocol == SqlOSSocialProviderProtocol.OAuthProfile
-                ? await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken)
+            var completed = resolved.Protocol == SqlOSSocialProviderProtocol.OAuthProfile
+                ? new CompletedProviderAuthorization(
+                    await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken),
+                    SqlOSUpstreamMfaDecision.NotAccepted(false, "evidence_missing"))
                 : await CompleteOidcAuthorizationAsync(connection, resolved, request, ipAddress, cancellationToken);
+            var providerUser = completed.User;
             var provisioned = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, ipAddress, cancellationToken);
             var organizations = await _adminService.GetUserOrganizationsAsync(provisioned.User.Id, cancellationToken);
             var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
@@ -179,6 +183,12 @@ public sealed class SqlOSOidcAuthService
                 SqlOSOidcProviderType.Custom => "oidc",
                 _ => "oidc"
             };
+            if (completed.UpstreamMfa.Accepted)
+            {
+                authMethod = SqlOSMfaPolicyService.AddAuthenticationMethod(
+                    authMethod,
+                    SqlOSUpstreamMfaTrust.AuthenticationMethod);
+            }
 
             await _adminService.RecordAuditAsync(
                 "user.login.oidc.success",
@@ -191,7 +201,17 @@ public sealed class SqlOSOidcAuthService
                 {
                     provider = connection.ProviderType.ToString(),
                     protocol = resolved.Protocol.ToString(),
-                    oidcConnectionId = connection.Id
+                    oidcConnectionId = connection.Id,
+                    upstreamMfa = new
+                    {
+                        completed.UpstreamMfa.EvidencePresent,
+                        completed.UpstreamMfa.Accepted,
+                        completed.UpstreamMfa.Reason,
+                        completed.UpstreamMfa.AcceptedClaim,
+                        completed.UpstreamMfa.AcceptedValue,
+                        completed.UpstreamMfa.AmrValues,
+                        completed.UpstreamMfa.AcrValues
+                    }
                 },
                 cancellationToken: cancellationToken);
 
@@ -226,7 +246,7 @@ public sealed class SqlOSOidcAuthService
         }
     }
 
-    private async Task<ProviderUser> CompleteOidcAuthorizationAsync(
+    private async Task<CompletedProviderAuthorization> CompleteOidcAuthorizationAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         SqlOSCompleteOidcAuthorizationRequest request,
@@ -240,7 +260,7 @@ public sealed class SqlOSOidcAuthService
         IReadOnlyDictionary<string, string>? userInfoClaims = resolved.UseUserInfo && !string.IsNullOrWhiteSpace(resolved.UserInfoEndpoint)
             ? await LoadUserInfoClaimsAsync(resolved.UserInfoEndpoint!, tokenPayload.AccessToken, cancellationToken)
             : null;
-        return await MapProviderUserAsync(
+        var providerUser = await MapProviderUserAsync(
             connection,
             resolved,
             idTokenPrincipal,
@@ -248,6 +268,9 @@ public sealed class SqlOSOidcAuthService
             request.UserPayloadJson,
             ipAddress,
             cancellationToken);
+        return new CompletedProviderAuthorization(
+            providerUser,
+            SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal));
     }
 
     private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
@@ -1263,6 +1286,10 @@ public sealed class SqlOSOidcAuthService
         bool EmailVerified,
         bool CanAutoLinkByEmail,
         string? EmailClaimSource = null);
+
+    private sealed record CompletedProviderAuthorization(
+        ProviderUser User,
+        SqlOSUpstreamMfaDecision UpstreamMfa);
 
     private sealed record ResolvedEmailClaims(string Email, bool EmailVerified, string Source);
 
