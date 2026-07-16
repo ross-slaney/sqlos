@@ -298,7 +298,6 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             dashboardOptions,
             scimEnabled,
             provider.GetRequiredService<SqlOSDashboardSessionService>(),
-            provider.GetRequiredService<SqlOSDashboardLoginThrottlingService>(),
             provider.GetRequiredService<IOptions<SqlOSOptions>>());
 
         return new DashboardMiddlewareHarness(provider, middleware);
@@ -370,7 +369,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
                 context.Request.ContentType = "application/json";
             }
 
-            await _middleware.InvokeAsync(context);
+            await _middleware.InvokeAsync(
+                context,
+                scope.ServiceProvider.GetRequiredService<SqlOSDashboardLoginThrottlingService>());
 
             context.Response.Body.Position = 0;
             using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);

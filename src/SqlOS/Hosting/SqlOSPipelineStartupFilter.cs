@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,20 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
                     "SqlOS dashboard authentication is DevelopmentOnly. The dashboard and admin APIs return 404 outside Development. " +
                     "Configure Dashboard.AuthMode = Password or Dashboard.AuthorizationCallback before exposing operator access.");
             }
+        }
+
+        var forwardedHeaders = services.GetService<IOptions<ForwardedHeadersOptions>>()?.Value;
+        var publicThrottleSurface =
+            hostOptions.Dashboard.AuthMode == SqlOSDashboardAuthMode.Password
+            || hostOptions.AuthServer.ClientRegistration.Dcr.Enabled;
+        if (publicThrottleSurface
+            && forwardedHeaders?.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedFor) == true
+            && forwardedHeaders.KnownProxies.Count == 0
+            && forwardedHeaders.KnownNetworks.Count == 0)
+        {
+            _logger.LogWarning(
+                "SqlOS public throttling is enabled while X-Forwarded-For has no KnownProxies or KnownNetworks. " +
+                "Configure trusted proxy boundaries or disable X-Forwarded-For processing; untrusted forwarded client addresses can bypass or collapse rate-limit buckets.");
         }
 
         // Apply only the host-configured, trusted ForwardedHeaders options. The

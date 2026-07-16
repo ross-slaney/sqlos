@@ -56,6 +56,73 @@ public sealed class SqlOSPipelineStartupFilterTests
     }
 
     [TestMethod]
+    public async Task Configure_IgnoresForwardedClientIpFromUntrustedProxy()
+    {
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment());
+        services.AddSingleton(Options.Create(new SqlOSOptions()));
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+            options.KnownProxies.Add(IPAddress.Parse("10.0.0.10"));
+        });
+
+        await using var provider = services.BuildServiceProvider();
+        var appBuilder = new ApplicationBuilder(provider);
+        IPAddress? observedClientIp = null;
+        var filter = new SqlOSPipelineStartupFilter(new RecordingLogger<SqlOSPipelineStartupFilter>());
+        filter.Configure(app => app.Run(context =>
+        {
+            observedClientIp = context.Connection.RemoteIpAddress;
+            return Task.CompletedTask;
+        }))(appBuilder);
+        var pipeline = appBuilder.Build();
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Request.Path = "/health";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.11");
+        context.Request.Headers["X-Forwarded-For"] = "203.0.113.42";
+
+        await pipeline(context);
+
+        observedClientIp.Should().Be(IPAddress.Parse("10.0.0.11"));
+    }
+
+    [TestMethod]
+    public void Configure_PublicThrottleWithTrustAllForwarding_EmitsSafetyWarning()
+    {
+        var options = new SqlOSOptions();
+        options.Dashboard.AuthMode = SqlOSDashboardAuthMode.Password;
+        options.Dashboard.Password = "test-password";
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment());
+        services.AddSingleton(Options.Create(options));
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
+        services.Configure<ForwardedHeadersOptions>(forwarded =>
+        {
+            forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+            forwarded.KnownProxies.Clear();
+            forwarded.KnownNetworks.Clear();
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var appBuilder = new ApplicationBuilder(provider);
+        var logger = new RecordingLogger<SqlOSPipelineStartupFilter>();
+
+        new SqlOSPipelineStartupFilter(logger).Configure(_ => { })(appBuilder);
+
+        logger.Messages.Should().Contain(message =>
+            message.Contains("no KnownProxies or KnownNetworks", StringComparison.Ordinal)
+            && message.Contains("rate-limit buckets", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void Configure_DevelopmentOnlyDashboard_EmitsProductionSafetyWarning()
     {
         var services = new ServiceCollection();

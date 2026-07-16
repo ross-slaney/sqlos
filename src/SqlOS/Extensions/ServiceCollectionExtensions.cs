@@ -63,11 +63,14 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(5);
         });
         services.AddSingleton<SqlOSDashboardSessionService>();
-        services.AddSingleton<SqlOSDashboardLoginThrottlingService>();
-        services.AddSingleton<SqlOSDynamicClientRegistrationRateLimiter>();
 
         services.AddScoped<ISqlOSAuthServerDbContext>(sp => sp.GetRequiredService<TContext>());
         services.AddScoped<ISqlOSFgaDbContext>(sp => sp.GetRequiredService<TContext>());
+        services.AddScoped<SqlOSDistributedRateLimitStore>();
+        services.AddScoped(sp => new SqlOSDashboardLoginThrottlingService(
+            sp.GetRequiredService<SqlOSDistributedRateLimitStore>()));
+        services.AddScoped(sp => new SqlOSDynamicClientRegistrationRateLimiter(
+            sp.GetRequiredService<SqlOSDistributedRateLimitStore>()));
 
         services.AddScoped<SqlOSSchemaInitializer>();
         services.AddScoped<SqlOSBootstrapper>();
