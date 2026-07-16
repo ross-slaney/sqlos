@@ -164,6 +164,20 @@ public sealed class SqlOSOptionsValidationTests
             .WithMessage("*Fga.MaxResourceHierarchyDepth must be greater than zero.*");
     }
 
+    [TestMethod]
+    public void AddSqlOS_RejectsFgaHierarchyDepthBeyondSqlServerLimit()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.Fga.MaxResourceHierarchyDepth = 101);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage(
+                "*Fga.MaxResourceHierarchyDepth cannot exceed 100, "
+                + "the SQL Server recursive CTE limit used by FGA list authorization.*");
+    }
+
     [DataTestMethod]
     [DataRow("default-src 'self'; script-src 'self'")]
     [DataRow("default-src 'self'; script-src 'nonce-{nonce}'; style-src 'self'")]

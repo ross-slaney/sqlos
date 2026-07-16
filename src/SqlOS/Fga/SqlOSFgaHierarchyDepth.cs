@@ -9,6 +9,7 @@ namespace SqlOS.Fga;
 internal static class SqlOSFgaHierarchyDepth
 {
     public const int Default = 10;
+    public const int SqlServerRecursiveCteMaximum = 100;
     public const string ModelAnnotationName = "SqlOS:Fga:MaxResourceHierarchyDepth";
 
     public static int Resolve(ISqlOSFgaDbContext context)
