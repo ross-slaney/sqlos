@@ -117,13 +117,7 @@ public sealed partial class SqlOSAdminService
             string.IsNullOrWhiteSpace(connection.SeedKey)
                 || !configuredConnections.Contains(BuildConfiguredScimConnectionKey(connection.OrganizationId, connection.SeedKey))))
         {
-            await RevokeManagedGrantsAsync(orphaned.Id, mappingId: null, cancellationToken: cancellationToken);
-            orphaned.IsEnabled = false;
-            orphaned.TokenHash = null;
-            orphaned.TokenPrefix = null;
-            orphaned.TokenRotatedAt = null;
-            orphaned.TokenLastUsedAt = null;
-            orphaned.UpdatedAt = DateTime.UtcNow;
+            orphaned.ConfigurationOrphanedAt ??= DateTime.UtcNow;
         }
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -176,6 +170,8 @@ public sealed partial class SqlOSAdminService
                     DisplayName = displayName,
                     IsEnabled = seed.Enabled,
                     Source = SqlOSScimSources.Seeded,
+                    ConfigurationOwner = SqlOSConfigurationOwners.Code,
+                    ConfigurationSourceKey = seedKey,
                     CreatedAt = now,
                     UpdatedAt = now
                 };
@@ -183,15 +179,30 @@ public sealed partial class SqlOSAdminService
             }
             else
             {
+                if (existing.ConfigurationSourceKey == null && existing.Source == SqlOSScimSources.Seeded)
+                {
+                    existing.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+                    existing.ConfigurationSourceKey = seedKey;
+                }
+                SqlOSConfigurationOwnershipPolicy.EnsureCodeOwnership(existing.ConfigurationOwner, existing.ConfigurationSourceKey, seedKey, $"SCIM connection '{displayName}'");
                 if (existing.IsEnabled && !seed.Enabled)
                 {
                     await RevokeManagedGrantsAsync(existing.Id, mappingId: null, cancellationToken: cancellationToken);
                 }
                 existing.DisplayName = displayName;
-                existing.IsEnabled = seed.Enabled;
+                // Preserve an operator emergency disable. Code may disable an existing
+                // connection, but does not silently re-enable one at startup.
+                if (!seed.Enabled)
+                {
+                    existing.IsEnabled = false;
+                }
                 existing.Source = SqlOSScimSources.Seeded;
                 existing.UpdatedAt = now;
             }
+
+            existing.ConfigurationFingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { OrganizationId = organization.Id, SourceKey = seedKey, DisplayName = displayName, seed.Enabled, Mappings = seed.GroupMappings.Select(mapping => new { mapping.SourceKey, mapping.MatchType, mapping.GroupDisplayName, mapping.GroupExternalId, mapping.GroupPattern, mapping.RoleKey, mapping.ResourceId, mapping.ResourceIdTemplate, mapping.Description, mapping.Enabled }).ToArray() });
+            existing.LastReconciledAt = now;
+            existing.ConfigurationOrphanedAt = null;
 
             if (rawToken != null)
             {
@@ -248,6 +259,28 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        foreach (var (seed, organization, seedKey) in resolvedSeeds)
+        {
+            var reconciled = await _context.Set<SqlOSScimConnection>()
+                .AsNoTracking()
+                .SingleAsync(x => x.OrganizationId == organization.Id && x.ConfigurationSourceKey == seedKey, cancellationToken);
+            await RecordAuditAsync(
+                "configuration.reconciled",
+                "system",
+                "startup",
+                organizationId: organization.Id,
+                data: new
+                {
+                    resourceType = "scim_connection",
+                    resourceId = reconciled.Id,
+                    owner = SqlOSConfigurationOwners.Code,
+                    sourceKey = seedKey,
+                    outcome = "reconciled",
+                    fingerprint = reconciled.ConfigurationFingerprint
+                },
+                cancellationToken: cancellationToken);
+        }
     }
 
     private async Task<List<SqlOSScimConnection>> LockSeededScimConnectionsForReconciliationAsync(
@@ -439,7 +472,7 @@ public sealed partial class SqlOSAdminService
         => await RunScimAdminAtomicAsync(async () =>
         {
             var connection = await GetRequiredScimConnectionForUpdateAsync(connectionId, cancellationToken);
-            EnsureScimConnectionIsDashboardManaged(connection);
+            // Enable/disable is the explicit emergency control available for every owner.
             if (enabled)
             {
                 EnsureScimConnectionHasToken(connection);

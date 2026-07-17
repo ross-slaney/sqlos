@@ -119,6 +119,8 @@ public sealed class SqlOSClientSeedOptions
 /// </summary>
 public sealed class SqlOSOidcConnectionSeedOptions
 {
+    /// <summary>Stable source key used to reconcile this connection across renames.</summary>
+    public string? Key { get; set; }
     public SqlOSOidcProviderType ProviderType { get; set; } = SqlOSOidcProviderType.Custom;
     public string DisplayName { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;

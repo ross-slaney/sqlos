@@ -102,7 +102,7 @@ public sealed class SqlOSSingleApplicationTests
         var act = async () => await harness.Admin.UpsertSeededClientsAsync();
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Single-application client id 'todo' already exists. Choose a different ClientId or remove the existing manual client.");
+            .WithMessage("*owned by 'dashboard'*");
     }
 
     [TestMethod]

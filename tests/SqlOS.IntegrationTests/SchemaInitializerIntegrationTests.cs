@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 33;
+    private const int CurrentSchemaVersion = 34;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -71,6 +71,13 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync(
             "SqlOSAuthOidcConnections",
             "AcceptedAcrValuesJson"));
+        foreach (var table in new[] { "SqlOSClientApplications", "SqlOSAuthOidcConnections", "SqlOSScimConnections", "SqlOSMfaSettings" })
+        {
+            foreach (var column in new[] { "ConfigurationOwner", "ConfigurationSourceKey", "ConfigurationFingerprint", "LastReconciledAt", "ConfigurationOrphanedAt" })
+            {
+                Assert.IsTrue(await ColumnExistsAsync(table, column), $"Column {table}.{column} should exist.");
+            }
+        }
     }
 
     [TestMethod]

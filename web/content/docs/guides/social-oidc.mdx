@@ -89,7 +89,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 For Apple or fully custom providers, use the general form:
 
 ```csharp
-auth.SeedOidcConnection(oidc =>
+auth.SeedOidcConnection("workforce", oidc =>
 {
     oidc.ProviderType = SqlOSOidcProviderType.Custom;
     oidc.DisplayName = "Acme Identity";

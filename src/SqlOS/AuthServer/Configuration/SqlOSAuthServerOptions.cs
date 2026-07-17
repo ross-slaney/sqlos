@@ -124,6 +124,16 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    /// <summary>Seed a social/OIDC connection with a stable source key.</summary>
+    public SqlOSAuthServerOptions SeedOidcConnection(string key, Action<SqlOSOidcConnectionSeedOptions> configure)
+    {
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Seeded OIDC connections require a stable key.");
+        var seed = new SqlOSOidcConnectionSeedOptions { Key = key.Trim() };
+        configure(seed);
+        OidcConnectionSeeds.Add(seed);
+        return this;
+    }
+
     /// <summary>
     /// Seed an organization-scoped SCIM directory sync connection. Seeded connections are reconciled
     /// on startup by stable key; mapping rules are reconciled by source key.
@@ -154,6 +164,7 @@ public class SqlOSAuthServerOptions
         params string[] allowedCallbackUris)
         => SeedOidcConnection(oidc =>
         {
+            oidc.Key = "microsoft";
             oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
             oidc.DisplayName = "Microsoft";
             oidc.ClientId = clientId;
@@ -174,6 +185,7 @@ public class SqlOSAuthServerOptions
         params string[] allowedCallbackUris)
         => SeedOidcConnection(oidc =>
         {
+            oidc.Key = "google";
             oidc.ProviderType = SqlOSOidcProviderType.Google;
             oidc.DisplayName = "Google";
             oidc.ClientId = clientId;
@@ -195,6 +207,7 @@ public class SqlOSAuthServerOptions
         params string[] allowedCallbackUris)
         => SeedOidcConnection(oidc =>
         {
+            oidc.Key = "github";
             oidc.ProviderType = SqlOSOidcProviderType.GitHub;
             oidc.DisplayName = "GitHub";
             oidc.ClientId = clientId;

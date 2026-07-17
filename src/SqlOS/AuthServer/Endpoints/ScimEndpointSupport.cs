@@ -220,6 +220,7 @@ public static partial class EndpointRouteBuilderExtensions
         connection.IsEnabled,
         connection.Source,
         connection.SeedKey,
+        Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(connection.ConfigurationOwner, connection.ConfigurationSourceKey, connection.LastReconciledAt, connection.ConfigurationFingerprint, connection.ConfigurationOrphanedAt),
         connection.TokenPrefix,
         connection.TokenRotatedAt,
         connection.TokenLastUsedAt,

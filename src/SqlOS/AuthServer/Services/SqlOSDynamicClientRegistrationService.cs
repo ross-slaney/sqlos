@@ -61,6 +61,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                 Audience = _options.DefaultAudience,
                 ClientType = "public_pkce",
                 RegistrationSource = "dcr",
+                ConfigurationOwner = SqlOSConfigurationOwners.Dynamic,
                 TokenEndpointAuthMethod = normalized.TokenEndpointAuthMethod,
                 GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                 ResponseTypesJson = JsonSerializer.Serialize(normalized.ResponseTypes),

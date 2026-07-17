@@ -140,9 +140,9 @@ public sealed class SqlOSScimServiceTests
         var connection = await context.Set<SqlOSScimConnection>().SingleAsync();
 
         var rotate = async () => await harness.Admin.RotateScimTokenAsync(connection.Id);
-        var disable = async () => await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, false);
         await rotate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*startup configuration*");
-        await disable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*startup configuration*");
+        (await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, false)).IsEnabled.Should().BeFalse();
+        (await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, true)).IsEnabled.Should().BeTrue();
 
         var configuredSeed = optionsValue.ScimConnectionSeeds.Single();
         configuredSeed.Token = null;
@@ -169,20 +169,25 @@ public sealed class SqlOSScimServiceTests
             seed.OrganizationSlug = "acme";
             seed.Token = replacement;
         });
+        var renamedConflict = () => harness.Admin.UpsertSeededScimConnectionsAsync();
+        await renamedConflict.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Only one SCIM directory connection can be enabled*");
+        connection.ConfigurationOrphanedAt.Should().NotBeNull();
+        connection.IsEnabled.Should().BeTrue();
+
+        await harness.Admin.SetScimConnectionEnabledAsync(connection.Id, false);
         await harness.Admin.UpsertSeededScimConnectionsAsync();
         var renamedConnections = await context.Set<SqlOSScimConnection>().OrderBy(item => item.CreatedAt).ToListAsync();
         renamedConnections.Should().HaveCount(2);
         renamedConnections[0].IsEnabled.Should().BeFalse();
-        renamedConnections[0].TokenHash.Should().BeNull();
+        renamedConnections[0].TokenHash.Should().NotBeNull();
         renamedConnections[1].IsEnabled.Should().BeTrue();
         (await harness.Scim.AuthenticateAsync(replacementContext)).Id.Should().Be(renamedConnections[1].Id);
 
         optionsValue.ScimConnectionSeeds.Clear();
         await harness.Admin.UpsertSeededScimConnectionsAsync();
-        var orphanedAuth = async () => await harness.Scim.AuthenticateAsync(replacementContext);
-        var orphanedError = await orphanedAuth.Should().ThrowAsync<SqlOSScimException>();
-        orphanedError.Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
-        (await context.Set<SqlOSScimConnection>().CountAsync(item => item.IsEnabled)).Should().Be(0);
+        (await harness.Scim.AuthenticateAsync(replacementContext)).Id.Should().Be(renamedConnections[1].Id);
+        (await context.Set<SqlOSScimConnection>().CountAsync(item => item.IsEnabled)).Should().Be(1);
 
         optionsValue.SeedScimConnection("acme-renamed", seed => seed.OrganizationSlug = "acme");
         var resurrectWithoutSecret = async () => await harness.Admin.UpsertSeededScimConnectionsAsync();

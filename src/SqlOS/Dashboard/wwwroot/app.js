@@ -723,7 +723,10 @@
         ];
 
         if (client.managedByStartupSeed) {
-            badges.push(renderClientBadge("Startup managed", "muted"));
+            badges.push(renderClientBadge("Code owned", "muted"));
+        }
+        if (client.ownership?.isOrphaned) {
+            badges.push(renderClientBadge("Seed missing", "warning"));
         }
 
         if (client.metadataCacheState === "fresh") {
@@ -1852,6 +1855,8 @@
                                 ${renderMetadataRows([
                                     { label: "Connection ID", value: item.connection.id },
                                     { label: "Source", value: item.connection.source || "dashboard" },
+                                    { label: "Configuration owner", value: item.connection.ownership?.owner || item.connection.source || "dashboard" },
+                                    { label: "Source key", value: item.connection.ownership?.sourceKey },
                                     { label: "Base URL", html: `<span class="inline-code">${esc(item.connection.baseUrl || "n/a")}</span>` },
                                     { label: "Users URL", html: `<span class="inline-code">${esc(item.connection.usersUrl || "n/a")}</span>` },
                                     { label: "Groups URL", html: `<span class="inline-code">${esc(item.connection.groupsUrl || "n/a")}</span>` },
@@ -1862,8 +1867,13 @@
                                 ])}
                                 ${item.connection.source === "seeded" ? `
                                     <div class="callout">
-                                        <strong>Managed by startup configuration.</strong>
-                                        Change this connection's display name, enabled state, or token secret in <span class="inline-code">SeedScimConnection</span>, then restart SqlOS. Dashboard token and lifecycle actions are intentionally disabled so a restart cannot silently undo an emergency rotation.
+                                        <strong>Code owned.</strong>
+                                        Change this connection's fields or token secret in <span class="inline-code">SeedScimConnection</span>. Emergency enable/disable remains available here and is preserved across restart.
+                                    </div>
+                                    <div class="form-actions">
+                                        ${item.connection.isEnabled
+                                            ? `<button type="button" class="js-disable-scim-connection" data-id="${esc(item.connection.id)}">Disable</button>`
+                                            : `<button type="button" class="js-enable-scim-connection" data-id="${esc(item.connection.id)}">Enable</button>`}
                                     </div>
                                 ` : `
                                     <form id="update-scim-connection-${esc(item.connection.id)}" class="nested-form">
@@ -3288,7 +3298,11 @@
                                     html: `<pre>${esc(JSON.stringify(parseJsonObject(item.claimMapping), null, 2))}</pre>`
                                 },
                                 { label: "Enabled", value: item.isEnabled ? "Yes" : "No" }
+                                ,{ label: "Configuration owner", value: item.ownership?.owner || "dashboard" }
+                                ,{ label: "Source key", value: item.ownership?.sourceKey }
+                                ,{ label: "Reconciliation", value: item.ownership?.isOrphaned ? "Seed missing" : item.ownership?.lastReconciledAt ? `Reconciled ${formatDate(item.ownership.lastReconciledAt)}` : "Not reconciled" }
                             ])}
+                            ${item.ownership && !item.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Edit this connection in startup configuration. Emergency enable/disable remains available here.</div>` : ""}
                             <form id="edit-oidc-${esc(item.id)}" class="nested-form">
                                 <input name="displayName" value="${esc(item.displayName)}" required>
                                 <label>Logo upload<input type="file" accept="image/*,.svg" data-dataurl-target="logoDataUrl"></label>
@@ -3352,6 +3366,10 @@
         });
 
         oidcConnections.forEach(item => {
+            if (item.ownership && !item.ownership.isEditable) {
+                const form = document.getElementById(`edit-oidc-${item.id}`);
+                form?.querySelectorAll("input, textarea, select, button[type='submit']").forEach(field => { field.disabled = true; });
+            }
             bindForm(`edit-oidc-${item.id}`, async form => {
                 await fetchJson(`${authApiBasePath}/oidc-connections/${item.id}`, {
                     method: "PUT",
@@ -3545,7 +3563,7 @@
             <div class="panel-grid">
                 <section class="panel">
                     <h2>MFA Settings</h2>
-                    ${settings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                    ${settings.ownership && !settings.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Policy fields come from startup configuration. The master Enable MFA switch remains available for emergency shutdown.</div>` : ""}
                     <form id="mfa-settings-form">
                         <label><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> Enable MFA</label>
                         <label><input type="checkbox" name="totpEnabled" ${settings.totpEnabled ? "checked" : ""}> Enable authenticator apps</label>
@@ -3572,6 +3590,10 @@
                 </section>
             </div>
         `;
+
+        if (settings.ownership && !settings.ownership.isEditable) {
+            content.querySelectorAll("#mfa-settings-form input:not([name='enabled'])").forEach(field => { field.disabled = true; });
+        }
 
         bindForm("mfa-settings-form", async form => {
             const splitList = value => String(value || "")

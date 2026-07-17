@@ -189,6 +189,11 @@ public sealed class SqlOSScimConnection
     public DateTime? TokenLastUsedAt { get; set; }
     public DateTime? LastSyncAt { get; set; }
     public string Source { get; set; } = "dashboard";
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -368,6 +373,11 @@ public sealed class SqlOSOidcConnection
     public bool TrustUpstreamMfa { get; set; }
     public string AcceptedAmrValuesJson { get; set; } = "[]";
     public string AcceptedAcrValuesJson { get; set; } = "[]";
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -467,6 +477,11 @@ public sealed class SqlOSClientApplication
     public string AccessMode { get; set; } = "all_organizations";
     public string ClientType { get; set; } = "public_pkce";
     public string RegistrationSource { get; set; } = "manual";
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public string TokenEndpointAuthMethod { get; set; } = "none";
     public string GrantTypesJson { get; set; } = "[\"authorization_code\",\"refresh_token\"]";
     public string ResponseTypesJson { get; set; } = "[\"code\"]";
@@ -642,6 +657,11 @@ public sealed class SqlOSMfaSettings
     public bool RequireForOwnersAndAdmins { get; set; }
     public string RequiredRolesJson { get; set; } = "[\"owner\",\"admin\"]";
     public string AvailableFactorsJson { get; set; } = "[\"totp\",\"recovery_code\"]";
+    public string ConfigurationOwner { get; set; } = "system";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
 

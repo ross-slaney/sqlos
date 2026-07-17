@@ -86,6 +86,7 @@ public static partial class EndpointRouteBuilderExtensions
         AcceptedAmrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAmrValuesJson),
         AcceptedAcrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAcrValuesJson),
         connection.IsEnabled,
+        Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(connection.ConfigurationOwner, connection.ConfigurationSourceKey, connection.LastReconciledAt, connection.ConfigurationFingerprint, connection.ConfigurationOrphanedAt),
         connection.CreatedAt,
         connection.UpdatedAt
     };
