@@ -101,7 +101,7 @@ Content-Type: application/json
 { "method": "phone", "destination": "+14155550123" }
 ```
 
-The operation validates and normalizes the number, applies a three-per-destination hourly test limit, calls the same `ISqlOSOtpDeliveryChannel` used by login, and audits a masked destination with a bounded provider status. It deliberately creates no SqlOS user, session, or login challenge, so a code delivered by this operational test cannot complete a SqlOS sign-in. Startup never performs this active provider check.
+The operation validates and normalizes the number, applies three-per-destination and 20-per-operator-source hourly limits, calls the same `ISqlOSOtpDeliveryChannel` used by login, and audits a masked destination with a bounded provider status. It deliberately creates no SqlOS user, session, or login challenge. Runtime verification is bound to its stored Twilio verification SID, so a code from an administrative test cannot satisfy a different login challenge. Startup never performs this active provider check.
 
 ### Runtime defaults
 

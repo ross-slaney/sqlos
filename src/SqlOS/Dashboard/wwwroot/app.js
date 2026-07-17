@@ -3591,7 +3591,7 @@
                     <input name="destination" type="${method.method === "email" ? "email" : "tel"}" maxlength="320" placeholder="${method.method === "email" ? "operator@example.com" : "+14155550123"}" required>
                     <button type="submit" ${method.locallyConfigured ? "" : "disabled"}>Send test delivery</button>
                 </form>
-                <small>Tests are limited to three sends per destination per hour and never create a user, session, or login challenge.</small>
+                <small>Tests are limited to three sends per destination and 20 per operator source per hour. They never create a user, session, or SqlOS login challenge.</small>
             </section>`;
 
         content.innerHTML = `

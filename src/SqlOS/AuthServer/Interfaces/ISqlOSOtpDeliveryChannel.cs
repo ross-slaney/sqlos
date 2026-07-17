@@ -19,7 +19,8 @@ public sealed record SqlOSOtpDeliveryContext(
     string? ClientApplicationId,
     string? AuthorizationRequestId,
     string? IpAddress,
-    string? UserAgent);
+    string? UserAgent,
+    string? ProviderChallengeId = null);
 
 public sealed record SqlOSOtpDeliveryStartResult(
     bool Accepted,

@@ -59,11 +59,12 @@ public sealed class SqlOSTwilioVerifyOtpChannel : ISqlOSOtpDeliveryChannel
 
         try
         {
-            var request = new CreateVerificationCheckOptions(_options.TwilioVerifyServiceSid!.Trim())
+            var request = new CreateVerificationCheckOptions(_options.TwilioVerifyServiceSid!.Trim()) { Code = code };
+            if (string.IsNullOrWhiteSpace(context.ProviderChallengeId))
             {
-                To = e164PhoneNumber,
-                Code = code
-            };
+                throw new InvalidOperationException("The provider verification identifier is required.");
+            }
+            request.VerificationSid = context.ProviderChallengeId;
 
             var check = await VerificationCheckResource.CreateAsync(request, CreateClient());
             var approved = check.Valid == true

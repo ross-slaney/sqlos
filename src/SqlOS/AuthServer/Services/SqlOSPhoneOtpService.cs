@@ -471,7 +471,8 @@ public sealed class SqlOSPhoneOtpService
                 challenge.ClientApplicationId,
                 challenge.AuthorizationRequestId,
                 challenge.IpAddress,
-                challenge.UserAgent),
+                challenge.UserAgent,
+                challenge.ProviderChallengeId),
             cancellationToken);
 
         challenge.AttemptCount++;

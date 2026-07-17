@@ -44,7 +44,7 @@ An authenticated administrator can retrieve the same model from `GET /sqlos/admi
 { "method": "email", "destination": "operator@example.com" }
 ```
 
-The test uses the configured auth email sender, is limited to three sends per destination per hour, and records only a masked destination. It does not create a user, session, OTP challenge, or reusable login credential. A successful local readiness check does not call ACS; use the explicit test only when you intend to incur a provider request.
+The test uses the configured auth email sender, is limited to three sends per destination and 20 per operator source per hour, and records only a masked destination. It does not create a user, session, OTP challenge, or reusable login credential. A successful local readiness check does not call ACS; use the explicit test only when you intend to incur a provider request.
 
 ## Enable AuthPage Email OTP
 

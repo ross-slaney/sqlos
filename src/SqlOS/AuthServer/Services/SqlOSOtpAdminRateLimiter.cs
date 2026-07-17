@@ -11,12 +11,12 @@ public sealed class SqlOSOtpAdminRateLimiter
         _store = store;
     }
 
-    public async Task<bool> TryConsumeAsync(string key, DateTimeOffset now, CancellationToken cancellationToken = default)
+    public async Task<bool> TryConsumeAsync(string key, DateTimeOffset now, int maxAttempts = 3, CancellationToken cancellationToken = default)
     {
         var state = await _store.IncrementAsync(
             "otp_admin_test",
             key,
-            lockThreshold: 4,
+            lockThreshold: checked(maxAttempts + 1),
             window: TimeSpan.FromHours(1),
             lockoutDuration: TimeSpan.FromHours(1),
             now,

@@ -86,7 +86,11 @@ public sealed class SqlOSOtpAdminService
         }
 
         var destinationHash = _crypto.HashToken(normalizedDestination);
-        if (!await _rateLimiter.TryConsumeAsync($"{normalizedMethod}:{destinationHash}", DateTimeOffset.UtcNow, cancellationToken))
+        var actorHash = _crypto.HashToken(string.IsNullOrWhiteSpace(ipAddress) ? "unknown" : ipAddress);
+        var now = DateTimeOffset.UtcNow;
+        var destinationAllowed = await _rateLimiter.TryConsumeAsync($"destination:{normalizedMethod}:{destinationHash}", now, cancellationToken: cancellationToken);
+        var actorAllowed = await _rateLimiter.TryConsumeAsync($"actor:{actorHash}", now, maxAttempts: 20, cancellationToken: cancellationToken);
+        if (!destinationAllowed || !actorAllowed)
         {
             await AuditAsync(normalizedMethod, "rate_limited", Mask(normalizedMethod, normalizedDestination), null, ipAddress, cancellationToken);
             throw new InvalidOperationException("Test delivery limit reached. Try again later.");
