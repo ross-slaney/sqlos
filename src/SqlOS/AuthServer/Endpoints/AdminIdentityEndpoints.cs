@@ -392,7 +392,7 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                var client = await adminService.SetApplicationAccessModeAsync(applicationId, request, cancellationToken: cancellationToken);
+                var client = await adminService.SetApplicationAccessModeAsync(applicationId, request, actorType: "dashboard", cancellationToken: cancellationToken);
                 return Results.Ok(new { client.Id, client.ClientId, client.Name, client.AccessMode, client.IsActive, client.DisabledAt, client.DisabledReason });
             }
             catch (InvalidOperationException ex)
@@ -421,6 +421,13 @@ public static partial class EndpointRouteBuilderExtensions
                     assignment.RoleKey,
                     assignment.Access,
                     assignment.Reason,
+                    Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                        assignment.ConfigurationOwner,
+                        assignment.ConfigurationSourceKey,
+                        assignment.LastReconciledAt,
+                        assignment.ConfigurationFingerprint,
+                        assignment.ConfigurationOrphanedAt,
+                        false),
                     assignment.CreatedAt,
                     assignment.RevokedAt
                 });
@@ -441,7 +448,20 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var assignment = await adminService.RevokeApplicationAssignmentAsync(applicationId, assignmentId, null, cancellationToken);
-                return Results.Ok(new { assignment.Id, assignment.RevokedAt, assignment.RevokedByActorType, assignment.RevokedByActorId });
+                return Results.Ok(new
+                {
+                    assignment.Id,
+                    assignment.RevokedAt,
+                    assignment.RevokedByActorType,
+                    assignment.RevokedByActorId,
+                    Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                        assignment.ConfigurationOwner,
+                        assignment.ConfigurationSourceKey,
+                        assignment.LastReconciledAt,
+                        assignment.ConfigurationFingerprint,
+                        assignment.ConfigurationOrphanedAt,
+                        false)
+                });
             }
             catch (InvalidOperationException ex)
             {

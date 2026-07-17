@@ -90,6 +90,13 @@ const snippetSpecs = [
     marker: "var filter = await fga.GetAuthorizationFilterAsync<Workspace>",
     wrap: asFgaGroupListProgram,
   },
+  {
+    name: "code-first application access policy",
+    relativePath: "web/content/docs/authserver/application-access.mdx",
+    heading: "## Code-first policy",
+    marker: "client.AssignOrganization(",
+    wrap: asApplicationAccessSeedProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
@@ -222,6 +229,16 @@ function asSecuritySettingsProgram(snippet) {
 using SqlOS.AuthServer.Services;
 
 SqlOSSettingsService settingsService = null!;
+
+${snippet}
+`;
+}
+
+function asApplicationAccessSeedProgram(snippet) {
+  return `using SqlOS.AuthServer.Configuration;
+using SqlOS.AuthServer.Contracts;
+
+var auth = new SqlOSAuthServerOptions();
 
 ${snippet}
 `;

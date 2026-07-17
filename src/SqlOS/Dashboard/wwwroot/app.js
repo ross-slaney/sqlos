@@ -2894,13 +2894,14 @@
                                 ])}
                                 <div>
                                     <h3>Access</h3>
+                                    ${clientDetail.ownership && !clientDetail.ownership.isEditable ? `<div class="callout"><strong>Code owned access mode:</strong> Change <span class="inline-code">AccessMode</span> in the client seed. Dashboard-created assignments remain available and survive reconciliation.</div>` : ""}
                                     <form id="application-access-mode-form" class="client-filter-form">
-                                        <select name="accessMode">
+                                        <select name="accessMode" ${clientDetail.ownership && !clientDetail.ownership.isEditable ? "disabled" : ""}>
                                             ${["all_organizations", "selected_organizations", "selected_users_groups_roles", "internal_only", "disabled"].map(mode => `
                                                 <option value="${esc(mode)}" ${(clientAccess?.accessMode || clientDetail.accessMode || "all_organizations") === mode ? "selected" : ""}>${esc(mode)}</option>
                                             `).join("")}
                                         </select>
-                                        <button type="submit">Save access mode</button>
+                                        <button type="submit" ${clientDetail.ownership && !clientDetail.ownership.isEditable ? "disabled" : ""}>Save access mode</button>
                                     </form>
                                     <form id="create-application-assignment-form" class="client-assignment-form">
                                         <select name="principalType">
@@ -2908,6 +2909,8 @@
                                             <option value="user">User</option>
                                             <option value="group">Group</option>
                                             <option value="role">Role</option>
+                                            <option value="service_account">Service account</option>
+                                            <option value="agent">Agent</option>
                                         </select>
                                         <input name="organizationId" placeholder="Organization ID">
                                         <input name="principalId" placeholder="User or group ID">
@@ -2929,9 +2932,10 @@
                                                         <div class="client-badge-row">
                                                             ${renderClientBadge(assignment.access, assignment.access === "denied" ? "danger" : "success")}
                                                             ${assignment.revokedAt ? renderClientBadge("Revoked", "muted") : ""}
+                                                            ${renderClientBadge(assignment.ownership?.owner === "code" ? "Code owned" : "Dashboard owned", assignment.ownership?.owner === "code" ? "info" : "muted")}
                                                         </div>
                                                     </div>
-                                                    ${assignment.revokedAt ? "" : `
+                                                    ${assignment.revokedAt || (assignment.ownership && !assignment.ownership.isEditable) ? "" : `
                                                         <button type="button" data-application-assignment-revoke="${esc(assignment.id)}">Revoke</button>
                                                     `}
                                                 </div>
@@ -2940,6 +2944,7 @@
                                                     { label: "Principal ID", value: assignment.principalId || "n/a" },
                                                     { label: "Role key", value: assignment.roleKey || "n/a" },
                                                     { label: "Reason", value: assignment.reason || "n/a" },
+                                                    { label: "Source key", value: assignment.ownership?.sourceKey || "n/a" },
                                                     { label: "Created", value: formatDate(assignment.createdAt) }
                                                 ])}
                                             </div>

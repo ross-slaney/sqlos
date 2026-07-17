@@ -455,6 +455,13 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.RoleKey).HasMaxLength(80);
             entity.Property(x => x.Access).HasMaxLength(20);
             entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.ClientApplicationId, x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL")
+                .HasDatabaseName("UX_SqlOSApplicationAssignments_Client_Owner_SourceKey");
             entity.Property(x => x.CreatedByActorType).HasMaxLength(80);
             entity.Property(x => x.CreatedByActorId).HasMaxLength(128);
             entity.Property(x => x.RevokedByActorType).HasMaxLength(80);

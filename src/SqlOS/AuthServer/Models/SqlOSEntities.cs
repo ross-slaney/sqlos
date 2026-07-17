@@ -520,6 +520,11 @@ public sealed class SqlOSApplicationAssignment
     public string? RoleKey { get; set; }
     public string Access { get; set; } = "allowed";
     public string? Reason { get; set; }
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByActorType { get; set; }
     public string? CreatedByActorId { get; set; }

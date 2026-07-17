@@ -43,6 +43,23 @@ builder.AddSqlOS<AppDbContext>(
 
 Single-application mode creates one first-party PKCE client and keeps CIMD, DCR, resource indicators, and multi-application policy out of the starting path.
 
+## Reproducible multi-application access
+
+Multi-application hosts can keep access policy beside each client seed. When `AccessMode` is omitted, new clients default to `all_organizations` and existing seeded clients retain their stored mode. Declare it explicitly whenever you add keyed assignments.
+
+```csharp
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "admin-console";
+    client.Name = "Admin Console";
+    client.RedirectUris = ["https://admin.example.com/auth/callback"];
+    client.AccessMode = SqlOSApplicationAccessModes.SelectedUsersGroupsRoles;
+    client.AssignRole("tenant-admins", "northwind", "admin");
+});
+```
+
+The organization ID/slug and referenced principals must already exist. Reconciliation is idempotent and source-owned: code changes affect only the keyed rows above, while dashboard-created assignments remain operator-owned. See [Application Access](/docs/authserver/application-access) and [Assign access across multiple apps](/docs/guides/multi-app-access).
+
 ## FGA seeding
 
 Keep auth and FGA seeding in the same `AddSqlOS` call:

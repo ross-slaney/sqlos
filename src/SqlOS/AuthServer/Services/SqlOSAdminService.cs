@@ -122,6 +122,40 @@ public sealed partial class SqlOSAdminService
 
     public async Task UpsertSeededClientsAsync(CancellationToken cancellationToken = default)
     {
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            await UpsertSeededClientsCoreAsync(cancellationToken);
+            return;
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+            await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            if (string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+            {
+                await _context.Database.ExecuteSqlRawAsync("""
+                    DECLARE @result int;
+                    EXEC @result = sys.sp_getapplock
+                        @Resource = N'SqlOS:ClientSeedReconciliation',
+                        @LockMode = N'Exclusive',
+                        @LockOwner = N'Transaction',
+                        @LockTimeout = 30000;
+                    IF @result < 0 THROW 51000, 'Could not acquire the SqlOS client seed reconciliation lock.', 1;
+                    """, cancellationToken);
+            }
+            await UpsertSeededClientsCoreAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
+
+    private async Task UpsertSeededClientsCoreAsync(CancellationToken cancellationToken)
+    {
         var seeds = BuildStartupClientSeeds();
         var sourceKeys = seeds.Select(x => x.ClientId.Trim()).ToHashSet(StringComparer.Ordinal);
         var now = DateTime.UtcNow;
@@ -147,9 +181,19 @@ public sealed partial class SqlOSAdminService
         {
             var normalized = NormalizeSeededClient(seed);
             var sourceKey = normalized.ClientId;
-            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { normalized.ClientId, normalized.Name, normalized.Description, normalized.Audience, normalized.ClientType, normalized.RequirePkce, normalized.AllowedScopes, normalized.IsFirstParty, normalized.AllowNativeHeadlessAuth, normalized.AllowDeviceAuthorization, normalized.EnableClientCredentials, normalized.RedirectUris, normalized.IsActive });
             var existing = await _context.Set<SqlOSClientApplication>()
                 .FirstOrDefaultAsync(x => x.ClientId == normalized.ClientId, cancellationToken);
+            if (seed.Assignments.Count > 0 && string.IsNullOrWhiteSpace(seed.AccessMode))
+            {
+                throw new InvalidOperationException($"Client '{normalized.ClientId}' must set AccessMode explicitly when declaring application assignments.");
+            }
+            var accessMode = string.IsNullOrWhiteSpace(seed.AccessMode)
+                ? existing == null ? SqlOSApplicationAccessModes.AllOrganizations : NormalizeAccessMode(existing.AccessMode)
+                : NormalizeAccessMode(seed.AccessMode);
+            var assignmentFingerprint = seed.Assignments
+                .OrderBy(x => x.Key, StringComparer.Ordinal)
+                .Select(x => new { x.Key, x.PrincipalType, x.PrincipalId, x.OrganizationIdOrSlug, x.RoleKey, x.Access, x.Description });
+            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { normalized.ClientId, normalized.Name, normalized.Description, normalized.Audience, normalized.ClientType, normalized.RequirePkce, normalized.AllowedScopes, normalized.IsFirstParty, normalized.AllowNativeHeadlessAuth, normalized.AllowDeviceAuthorization, normalized.EnableClientCredentials, normalized.RedirectUris, normalized.IsActive, AccessMode = accessMode, Assignments = assignmentFingerprint });
             var outcome = existing == null ? "created" : existing.ConfigurationFingerprint == fingerprint && existing.ConfigurationOrphanedAt == null ? null : "updated";
 
             if (existing != null && string.Equals(existing.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase) && existing.ConfigurationSourceKey == null)
@@ -187,8 +231,10 @@ public sealed partial class SqlOSAdminService
                     RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
                     CreatedAt = DateTime.UtcNow,
                     IsFirstParty = normalized.IsFirstParty,
-                    IsActive = normalized.IsActive,
-                    AccessMode = SqlOSApplicationAccessModes.AllOrganizations
+                    IsActive = normalized.IsActive && accessMode != SqlOSApplicationAccessModes.Disabled,
+                    AccessMode = accessMode,
+                    DisabledAt = accessMode == SqlOSApplicationAccessModes.Disabled ? now : null,
+                    DisabledReason = accessMode == SqlOSApplicationAccessModes.Disabled ? "application_access_disabled" : null
                 });
                 auditOutcomes.Add((sourceKey, sourceKey, "created", fingerprint));
                 continue;
@@ -214,7 +260,7 @@ public sealed partial class SqlOSAdminService
             existing.AllowDeviceAuthorization = normalized.AllowDeviceAuthorization;
             existing.RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris);
             existing.IsFirstParty = normalized.IsFirstParty;
-            existing.AccessMode = NormalizeAccessMode(existing.AccessMode);
+            await ApplySeededApplicationAccessModeAsync(existing, accessMode, normalized.IsActive, cancellationToken);
             if (existing.DisabledAt != null)
             {
                 existing.IsActive = false;
@@ -226,6 +272,7 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await ReconcileSeededApplicationAssignmentsAsync(seeds, now, cancellationToken);
         foreach (var audit in auditOutcomes)
         {
             await RecordAuditAsync("configuration.reconciled", "system", "startup", data: new { resourceType = "oauth_client", resourceId = audit.ResourceId, owner = SqlOSConfigurationOwners.Code, sourceKey = audit.SourceKey, outcome = audit.Outcome, fingerprint = audit.Fingerprint }, cancellationToken: cancellationToken);
@@ -1247,6 +1294,10 @@ public sealed partial class SqlOSAdminService
         CancellationToken cancellationToken = default)
     {
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        if (string.Equals(actorType, "dashboard", StringComparison.OrdinalIgnoreCase))
+        {
+            SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(client.ConfigurationOwner, $"OAuth client '{client.ClientId}' access mode");
+        }
         var accessMode = NormalizeAccessMode(request.AccessMode);
         var previousMode = NormalizeAccessMode(client.AccessMode);
         client.AccessMode = accessMode;
@@ -1304,6 +1355,13 @@ public sealed partial class SqlOSAdminService
                 x.RoleKey,
                 x.Access,
                 x.Reason,
+                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                    x.ConfigurationOwner,
+                    x.ConfigurationSourceKey,
+                    x.LastReconciledAt,
+                    x.ConfigurationFingerprint,
+                    x.ConfigurationOrphanedAt,
+                    false),
                 x.CreatedAt,
                 x.CreatedByActorType,
                 x.CreatedByActorId,
@@ -1332,6 +1390,7 @@ public sealed partial class SqlOSAdminService
     {
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
         var normalized = NormalizeAssignmentRequest(request);
+        await ValidateAssignmentPrincipalAsync(normalized, cancellationToken);
 
         var assignment = new SqlOSApplicationAssignment
         {
@@ -1343,6 +1402,7 @@ public sealed partial class SqlOSAdminService
             RoleKey = normalized.RoleKey,
             Access = normalized.Access,
             Reason = normalized.Reason,
+            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard,
             CreatedAt = DateTime.UtcNow,
             CreatedByActorType = actorType,
             CreatedByActorId = actorId
@@ -1379,6 +1439,8 @@ public sealed partial class SqlOSAdminService
         var assignment = await _context.Set<SqlOSApplicationAssignment>()
             .FirstOrDefaultAsync(x => x.Id == assignmentId && x.ClientApplicationId == client.Id, cancellationToken)
             ?? throw new InvalidOperationException("Application assignment was not found.");
+
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(assignment.ConfigurationOwner, $"Application assignment '{assignment.Id}'");
 
         if (assignment.RevokedAt == null)
         {
@@ -2109,9 +2171,9 @@ public sealed partial class SqlOSAdminService
     {
         var principalType = NormalizePrincipalType(request.PrincipalType);
         var access = NormalizeAssignmentAccess(request.Access);
-        var principalId = string.IsNullOrWhiteSpace(request.PrincipalId) ? null : request.PrincipalId.Trim();
-        var organizationId = string.IsNullOrWhiteSpace(request.OrganizationId) ? null : request.OrganizationId.Trim();
-        var roleKey = string.IsNullOrWhiteSpace(request.RoleKey) ? null : request.RoleKey.Trim();
+        var principalId = NormalizeBoundedOptional(request.PrincipalId, "Application assignment principalId", 128);
+        var organizationId = NormalizeBoundedOptional(request.OrganizationId, "Application assignment organizationId", 64);
+        var roleKey = NormalizeBoundedOptional(request.RoleKey, "Application assignment roleKey", 80);
 
         switch (principalType)
         {
@@ -2150,7 +2212,15 @@ public sealed partial class SqlOSAdminService
             organizationId,
             roleKey,
             access,
-            string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim());
+            NormalizeBoundedOptional(request.Reason, "Application assignment reason", 500));
+    }
+
+    private static string? NormalizeBoundedOptional(string? value, string name, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        if (normalized.Length > maxLength) throw new InvalidOperationException($"{name} must be {maxLength} characters or fewer.");
+        return normalized;
     }
 
     private static string NormalizePrincipalType(string value)

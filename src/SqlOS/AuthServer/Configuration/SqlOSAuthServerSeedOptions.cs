@@ -108,6 +108,60 @@ public sealed class SqlOSClientSeedOptions
     /// <summary>Enables OAuth client credentials for this confidential, non-browser client.</summary>
     public bool EnableClientCredentials { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>
+    /// Controls which organizations and principals may use this application. When omitted, new
+    /// clients use <c>all_organizations</c> and existing clients retain their current access mode.
+    /// </summary>
+    public string? AccessMode { get; set; }
+    /// <summary>Gets the ownership-safe application access assignments reconciled for this client.</summary>
+    public List<SqlOSApplicationAssignmentSeedOptions> Assignments { get; } = [];
+
+    public SqlOSClientSeedOptions AssignOrganization(string key, string organizationIdOrSlug, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.Organization, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
+
+    public SqlOSClientSeedOptions AssignUser(string key, string userId, string? organizationIdOrSlug = null, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.User, principalId: userId, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
+
+    public SqlOSClientSeedOptions AssignGroup(string key, string groupId, string? organizationIdOrSlug = null, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.Group, principalId: groupId, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
+
+    public SqlOSClientSeedOptions AssignRole(string key, string organizationIdOrSlug, string roleKey, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.Role, organizationIdOrSlug: organizationIdOrSlug, roleKey: roleKey, access: access, description: description);
+
+    public SqlOSClientSeedOptions AssignServiceAccount(string key, string serviceAccountId, string? organizationIdOrSlug = null, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount, principalId: serviceAccountId, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
+
+    public SqlOSClientSeedOptions AssignAgent(string key, string agentId, string? organizationIdOrSlug = null, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+        => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.Agent, principalId: agentId, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
+
+    private SqlOSClientSeedOptions Assign(string key, string principalType, string? principalId = null, string? organizationIdOrSlug = null, string? roleKey = null, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
+    {
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Seeded application assignments require a stable key.");
+        Assignments.Add(new SqlOSApplicationAssignmentSeedOptions
+        {
+            Key = key.Trim(),
+            PrincipalType = principalType,
+            PrincipalId = principalId,
+            OrganizationIdOrSlug = organizationIdOrSlug,
+            RoleKey = roleKey,
+            Access = access,
+            Description = description
+        });
+        return this;
+    }
+}
+
+/// <summary>Declarative, stable-keyed assignment owned by a client seed.</summary>
+public sealed class SqlOSApplicationAssignmentSeedOptions
+{
+    public string Key { get; set; } = string.Empty;
+    public string PrincipalType { get; set; } = string.Empty;
+    public string? PrincipalId { get; set; }
+    /// <summary>An organization stable ID or slug, resolved during startup.</summary>
+    public string? OrganizationIdOrSlug { get; set; }
+    public string? RoleKey { get; set; }
+    public string Access { get; set; } = SqlOSApplicationAssignmentAccess.Allowed;
+    public string? Description { get; set; }
 }
 
 /// <summary>
