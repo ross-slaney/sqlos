@@ -109,7 +109,7 @@ An OIDC login proves the configured provider authenticated the user; it does not
 Code-owned OIDC seeds can configure the policy without adding runtime infrastructure:
 
 ```csharp
-options.AuthServer.SeedOidcConnection(oidc =>
+options.AuthServer.SeedOidcConnection("workforce", oidc =>
 {
     oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
     oidc.DisplayName = "Workforce Entra ID";

@@ -35,7 +35,7 @@ public sealed class SqlOSClientStorageTests
     }
 
     [TestMethod]
-    public async Task UpsertSeededClientsAsync_BackfillsSeededRegistrationSource()
+    public async Task UpsertSeededClientsAsync_DoesNotAdoptDashboardOwnedClient()
     {
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions();
@@ -56,15 +56,13 @@ public sealed class SqlOSClientStorageTests
         });
         await context.SaveChangesAsync();
 
-        await admin.UpsertSeededClientsAsync();
+        var act = () => admin.UpsertSeededClientsAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*owned by 'dashboard'*");
 
-        var client = await context.Set<SqlOSClientApplication>()
-            .SingleAsync(x => x.ClientId == "seeded-client");
-
-        client.RegistrationSource.Should().Be("seeded");
-        client.TokenEndpointAuthMethod.Should().Be("none");
-        client.GrantTypesJson.Should().Contain("authorization_code");
-        client.ResponseTypesJson.Should().Contain("code");
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync();
+        client.Name.Should().Be("Existing Client");
+        client.RegistrationSource.Should().Be("manual");
     }
 
     [TestMethod]

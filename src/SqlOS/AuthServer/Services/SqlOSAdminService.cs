@@ -123,7 +123,22 @@ public sealed partial class SqlOSAdminService
     public async Task UpsertSeededClientsAsync(CancellationToken cancellationToken = default)
     {
         var seeds = BuildStartupClientSeeds();
-        if (seeds.Count == 0)
+        var sourceKeys = seeds.Select(x => x.ClientId.Trim()).ToHashSet(StringComparer.Ordinal);
+        var now = DateTime.UtcNow;
+        var auditOutcomes = new List<(string ResourceId, string SourceKey, string Outcome, string? Fingerprint)>();
+        var orphans = await _context.Set<SqlOSClientApplication>()
+            .Where(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.ConfigurationSourceKey != null && !sourceKeys.Contains(x.ConfigurationSourceKey))
+            .ToListAsync(cancellationToken);
+        foreach (var orphan in orphans)
+        {
+            if (orphan.ConfigurationOrphanedAt == null)
+            {
+                orphan.ConfigurationOrphanedAt = now;
+                auditOutcomes.Add((orphan.Id, orphan.ConfigurationSourceKey!, "orphaned", orphan.ConfigurationFingerprint));
+            }
+        }
+
+        if (seeds.Count == 0 && orphans.Count == 0)
         {
             return;
         }
@@ -131,14 +146,20 @@ public sealed partial class SqlOSAdminService
         foreach (var seed in seeds)
         {
             var normalized = NormalizeSeededClient(seed);
+            var sourceKey = normalized.ClientId;
+            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { normalized.ClientId, normalized.Name, normalized.Description, normalized.Audience, normalized.ClientType, normalized.RequirePkce, normalized.AllowedScopes, normalized.IsFirstParty, normalized.AllowNativeHeadlessAuth, normalized.AllowDeviceAuthorization, normalized.EnableClientCredentials, normalized.RedirectUris, normalized.IsActive });
             var existing = await _context.Set<SqlOSClientApplication>()
                 .FirstOrDefaultAsync(x => x.ClientId == normalized.ClientId, cancellationToken);
+            var outcome = existing == null ? "created" : existing.ConfigurationFingerprint == fingerprint && existing.ConfigurationOrphanedAt == null ? null : "updated";
 
-            if (_options.SingleApplication != null
-                && existing != null
-                && !string.Equals(existing.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase))
+            if (existing != null && string.Equals(existing.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase) && existing.ConfigurationSourceKey == null)
             {
-                throw new InvalidOperationException($"Single-application client id '{normalized.ClientId}' already exists. Choose a different ClientId or remove the existing manual client.");
+                existing.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+                existing.ConfigurationSourceKey = sourceKey;
+            }
+            if (existing != null)
+            {
+                SqlOSConfigurationOwnershipPolicy.EnsureCodeOwnership(existing.ConfigurationOwner, existing.ConfigurationSourceKey, sourceKey, $"OAuth client '{sourceKey}'");
             }
 
             if (existing == null)
@@ -152,6 +173,10 @@ public sealed partial class SqlOSAdminService
                     Audience = normalized.Audience,
                     ClientType = normalized.ClientType,
                     RegistrationSource = "seeded",
+                    ConfigurationOwner = SqlOSConfigurationOwners.Code,
+                    ConfigurationSourceKey = sourceKey,
+                    ConfigurationFingerprint = fingerprint,
+                    LastReconciledAt = now,
                     TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none",
                     GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
@@ -165,6 +190,7 @@ public sealed partial class SqlOSAdminService
                     IsActive = normalized.IsActive,
                     AccessMode = SqlOSApplicationAccessModes.AllOrganizations
                 });
+                auditOutcomes.Add((sourceKey, sourceKey, "created", fingerprint));
                 continue;
             }
 
@@ -173,6 +199,10 @@ public sealed partial class SqlOSAdminService
             existing.Audience = normalized.Audience;
             existing.ClientType = normalized.ClientType;
             existing.RegistrationSource = "seeded";
+            existing.ConfigurationFingerprint = fingerprint;
+            existing.LastReconciledAt = now;
+            existing.ConfigurationOrphanedAt = null;
+            if (outcome != null) auditOutcomes.Add((existing.Id, sourceKey, outcome, fingerprint));
             existing.TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none";
             existing.GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes);
             existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
@@ -196,11 +226,29 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        foreach (var audit in auditOutcomes)
+        {
+            await RecordAuditAsync("configuration.reconciled", "system", "startup", data: new { resourceType = "oauth_client", resourceId = audit.ResourceId, owner = SqlOSConfigurationOwners.Code, sourceKey = audit.SourceKey, outcome = audit.Outcome, fingerprint = audit.Fingerprint }, cancellationToken: cancellationToken);
+        }
     }
 
     public async Task UpsertSeededOidcConnectionsAsync(CancellationToken cancellationToken = default)
     {
-        if (_options.OidcConnectionSeeds.Count == 0)
+        var sourceKeys = _options.OidcConnectionSeeds.Select(ResolveOidcSeedKey).ToHashSet(StringComparer.Ordinal);
+        var now = DateTime.UtcNow;
+        var auditOutcomes = new List<(string ResourceId, string SourceKey, string Outcome, string? Fingerprint)>();
+        var orphans = await _context.Set<SqlOSOidcConnection>()
+            .Where(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.ConfigurationSourceKey != null && !sourceKeys.Contains(x.ConfigurationSourceKey))
+            .ToListAsync(cancellationToken);
+        foreach (var orphan in orphans)
+        {
+            if (orphan.ConfigurationOrphanedAt == null)
+            {
+                orphan.ConfigurationOrphanedAt = now;
+                auditOutcomes.Add((orphan.Id, orphan.ConfigurationSourceKey!, "orphaned", orphan.ConfigurationFingerprint));
+            }
+        }
+        if (_options.OidcConnectionSeeds.Count == 0 && orphans.Count == 0)
         {
             return;
         }
@@ -208,20 +256,16 @@ public sealed partial class SqlOSAdminService
         foreach (var seed in _options.OidcConnectionSeeds)
         {
             var displayName = (seed.DisplayName ?? string.Empty).Trim();
+            var sourceKey = ResolveOidcSeedKey(seed);
 
-            SqlOSOidcConnection? existing;
-            if (seed.ProviderType == SqlOSOidcProviderType.Custom)
+            var existing = await _context.Set<SqlOSOidcConnection>().FirstOrDefaultAsync(x => x.ConfigurationSourceKey == sourceKey, cancellationToken);
+            var conflicting = await _context.Set<SqlOSOidcConnection>().FirstOrDefaultAsync(x => x.Id != (existing == null ? string.Empty : existing.Id)
+                && (seed.ProviderType == SqlOSOidcProviderType.Custom ? x.ProviderType == SqlOSOidcProviderType.Custom && x.DisplayName == displayName : x.ProviderType == seed.ProviderType), cancellationToken);
+            if (existing == null && conflicting != null)
             {
-                existing = await _context.Set<SqlOSOidcConnection>()
-                    .FirstOrDefaultAsync(
-                        x => x.ProviderType == SqlOSOidcProviderType.Custom && x.DisplayName == displayName,
-                        cancellationToken);
+                throw new InvalidOperationException($"Cannot reconcile OIDC connection '{displayName}' from code because an existing '{conflicting.ConfigurationOwner}' connection uses the same provider identity. Remove or rename the conflicting record explicitly.");
             }
-            else
-            {
-                existing = await _context.Set<SqlOSOidcConnection>()
-                    .FirstOrDefaultAsync(x => x.ProviderType == seed.ProviderType, cancellationToken);
-            }
+            if (existing != null) SqlOSConfigurationOwnershipPolicy.EnsureCodeOwnership(existing.ConfigurationOwner, existing.ConfigurationSourceKey, sourceKey, $"OIDC connection '{displayName}'");
 
             var connectionId = existing?.Id ?? _cryptoService.GenerateId("oidc");
             var callbacks = NormalizeCallbackUris(seed.AllowedCallbackUris, connectionId);
@@ -247,6 +291,8 @@ public sealed partial class SqlOSAdminService
                 seed.UseUserInfo,
                 seed.AppleTeamId,
                 seed.AppleKeyId);
+            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { SourceKey = sourceKey, seed.ProviderType, DisplayName = displayName, seed.ClientId, Callbacks = callbacks, normalized.Protocol, normalized.UseDiscovery, normalized.DiscoveryUrl, normalized.Issuer, normalized.AuthorizationEndpoint, normalized.TokenEndpoint, normalized.UserInfoEndpoint, normalized.JwksUri, normalized.MicrosoftTenant, normalized.Scopes, normalized.ClaimMapping, normalized.ClientAuthMethod, normalized.UseUserInfo, normalized.AppleTeamId, normalized.AppleKeyId, seed.TrustUpstreamMfa, AcceptedAmrValues = NormalizeTrustValues(seed.AcceptedAmrValues), AcceptedAcrValues = NormalizeTrustValues(seed.AcceptedAcrValues) });
+            var outcome = existing == null ? "created" : existing.ConfigurationFingerprint == fingerprint && existing.ConfigurationOrphanedAt == null ? null : "updated";
 
             if (existing == null)
             {
@@ -278,6 +324,10 @@ public sealed partial class SqlOSAdminService
                     TrustUpstreamMfa = seed.TrustUpstreamMfa,
                     AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues)),
                     AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues)),
+                    ConfigurationOwner = SqlOSConfigurationOwners.Code,
+                    ConfigurationSourceKey = sourceKey,
+                    ConfigurationFingerprint = fingerprint,
+                    LastReconciledAt = now,
                     IsEnabled = seed.IsEnabled,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -285,6 +335,7 @@ public sealed partial class SqlOSAdminService
 
                 ValidateOidcSecretRequirements(connection);
                 _context.Set<SqlOSOidcConnection>().Add(connection);
+                auditOutcomes.Add((connection.Id, sourceKey, "created", fingerprint));
                 continue;
             }
 
@@ -310,6 +361,10 @@ public sealed partial class SqlOSAdminService
             existing.TrustUpstreamMfa = seed.TrustUpstreamMfa;
             existing.AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues));
             existing.AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues));
+            existing.ConfigurationFingerprint = fingerprint;
+            existing.LastReconciledAt = now;
+            existing.ConfigurationOrphanedAt = null;
+            if (outcome != null) auditOutcomes.Add((existing.Id, sourceKey, outcome, fingerprint));
             existing.UpdatedAt = DateTime.UtcNow;
 
             // Only overwrite secrets when the seed supplies them, so config without a secret
@@ -330,6 +385,17 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        foreach (var audit in auditOutcomes)
+        {
+            await RecordAuditAsync("configuration.reconciled", "system", "startup", data: new { resourceType = "oidc_connection", resourceId = audit.ResourceId, owner = SqlOSConfigurationOwners.Code, sourceKey = audit.SourceKey, outcome = audit.Outcome, fingerprint = audit.Fingerprint }, cancellationToken: cancellationToken);
+        }
+    }
+
+    private static string ResolveOidcSeedKey(SqlOSOidcConnectionSeedOptions seed)
+    {
+        if (!string.IsNullOrWhiteSpace(seed.Key)) return seed.Key.Trim();
+        if (seed.ProviderType != SqlOSOidcProviderType.Custom) return seed.ProviderType.ToString().ToLowerInvariant();
+        throw new InvalidOperationException("Custom seeded OIDC connections require a stable key. Use SeedOidcConnection(key, configure).");
     }
 
     public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
@@ -576,6 +642,8 @@ public sealed partial class SqlOSAdminService
         var connection = await _context.Set<SqlOSOidcConnection>()
             .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("OIDC connection not found.");
+
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(connection.ConfigurationOwner, "OIDC connection");
 
         var callbacks = NormalizeCallbackUris(request.AllowedCallbackUris, connectionId);
         if (callbacks.Count == 0)
@@ -1604,6 +1672,7 @@ public sealed partial class SqlOSAdminService
                 x.AppleTeamId,
                 x.AppleKeyId,
                 x.IsEnabled,
+                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(x.ConfigurationOwner, x.ConfigurationSourceKey, x.LastReconciledAt, x.ConfigurationFingerprint, x.ConfigurationOrphanedAt),
                 x.CreatedAt,
                 x.UpdatedAt
             })
@@ -2652,6 +2721,7 @@ public sealed partial class SqlOSAdminService
             client.DisabledAt,
             client.DisabledReason,
             managedByStartupSeed,
+            SqlOSConfigurationOwnershipPolicy.ToDto(client.ConfigurationOwner, client.ConfigurationSourceKey, client.LastReconciledAt, client.ConfigurationFingerprint, client.ConfigurationOrphanedAt),
             string.Equals(client.RegistrationSource, "manual", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(client.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase),
             duplicateFingerprint,
@@ -2966,6 +3036,7 @@ public sealed partial class SqlOSAdminService
         DateTime? DisabledAt,
         string? DisabledReason,
         bool ManagedByStartupSeed,
+        SqlOSConfigurationOwnershipDto Ownership,
         bool CoreMetadataEditable,
         string? DuplicateFingerprint,
         int DuplicateCount,

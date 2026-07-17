@@ -182,6 +182,12 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.TokenHash).HasMaxLength(128);
             entity.Property(x => x.TokenPrefix).HasMaxLength(24);
             entity.Property(x => x.Source).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.OrganizationId, x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
             entity.HasOne(x => x.Organization)
                 .WithMany(x => x.ScimConnections)
                 .HasForeignKey(x => x.OrganizationId)
@@ -367,6 +373,12 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.AppleKeyId).HasMaxLength(100);
             entity.Property(x => x.AcceptedAmrValuesJson).HasDefaultValue("[]");
             entity.Property(x => x.AcceptedAcrValuesJson).HasDefaultValue("[]");
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
         });
 
         modelBuilder.Entity<SqlOSExternalIdentity>(entity =>
@@ -412,6 +424,12 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.ClientType).HasMaxLength(40);
             entity.Property(x => x.RegistrationSource).HasMaxLength(20);
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
             entity.Property(x => x.TokenEndpointAuthMethod).HasMaxLength(60);
             entity.Property(x => x.MetadataDocumentUrl).HasMaxLength(850);
             entity.Property(x => x.ClientUri).HasMaxLength(850);
@@ -607,6 +625,9 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.Id).HasMaxLength(64);
             entity.Property(x => x.RequiredRolesJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.AvailableFactorsJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
         });
 
         modelBuilder.Entity<SqlOSOrganizationMfaPolicy>(entity =>

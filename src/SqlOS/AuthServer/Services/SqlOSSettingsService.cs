@@ -4,6 +4,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuditLogs;
 using System.Text.Json;
 
 namespace SqlOS.AuthServer.Services;
@@ -13,15 +14,18 @@ public sealed class SqlOSSettingsService
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly ISqlOSAuthEmailSender _emailSender;
+    private readonly SqlOSCryptoService? _cryptoService;
 
     public SqlOSSettingsService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSAuthEmailSender emailSender)
+        ISqlOSAuthEmailSender emailSender,
+        SqlOSCryptoService? cryptoService = null)
     {
         _context = context;
         _options = options.Value;
         _emailSender = emailSender;
+        _cryptoService = cryptoService;
     }
 
     public async Task EnsureDefaultSettingsAsync(CancellationToken cancellationToken = default)
@@ -146,6 +150,7 @@ public sealed class SqlOSSettingsService
             RequireForOwnersAndAdmins = _options.Mfa.RequireForOwnersAndAdminsByDefault,
             RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(_options.Mfa.RequiredRolesByDefault, ["owner", "admin"])),
             AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(_options.Mfa.AvailableFactorsByDefault)),
+            ConfigurationOwner = SqlOSConfigurationOwners.System,
             UpdatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync(cancellationToken);
@@ -155,11 +160,43 @@ public sealed class SqlOSSettingsService
     {
         if (_options.MfaSeed == null)
         {
+            var existingSeed = await _context.Set<SqlOSMfaSettings>().FirstOrDefaultAsync(x => x.Id == "default" && x.ConfigurationOwner == SqlOSConfigurationOwners.Code, cancellationToken);
+            if (existingSeed != null && existingSeed.ConfigurationOrphanedAt == null)
+            {
+                existingSeed.ConfigurationOrphanedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync(cancellationToken);
+                if (_cryptoService != null)
+                {
+                    var audit = new SqlOSAuditLogService(_context, _cryptoService);
+                    await audit.RecordAsync(new SqlOSAuditLogRecordRequest(
+                        Action: "configuration.reconciled",
+                        Source: "authserver",
+                        Actor: new SqlOSAuditActor("system", "startup"),
+                        Targets: [new SqlOSAuditTarget("mfa_settings", existingSeed.Id)],
+                        Metadata: new Dictionary<string, object?>
+                        {
+                            ["resourceType"] = "mfa_settings",
+                            ["resourceId"] = existingSeed.Id,
+                            ["owner"] = SqlOSConfigurationOwners.Code,
+                            ["sourceKey"] = existingSeed.ConfigurationSourceKey,
+                            ["outcome"] = "orphaned",
+                            ["fingerprint"] = existingSeed.ConfigurationFingerprint
+                        }), cancellationToken);
+                }
+            }
             return;
         }
 
         await EnsureDefaultMfaSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        var previousFingerprint = settings.ConfigurationFingerprint;
+        var wasOrphaned = settings.ConfigurationOrphanedAt != null;
+        if (string.Equals(settings.ConfigurationOwner, SqlOSConfigurationOwners.System, StringComparison.OrdinalIgnoreCase))
+        {
+            settings.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+            settings.ConfigurationSourceKey = "mfa:default";
+        }
+        else SqlOSConfigurationOwnershipPolicy.EnsureCodeOwnership(settings.ConfigurationOwner, settings.ConfigurationSourceKey, "mfa:default", "global MFA settings");
 
         settings.Enabled = _options.MfaSeed.Enabled;
         settings.TotpEnabled = _options.MfaSeed.TotpEnabled;
@@ -169,7 +206,11 @@ public sealed class SqlOSSettingsService
         settings.RequireForOwnersAndAdmins = _options.MfaSeed.RequireForOwnersAndAdmins;
         settings.RequiredRolesJson = JsonSerializer.Serialize(NormalizeList(_options.MfaSeed.RequiredRoles, ["owner", "admin"]));
         settings.AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(_options.MfaSeed.AvailableFactors));
-        settings.UpdatedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        settings.UpdatedAt = now;
+        settings.LastReconciledAt = now;
+        settings.ConfigurationOrphanedAt = null;
+        settings.ConfigurationFingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { _options.MfaSeed.Enabled, _options.MfaSeed.TotpEnabled, _options.MfaSeed.UserSelfEnrollmentEnabled, _options.MfaSeed.RecoveryCodesEnabled, _options.MfaSeed.RequireForAllUsers, _options.MfaSeed.RequireForOwnersAndAdmins, RequiredRoles = NormalizeList(_options.MfaSeed.RequiredRoles, ["owner", "admin"]), AvailableFactors = NormalizeAvailableFactors(_options.MfaSeed.AvailableFactors) });
 
         foreach (var organizationSeed in _options.MfaSeed.Organizations)
         {
@@ -206,12 +247,32 @@ public sealed class SqlOSSettingsService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (_cryptoService != null && (previousFingerprint != settings.ConfigurationFingerprint || wasOrphaned))
+        {
+            var audit = new SqlOSAuditLogService(_context, _cryptoService);
+            await audit.RecordAsync(new SqlOSAuditLogRecordRequest(
+                Action: "configuration.reconciled",
+                Source: "authserver",
+                Actor: new SqlOSAuditActor("system", "startup"),
+                Targets: [new SqlOSAuditTarget("mfa_settings", settings.Id)],
+                Metadata: new Dictionary<string, object?>
+                {
+                    ["resourceType"] = "mfa_settings",
+                    ["resourceId"] = settings.Id,
+                    ["owner"] = SqlOSConfigurationOwners.Code,
+                    ["sourceKey"] = settings.ConfigurationSourceKey,
+                    ["outcome"] = previousFingerprint == null ? "created" : "updated",
+                    ["fingerprint"] = settings.ConfigurationFingerprint
+                }), cancellationToken);
+        }
     }
 
     public async Task<SqlOSMfaSettingsDto> GetMfaSettingsAsync(CancellationToken cancellationToken = default)
     {
         await EnsureDefaultMfaSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
         return ToMfaSettingsDto(settings, _options.MfaSeed != null);
     }
 
@@ -219,6 +280,27 @@ public sealed class SqlOSSettingsService
     {
         await EnsureDefaultMfaSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSMfaSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+
+        if (string.Equals(settings.ConfigurationOwner, SqlOSConfigurationOwners.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            var onlyEnabledChanged = request.TotpEnabled == settings.TotpEnabled
+                && request.UserSelfEnrollmentEnabled == settings.UserSelfEnrollmentEnabled
+                && request.RecoveryCodesEnabled == settings.RecoveryCodesEnabled
+                && request.RequireForAllUsers == settings.RequireForAllUsers
+                && request.RequireForOwnersAndAdmins == settings.RequireForOwnersAndAdmins
+                && NormalizeList(request.RequiredRoles, ["owner", "admin"]).SequenceEqual(DeserializeStringArray(settings.RequiredRolesJson, ["owner", "admin"]), StringComparer.OrdinalIgnoreCase)
+                && NormalizeAvailableFactors(request.AvailableFactors).SequenceEqual(DeserializeStringArray(settings.AvailableFactorsJson, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]), StringComparer.OrdinalIgnoreCase);
+            if (!onlyEnabledChanged) SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(settings.ConfigurationOwner, "Global MFA settings");
+            settings.Enabled = request.Enabled;
+            settings.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+            return ToMfaSettingsDto(settings, true);
+        }
+        if (string.Equals(settings.ConfigurationOwner, SqlOSConfigurationOwners.System, StringComparison.OrdinalIgnoreCase))
+        {
+            settings.ConfigurationOwner = SqlOSConfigurationOwners.Dashboard;
+            settings.ConfigurationSourceKey = null;
+        }
 
         settings.Enabled = request.Enabled;
         settings.TotpEnabled = request.TotpEnabled;
@@ -565,7 +647,8 @@ public sealed class SqlOSSettingsService
             DeserializeStringArray(settings.RequiredRolesJson, ["owner", "admin"]),
             DeserializeStringArray(settings.AvailableFactorsJson, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]),
             settings.UpdatedAt,
-            managedByStartupSeed);
+            managedByStartupSeed,
+            SqlOSConfigurationOwnershipPolicy.ToDto(settings.ConfigurationOwner, settings.ConfigurationSourceKey, settings.LastReconciledAt, settings.ConfigurationFingerprint, settings.ConfigurationOrphanedAt));
 
     private static SqlOSOrganizationMfaPolicyDto ToOrganizationMfaPolicyDto(
         SqlOSOrganization organization,

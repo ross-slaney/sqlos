@@ -16,7 +16,8 @@ public sealed record SqlOSMfaSettingsDto(
     IReadOnlyList<string> RequiredRoles,
     IReadOnlyList<string> AvailableFactors,
     DateTime UpdatedAt,
-    bool ManagedByStartupSeed);
+    bool ManagedByStartupSeed,
+    SqlOSConfigurationOwnershipDto Ownership);
 
 public sealed record SqlOSUpdateMfaSettingsRequest(
     bool Enabled,

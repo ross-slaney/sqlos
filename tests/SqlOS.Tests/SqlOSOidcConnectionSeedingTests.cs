@@ -206,7 +206,7 @@ public sealed class SqlOSOidcConnectionSeedingTests
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue
-            .SeedOidcConnection(oidc =>
+            .SeedOidcConnection("acme", oidc =>
             {
                 oidc.ProviderType = SqlOSOidcProviderType.Custom;
                 oidc.DisplayName = "Acme Identity";
@@ -216,7 +216,7 @@ public sealed class SqlOSOidcConnectionSeedingTests
                 oidc.DiscoveryUrl = "https://oidc.example.local/.well-known/openid-configuration";
                 oidc.AllowedCallbackUris = ["https://app.example.local/callback/{connectionId}"];
             })
-            .SeedOidcConnection(oidc =>
+            .SeedOidcConnection("globex", oidc =>
             {
                 oidc.ProviderType = SqlOSOidcProviderType.Custom;
                 oidc.DisplayName = "Globex Identity";
@@ -259,6 +259,27 @@ public sealed class SqlOSOidcConnectionSeedingTests
     }
 
     [TestMethod]
+    public async Task CustomSeed_WithoutStableKey_IsRejectedBeforePersistence()
+    {
+        using var context = CreateContext();
+        var options = new SqlOSAuthServerOptions();
+        options.SeedOidcConnection(seed =>
+        {
+            seed.DisplayName = "Display names can change";
+            seed.ClientId = "client";
+            seed.ClientSecret = "secret";
+            seed.DiscoveryUrl = "https://id.example.test/.well-known/openid-configuration";
+            seed.AllowedCallbackUris = ["https://app.example.test/callback/{connectionId}"];
+        });
+        var (admin, _) = CreateServices(context, options);
+
+        await FluentActions.Awaiting(() => admin.UpsertSeededOidcConnectionsAsync())
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*require a stable key*SeedOidcConnection(key, configure)*");
+        (await context.Set<SqlOSOidcConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task UpsertSeededOidcConnectionsAsync_ThrowsWhenSecretMissing()
     {
         using var context = CreateContext();
@@ -288,6 +309,60 @@ public sealed class SqlOSOidcConnectionSeedingTests
         await admin.UpsertSeededOidcConnectionsAsync();
 
         (await context.Set<SqlOSOidcConnection>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task StableSourceKey_ReconcilesRename_AndFingerprintExcludesSecret()
+    {
+        using var context = CreateContext();
+        var options = new SqlOSAuthServerOptions();
+        options.SeedOidcConnection("workforce", seed =>
+        {
+            seed.DisplayName = "Acme";
+            seed.ClientId = "acme-client";
+            seed.ClientSecret = "secret-one";
+            seed.DiscoveryUrl = "https://id.acme.test/.well-known/openid-configuration";
+            seed.AllowedCallbackUris = ["https://app.acme.test/callback/{connectionId}"];
+        });
+        var (admin, _) = CreateServices(context, options);
+
+        await admin.UpsertSeededOidcConnectionsAsync();
+        var first = await context.Set<SqlOSOidcConnection>().SingleAsync();
+        var id = first.Id;
+        var fingerprint = first.ConfigurationFingerprint;
+
+        options.OidcConnectionSeeds[0].DisplayName = "Acme Workforce";
+        options.OidcConnectionSeeds[0].ClientSecret = "secret-two";
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        var renamed = await context.Set<SqlOSOidcConnection>().SingleAsync();
+        renamed.Id.Should().Be(id);
+        renamed.DisplayName.Should().Be("Acme Workforce");
+        renamed.ConfigurationOwner.Should().Be(SqlOSConfigurationOwners.Code);
+        renamed.ConfigurationSourceKey.Should().Be("workforce");
+        renamed.ConfigurationFingerprint.Should().NotBe(fingerprint, "the display name changed");
+
+        var renamedFingerprint = renamed.ConfigurationFingerprint;
+        options.OidcConnectionSeeds[0].ClientSecret = "secret-three";
+        await admin.UpsertSeededOidcConnectionsAsync();
+        (await context.Set<SqlOSOidcConnection>().SingleAsync()).ConfigurationFingerprint.Should().Be(renamedFingerprint, "secret values must never affect diagnostic fingerprints");
+    }
+
+    [TestMethod]
+    public async Task RemovedSeed_IsMarkedOrphaned_WithoutDisablingConnection()
+    {
+        using var context = CreateContext();
+        var options = new SqlOSAuthServerOptions();
+        options.SeedGoogleConnection("client", "secret", "https://app.test/callback/{connectionId}");
+        var (admin, _) = CreateServices(context, options);
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        options.OidcConnectionSeeds.Clear();
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        var connection = await context.Set<SqlOSOidcConnection>().SingleAsync();
+        connection.ConfigurationOrphanedAt.Should().NotBeNull();
+        connection.IsEnabled.Should().BeTrue();
     }
 
     private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(

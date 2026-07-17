@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 
@@ -297,6 +298,7 @@ public sealed class SqlOSCimdClientService
         client.Audience = string.IsNullOrWhiteSpace(client.Audience) ? _options.DefaultAudience : client.Audience;
         client.ClientType = "public_pkce";
         client.RegistrationSource = "cimd";
+        client.ConfigurationOwner = SqlOSConfigurationOwners.Dynamic;
         client.TokenEndpointAuthMethod = parsed.TokenEndpointAuthMethod;
         client.GrantTypesJson = JsonSerializer.Serialize(parsed.GrantTypes);
         client.ResponseTypesJson = JsonSerializer.Serialize(parsed.ResponseTypes);
