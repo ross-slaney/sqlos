@@ -11,10 +11,36 @@ For a complete customer IT administrator journey, use [Let customer admins set u
 
 ## Setup
 
-You can configure SAML in two ways:
+You can configure SAML in three ways:
 
+- **Code-first setup**: your application declares a stable-keyed connection that SqlOS reconciles on startup.
 - **Platform-admin setup**: your operator creates the draft and imports metadata from the dashboard or admin API.
 - **Delegated org-admin setup**: your operator or host app creates a one-organization portal session, sends the setup link to the customer IT admin, and lets that admin complete the same SAML setup without access to the global dashboard.
+
+### Code-first connection
+
+Use a seed when the organization and IdP configuration are deployment topology that should be reproducible in source control. Keep the public signing certificate or metadata in host configuration; SqlOS does not call a cloud key service or fetch a remote metadata URL.
+
+```csharp
+var metadataXml = builder.Configuration["SqlOS:Saml:Acme:MetadataXml"]
+    ?? throw new InvalidOperationException("Acme SAML metadata is not configured.");
+
+options.AuthServer.SeedSamlConnection("acme-workforce", saml =>
+{
+    saml.OrganizationSlug = "acme";
+    saml.DisplayName = "Acme workforce SSO";
+    saml.MetadataXml = metadataXml;
+    saml.PrimaryDomain = "acme.com";
+    saml.AutoProvisionUsers = false;
+    saml.AutoLinkByEmail = true;
+});
+```
+
+You can provide `IdentityProviderEntityId`, `SingleSignOnUrl`, and `X509CertificatePem` instead of `MetadataXml`. Do not provide both modes. The certificate is public verification material, but treating deployment-specific metadata as configuration keeps customer topology out of a shared source tree.
+
+The stable key—not the display name—owns reconciliation. Code-owned fields update on restart, renames preserve the same record, and unrelated dashboard-owned connections are never adopted. Removing a seed marks the record orphaned without deleting or silently disabling a live enterprise connection. A dashboard emergency disable survives restart; setting `IsEnabled = false` in code can disable an existing connection, while `true` only controls initial creation and does not undo an operator disable.
+
+The dashboard labels code-owned connections and makes their metadata editor read-only. Operators can still emergency-disable or re-enable the connection. Metadata changes are normalized through the same parser used by the dashboard/API, must contain an absolute HTTPS SSO URL and a currently valid X.509 certificate, and are written to the audit log without certificate contents.
 
 ### 1. Create an SSO draft
 
@@ -220,6 +246,7 @@ When `/test` includes `clientId` and `redirectUri`, it must also include a fresh
 | `autoLinkByEmail` | `true` for portal-created connections | Require existing verified org members to enroll and sign in through SSO |
 | `trustUpstreamMfa` | `false` | Allow this connection to satisfy MFA only through accepted signed `AuthnContextClassRef` values |
 | `acceptedAuthnContextClassRefs` | empty | Exact SAML authentication-context URIs accepted as upstream MFA |
+| `SamlConnectionSeeds` | empty | Stable-keyed code-first upstream SAML connections; configured with `SeedSamlConnection` |
 | `SsoPortal.EnableApi` | `true` | Expose portal and headless setup APIs |
 | `SsoPortal.UseHostedPortal` | `true` | Serve the bundled setup portal |
 | `SsoPortal.BuildUiUrl` | `null` | Redirect opened setup sessions to a host-owned UI |

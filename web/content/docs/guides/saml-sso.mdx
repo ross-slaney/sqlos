@@ -15,8 +15,10 @@ section: guides
 You'll learn how to create a SAML connection, share metadata with your customer’s IdP, and route users by email domain.
 
 <Callout type="info" title="Choose who runs setup">
-  This guide is the **operator-managed** path: your platform team uses the protected SqlOS dashboard. To give a customer IT admin a one-time, one-organization portal instead, follow [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso).
+  Use code-first seeds for repeatable deployment-owned connections, this **operator-managed** dashboard path for platform-owned setup, or the [customer-managed SSO guide](/docs/guides/customer-managed-sso) for a one-time organization-scoped portal. All three use the same SAML runtime and validation.
 </Callout>
+
+For code-first setup, call `options.AuthServer.SeedSamlConnection("stable-key", ...)` and provide either metadata XML from host configuration or explicit entity ID, HTTPS SSO URL, and public signing certificate. The dashboard shows the result as code owned and leaves emergency enable/disable available; edit other fields in the seed. See [SAML SSO: Code-first connection](/docs/authserver/saml-sso#code-first-connection) for the compiled example and reconciliation rules.
 
 <Callout type="info" title="Prerequisites">
   - An organization in SqlOS with a **primary email domain** set

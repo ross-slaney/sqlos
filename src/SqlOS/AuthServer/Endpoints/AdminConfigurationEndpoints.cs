@@ -202,6 +202,20 @@ public static partial class EndpointRouteBuilderExtensions
             });
         });
 
+        api.MapPost("/sso-connections/{connectionId}/enable", async (HttpContext context, string connectionId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            var connection = await adminService.SetSsoConnectionEnabledAsync(connectionId, true, cancellationToken);
+            return Results.Ok(new { connection.Id, connection.IsEnabled, connection.UpdatedAt });
+        });
+
+        api.MapPost("/sso-connections/{connectionId}/disable", async (HttpContext context, string connectionId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            var connection = await adminService.SetSsoConnectionEnabledAsync(connectionId, false, cancellationToken);
+            return Results.Ok(new { connection.Id, connection.IsEnabled, connection.UpdatedAt });
+        });
+
         api.MapPost("/sso-connections", async (HttpContext context, SqlOSCreateSsoConnectionRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))

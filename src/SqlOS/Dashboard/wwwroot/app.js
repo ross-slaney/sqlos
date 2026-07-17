@@ -1745,13 +1745,17 @@
                                     { label: "Connection ID", value: item.id },
                                     { label: "Primary domain", value: item.primaryDomain || "n/a" },
                                     { label: "Enabled", value: item.isEnabled ? "Yes" : "No" },
+                                    { label: "Configuration owner", value: item.ownership?.owner || "dashboard" },
+                                    { label: "Source key", value: item.ownership?.sourceKey || "n/a" },
                                     { label: "SP Entity ID", value: item.serviceProviderEntityId },
                                     { label: "ACS URL", value: item.assertionConsumerServiceUrl }
                                 ])}
+                                ${item.ownership && !item.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Update federation metadata and policy in the SAML seed. Emergency enable/disable remains available.</div>` : ""}
                                 <form id="import-sso-metadata-${esc(item.id)}" class="nested-form">
                                     <textarea name="metadataXml" placeholder="Paste the Entra federation metadata XML" required></textarea>
-                                    <button type="submit">Import metadata</button>
+                                    <button type="submit" ${item.ownership && !item.ownership.isEditable ? "disabled" : ""}>Import metadata</button>
                                 </form>
+                                <button type="button" data-saml-toggle="${esc(item.id)}" data-enabled="${item.isEnabled ? "true" : "false"}">${item.isEnabled ? "Emergency disable" : "Enable"}</button>
                             `,
                             "No SSO connections yet."
                         )}
@@ -2159,6 +2163,7 @@
             });
 
             organizationSsoConnections.forEach(item => {
+                if (item.ownership && !item.ownership.isEditable) return;
                 bindForm(`import-sso-metadata-${item.id}`, async form => {
                     await fetchJson(`${authApiBasePath}/sso-connections/${item.id}/metadata`, {
                         method: "POST",
@@ -2167,6 +2172,16 @@
                         })
                     });
                     setFlash("success", "Federation metadata imported.");
+                });
+            });
+
+            document.querySelectorAll("[data-saml-toggle]").forEach(button => {
+                button.addEventListener("click", async () => {
+                    const enabled = button.dataset.enabled === "true";
+                    if (enabled && !window.confirm("Disable this SAML connection? New SSO sign-ins will stop until it is enabled again.")) return;
+                    await fetchJson(`${authApiBasePath}/sso-connections/${encodeURIComponent(button.dataset.samlToggle)}/${enabled ? "disable" : "enable"}`, { method: "POST" });
+                    setFlash("success", enabled ? "SAML connection disabled." : "SAML connection enabled.");
+                    await render();
                 });
             });
 
@@ -3497,9 +3512,13 @@
                                 { label: "Organization", value: item.organization },
                                 { label: "Primary domain", value: item.primaryDomain || "n/a" },
                                 { label: "Status", value: `${item.setupStatus} | Enabled: ${item.isEnabled}` },
+                                { label: "Configuration owner", value: item.ownership?.owner || "dashboard" },
+                                { label: "Source key", value: item.ownership?.sourceKey || "n/a" },
                                 { label: "SP Entity ID", value: item.serviceProviderEntityId },
                                 { label: "ACS URL", value: item.assertionConsumerServiceUrl }
                             ])}
+                            ${item.ownership && !item.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Change connection fields in startup configuration. Emergency enable/disable remains available.</div>` : ""}
+                            <button type="button" data-saml-toggle="${esc(item.id)}" data-enabled="${item.isEnabled ? "true" : "false"}">${item.isEnabled ? "Emergency disable" : "Enable"}</button>
                         `,
                         "No SSO connections yet."
                     )}
@@ -3535,6 +3554,16 @@
                 })
             });
             setFlash("success", "Federation metadata imported.");
+        });
+
+        document.querySelectorAll("[data-saml-toggle]").forEach(button => {
+            button.addEventListener("click", async () => {
+                const enabled = button.dataset.enabled === "true";
+                if (enabled && !window.confirm("Disable this SAML connection? New SSO sign-ins will stop until it is enabled again.")) return;
+                await fetchJson(`${authApiBasePath}/sso-connections/${encodeURIComponent(button.dataset.samlToggle)}/${enabled ? "disable" : "enable"}`, { method: "POST" });
+                setFlash("success", enabled ? "SAML connection disabled." : "SAML connection enabled.");
+                await render();
+            });
         });
     }
 
