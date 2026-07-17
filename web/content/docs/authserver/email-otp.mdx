@@ -34,6 +34,18 @@ dotnet run
 
 Use `scripts/azure/setup-acs-email.sh` to create the ACS Email resources and DNS verification records.
 
+## Readiness and safe test delivery
+
+Open **Auth Server > Security > OTP communications readiness** after configuring the host. The dashboard reports whether Email OTP is enabled, whether the local sender is configured, bounded reason codes, and non-secret policy values. Connection strings remain in your deployment secret store and are never returned by the admin API.
+
+An authenticated administrator can retrieve the same model from `GET /sqlos/admin/auth/api/otp/readiness` or send a bounded test with `POST /sqlos/admin/auth/api/otp/test-delivery`:
+
+```json
+{ "method": "email", "destination": "operator@example.com" }
+```
+
+The test uses the configured auth email sender, is limited to three sends per destination per hour, and records only a masked destination. It does not create a user, session, OTP challenge, or reusable login credential. A successful local readiness check does not call ACS; use the explicit test only when you intend to incur a provider request.
+
 ## Enable AuthPage Email OTP
 
 Seed or configure the AuthPage credential types:

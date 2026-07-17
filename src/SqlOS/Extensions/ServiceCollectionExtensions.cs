@@ -100,6 +100,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSMagicLinkService>();
         services.AddSingleton<ISqlOSOtpDeliveryChannel, SqlOSTwilioVerifyOtpChannel>();
         services.AddScoped<SqlOSPhoneOtpService>();
+        services.AddScoped(sp => new SqlOSOtpAdminRateLimiter(
+            sp.GetRequiredService<SqlOSDistributedRateLimitStore>()));
+        services.AddScoped<SqlOSOtpAdminService>();
         services.AddScoped<SqlOSMfaPolicyService>();
         services.AddScoped<SqlOSTotpMfaService>();
         services.AddScoped<SqlOSPasswordLoginAbuseService>();

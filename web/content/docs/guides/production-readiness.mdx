@@ -313,6 +313,7 @@ Run this against the public origin through the real proxy, not directly against 
 ### User journeys
 
 - [ ] Hosted password or passwordless sign-in works through the external HTTPS origin.
+- [ ] The dashboard OTP readiness view reports every enabled method ready, and an explicit test reaches operator-controlled email/phone destinations without exposing provider secrets in the response or audit log.
 - [ ] Each enabled OIDC or SAML provider returns through its production callback.
 - [ ] Invitation, password-reset, OTP, and MFA messages contain production—not internal—URLs.
 - [ ] Multi-organization selection and organization-scoped claims behave as expected.
