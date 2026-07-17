@@ -147,6 +147,8 @@ public sealed class SqlOSMachineClientAdminService
         {
             AddGrants(subject.Id, grants, DateTime.UtcNow, marker: null);
             await _context.SaveChangesAsync(cancellationToken);
+            await _admin.RecordAuditAsync("machine_client.grant_added", "admin", null, organizationId: subject.OrganizationId,
+                data: new { clientId, request.ResourceId, request.RoleId }, cancellationToken: cancellationToken);
         }
     }
 
@@ -158,6 +160,8 @@ public sealed class SqlOSMachineClientAdminService
             ?? throw new InvalidOperationException("Grant not found.");
         _context.Set<SqlOSFgaGrant>().Remove(grant);
         await _context.SaveChangesAsync(cancellationToken);
+        await _admin.RecordAuditAsync("machine_client.grant_removed", "admin", null, organizationId: subject.OrganizationId,
+            data: new { clientId, grantId, grant.ResourceId, grant.RoleId }, cancellationToken: cancellationToken);
     }
 
     private async Task UpsertSeededMachineClientsCoreAsync(CancellationToken cancellationToken)
@@ -168,7 +172,13 @@ public sealed class SqlOSMachineClientAdminService
         var orphans = await _context.Set<SqlOSFgaServiceAccount>()
             .Where(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.ConfigurationSourceKey != null && !keys.Contains(x.ConfigurationSourceKey))
             .ToListAsync(cancellationToken);
-        foreach (var orphan in orphans) orphan.ConfigurationOrphanedAt ??= now;
+        foreach (var orphan in orphans)
+        {
+            if (orphan.ConfigurationOrphanedAt != null) continue;
+            orphan.ConfigurationOrphanedAt = now;
+            await _admin.RecordAuditAsync("configuration.orphaned", "system", "startup",
+                data: new { resourceType = "machine_client", clientId = orphan.ClientId, sourceKey = orphan.ConfigurationSourceKey }, cancellationToken: cancellationToken);
+        }
 
         foreach (var seed in seeds)
         {
@@ -193,6 +203,7 @@ public sealed class SqlOSMachineClientAdminService
             }
 
             var secretHash = ResolveSeedSecretHash(machine, account);
+            var isNew = account == null;
             if (account == null)
             {
                 var subject = new SqlOSFgaSubject
@@ -209,6 +220,17 @@ public sealed class SqlOSMachineClientAdminService
                 _context.Set<SqlOSFgaSubject>().Add(subject);
                 _context.Set<SqlOSFgaServiceAccount>().Add(account);
             }
+            var marker = $"[sqlos-machine:{sourceKey}]";
+            var old = await _context.Set<SqlOSFgaGrant>().Where(x => x.SubjectId == account.SubjectId && x.Description != null && x.Description.StartsWith(marker)).ToListAsync(cancellationToken);
+            var desiredGrants = grants.Select(x => (x.ResourceId, x.RoleId, Description: $"{marker} {x.Description}".Trim()))
+                .OrderBy(x => x.ResourceId, StringComparer.Ordinal).ThenBy(x => x.RoleId, StringComparer.Ordinal).ToArray();
+            var currentGrants = old.Select(x => (x.ResourceId, x.RoleId, x.Description!))
+                .OrderBy(x => x.ResourceId, StringComparer.Ordinal).ThenBy(x => x.RoleId, StringComparer.Ordinal).ToArray();
+            var grantDrift = !desiredGrants.SequenceEqual(currentGrants);
+            var changed = isNew || account.ConfigurationFingerprint != fingerprint || account.ConfigurationOrphanedAt != null
+                || account.ClientSecretHash != secretHash || grantDrift;
+            if (!changed) continue;
+
             account.Subject!.DisplayName = seed.Name;
             account.Description = seed.Description;
             account.ClientSecretHash = secretHash;
@@ -218,8 +240,6 @@ public sealed class SqlOSMachineClientAdminService
             account.ConfigurationOrphanedAt = null;
             account.UpdatedAt = now;
 
-            var marker = $"[sqlos-machine:{sourceKey}]";
-            var old = await _context.Set<SqlOSFgaGrant>().Where(x => x.SubjectId == account.SubjectId && x.Description != null && x.Description.StartsWith(marker)).ToListAsync(cancellationToken);
             _context.Set<SqlOSFgaGrant>().RemoveRange(old);
             AddGrants(account.SubjectId, grants, now, marker);
             await _admin.RecordAuditAsync("configuration.reconciled", "system", "startup", organizationId: organizationId,
@@ -236,6 +256,7 @@ public sealed class SqlOSMachineClientAdminService
         {
             var hash = machine.SecretHashResolver()?.Trim();
             if (string.IsNullOrWhiteSpace(hash)) throw new InvalidOperationException("Machine-client secret hash resolution returned no value.");
+            if (!IsSupportedPasswordHash(hash)) throw new InvalidOperationException("Machine-client secret hash resolution returned an unsupported PasswordHasher payload.");
             return hash;
         }
         var secret = machine.SecretResolver!()?.Trim();
@@ -315,6 +336,18 @@ public sealed class SqlOSMachineClientAdminService
             account.ConfigurationOwner, account.ConfigurationSourceKey, account.ConfigurationOrphanedAt, grantCount);
 
     private static string GenerateSecret() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
+    private static bool IsSupportedPasswordHash(string hash)
+    {
+        try
+        {
+            var payload = Convert.FromBase64String(hash);
+            return payload.Length >= 13 && payload[0] is 0x00 or 0x01;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
     private static string Require(string? value, string message, int max)
     {
         var normalized = value?.Trim();

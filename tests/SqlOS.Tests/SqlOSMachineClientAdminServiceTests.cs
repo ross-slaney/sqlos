@@ -71,6 +71,7 @@ public sealed class SqlOSMachineClientAdminServiceTests
 
         await admin.UpsertSeededClientsAsync();
         await service.UpsertSeededMachineClientsAsync();
+        var originalGrantId = await context.Set<SqlOSFgaGrant>().Select(x => x.Id).SingleAsync();
         await service.UpsertSeededMachineClientsAsync();
 
         var account = await context.Set<SqlOSFgaServiceAccount>().Include(x => x.Subject).SingleAsync();
@@ -78,6 +79,8 @@ public sealed class SqlOSMachineClientAdminServiceTests
         account.ConfigurationSourceKey.Should().Be("seeded-worker");
         account.Subject!.OrganizationId.Should().Be(organization.Id);
         (await context.Set<SqlOSFgaGrant>().CountAsync(x => x.SubjectId == account.SubjectId)).Should().Be(1);
+        (await context.Set<SqlOSFgaGrant>().Select(x => x.Id).SingleAsync()).Should().Be(originalGrantId);
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "configuration.reconciled" && x.DataJson != null && x.DataJson.Contains("machine_client"))).Should().Be(1);
         (await service.ValidateCredentialAsync("seeded-worker", secret, "https://api.example.test", ["jobs.run"])).Valid.Should().BeTrue();
         await FluentActions.Invoking(() => service.RotateAsync("seeded-worker"))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*code-owned*");
@@ -107,6 +110,11 @@ public sealed class SqlOSMachineClientAdminServiceTests
         await admin.UpsertSeededClientsAsync();
         await FluentActions.Invoking(() => service.UpsertSeededMachineClientsAsync())
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*43 to 256*");
+
+        optionsValue.ClientSeeds[0].MachineClient!.SecretResolver = null;
+        optionsValue.ClientSeeds[0].MachineClient!.SecretHashResolver = () => "not-a-password-hash";
+        await FluentActions.Invoking(() => service.UpsertSeededMachineClientsAsync())
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*unsupported PasswordHasher payload*");
     }
 
     private static async Task<(SqlOSOrganization Organization, SqlOSFgaResource Resource, SqlOSFgaRole Role)> SeedDependenciesAsync(TestSqlOSInMemoryDbContext context, SqlOSAdminService admin)
