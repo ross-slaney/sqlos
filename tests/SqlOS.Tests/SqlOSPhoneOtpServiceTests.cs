@@ -147,6 +147,8 @@ public sealed class SqlOSPhoneOtpServiceTests
 
         result.User.Id.Should().Be(user.Id);
         result.AuthenticationMethod.Should().Be("phone_otp");
+        harness.Channel.CheckRequests.Should().ContainSingle()
+            .Which.Context.ProviderChallengeId.Should().Be("ve-1");
         new SqlOSMfaPolicyService(harness.Options).SatisfiesStrongMfa(result.AuthenticationMethod).Should().BeTrue();
     }
 
@@ -162,6 +164,24 @@ public sealed class SqlOSPhoneOtpServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("The sign-in code is invalid or expired.");
         harness.Channel.CheckRequests.Should().ContainSingle(x => x.Code == "000000");
+    }
+
+    [TestMethod]
+    public async Task PhoneOtp_Verify_CannotCrossSatisfyAnotherProviderChallenge()
+    {
+        using var harness = await PhoneOtpHarness.CreateAsync();
+        await harness.CreateUserWithPhoneAsync("+12025550137");
+        var start = await harness.Service.StartForClientAsync(new SqlOSPhoneOtpStartRequest("+12025550137", "test-client", null));
+        var challenge = await harness.Context.Set<SqlOSPhoneOtpChallenge>()
+            .SingleAsync(x => x.ChallengeTokenHash == harness.Crypto.HashToken(start.ChallengeToken));
+        challenge.ProviderChallengeId = "ve-from-admin-test";
+        await harness.Context.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => harness.Service.VerifyAsync(new SqlOSPhoneOtpVerifyRequest(start.ChallengeToken, "123456")))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+        harness.Channel.CheckRequests.Should().ContainSingle()
+            .Which.Context.ProviderChallengeId.Should().Be("ve-from-admin-test");
     }
 
     [TestMethod]
@@ -402,7 +422,9 @@ public sealed class SqlOSPhoneOtpServiceTests
             CancellationToken cancellationToken = default)
         {
             CheckRequests.Add((e164PhoneNumber, code, context));
-            var approved = string.Equals(code, ApprovedCode, StringComparison.Ordinal);
+            var expectedProviderChallengeId = $"ve-{StartRequests.Count}";
+            var approved = string.Equals(code, ApprovedCode, StringComparison.Ordinal)
+                && string.Equals(context.ProviderChallengeId, expectedProviderChallengeId, StringComparison.Ordinal);
             return Task.FromResult(new SqlOSOtpDeliveryCheckResult(
                 approved,
                 "test_verify",

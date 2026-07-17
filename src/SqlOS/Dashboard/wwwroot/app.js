@@ -3572,7 +3572,27 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading security settings...");
 
-        const settings = await fetchJson(`${authApiBasePath}/settings/security`);
+        const [settings, otp] = await Promise.all([
+            fetchJson(`${authApiBasePath}/settings/security`),
+            fetchJson(`${authApiBasePath}/otp/readiness`)
+        ]);
+        const otpCard = method => `
+            <section class="panel">
+                <h2>${method.method === "email" ? "Email OTP" : "Phone OTP"}</h2>
+                <div class="status-row"><span class="status ${method.enabled && method.locallyConfigured ? "active" : "inactive"}">${method.enabled && method.locallyConfigured ? "Ready" : method.enabled ? "Incomplete" : "Disabled"}</span></div>
+                ${renderMetadataRows([
+                    { label: "Provider", value: method.provider },
+                    { label: "Deployment configuration", value: "Code / host configuration (view only)" },
+                    { label: "Reason codes", value: method.reasonCodes.length ? method.reasonCodes.join(", ") : "None" },
+                    { label: "Configuration keys", value: method.configurationKeys.join("\n") }
+                ])}
+                <details><summary>Effective non-secret policy</summary><pre>${esc(JSON.stringify(method.policy, null, 2))}</pre></details>
+                <form class="otp-test-form" data-method="${method.method}">
+                    <input name="destination" type="${method.method === "email" ? "email" : "tel"}" maxlength="320" placeholder="${method.method === "email" ? "operator@example.com" : "+14155550123"}" required>
+                    <button type="submit" ${method.locallyConfigured ? "" : "disabled"}>Send test delivery</button>
+                </form>
+                <small>Tests are limited to three sends per destination and 20 per operator source per hour. They never create a user, session, or SqlOS login challenge.</small>
+            </section>`;
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -3599,6 +3619,16 @@
                     ])}
                 </section>
             </div>
+            <h2>OTP communications readiness</h2>
+            <p>Provider secrets remain deployment-owned and are never returned here. These checks validate local configuration only; startup never calls a provider.</p>
+            <div class="panel-grid">
+                ${otpCard(otp.email)}
+                ${otpCard(otp.phone)}
+            </div>
+            <section class="panel">
+                <h2>Recent OTP test diagnostics</h2>
+                ${otp.recentDiagnostics.length ? `<div class="table-wrap"><table><thead><tr><th>Time</th><th>Method</th><th>Outcome</th><th>Destination</th><th>Provider status</th></tr></thead><tbody>${otp.recentDiagnostics.map(item => `<tr><td>${esc(formatDate(item.occurredAt))}</td><td>${esc(item.method || "-")}</td><td>${esc(item.action)}</td><td>${esc(item.maskedDestination || "-")}</td><td>${esc(item.providerStatus || "-")}</td></tr>`).join("")}</tbody></table></div>` : "<p>No administrative OTP test deliveries have been attempted.</p>"}
+            </section>
         `;
 
         bindForm("security-settings-form", async form => {
@@ -3619,6 +3649,21 @@
                 })
             });
             setFlash("success", "Security settings saved.");
+        });
+
+        document.querySelectorAll(".otp-test-form").forEach(form => {
+            form.addEventListener("submit", async event => {
+                event.preventDefault();
+                const method = form.dataset.method;
+                const destination = new FormData(form).get("destination");
+                if (!window.confirm(`Send a ${method} OTP delivery test to ${destination}? This may incur provider charges.`)) return;
+                await fetchJson(`${authApiBasePath}/otp/test-delivery`, {
+                    method: "POST",
+                    body: JSON.stringify({ method, destination })
+                });
+                setFlash("success", `${method === "email" ? "Email" : "Phone"} test accepted. No login challenge was created.`);
+                await renderAuthSecurity();
+            });
         });
     }
 

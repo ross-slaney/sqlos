@@ -15,6 +15,32 @@ namespace SqlOS.IntegrationTests;
 public class DistributedRateLimitIntegrationTests
 {
     [TestMethod]
+    public async Task OtpAdministrativeTestLimit_IsSharedAcrossApplicationInstances()
+    {
+        var connectionString = GetConnectionString();
+        await using var firstContext = CreateContext(connectionString);
+        await using var secondContext = CreateContext(connectionString);
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var firstStore = new SqlOSDistributedRateLimitStore(firstContext, options);
+        var secondStore = new SqlOSDistributedRateLimitStore(secondContext, options);
+        var first = new SqlOSOtpAdminRateLimiter(firstStore);
+        var second = new SqlOSOtpAdminRateLimiter(secondStore);
+        var key = $"email-{Guid.NewGuid():N}";
+
+        try
+        {
+            (await first.TryConsumeAsync(key, DateTimeOffset.UtcNow)).Should().BeTrue();
+            (await second.TryConsumeAsync(key, DateTimeOffset.UtcNow.AddSeconds(1))).Should().BeTrue();
+            (await first.TryConsumeAsync(key, DateTimeOffset.UtcNow.AddSeconds(2))).Should().BeTrue();
+            (await second.TryConsumeAsync(key, DateTimeOffset.UtcNow.AddSeconds(3))).Should().BeFalse();
+        }
+        finally
+        {
+            await firstStore.DeleteAsync("otp_admin_test", key);
+        }
+    }
+
+    [TestMethod]
     public async Task DcrLimit_IsSharedAcrossApplicationInstances()
     {
         var connectionString = GetConnectionString();

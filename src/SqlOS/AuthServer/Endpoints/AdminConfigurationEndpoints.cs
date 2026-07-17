@@ -459,5 +459,24 @@ public static partial class EndpointRouteBuilderExtensions
 
             return Results.Ok(await adminService.ListAuditEventsAsync(cancellationToken));
         });
+
+        api.MapGet("/otp/readiness", async (HttpContext context, SqlOSOtpAdminService otpAdmin, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            return Results.Ok(await otpAdmin.GetReadinessAsync(cancellationToken));
+        });
+
+        api.MapPost("/otp/test-delivery", async (HttpContext context, OtpTestDeliveryRequest request, SqlOSOtpAdminService otpAdmin, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try
+            {
+                return Results.Ok(await otpAdmin.SendTestAsync(request.Method, request.Destination, context.Connection.RemoteIpAddress?.ToString(), cancellationToken));
+            }
+            catch (ArgumentException exception) { return Results.BadRequest(new { message = exception.Message }); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
     }
+
+    private sealed record OtpTestDeliveryRequest(string Method, string Destination);
 }

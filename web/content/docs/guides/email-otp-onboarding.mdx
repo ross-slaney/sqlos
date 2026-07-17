@@ -302,6 +302,7 @@ A new challenge supersedes the previous active challenge in that signup context.
 
 ## Production checklist
 
+- Open **Auth Server > Security > OTP communications readiness**, confirm Email OTP is ready, and perform one explicit test delivery to an operator-controlled inbox. The readiness read is local-only; the test is the provider proof.
 - Use HTTPS, PKCE S256, high-entropy state, and an exact redirect URI.
 - Keep signup and challenge tokens in ephemeral state and clear them after completion.
 - Treat existing-account disclosure as an explicit threat-model decision: the current signup endpoint is not account-enumeration resistant, so add bot controls, rate limits, and monitoring rather than claiming a generic response.

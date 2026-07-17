@@ -59,6 +59,12 @@ You'll learn how to diagnose connection, OAuth callback, SAML, and migration pro
 - Domain on the org must match the email entered at login.
 - SAML connection must be **enabled**, not draft-only.
 
+## Email or phone OTP delivery
+
+Open **Auth Server > Security > OTP communications readiness** first. The status returns bounded reason codes such as `missing_from_address`, `missing_auth_token`, or `missing_verify_service_sid` without exposing provider credentials. Deployment-owned values must be corrected in host configuration and the application restarted; the dashboard intentionally does not persist them.
+
+Use **Send test delivery** only with an operator-controlled destination. A test is limited to three sends per destination per hour and creates no SqlOS login challenge. Recent rows distinguish a local configuration problem, provider rejection, and administrative test throttling while retaining only a masked destination. Runtime user-facing OTP errors remain generic.
+
 ## FGA filters return empty lists
 
 - Confirm resources were created for domain rows and grants exist for the subject.

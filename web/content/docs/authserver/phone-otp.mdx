@@ -88,6 +88,21 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 When `Enabled` is `true`, startup validation requires all three Twilio values. An incomplete configuration fails startup with a direct validation error instead of exposing a broken login button.
 
+### Dashboard readiness and provider test
+
+**Auth Server > Security > OTP communications readiness** shows the enabled state, local configuration reason codes, effective non-secret limits, and only the last four characters of the Verify service SID. It never returns the Account SID credential or Auth Token.
+
+The authenticated admin API exposes the same status at `GET /sqlos/admin/auth/api/otp/readiness`. An operator can explicitly test delivery from the dashboard or with:
+
+```http
+POST /sqlos/admin/auth/api/otp/test-delivery
+Content-Type: application/json
+
+{ "method": "phone", "destination": "+14155550123" }
+```
+
+The operation validates and normalizes the number, applies three-per-destination and 20-per-operator-source hourly limits, calls the same `ISqlOSOtpDeliveryChannel` used by login, and audits a masked destination with a bounded provider status. It deliberately creates no SqlOS user, session, or login challenge. Runtime verification is bound to its stored Twilio verification SID, so a code from an administrative test cannot satisfy a different login challenge. Startup never performs this active provider check.
+
 ### Runtime defaults
 
 | Option | Default | Meaning |
