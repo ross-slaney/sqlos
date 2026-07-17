@@ -11,7 +11,8 @@ public sealed record SqlOSAdminSessionRevocationRequest(
     string? ClientApplicationId = null,
     string? Reason = null,
     string? OperationId = null,
-    bool Confirm = false);
+    bool Confirm = false,
+    int? ExpectedMatchedSessions = null);
 
 public sealed record SqlOSAdminSessionRevocationResult(
     bool Preview,

@@ -34,12 +34,12 @@ public sealed class SqlOSSessionRevocationServiceTests
         preview.AlreadyRevokedSessions.Should().Be(1);
         preview.ActiveRefreshTokens.Should().Be(1);
 
-        var executed = await service.RevokeAsync(request with { Confirm = true });
+        var executed = await service.RevokeAsync(request with { Confirm = true, ExpectedMatchedSessions = preview.MatchedSessions });
         executed.NewlyRevokedSessions.Should().Be(1);
         executed.NewlyRevokedRefreshTokens.Should().Be(1);
         executed.OperationId.Should().Be("op-42");
 
-        var repeated = await service.RevokeAsync(request with { Confirm = true });
+        var repeated = await service.RevokeAsync(request with { Confirm = true, ExpectedMatchedSessions = preview.MatchedSessions });
         repeated.NewlyRevokedSessions.Should().Be(0);
         repeated.NewlyRevokedRefreshTokens.Should().Be(0);
         repeated.AlreadyRevokedSessions.Should().Be(2);
@@ -113,11 +113,48 @@ public sealed class SqlOSSessionRevocationServiceTests
         var result = await CreateService(context).RevokeAsync(new SqlOSAdminSessionRevocationRequest(
             UserId: "unknown-user",
             OrganizationId: "unknown-organization",
-            Confirm: true));
+            Confirm: true,
+            ExpectedMatchedSessions: 0));
 
         result.MatchedSessions.Should().Be(0);
         result.AuditEventId.Should().BeNull();
         (await context.Set<SqlOSAuditEvent>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Execute_RejectsWhenBroadScopeChangedAfterPreview()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        Seed(context);
+        await context.SaveChangesAsync();
+        var preview = await service.PreviewAsync(new SqlOSAdminSessionRevocationRequest(UserId: "user-1"));
+        context.Set<SqlOSSession>().Add(Session("arrived-after-preview", "org-1", "client-1"));
+        await context.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => service.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
+                UserId: "user-1", OperationId: preview.OperationId, Confirm: true,
+                ExpectedMatchedSessions: preview.MatchedSessions)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*changed after preview*");
+        (await context.Set<SqlOSSession>().CountAsync(x => x.RevokedAt == null)).Should().Be(4);
+    }
+
+    [TestMethod]
+    public async Task Execute_RejectsOperationIdReusedForDifferentScope()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        Seed(context);
+        await context.SaveChangesAsync();
+        await service.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
+            SessionId: "matching-active", OperationId: "unique-operation", Confirm: true));
+
+        await FluentActions.Invoking(() => service.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
+                SessionId: "other-org", OperationId: "unique-operation", Confirm: true)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*different revocation scope*");
+        (await context.Set<SqlOSSession>().SingleAsync(x => x.Id == "other-org")).RevokedAt.Should().BeNull();
     }
 
     private static SqlOSSessionRevocationService CreateService(TestSqlOSInMemoryDbContext context)

@@ -3836,7 +3836,12 @@
         if (!confirmed) return false;
         await fetchJson(`${authApiBasePath}/sessions/revocation`, {
             method: "POST",
-            body: JSON.stringify({ ...request, operationId: preview.operationId, confirm: true })
+            body: JSON.stringify({
+                ...request,
+                operationId: preview.operationId,
+                expectedMatchedSessions: preview.matchedSessions,
+                confirm: true
+            })
         });
         return true;
     }

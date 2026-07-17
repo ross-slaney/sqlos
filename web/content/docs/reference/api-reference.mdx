@@ -232,7 +232,7 @@ The dashboard admin API has two authenticated platform-operator routes. Unauthor
 | `POST /sqlos/admin/auth/api/sessions/revocation/preview` | `SqlOSAdminSessionRevocationRequest` | Match and active refresh-token counts; no mutation |
 | `POST /sqlos/admin/auth/api/sessions/revocation` | Same request with `confirm: true` | Newly/already-revoked session counts and revoked refresh-token count |
 
-Supply at least one of `sessionId`, `userId`, `organizationId`, or `clientApplicationId`. Multiple values are combined with AND semantics. `reason` and `operationId` are bounded strings, and operations matching more than 10,000 sessions are rejected so callers must narrow the incident scope. The API returns a generic not-found result when execution matches no records and does not expose cross-tenant record details.
+Supply at least one of `sessionId`, `userId`, `organizationId`, or `clientApplicationId`. Multiple values are combined with AND semantics. For a broad operation, copy the preview's `matchedSessions` into `expectedMatchedSessions`; execution rejects a changed count so the operator must preview and confirm the current scope again. `reason` and `operationId` are bounded strings, operation IDs cannot be reused for a different selector/reason, and operations matching more than 10,000 sessions are rejected so callers must narrow the incident scope. The API returns a generic not-found result when execution matches no records and does not expose cross-tenant record details.
 
 ## Headless AuthPage API
 

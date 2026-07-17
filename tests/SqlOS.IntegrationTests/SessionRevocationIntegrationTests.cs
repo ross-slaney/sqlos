@@ -59,7 +59,8 @@ public sealed class SessionRevocationIntegrationTests
                 var service = new SqlOSSessionRevocationService(context, new SqlOSAuditLogService(context, crypto));
                 await ready.Task;
                 return await service.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
-                    UserId: "user-concurrent", Reason: "incident", OperationId: operationId, Confirm: true));
+                    UserId: "user-concurrent", Reason: "incident", OperationId: operationId, Confirm: true,
+                    ExpectedMatchedSessions: 1));
             }
 
             var first = RunAsync("operation-a");

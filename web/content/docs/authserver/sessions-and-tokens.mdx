@@ -149,10 +149,11 @@ var result = await revocations.RevokeAsync(new SqlOSAdminSessionRevocationReques
     ClientApplicationId: clientApplicationId,
     Reason: "incident-2026-07",
     OperationId: preview.OperationId,
-    Confirm: true), ct);
+    Confirm: true,
+    ExpectedMatchedSessions: preview.MatchedSessions), ct);
 ```
 
-The authenticated admin API exposes `POST /sqlos/admin/auth/api/sessions/revocation/preview` and `POST /sqlos/admin/auth/api/sessions/revocation`. At least one selector is required, multiple selectors narrow the result, and execution requires `confirm: true`. A single operation is capped at 10,000 sessions; narrow broader incident queries instead of loading an unbounded tenant history. Revocation immediately marks matching sessions and active refresh tokens as revoked, removes cached refresh responses, preserves unrelated sessions, and writes an audit record containing the actor, reason, selectors, operation ID, and counts—never token material.
+The authenticated admin API exposes `POST /sqlos/admin/auth/api/sessions/revocation/preview` and `POST /sqlos/admin/auth/api/sessions/revocation`. At least one selector is required, multiple selectors narrow the result, and execution requires `confirm: true`. Broad execution also requires `expectedMatchedSessions` from the preview; if the scope changes between preview and confirmation, the caller must preview again. A single operation is capped at 10,000 sessions; narrow broader incident queries instead of loading an unbounded tenant history. Revocation immediately marks matching sessions and active refresh tokens as revoked, removes cached refresh responses, preserves unrelated sessions, and writes an audit record containing the actor, reason, selectors, operation ID, and counts—never token material. Reusing an operation ID with a different scope or reason is rejected.
 
 Repeat execution is safe: already-revoked sessions and tokens are counted but not rewritten. On SQL Server, matching execution is serialized so concurrent incident responders cannot count the same active sessions as newly revoked.
 

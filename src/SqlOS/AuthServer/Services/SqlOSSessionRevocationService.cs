@@ -1,4 +1,7 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Contracts;
@@ -93,11 +96,33 @@ public sealed class SqlOSSessionRevocationService
                 """, cancellationToken);
         }
 
+        var selectorFingerprint = BuildSelectorFingerprint(normalized);
+        if (execute)
+        {
+            var priorOperation = await _context.Set<SqlOSAuditEvent>()
+                .AsNoTracking()
+                .Where(x => x.EventType == "session.admin-revoked" && x.CorrelationId == operationId)
+                .Select(x => x.DataJson)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (priorOperation != null && !HasSelectorFingerprint(priorOperation, selectorFingerprint))
+            {
+                throw new InvalidOperationException("Operation ID has already been used for a different revocation scope.");
+            }
+        }
+
         var query = ApplySelectors(_context.Set<SqlOSSession>().AsQueryable(), normalized);
         var matched = await query.CountAsync(cancellationToken);
         if (matched > MaxMatches)
         {
             throw new InvalidOperationException($"The revocation matches more than {MaxMatches:N0} sessions. Add a narrower filter.");
+        }
+        if (execute && normalized.ExpectedMatchedSessions.HasValue && normalized.ExpectedMatchedSessions.Value != matched)
+        {
+            throw new InvalidOperationException("The revocation scope changed after preview. Preview the operation again before confirming.");
+        }
+        if (execute && normalized.SessionId == null && !normalized.ExpectedMatchedSessions.HasValue)
+        {
+            throw new ArgumentException("Broad revocation requires the matched-session count returned by preview.");
         }
 
         var alreadyRevoked = await query.CountAsync(x => x.RevokedAt != null, cancellationToken);
@@ -158,12 +183,13 @@ public sealed class SqlOSSessionRevocationService
                 Source: "authserver",
                 Actor: new SqlOSAuditActor("admin"),
                 Targets: targets,
-                Context: new SqlOSAuditContext(SessionId: normalized.SessionId),
+                Context: new SqlOSAuditContext(SessionId: normalized.SessionId, CorrelationId: operationId),
                 IdempotencyKey: $"admin-session-revocation:{operationId}",
                 Metadata: new Dictionary<string, object?>
                 {
                     ["operation_id"] = operationId,
                     ["reason"] = reason,
+                    ["selector_fingerprint"] = selectorFingerprint,
                     ["matched_sessions"] = matched,
                     ["newly_revoked_sessions"] = sessions.Count,
                     ["already_revoked_sessions"] = alreadyRevoked,
@@ -216,11 +242,41 @@ public sealed class SqlOSSessionRevocationService
         };
 
         if (normalized.Reason!.Length > MaxReasonLength) throw new ArgumentException("Reason is too long.");
+        if (normalized.OperationId?.Length > 128) throw new ArgumentException("OperationId is too long.");
+        if (normalized.ExpectedMatchedSessions < 0 || normalized.ExpectedMatchedSessions > MaxMatches)
+        {
+            throw new ArgumentException($"ExpectedMatchedSessions must be between 0 and {MaxMatches:N0}.");
+        }
         if (normalized.SessionId == null && normalized.UserId == null && normalized.OrganizationId == null && normalized.ClientApplicationId == null)
         {
             throw new ArgumentException("At least one session, user, organization, or client selector is required.");
         }
 
         return normalized;
+    }
+
+    private static string BuildSelectorFingerprint(SqlOSAdminSessionRevocationRequest request)
+    {
+        var canonical = string.Join('\n',
+            request.SessionId ?? string.Empty,
+            request.UserId ?? string.Empty,
+            request.OrganizationId ?? string.Empty,
+            request.ClientApplicationId ?? string.Empty,
+            request.Reason ?? string.Empty);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static bool HasSelectorFingerprint(string metadataJson, string expected)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            return document.RootElement.TryGetProperty("selector_fingerprint", out var value)
+                && string.Equals(value.GetString(), expected, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }
