@@ -165,6 +165,12 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.ServiceAccounts, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.ClientId).HasMaxLength(450);
+            entity.Property(e => e.ConfigurationOwner).HasMaxLength(32);
+            entity.Property(e => e.ConfigurationSourceKey).HasMaxLength(200);
+            entity.Property(e => e.ConfigurationFingerprint).HasMaxLength(128);
+            entity.HasIndex(e => e.ClientId).IsUnique();
+            entity.HasIndex(e => new { e.ConfigurationOwner, e.ConfigurationSourceKey }).IsUnique();
             entity.HasOne(e => e.Subject)
                 .WithOne(s => s.ServiceAccount)
                 .HasForeignKey<SqlOSFgaServiceAccount>(e => e.SubjectId)

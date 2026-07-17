@@ -87,6 +87,8 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             await client.PostAsJsonAsync("/sqlos/admin/auth/api/sessions/revocation", new { userId = "victim", confirm = true }),
             await client.GetAsync("/sqlos/admin/auth/api/otp/readiness"),
             await client.PostAsJsonAsync("/sqlos/admin/auth/api/otp/test-delivery", new { method = "email", destination = "operator@example.test" }),
+            await client.GetAsync("/sqlos/admin/auth/api/machine-clients"),
+            await client.PostAsJsonAsync("/sqlos/admin/auth/api/machine-clients", new { }),
             await client.PutAsJsonAsync("/sqlos/admin/email/api/templates/missing", new { }),
             await client.DeleteAsync("/sqlos/admin/email/api/templates/missing")
         };

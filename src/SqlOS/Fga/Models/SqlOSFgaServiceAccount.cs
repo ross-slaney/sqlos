@@ -14,6 +14,11 @@ public class SqlOSFgaServiceAccount
     public DateTime? ExpiresAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
 
     // Navigation
     public SqlOSFgaSubject? Subject { get; set; }

@@ -13,6 +13,7 @@ public sealed class SqlOSBootstrapper
     private readonly SqlOSSchemaInitializer _authSchemaInitializer;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAdminService _adminService;
+    private readonly SqlOSMachineClientAdminService _machineClients;
     private readonly SqlOSSettingsService _settingsService;
     private readonly SqlOSEmailAdminService _emailAdminService;
     private readonly SqlOSFgaSchemaInitializer _fgaSchemaInitializer;
@@ -26,6 +27,7 @@ public sealed class SqlOSBootstrapper
         SqlOSSchemaInitializer authSchemaInitializer,
         SqlOSCryptoService cryptoService,
         SqlOSAdminService adminService,
+        SqlOSMachineClientAdminService machineClients,
         SqlOSSettingsService settingsService,
         SqlOSEmailAdminService emailAdminService,
         SqlOSFgaSchemaInitializer fgaSchemaInitializer,
@@ -38,6 +40,7 @@ public sealed class SqlOSBootstrapper
         _authSchemaInitializer = authSchemaInitializer;
         _cryptoService = cryptoService;
         _adminService = adminService;
+        _machineClients = machineClients;
         _settingsService = settingsService;
         _emailAdminService = emailAdminService;
         _fgaSchemaInitializer = fgaSchemaInitializer;
@@ -78,6 +81,7 @@ public sealed class SqlOSBootstrapper
         }
 
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
+        await _machineClients.UpsertSeededMachineClientsAsync(cancellationToken);
         await _adminService.UpsertSeededOidcConnectionsAsync(cancellationToken);
         await _adminService.UpsertSeededSamlConnectionsAsync(cancellationToken);
         await _adminService.UpsertSeededScimConnectionsAsync(cancellationToken);

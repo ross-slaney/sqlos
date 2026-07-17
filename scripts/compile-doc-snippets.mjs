@@ -111,6 +111,13 @@ const snippetSpecs = [
     marker: "SeedSamlConnection(",
     wrap: asSamlSeedProgram,
   },
+  {
+    name: "unified machine-client seed",
+    relativePath: "web/content/docs/guides/service-account-jobs.mdx",
+    heading: "## Recommended: declare one machine client",
+    marker: "SeedMachineClient(",
+    wrap: asMachineClientSeedProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
@@ -272,6 +279,18 @@ ${snippet}
 }
 
 function asSamlSeedProgram(snippet) {
+  return `using Microsoft.Extensions.Configuration;
+using SqlOS.AuthServer.Configuration;
+using SqlOS.Configuration;
+
+var builder = WebApplication.CreateBuilder(args);
+var options = new SqlOSOptions();
+
+${snippet}
+`;
+}
+
+function asMachineClientSeedProgram(snippet) {
   return `using Microsoft.Extensions.Configuration;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
