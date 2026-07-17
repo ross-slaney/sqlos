@@ -190,7 +190,7 @@ public sealed class PublicOriginSecurityIntegrationTests
                 options.AuthServer.DeviceAuthorization.Enabled = true;
                 options.AuthServer.SeedBrowserClient("browser-client", "Browser Client", "https://client.example.test/callback");
                 options.AuthServer.SeedCliClient("device-client", "Device Client", "openid");
-                options.AuthServer.SeedOidcConnection(connection =>
+                options.AuthServer.SeedOidcConnection("public-origin-security", connection =>
                 {
                     connection.ProviderType = SqlOSOidcProviderType.Custom;
                     connection.DisplayName = "Test OIDC";

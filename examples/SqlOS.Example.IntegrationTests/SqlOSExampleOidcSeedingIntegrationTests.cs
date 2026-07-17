@@ -15,7 +15,7 @@ public sealed class SqlOSExampleOidcSeedingIntegrationTests
     [TestMethod]
     public async Task SeededMicrosoftConnection_AppearsAsEnabledProvider()
     {
-        using var factory = CreateSeededFactory();
+        await using var factory = CreateSeededFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -34,7 +34,7 @@ public sealed class SqlOSExampleOidcSeedingIntegrationTests
     [TestMethod]
     public async Task SeededMicrosoftConnection_PersistsConfiguredValues()
     {
-        using var factory = CreateSeededFactory();
+        await using var factory = CreateSeededFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -58,8 +58,8 @@ public sealed class SqlOSExampleOidcSeedingIntegrationTests
         callbacks.Should().Contain($"http://localhost:5062/api/v1/auth/oidc/callback/{connectionId}");
     }
 
-    private static WebApplicationFactory<Program> CreateSeededFactory()
-        => ExampleApiFixture.CreateFactory(builder =>
+    private static IsolatedExampleApiFactory CreateSeededFactory()
+        => ExampleApiFixture.CreateIsolatedFactory(builder =>
         {
             builder.UseSetting("SqlOS:Issuer", "http://localhost:5062/sqlos/auth");
             builder.UseSetting("SqlOS:Oidc:Microsoft:ClientId", SeededClientId);

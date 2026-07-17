@@ -57,6 +57,35 @@ dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj --filter 
 
 Coverage settings live in `tests/coverlet.runsettings`.
 
+## Test control-plane parity
+
+Administrative capabilities that support code-first configuration, programmable administration, and the dashboard use `ControlPlaneParityHarness` in `tests/SqlOS.Tests/Infrastructure`. The harness starts a production endpoint map on ASP.NET Core TestServer and provides three deliberate entry paths:
+
+1. configure strongly typed startup seeds and run the real reconcilers;
+2. call the public administration service directly;
+3. send the exact JSON payload to the admin route used by the embedded dashboard.
+
+Add a focused parity case rather than copying a complete host fixture. Load a canonical projection containing stable, non-secret configuration; compare semantic values; and assert expected ownership differences (`code` versus `dashboard`) separately. Then invoke a runtime behavior such as OAuth authorization-request validation, provider discovery, SCIM bearer authentication, or effective policy resolution.
+
+The representative suite covers OAuth clients, upstream OIDC connections, inbound SCIM connections, and global MFA settings. It also checks invalid-input semantics, one-time secret reveal versus redacted reads, audit outcomes, dashboard JavaScript route/field drift, parallel isolation, and real SQL persistence across DbContext instances.
+
+When adding a new administrative capability, use this checklist:
+
+- use production seeds, services, routes, request contracts, and runtime services;
+- normalize random IDs and timestamps rather than snapshotting them;
+- never place raw secrets, encrypted values, bearer tokens, or hashes in projections or failure output;
+- prove code-owned records are observable but not editable, while dashboard-owned records remain editable;
+- assert disable/re-enable and reconciliation behavior where the capability has a lifecycle;
+- add real SQL coverage when locking, uniqueness, persistence, or concurrent reconciliation matters;
+- document an inapplicable control plane instead of adding an artificial UI for an internal secure default.
+
+Run the focused suite with:
+
+```bash
+dotnet test tests/SqlOS.Tests/SqlOS.Tests.csproj --filter SqlOSControlPlaneParityTests
+dotnet test tests/SqlOS.IntegrationTests/SqlOS.IntegrationTests.csproj --filter ControlPlaneParityPersistenceIntegrationTests
+```
+
 ## Next steps
 
 - [Getting Started](/docs/getting-started)
