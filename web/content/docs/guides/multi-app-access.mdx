@@ -56,6 +56,9 @@ builder.AddSqlOS<AppDbContext>(options =>
         client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
         client.RequirePkce = true;
         client.IsFirstParty = true;
+        client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+        client.AssignOrganization("northwind-subscription", "northwind",
+            description: "Northwind enterprise subscription");
     });
 
     auth.SeedClient(client =>
@@ -68,6 +71,9 @@ builder.AddSqlOS<AppDbContext>(options =>
         client.RequirePkce = true;
         client.IsFirstParty = true;
         client.AllowNativeHeadlessAuth = true;
+        client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+        client.AssignOrganization("northwind-mobile", "northwind",
+            description: "Northwind mobile entitlement");
     });
 
     auth.SeedClient(client =>
@@ -79,15 +85,20 @@ builder.AddSqlOS<AppDbContext>(options =>
         client.AllowedScopes = ["openid", "profile", "email", "offline_access"];
         client.RequirePkce = true;
         client.IsFirstParty = true;
+        client.AccessMode = SqlOSApplicationAccessModes.SelectedUsersGroupsRoles;
+        client.AssignRole("northwind-admins", "northwind", "admin",
+            description: "Northwind administrators");
     });
 });
 ```
 
-New seeded clients start in `all_organizations`. Startup reconciliation preserves an existing client's access mode, and client seed options do not currently contain assignments. Apply the restrictive policy explicitly after the clients exist.
+`northwind` is a stable organization ID or slug that must already exist. Startup resolves it, applies the restrictive mode before the host accepts traffic, and fails closed if the organization or principal is missing or inactive. If you omit `AccessMode` and assignments, new clients use `all_organizations` and existing seeded clients retain their stored mode.
+
+Assignment keys such as `northwind-mobile` are application-owned identities, not database row IDs. SqlOS reconciles only rows owned by that key. Dashboard-created assignments coexist with them and survive restart; removing a keyed seed revokes only its code-owned row and records an audit event.
 
 ## 2. Choose the access mode
 
-Open **Auth Server > Clients**, select each app, and use its **Access** section. For Atlas Suite:
+Open **Auth Server > Clients** and select each app to inspect the effective policy. For Atlas Suite:
 
 | Client | Mode | Meaning |
 | --- | --- | --- |
@@ -95,7 +106,7 @@ Open **Auth Server > Clients**, select each app, and use its **Access** section.
 | `atlas-field-mobile` | `selected_organizations` | Mobile-entitled organizations only |
 | `atlas-ops-console` | `selected_users_groups_roles` | Only explicit people, groups, or org roles |
 
-The same change is available from a trusted admin process:
+For dashboard-owned clients, the same change is available from a trusted admin process:
 
 ```csharp
 await admin.SetApplicationAccessModeAsync(
@@ -107,7 +118,7 @@ await admin.SetApplicationAccessModeAsync(
     cancellationToken: ct);
 ```
 
-Run assignment automation as an idempotent, versioned deployment step. `AssignApplicationAsync` creates an assignment; it does not deduplicate repeated calls for you.
+Code-owned access modes are read-only in the dashboard. Operators may still add dashboard-owned exception assignments; startup reconciliation never adopts or removes them. For fully programmable, operator-owned policy, `AssignApplicationAsync` remains available and creates a new dashboard-owned assignment on each call.
 
 ## 3. Assign Northwind to the customer apps
 

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -237,6 +238,175 @@ public sealed class SqlOSApplicationAssignmentsTests
         failure.Message.Should().NotContain("selected_organizations");
     }
 
+    [TestMethod]
+    public async Task SeededAssignments_ResolveOrganizationSlugAndAuthorizeWithoutSetupScript()
+    {
+        await using var harness = await Harness.CreateAsync(options =>
+        {
+            var client = options.ClientSeeds.Single(x => x.ClientId == "test-client");
+            client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+            client.AssignOrganization("primary-org", "allowed", description: "production tenant");
+        });
+
+        var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "test-client");
+        client.AccessMode.Should().Be(SqlOSApplicationAccessModes.SelectedOrganizations);
+        var assignment = await harness.Context.Set<SqlOSApplicationAssignment>().SingleAsync(x => x.ClientApplicationId == client.Id);
+        assignment.OrganizationId.Should().Be("org_allowed");
+        assignment.ConfigurationOwner.Should().Be(SqlOSConfigurationOwners.Code);
+        assignment.ConfigurationSourceKey.Should().Be("primary-org");
+        JsonSerializer.Serialize(await harness.Admin.ListApplicationAssignmentsAsync(client.Id)).Should()
+            .Contain("\"Owner\":\"code\"").And.Contain("\"IsEditable\":false");
+
+        var result = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest("ada@example.com", "P@ssword123!", "test-client", "org_allowed"),
+            harness.Http);
+        result.Tokens.Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task SeededAssignments_RerunIsIdempotentAndPreservesDashboardAssignments()
+    {
+        await using var harness = await Harness.CreateAsync(options =>
+        {
+            var client = options.ClientSeeds.Single(x => x.ClientId == "test-client");
+            client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+            client.AssignOrganization("primary-org", "allowed");
+        });
+        var dashboard = await harness.Admin.AssignApplicationAsync("test-client", new SqlOSCreateApplicationAssignmentRequest(
+            SqlOSApplicationAssignmentPrincipalTypes.Organization,
+            OrganizationId: "org_blocked"));
+
+        await harness.Admin.UpsertSeededClientsAsync();
+
+        var assignments = await harness.Context.Set<SqlOSApplicationAssignment>().ToListAsync();
+        assignments.Should().HaveCount(2);
+        assignments.Single(x => x.Id == dashboard.Id).ConfigurationOwner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        assignments.Single(x => x.ConfigurationSourceKey == "primary-org").RevokedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task SeededClient_OmittedAccessModePreservesExistingStoredPolicy()
+    {
+        await using var harness = await Harness.CreateAsync();
+        await harness.Admin.SetApplicationAccessModeAsync(
+            "test-client",
+            new SqlOSSetApplicationAccessModeRequest(SqlOSApplicationAccessModes.SelectedOrganizations));
+
+        await harness.Admin.UpsertSeededClientsAsync();
+
+        (await harness.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "test-client"))
+            .AccessMode.Should().Be(SqlOSApplicationAccessModes.SelectedOrganizations);
+    }
+
+    [TestMethod]
+    public async Task SeededClient_AssignmentsRequireExplicitAccessMode()
+    {
+        var act = () => Harness.CreateAsync(options =>
+            options.ClientSeeds.Single(x => x.ClientId == "test-client")
+                .AssignOrganization("primary-org", "allowed"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must set AccessMode explicitly*");
+    }
+
+    [TestMethod]
+    public async Task SeededAssignments_RemovalRevokesOnlyCodeOwnedAssignmentAndAuditsOutcome()
+    {
+        await using var harness = await Harness.CreateAsync(options =>
+        {
+            var client = options.ClientSeeds.Single(x => x.ClientId == "test-client");
+            client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+            client.AssignOrganization("primary-org", "allowed");
+        });
+        var dashboard = await harness.Admin.AssignApplicationAsync("test-client", new SqlOSCreateApplicationAssignmentRequest(
+            SqlOSApplicationAssignmentPrincipalTypes.Organization,
+            OrganizationId: "org_blocked"));
+        harness.Options.ClientSeeds.Single(x => x.ClientId == "test-client").Assignments.Clear();
+
+        await harness.Admin.UpsertSeededClientsAsync();
+
+        var codeOwned = await harness.Context.Set<SqlOSApplicationAssignment>().SingleAsync(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code);
+        codeOwned.RevokedAt.Should().NotBeNull();
+        codeOwned.ConfigurationOrphanedAt.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSApplicationAssignment>().SingleAsync(x => x.Id == dashboard.Id)).RevokedAt.Should().BeNull();
+        (await harness.Context.Set<SqlOSAuditEvent>().Where(x => x.EventType == "configuration.reconciled").Select(x => x.DataJson).ToListAsync())
+            .Should().Contain(x => x.Contains("application_assignment") && x.Contains("revoked"));
+    }
+
+    [TestMethod]
+    public async Task SeededAssignments_InvalidOrCrossTenantPrincipalFailsClosed()
+    {
+        var act = () => Harness.CreateAsync(options =>
+        {
+            var client = options.ClientSeeds.Single(x => x.ClientId == "test-client");
+            client.AccessMode = SqlOSApplicationAccessModes.SelectedUsersGroupsRoles;
+            client.AssignUser("wrong-tenant", "missing-user", "allowed");
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*was not found or is inactive*");
+    }
+
+    [TestMethod]
+    public async Task ApplicationAssignments_RejectOverlongFieldsBeforePersistence()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var act = () => harness.Admin.AssignApplicationAsync(
+            "test-client",
+            new SqlOSCreateApplicationAssignmentRequest(
+                SqlOSApplicationAssignmentPrincipalTypes.User,
+                PrincipalId: new string('u', 129)));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*principalId must be 128 characters or fewer*");
+        (await harness.Context.Set<SqlOSApplicationAssignment>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SeededAssignments_CodeOwnedRowsAreReadOnlyThroughDashboardService()
+    {
+        await using var harness = await Harness.CreateAsync(options =>
+        {
+            var client = options.ClientSeeds.Single(x => x.ClientId == "test-client");
+            client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+            client.AssignOrganization("primary-org", "allowed");
+        });
+        var assignment = await harness.Context.Set<SqlOSApplicationAssignment>().SingleAsync();
+
+        var revoke = () => harness.Admin.RevokeApplicationAssignmentAsync("test-client", assignment.Id);
+        await revoke.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code' configuration source*");
+    }
+
+    [TestMethod]
+    public async Task SeededAssignments_AllSupportedPrincipalBuildersUseSharedValidation()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var group = await harness.SeedFgaGroupMembershipAsync();
+        var (serviceAccountId, agentId) = await harness.SeedFgaMachinePrincipalsAsync();
+        var client = harness.Options.ClientSeeds.Single(x => x.ClientId == "test-client");
+        client.AccessMode = SqlOSApplicationAccessModes.SelectedUsersGroupsRoles;
+        client.AssignOrganization("organization", "allowed")
+            .AssignUser("user", harness.User.Id)
+            .AssignGroup("group", group.Id)
+            .AssignRole("role", "allowed", "admin")
+            .AssignServiceAccount("service-account", serviceAccountId, "allowed")
+            .AssignAgent("agent", agentId, "allowed");
+
+        await harness.Admin.UpsertSeededClientsAsync();
+
+        var assignments = await harness.Context.Set<SqlOSApplicationAssignment>()
+            .Where(x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.RevokedAt == null)
+            .ToListAsync();
+        assignments.Should().HaveCount(6);
+        assignments.Select(x => x.PrincipalType).Should().BeEquivalentTo(
+            SqlOSApplicationAssignmentPrincipalTypes.Organization,
+            SqlOSApplicationAssignmentPrincipalTypes.User,
+            SqlOSApplicationAssignmentPrincipalTypes.Group,
+            SqlOSApplicationAssignmentPrincipalTypes.Role,
+            SqlOSApplicationAssignmentPrincipalTypes.ServiceAccount,
+            SqlOSApplicationAssignmentPrincipalTypes.Agent);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly SqlOSCryptoService _crypto;
@@ -268,8 +438,9 @@ public sealed class SqlOSApplicationAssignmentsTests
         public SqlOSDeviceAuthorizationService Device { get; }
         public SqlOSUser User { get; }
         public DefaultHttpContext Http { get; }
+        public SqlOSAuthServerOptions Options { get; private init; } = null!;
 
-        public static async Task<Harness> CreateAsync()
+        public static async Task<Harness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
         {
             var context = new TestSqlOSInMemoryDbContext(
                 new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
@@ -284,8 +455,9 @@ public sealed class SqlOSApplicationAssignmentsTests
             authOptions.ResourceIndicators.Enabled = true;
             authOptions.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
             authOptions.SeedCliClient("test-cli", "Test CLI", "test-cli", "openid", "offline_access");
+            configure?.Invoke(authOptions);
 
-            var options = Options.Create(authOptions);
+            var options = Microsoft.Extensions.Options.Options.Create(authOptions);
             var crypto = TestCryptoService.Create(context, options);
             var admin = new SqlOSAdminService(context, options, crypto);
             var emailSender = new TestAuthEmailSender();
@@ -302,8 +474,6 @@ public sealed class SqlOSApplicationAssignmentsTests
 
             await crypto.EnsureActiveSigningKeyAsync();
             await settings.EnsureDefaultAuthPageSettingsAsync();
-            await admin.UpsertSeededClientsAsync();
-
             var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Ada Lovelace", "ada@example.com", "P@ssword123!"));
             context.Set<SqlOSOrganization>().AddRange(
                 new SqlOSOrganization { Id = "org_allowed", Slug = "allowed", Name = "Allowed Org", CreatedAt = DateTime.UtcNow, IsActive = true },
@@ -313,7 +483,9 @@ public sealed class SqlOSApplicationAssignmentsTests
                 new SqlOSMembership { OrganizationId = "org_blocked", UserId = user.Id, Role = "member", CreatedAt = DateTime.UtcNow, IsActive = true });
             await context.SaveChangesAsync();
 
-            return new Harness(context, admin, auth, authorization, device, crypto, user, http);
+            await admin.UpsertSeededClientsAsync();
+
+            return new Harness(context, admin, auth, authorization, device, crypto, user, http) { Options = authOptions };
         }
 
         public async Task<SqlOSAuthorizationRequest> CreateAuthorizationRequestAsync()
@@ -381,6 +553,49 @@ public sealed class SqlOSApplicationAssignmentsTests
             });
             await Context.SaveChangesAsync();
             return group;
+        }
+
+        public async Task<(string ServiceAccountId, string AgentId)> SeedFgaMachinePrincipalsAsync()
+        {
+            var serviceSubject = new SqlOSFgaSubject
+            {
+                Id = "subj_service_app",
+                SubjectTypeId = "service_account",
+                OrganizationId = "org_allowed",
+                DisplayName = "Application worker",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            var agentSubject = new SqlOSFgaSubject
+            {
+                Id = "subj_agent_app",
+                SubjectTypeId = "agent",
+                OrganizationId = "org_allowed",
+                DisplayName = "Application agent",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            var serviceAccount = new SqlOSFgaServiceAccount
+            {
+                Id = "sa_app",
+                SubjectId = serviceSubject.Id,
+                ClientId = "sa-app",
+                ClientSecretHash = "not-used-in-assignment-test",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            var agent = new SqlOSFgaAgent
+            {
+                Id = "agt_app",
+                SubjectId = agentSubject.Id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            Context.Set<SqlOSFgaSubject>().AddRange(serviceSubject, agentSubject);
+            Context.Set<SqlOSFgaServiceAccount>().Add(serviceAccount);
+            Context.Set<SqlOSFgaAgent>().Add(agent);
+            await Context.SaveChangesAsync();
+            return (serviceAccount.Id, agent.Id);
         }
 
         public async ValueTask DisposeAsync()

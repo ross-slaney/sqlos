@@ -148,7 +148,20 @@ See [Headless Auth](/docs/authserver/headless-auth) and [Hosted vs Headless](/do
 
 ## 4. Configure application access
 
-Start with open access for the customer-facing app. Restrict sensitive surfaces.
+For reproducible deployments, set `AccessMode` and stable keyed assignments directly on `SeedClient`. Referenced organizations and principals must already exist. The dashboard/API workflow below is the operator-owned alternative and remains useful for runtime exceptions.
+
+```csharp
+auth.SeedClient(client =>
+{
+    client.ClientId = "admin-console";
+    client.Name = "Admin Console";
+    client.RedirectUris = ["https://admin.example.com/auth/callback"];
+    client.AccessMode = SqlOSApplicationAccessModes.SelectedUsersGroupsRoles;
+    client.AssignRole("tenant-admins", "org_123", "admin");
+});
+```
+
+Or restrict a dashboard-owned client through the admin API:
 
 ```bash
 curl -X POST https://auth.example.com/sqlos/admin/auth/api/applications/admin-console/access-mode \

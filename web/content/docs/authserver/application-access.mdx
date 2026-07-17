@@ -27,6 +27,28 @@ Two apps can mint tokens for the same API audience. Assignments decide whether a
 
 Explicit `denied` assignments take precedence over allowed assignments.
 
+## Code-first policy
+
+Declare reproducible application policy on the client seed. Stable assignment keys let SqlOS update or revoke only the rows owned by that source configuration.
+
+```csharp
+auth.SeedClient(client =>
+{
+    client.ClientId = "customer-portal";
+    client.Name = "Customer Portal";
+    client.RedirectUris = ["https://portal.example.com/auth/callback"];
+    client.AccessMode = SqlOSApplicationAccessModes.SelectedOrganizations;
+    client.AssignOrganization(
+        "northwind-access",
+        "northwind", // stable organization ID or slug
+        description: "Contracted customer");
+});
+```
+
+Use `AssignOrganization`, `AssignUser`, `AssignGroup`, `AssignRole`, `AssignServiceAccount`, or `AssignAgent`. Referenced organizations and principals must already exist and be active; FGA startup seeds are applied before client policy. Invalid, cross-organization, duplicate-key, and mode-incompatible assignments stop startup without opening access.
+
+Code-owned access modes and assignments are visible but read-only in the dashboard. Emergency client disablement remains available. Dashboard-owned assignments may coexist as operator exceptions and are never deleted by seed reconciliation.
+
 ## Admin API
 
 Set an application access mode:

@@ -60,6 +60,23 @@ public sealed class SqlOSBootstrapper
         await _settingsService.UpsertSeededAuthEmailSettingsAsync(cancellationToken);
         await _settingsService.UpsertSeededMfaSettingsAsync(cancellationToken);
         await _emailAdminService.EnsureBuiltInTemplatesAsync(cancellationToken);
+
+        // Application access seeds may reference FGA groups, service accounts, agents, and roles.
+        // Make those stable principals available before client policy reconciliation.
+        await _fgaSchemaInitializer.EnsureSchemaAsync(cancellationToken);
+        if (_options.Fga.InitializeFunctions)
+        {
+            await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
+        }
+        if (_options.Fga.SeedCoreData)
+        {
+            await _fgaSeedService.SeedCoreAsync(cancellationToken);
+        }
+        if (_options.Fga.StartupSeedData != null)
+        {
+            await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
+        }
+
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _adminService.UpsertSeededOidcConnectionsAsync(cancellationToken);
         await _adminService.UpsertSeededScimConnectionsAsync(cancellationToken);
@@ -70,23 +87,7 @@ public sealed class SqlOSBootstrapper
         await _adminService.CleanupExpiredRefreshTokensAsync(cancellationToken);
         await _adminService.CleanupStaleDynamicClientsAsync(cancellationToken);
 
-        await _fgaSchemaInitializer.EnsureSchemaAsync(cancellationToken);
         await _adminService.ReconcileDisabledScimManagedGrantsAsync(cancellationToken);
-
-        if (_options.Fga.InitializeFunctions)
-        {
-            await _fgaFunctionInitializer.EnsureFunctionsExistAsync(cancellationToken);
-        }
-
-        if (_options.Fga.SeedCoreData)
-        {
-            await _fgaSeedService.SeedCoreAsync(cancellationToken);
-        }
-
-        if (_options.Fga.StartupSeedData != null)
-        {
-            await _fgaSeedService.SeedAuthorizationDataAsync(_options.Fga.StartupSeedData, cancellationToken);
-        }
 
         await _fgaHierarchyValidator.ValidateExistingDataAsync(cancellationToken);
 

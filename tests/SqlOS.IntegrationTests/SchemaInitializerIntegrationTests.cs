@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 34;
+    private const int CurrentSchemaVersion = 35;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
