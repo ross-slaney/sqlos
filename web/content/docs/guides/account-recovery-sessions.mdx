@@ -198,6 +198,8 @@ Place this middleware before the account endpoints. Do not use user ids from rou
 
 `SqlOSAdminService.ListUserSessionsAsync` is useful for trusted admin/server surfaces, but it returns session history—including revoked or expired rows—and raw user-agent/IP fields. A user-facing endpoint should project only the fields Harbor intends to display and compute active state explicitly.
 
+For a platform-operator workflow, use `SqlOSSessionRevocationService` or the dashboard Sessions page instead. Those surfaces provide bounded preview, explicit confirmation, idempotent execution, refresh-token invalidation, and audit records. They are platform-admin capabilities; do not expose their arbitrary user/organization/client selectors to an end-user account page.
+
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Extensions;

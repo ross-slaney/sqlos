@@ -45,6 +45,8 @@ public class SqlOSAuthEndpointRouteInventoryTests
             "GET /sqlos/admin/auth/api/users",
             "GET /sqlos/admin/auth/api/clients",
             "GET /sqlos/admin/auth/api/sessions",
+            "POST /sqlos/admin/auth/api/sessions/revocation/preview",
+            "POST /sqlos/admin/auth/api/sessions/revocation",
             "GET /sqlos/admin/auth/api/settings/security"
         };
 

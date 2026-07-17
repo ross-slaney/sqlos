@@ -223,6 +223,17 @@ Account-management routes are secure by default without adding a blanket ASP.NET
 
 Trusted backend code can still call `SqlOSAuthService.LogoutAsync(..., sessionId: ...)`, `LogoutAllAsync(userId)`, or `CreateEmailVerificationTokenAsync(...)` after applying its own ownership/admin policy. Do not expose those service methods by mapping caller-supplied IDs or raw tokens directly into a public route.
 
+## Platform-admin session revocation
+
+The dashboard admin API has two authenticated platform-operator routes. Unauthorized requests receive the same not-found response used by the rest of the admin control plane.
+
+| Method and route | JSON request | Success response |
+| --- | --- | --- |
+| `POST /sqlos/admin/auth/api/sessions/revocation/preview` | `SqlOSAdminSessionRevocationRequest` | Match and active refresh-token counts; no mutation |
+| `POST /sqlos/admin/auth/api/sessions/revocation` | Same request with `confirm: true` | Newly/already-revoked session counts and revoked refresh-token count |
+
+Supply at least one of `sessionId`, `userId`, `organizationId`, or `clientApplicationId`. Multiple values are combined with AND semantics. For a broad operation, copy the preview's `matchedSessions` into `expectedMatchedSessions`; execution rejects a changed count so the operator must preview and confirm the current scope again. `reason` and `operationId` are bounded strings, operation IDs cannot be reused for a different selector/reason, and operations matching more than 10,000 sessions are rejected so callers must narrow the incident scope. The API returns a generic not-found result when execution matches no records and does not expose cross-tenant record details.
+
 ## Headless AuthPage API
 
 The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthServer.Headless.HeadlessApiBasePath`. `AuthServer.Headless.EnableApi` defaults to `true`; disabling it leaves the routes unavailable with `404`. These endpoints use JSON and operate on SqlOS authorization-request state.

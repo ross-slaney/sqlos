@@ -393,6 +393,49 @@ public static partial class EndpointRouteBuilderExtensions
             return Results.Ok(await adminService.ListSessionsAsync(page, pageSize, cancellationToken));
         });
 
+        api.MapPost("/sessions/revocation/preview", async (HttpContext context, SqlOSAdminSessionRevocationRequest request, SqlOSSessionRevocationService revocations, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await revocations.PreviewAsync(request, cancellationToken));
+            }
+            catch (ArgumentException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        });
+
+        api.MapPost("/sessions/revocation", async (HttpContext context, SqlOSAdminSessionRevocationRequest request, SqlOSSessionRevocationService revocations, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var result = await revocations.RevokeAsync(request, cancellationToken);
+                return result.MatchedSessions == 0 ? Results.NotFound() : Results.Ok(result);
+            }
+            catch (ArgumentException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        });
+
         api.MapGet("/audit-events", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))

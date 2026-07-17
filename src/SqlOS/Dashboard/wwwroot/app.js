@@ -1554,6 +1554,7 @@
                             { label: "Pending invitations", value: pendingInvitations },
                             { label: "Enabled SSO", value: organization.enabledSsoConnections ?? 0 }
                         ])}
+                        <button type="button" id="revoke-organization-sessions">Revoke organization sessions</button>
                     </section>
                 </div>
             `;
@@ -2009,6 +2010,18 @@
                 });
                 setFlash("success", "Organization updated.");
             });
+            document.getElementById("revoke-organization-sessions")?.addEventListener("click", async () => {
+                try {
+                    const reason = window.prompt("Why are you revoking sessions for this organization?", "organization_revoked");
+                    if (reason === null) return;
+                    if (await revokeSessionsWithPreview({ organizationId, reason })) {
+                        setFlash("success", "Organization sessions revoked.");
+                    }
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                }
+                await render();
+            });
         } else if (tab === "users") {
             bindForm("create-org-membership-form", async form => {
                 await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
@@ -2462,6 +2475,7 @@
                             <input name="resetUrlTemplate" placeholder="Optional reset URL template with {token}">
                             <button type="submit" ${user.defaultEmail ? "" : "disabled"}>Send password reset email</button>
                         </form>
+                        <button type="button" id="revoke-user-sessions">Sign out all user sessions</button>
                     </section>
                 </div>
             `;
@@ -2506,8 +2520,11 @@
                                 { label: "Client", value: item.clientApplicationId || "n/a" },
                                 { label: "Created", value: formatDate(item.createdAt) },
                                 { label: "Last seen", value: formatDate(item.lastSeenAt) },
-                                { label: "Revoked", value: formatDate(item.revokedAt) }
+                                { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "Active" },
+                                { label: "Revocation reason", value: item.revocationReason || "n/a" }
                             ])}
+                            ${item.revokedAt ? "" : `<button type="button" class="js-revoke-user-session" data-session-id="${esc(item.id)}">Revoke session</button>`}
+                            ${item.revokedAt ? `<a class="inline-link" href="${esc(pathForRoute("auth-audit"))}">Open audit history</a>` : ""}
                         `,
                         "No sessions yet."
                     )}
@@ -2542,6 +2559,16 @@
                 });
                 setFlash("success", "Password reset email queued.");
             });
+            document.getElementById("revoke-user-sessions")?.addEventListener("click", async () => {
+                try {
+                    const reason = window.prompt("Why are you signing out this user?", "user_sessions_revoked");
+                    if (reason === null) return;
+                    if (await revokeSessionsWithPreview({ userId, reason })) setFlash("success", "User sessions revoked.");
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                }
+                await render();
+            });
         } else if (tab === "organizations") {
             bindPagination("#user-memberships-pagination-top", async page => {
                 setPagerPage(`auth-user-${userId}-memberships`, page);
@@ -2551,6 +2578,20 @@
             bindPagination("#user-sessions-pagination-top", async page => {
                 setPagerPage(`auth-user-${userId}-sessions`, page);
                 await render();
+            });
+            document.querySelectorAll(".js-revoke-user-session").forEach(button => {
+                button.addEventListener("click", async () => {
+                    try {
+                        const reason = window.prompt("Why are you revoking this session?", "admin_revoked");
+                        if (reason === null) return;
+                        if (await revokeSessionsWithPreview({ sessionId: button.dataset.sessionId, userId, reason })) {
+                            setFlash("success", "Session revoked.");
+                        }
+                    } catch (error) {
+                        setFlash("error", error.message || String(error));
+                    }
+                    await render();
+                });
             });
         }
     }
@@ -3169,11 +3210,9 @@
                             return;
                         }
 
-                        await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/revoke`, {
-                            method: "POST",
-                            body: JSON.stringify({ reason })
-                        });
-                        setFlash("success", "Client sessions revoked.");
+                        if (await revokeSessionsWithPreview({ clientApplicationId: clientId, reason })) {
+                            setFlash("success", "Client sessions revoked.");
+                        }
                     }
                 } catch (error) {
                     setFlash("error", error.message || String(error));
@@ -3782,6 +3821,31 @@
         });
     }
 
+    async function revokeSessionsWithPreview(request) {
+        const preview = await fetchJson(`${authApiBasePath}/sessions/revocation/preview`, {
+            method: "POST",
+            body: JSON.stringify(request)
+        });
+        if (preview.matchedSessions === 0) {
+            setFlash("info", "No sessions matched this scope.");
+            return false;
+        }
+        const confirmed = window.confirm(
+            `Revoke ${preview.matchedSessions} session(s) and ${preview.activeRefreshTokens} active refresh token(s)? Already-revoked sessions will be left unchanged.`
+        );
+        if (!confirmed) return false;
+        await fetchJson(`${authApiBasePath}/sessions/revocation`, {
+            method: "POST",
+            body: JSON.stringify({
+                ...request,
+                operationId: preview.operationId,
+                expectedMatchedSessions: preview.matchedSessions,
+                confirm: true
+            })
+        });
+        return true;
+    }
+
     async function renderAuthSessions() {
         const config = authViews.sessions;
         setHeader("Auth Server", config.title, config.description);
@@ -3797,6 +3861,14 @@
                     <h2>Sessions</h2>
                     <div id="sessions-pagination-top">${renderPagination(sessions.page, sessions.totalPages, sessions.totalCount)}</div>
                 </div>
+                <form id="session-revocation-form" class="client-filter-form">
+                    <input name="userId" placeholder="User ID (optional)">
+                    <input name="organizationId" placeholder="Organization ID (optional)">
+                    <input name="clientApplicationId" placeholder="Client application ID (optional)">
+                    <input name="reason" placeholder="Reason" value="admin_revoked" required>
+                    <button type="submit">Preview and revoke</button>
+                </form>
+                <p>Use one or more filters. Combined filters use AND semantics, and you will see the affected session and refresh-token count before confirmation.</p>
                 ${renderList(
                     sessions.data,
                     item => `
@@ -3810,8 +3882,12 @@
                             { label: "Client", value: item.clientApplicationId || "n/a" },
                             { label: "Created", value: formatDate(item.createdAt) },
                             { label: "Idle expires", value: formatDate(item.idleExpiresAt) },
-                            { label: "Absolute expires", value: formatDate(item.absoluteExpiresAt) }
+                            { label: "Absolute expires", value: formatDate(item.absoluteExpiresAt) },
+                            { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "Active" },
+                            { label: "Revocation reason", value: item.revocationReason || "n/a" }
                         ])}
+                        ${item.revokedAt ? "" : `<button type="button" class="js-revoke-session" data-session-id="${esc(item.id)}">Revoke session</button>`}
+                        ${item.revokedAt ? `<a class="inline-link" href="${esc(pathForRoute("auth-audit"))}">Open audit history</a>` : ""}
                     `,
                     "No sessions yet."
                 )}
@@ -3821,6 +3897,31 @@
         bindPagination("#sessions-pagination-top", async page => {
             setPagerPage("auth-sessions", page);
             await render();
+        });
+
+        bindForm("session-revocation-form", async form => {
+            const request = {
+                userId: form.get("userId") || null,
+                organizationId: form.get("organizationId") || null,
+                clientApplicationId: form.get("clientApplicationId") || null,
+                reason: form.get("reason")
+            };
+            if (await revokeSessionsWithPreview(request)) setFlash("success", "Sessions revoked.");
+        });
+
+        document.querySelectorAll(".js-revoke-session").forEach(button => {
+            button.addEventListener("click", async () => {
+                try {
+                    const reason = window.prompt("Why are you revoking this session?", "admin_revoked");
+                    if (reason === null) return;
+                    if (await revokeSessionsWithPreview({ sessionId: button.dataset.sessionId, reason })) {
+                        setFlash("success", "Session revoked.");
+                    }
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                }
+                await render();
+            });
         });
     }
 

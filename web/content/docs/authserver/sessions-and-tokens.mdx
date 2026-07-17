@@ -132,6 +132,31 @@ await authService.LogoutAllAsync(userId, ct);
 
 `LogoutAllAsync` invalidates both OAuth sessions and hosted AuthPage sessions. A successful password reset does the same. Organization deactivation invalidates organization-bound OAuth and AuthPage sessions, and the SSO portal's organization-session revocation action invalidates matching-domain AuthPage sessions along with OAuth sessions.
 
+### Platform-admin revocation
+
+The dashboard's **Auth Server > Sessions** page supports incident-response revocation by session, user, organization, client application, or an AND-combination of those filters. It always previews the matched sessions and active refresh tokens before asking for confirmation. The Applications page uses the same preview-and-confirm workflow when an operator revokes a client's sessions.
+
+Trusted backend administration can use the same strongly typed service:
+
+```csharp
+var preview = await revocations.PreviewAsync(new SqlOSAdminSessionRevocationRequest(
+    OrganizationId: organizationId,
+    ClientApplicationId: clientApplicationId,
+    Reason: "incident-2026-07"), ct);
+
+var result = await revocations.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
+    OrganizationId: organizationId,
+    ClientApplicationId: clientApplicationId,
+    Reason: "incident-2026-07",
+    OperationId: preview.OperationId,
+    Confirm: true,
+    ExpectedMatchedSessions: preview.MatchedSessions), ct);
+```
+
+The authenticated admin API exposes `POST /sqlos/admin/auth/api/sessions/revocation/preview` and `POST /sqlos/admin/auth/api/sessions/revocation`. At least one selector is required, multiple selectors narrow the result, and execution requires `confirm: true`. Broad execution also requires `expectedMatchedSessions` from the preview; if the scope changes between preview and confirmation, the caller must preview again. A single operation is capped at 10,000 sessions; narrow broader incident queries instead of loading an unbounded tenant history. Revocation immediately marks matching sessions and active refresh tokens as revoked, removes cached refresh responses, preserves unrelated sessions, and writes an audit record containing the actor, reason, selectors, operation ID, and counts—never token material. Reusing an operation ID with a different scope or reason is rejected.
+
+Repeat execution is safe: already-revoked sessions and tokens are counted but not rewritten. On SQL Server, matching execution is serialized so concurrent incident responders cannot count the same active sessions as newly revoked.
+
 ## Session lifetimes
 
 Configured via the dashboard (Auth Server > Security) or the admin API:
@@ -161,8 +186,8 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 Idle timeout does not retroactively shorten a JWT that has already been issued. Session-aware access-token validation rejects a missing, revoked, or absolutely expired session; the access token's own `exp` remains its time boundary. Idle expiry is enforced on refresh, and a successful refresh extends the idle deadline without moving the absolute deadline.
 
-## Viewing active sessions
+## Viewing sessions
 
-The dashboard Sessions page shows all active sessions with authentication method, client, and expiration.
+The dashboard Sessions page shows session history with authentication method, client, expiration, revocation time, and revocation reason. Use its user, organization, and client filters to preview and revoke a bounded set during incident response.
 
 ![Active sessions](/docs/dashboard-sessions.png)
