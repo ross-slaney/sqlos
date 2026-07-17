@@ -115,6 +115,8 @@ public sealed class SqlOSClientSeedOptions
     public string? AccessMode { get; set; }
     /// <summary>Gets the ownership-safe application access assignments reconciled for this client.</summary>
     public List<SqlOSApplicationAssignmentSeedOptions> Assignments { get; } = [];
+    /// <summary>Optional unified OAuth client and FGA service-account declaration.</summary>
+    public SqlOSMachineClientSeedOptions? MachineClient { get; set; }
 
     public SqlOSClientSeedOptions AssignOrganization(string key, string organizationIdOrSlug, string access = SqlOSApplicationAssignmentAccess.Allowed, string? description = null)
         => Assign(key, SqlOSApplicationAssignmentPrincipalTypes.Organization, organizationIdOrSlug: organizationIdOrSlug, access: access, description: description);
@@ -150,6 +152,26 @@ public sealed class SqlOSClientSeedOptions
         return this;
     }
 }
+
+public sealed class SqlOSMachineClientSeedOptions
+{
+    public string? OrganizationId { get; set; }
+    public string? OrganizationSlug { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    /// <summary>Resolves secret material from the host secret provider. Never commit the returned value.</summary>
+    public Func<string?>? SecretResolver { get; set; }
+    /// <summary>Alternatively resolves an ASP.NET Core PasswordHasher-compatible hash.</summary>
+    public Func<string?>? SecretHashResolver { get; set; }
+    public List<SqlOSMachineClientGrantSeedOptions> Grants { get; } = [];
+
+    public SqlOSMachineClientSeedOptions Grant(string resourceId, string roleId, string? description = null)
+    {
+        Grants.Add(new SqlOSMachineClientGrantSeedOptions(resourceId, roleId, description));
+        return this;
+    }
+}
+
+public sealed record SqlOSMachineClientGrantSeedOptions(string ResourceId, string RoleId, string? Description = null);
 
 /// <summary>Declarative, stable-keyed assignment owned by a client seed.</summary>
 public sealed class SqlOSApplicationAssignmentSeedOptions

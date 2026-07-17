@@ -583,5 +583,55 @@ public static partial class EndpointRouteBuilderExtensions
                 return Results.BadRequest(new { message = ex.Message });
             }
         });
+
+        api.MapGet("/machine-clients", async (HttpContext context, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            return Results.Ok(await machines.ListAsync(cancellationToken));
+        });
+
+        api.MapPost("/machine-clients", async (HttpContext context, SqlOSCreateMachineClientRequest request, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await machines.CreateAsync(request, cancellationToken)); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapPost("/machine-clients/{clientId}/rotate", async (HttpContext context, string clientId, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await machines.RotateAsync(clientId, cancellationToken)); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapPost("/machine-clients/{clientId}/validate", async (HttpContext context, string clientId, MachineClientValidationRequest request, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await machines.ValidateCredentialAsync(clientId, request.ClientSecret, request.Resource, request.Scopes, cancellationToken)); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapPost("/machine-clients/{clientId}/revoke", async (HttpContext context, string clientId, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { await machines.RevokeAsync(clientId, cancellationToken); return Results.Ok(new { revoked = true }); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapPost("/machine-clients/{clientId}/grants", async (HttpContext context, string clientId, SqlOSMachineClientGrantRequest request, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { await machines.AddGrantAsync(clientId, request, cancellationToken); return Results.Ok(new { added = true }); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapDelete("/machine-clients/{clientId}/grants/{grantId}", async (HttpContext context, string clientId, string grantId, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { await machines.RemoveGrantAsync(clientId, grantId, cancellationToken); return Results.Ok(new { removed = true }); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
     }
+
+    private sealed record MachineClientValidationRequest(string ClientSecret, string Resource, IReadOnlyList<string> Scopes);
 }

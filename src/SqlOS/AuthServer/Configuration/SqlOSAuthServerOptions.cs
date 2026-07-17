@@ -112,6 +112,24 @@ public class SqlOSAuthServerOptions
         return this;
     }
 
+    public SqlOSAuthServerOptions SeedMachineClient(string clientId, Action<SqlOSClientSeedOptions, SqlOSMachineClientSeedOptions> configure)
+    {
+        if (string.IsNullOrWhiteSpace(clientId)) throw new InvalidOperationException("Machine clients require a stable client ID.");
+        var machine = new SqlOSMachineClientSeedOptions();
+        var client = new SqlOSClientSeedOptions
+        {
+            ClientId = clientId.Trim(),
+            Name = clientId.Trim(),
+            ClientType = "confidential",
+            RequirePkce = false,
+            EnableClientCredentials = true,
+            MachineClient = machine
+        };
+        configure(client, machine);
+        ClientSeeds.Add(client);
+        return this;
+    }
+
     /// <summary>
     /// Seed a social/OIDC login connection (Google, Microsoft, Apple, or custom). The connection is
     /// reconciled into the database on startup, matched by provider type (and display name for custom

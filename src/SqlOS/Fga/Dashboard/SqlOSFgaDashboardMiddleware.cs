@@ -807,6 +807,9 @@ public class SqlOSFgaDashboardMiddleware
                 s.Description,
                 s.LastUsedAt,
                 s.ExpiresAt,
+                s.ConfigurationOwner,
+                s.ConfigurationSourceKey,
+                s.ConfigurationOrphanedAt,
                 s.CreatedAt
             })
             .ToListAsync();

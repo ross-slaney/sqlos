@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -14,6 +15,44 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class ClientCredentialsIntegrationTests
 {
+    [TestMethod]
+    public async Task UnifiedMachineClient_RealSql_AtomicallyProvisionsRotatesAndRevokesProtocolIdentity()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var clientId = $"unified-{suffix}";
+        var audience = $"https://api.example.test/unified/{suffix}";
+        var context = AspireFixture.SharedContext;
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var machines = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        var protocol = new SqlOSClientCredentialsService(context, crypto, admin, options);
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Unified {suffix}", $"unified-{suffix}"));
+        var resourceTypeId = await context.Set<SqlOSFgaResourceType>().Select(x => x.Id).FirstAsync();
+        var role = new SqlOSFgaRole { Id = $"role_{suffix}", Key = $"runner-{suffix}", Name = "Runner" };
+        var resource = new SqlOSFgaResource { Id = $"res_{suffix}", ResourceTypeId = resourceTypeId, Name = "Jobs", IsActive = true };
+        context.Set<SqlOSFgaRole>().Add(role);
+        context.Set<SqlOSFgaResource>().Add(resource);
+        await context.SaveChangesAsync();
+
+        var created = await machines.CreateAsync(new SqlOSCreateMachineClientRequest(
+            clientId, "Unified worker", null, audience, ["jobs.run"], organization.Id, null, [new(resource.Id, role.Id)]));
+        var issued = await protocol.ExchangeAsync(clientId, created.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default);
+        (await crypto.ValidateAccessTokenAsync(issued.AccessToken, audience)).Should().NotBeNull();
+        var account = await context.Set<SqlOSFgaServiceAccount>().SingleAsync(x => x.ClientId == clientId);
+        (await context.Set<SqlOSFgaGrant>().AnyAsync(x => x.SubjectId == account.SubjectId && x.ResourceId == resource.Id && x.RoleId == role.Id)).Should().BeTrue();
+
+        var rotated = await machines.RotateAsync(clientId);
+        await FluentActions.Invoking(() => protocol.ExchangeAsync(clientId, created.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default))
+            .Should().ThrowAsync<SqlOSClientCredentialsException>();
+        (await protocol.ExchangeAsync(clientId, rotated.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default)).AccessToken.Should().NotBeNullOrWhiteSpace();
+
+        await machines.RevokeAsync(clientId);
+        (await crypto.ValidateAccessTokenAsync(issued.AccessToken, audience)).Should().BeNull();
+        JsonSerializer.Serialize(await context.Set<SqlOSAuditEvent>().Where(x => x.ActorId == clientId || x.DataJson!.Contains(clientId)).ToListAsync())
+            .Should().NotContain(created.ClientSecret).And.NotContain(rotated.ClientSecret);
+    }
+
     [TestMethod]
     public async Task ClientCredentials_RealSql_IssuesValidServiceTokenAndRevokesWithoutHumanSession()
     {

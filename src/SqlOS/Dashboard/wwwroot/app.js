@@ -27,6 +27,7 @@
     let latestSsoDraft = null;
     let latestSsoPortalSession = null;
     let latestScimToken = null;
+    let latestMachineClientSecret = null;
     const pagerState = new Map();
     let selectedClientId = null;
     let clientDraftState = null;
@@ -72,6 +73,7 @@
         users: { title: "Users", description: "Create users and bootstrap password credentials." },
         memberships: { title: "Memberships", description: "Assign users to organizations and manage roles." },
         clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
+        "machine-clients": { title: "Machine Clients", description: "Provision OAuth client credentials and FGA service accounts as one operational identity." },
         oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, GitHub, and custom providers for authserver-owned social login." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         mfa: { title: "MFA", description: "Configure authenticator app enrollment and second-factor requirements." },
@@ -1291,6 +1293,11 @@
 
         if (view === "clients") {
             await renderAuthClients(route);
+            return;
+        }
+
+        if (view === "machine-clients") {
+            await renderAuthMachineClients();
             return;
         }
 
@@ -3243,6 +3250,90 @@
             form?.scrollIntoView({ behavior: "smooth", block: "start" });
             form?.querySelector("input[name=\"clientId\"]")?.focus();
         }
+    }
+
+    async function renderAuthMachineClients() {
+        const config = authViews["machine-clients"];
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading machine clients...");
+        const [machines, organizations] = await Promise.all([
+            fetchJson(`${authApiBasePath}/machine-clients`),
+            fetchJson(`${authApiBasePath}/organizations?page=1&pageSize=100`)
+        ]);
+        const organizationRows = organizations.data || [];
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            ${latestMachineClientSecret ? `<section class="panel callout"><h2>Copy this secret now</h2><p>SqlOS stores only a slow hash and cannot show this value again.</p><div class="inline-code">${esc(latestMachineClientSecret.secret)}</div><p><strong>Client ID:</strong> ${esc(latestMachineClientSecret.clientId)}</p><button id="machine-secret-ack" type="button">I copied it</button></section>` : ""}
+            <div class="panel-grid">
+                <section class="panel">
+                    <h2>Create machine client</h2>
+                    <p>Creates the confidential OAuth client, FGA subject, credential hash, and initial grant atomically.</p>
+                    <form id="machine-client-form">
+                        <input name="clientId" maxlength="200" placeholder="nightly-worker" required>
+                        <input name="displayName" maxlength="200" placeholder="Nightly worker" required>
+                        <input name="description" maxlength="500" placeholder="Purpose (optional)">
+                        <input name="audience" maxlength="500" placeholder="https://api.example.com" required>
+                        <input name="scopes" placeholder="jobs.run jobs.read" required>
+                        <select name="organizationId"><option value="">No organization binding</option>${organizationRows.map(org => `<option value="${esc(org.id)}">${esc(org.name)}</option>`).join("")}</select>
+                        <input name="expiresAt" type="datetime-local" placeholder="Expiry (optional)">
+                        <input name="resourceId" placeholder="Initial FGA resource ID (optional)">
+                        <input name="roleId" placeholder="Initial FGA role ID (optional)">
+                        <button type="submit">Create and reveal secret once</button>
+                    </form>
+                </section>
+                <section class="panel">
+                    <h2>Worker configuration</h2>
+                    ${renderMetadataRows([
+                        { label: "Token endpoint", value: `${window.location.origin}${authServerBasePath}/token` },
+                        { label: "Authentication", value: "HTTP Basic (client_secret_basic)" },
+                        { label: "Grant", value: "client_credentials" }
+                    ])}
+                    <p>Code-owned clients should use <code>SeedMachineClient</code> and a host secret resolver. Dashboard-owned clients reveal a generated secret only at creation and rotation.</p>
+                </section>
+            </div>
+            <section class="panel">
+                <h2>Operational identities</h2>
+                ${machines.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Client / audience</th><th>Status</th><th>Ownership</th><th>Grants</th><th>Last use</th><th>Actions</th></tr></thead><tbody>${machines.map(machine => `<tr>
+                    <td>${esc(machine.displayName)}</td>
+                    <td><code>${esc(machine.clientId)}</code><br><small>${esc(machine.audience)}</small></td>
+                    <td>${machine.ready ? '<span class="status active">Ready</span>' : '<span class="status inactive">Unavailable</span>'}</td>
+                    <td>${esc(machine.configurationOwner)}${machine.configurationSourceKey ? `<br><small>${esc(machine.configurationSourceKey)}</small>` : ""}${machine.configurationOrphanedAt ? '<br><span class="status warning">Orphaned</span>' : ""}</td>
+                    <td>${esc(machine.grantCount)}</td><td>${machine.lastUsedAt ? esc(formatDate(machine.lastUsedAt)) : "Never"}</td>
+                    <td><button type="button" data-machine-test="${esc(machine.clientId)}" data-resource="${esc(machine.audience)}" data-scopes="${esc(machine.scopes.join(" "))}">Test</button> ${machine.configurationOwner === "dashboard" ? `<button type="button" data-machine-rotate="${esc(machine.clientId)}">Rotate</button>` : ""} <button type="button" data-machine-revoke="${esc(machine.clientId)}">Revoke</button></td>
+                </tr>`).join("")}</tbody></table></div>` : "<p>No machine clients yet.</p>"}
+                <p><a href="${esc(pathForRoute("fga-service-accounts"))}" data-dashboard-route="fga-service-accounts">Inspect service-account subjects and grant paths in FGA</a></p>
+            </section>`;
+
+        bindForm("machine-client-form", async form => {
+            const resourceId = String(form.get("resourceId") || "").trim();
+            const roleId = String(form.get("roleId") || "").trim();
+            if ((resourceId && !roleId) || (!resourceId && roleId)) throw new Error("Specify both initial resource and role IDs.");
+            const result = await fetchJson(`${authApiBasePath}/machine-clients`, { method: "POST", body: JSON.stringify({
+                clientId: form.get("clientId"), displayName: form.get("displayName"), description: form.get("description") || null,
+                audience: form.get("audience"), scopes: String(form.get("scopes") || "").split(/\s+/).filter(Boolean),
+                organizationId: form.get("organizationId") || null, expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
+                grants: resourceId ? [{ resourceId, roleId, description: "Initial dashboard grant" }] : []
+            }) });
+            latestMachineClientSecret = { clientId: result.client.clientId, secret: result.clientSecret };
+            await renderAuthMachineClients();
+        });
+        document.getElementById("machine-secret-ack")?.addEventListener("click", async () => { latestMachineClientSecret = null; await renderAuthMachineClients(); });
+        document.querySelectorAll("[data-machine-rotate]").forEach(button => button.addEventListener("click", async () => {
+            if (!window.confirm(`Rotate ${button.dataset.machineRotate}? The old secret stops working immediately.`)) return;
+            const result = await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineRotate)}/rotate`, { method: "POST" });
+            latestMachineClientSecret = { clientId: result.client.clientId, secret: result.clientSecret }; await renderAuthMachineClients();
+        }));
+        document.querySelectorAll("[data-machine-test]").forEach(button => button.addEventListener("click", async () => {
+            const secret = window.prompt(`Paste the current secret for ${button.dataset.machineTest}. It is sent only to this authenticated admin operation and is never stored or returned.`);
+            if (!secret) return;
+            const result = await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineTest)}/validate`, { method: "POST", body: JSON.stringify({ clientSecret: secret, resource: button.dataset.resource, scopes: button.dataset.scopes.split(/\s+/).filter(Boolean) }) });
+            setFlash(result.valid ? "success" : "error", result.valid ? "Credential, audience, scope, expiry, and client status are valid." : "Credential or binding is invalid."); await renderAuthMachineClients();
+        }));
+        document.querySelectorAll("[data-machine-revoke]").forEach(button => button.addEventListener("click", async () => {
+            if (!window.confirm(`Immediately revoke ${button.dataset.machineRevoke}? Existing database-validated service tokens will stop working.`)) return;
+            await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineRevoke)}/revoke`, { method: "POST" }); setFlash("success", "Machine client revoked."); await renderAuthMachineClients();
+        }));
     }
 
     async function renderAuthOidc() {
