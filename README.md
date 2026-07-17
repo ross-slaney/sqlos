@@ -10,6 +10,24 @@ SqlOS 3.23.0 provides a hosted OAuth server, branded login, organizations, sessi
 
 Start with one application and hosted login. Add SAML SSO, social login, Email OTP, audit logs, calendar connections, or hierarchical authorization when your product needs them.
 
+## One capability, three control planes
+
+SqlOS keeps infrastructure optional without making operations opaque. Administrative capabilities are designed as one underlying implementation exposed in three ways:
+
+### Code-first configuration
+
+Use strongly typed options and seeds when configuration should be reproducible in source control. Startup reconciliation is deterministic and idempotent: code-owned records can be kept aligned with code without silently overwriting records owned by dashboard operators.
+
+### Programmable administration
+
+Use authenticated services/SDKs and admin APIs to automate work such as creating connections, rotating credentials, previewing policies, triggering synchronization, and inspecting outcomes. These operations share the same validation, authorization, tenancy, secret handling, and audit behavior as every other control plane.
+
+### Dashboard workflow
+
+Use the embedded dashboard for complete operator workflows: setup, validation, testing, troubleshooting, rotation, disablement, audit history, ownership visibility, and copy-ready integration values. Code-owned records remain visible and testable while clearly identifying fields controlled by source code.
+
+The three paths do not implement separate policy. When a capability supports all three, code-first, API-created, and dashboard-created configuration must produce equivalent runtime behavior. Invisible security defaults remain automatic; they do not gain unnecessary switches merely to appear in the dashboard.
+
 ## Choose your starting point
 
 ### See SqlOS work first
