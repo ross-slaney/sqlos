@@ -155,7 +155,15 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSSsoConnections", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.IdentityProviderEntityId).HasMaxLength(500);
+            entity.Property(x => x.SingleSignOnUrl).HasMaxLength(2000);
             entity.Property(x => x.AcceptedAuthnContextClassRefsJson).HasDefaultValue("[]");
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL");
             entity.HasOne(x => x.Organization)
                 .WithMany(x => x.SsoConnections)
                 .HasForeignKey(x => x.OrganizationId)

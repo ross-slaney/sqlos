@@ -71,6 +71,7 @@ public class SqlOSAuthServerOptions
     public SqlOSSingleApplicationOptions? SingleApplication { get; private set; }
     public List<SqlOSClientSeedOptions> ClientSeeds { get; } = [];
     public List<SqlOSOidcConnectionSeedOptions> OidcConnectionSeeds { get; } = [];
+    public List<SqlOSSamlConnectionSeedOptions> SamlConnectionSeeds { get; } = [];
     public List<SqlOSScimConnectionSeedOptions> ScimConnectionSeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
@@ -149,6 +150,21 @@ public class SqlOSAuthServerOptions
         configure(seed);
         EnableScim = true;
         ScimConnectionSeeds.Add(seed);
+        return this;
+    }
+
+    /// <summary>Seed an organization-scoped upstream SAML identity-provider connection.</summary>
+    public SqlOSAuthServerOptions SeedSamlConnection(string key, Action<SqlOSSamlConnectionSeedOptions> configure)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("Seeded SAML connections require a stable key.");
+        }
+
+        var seed = new SqlOSSamlConnectionSeedOptions { Key = key.Trim() };
+        configure(seed);
+        EnableSaml = true;
+        SamlConnectionSeeds.Add(seed);
         return this;
     }
 

@@ -168,6 +168,11 @@ public sealed class SqlOSSsoConnection
     public bool AutoLinkByEmail { get; set; }
     public bool TrustUpstreamMfa { get; set; }
     public string AcceptedAuthnContextClassRefsJson { get; set; } = "[]";
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

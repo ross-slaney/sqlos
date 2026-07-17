@@ -769,22 +769,37 @@ public sealed partial class SqlOSAdminService
 
     public async Task<SqlOSSsoConnection> CreateSsoConnectionAsync(SqlOSCreateSsoConnectionRequest request, CancellationToken cancellationToken = default)
     {
+        _ = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(x => x.Id == request.OrganizationId, cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+        var normalized = NormalizeSamlConnection(
+            null,
+            request.IdentityProviderEntityId,
+            request.SingleSignOnUrl,
+            request.X509CertificatePem);
+        if (await _context.Set<SqlOSSsoConnection>().AnyAsync(
+            x => x.IdentityProviderEntityId == normalized.IdentityProviderEntityId,
+            cancellationToken))
+        {
+            throw new InvalidOperationException("A SAML connection already uses this IdP entity ID.");
+        }
         var connection = new SqlOSSsoConnection
         {
             Id = _cryptoService.GenerateId("sso"),
             OrganizationId = request.OrganizationId,
-            DisplayName = request.DisplayName,
-            IdentityProviderEntityId = request.IdentityProviderEntityId,
-            SingleSignOnUrl = request.SingleSignOnUrl,
-            X509CertificatePem = request.X509CertificatePem,
+            DisplayName = RequireSamlSeedValue(request.DisplayName, "SAML display name is required.", 200),
+            IdentityProviderEntityId = normalized.IdentityProviderEntityId,
+            SingleSignOnUrl = normalized.SingleSignOnUrl,
+            X509CertificatePem = normalized.X509CertificatePem,
             AutoProvisionUsers = request.AutoProvisionUsers,
             AutoLinkByEmail = request.AutoLinkByEmail,
             TrustUpstreamMfa = request.TrustUpstreamMfa,
             AcceptedAuthnContextClassRefsJson = JsonSerializer.Serialize(
                 NormalizeTrustValues(request.AcceptedAuthnContextClassRefs)),
-            EmailAttributeName = request.EmailAttributeName ?? "email",
-            FirstNameAttributeName = request.FirstNameAttributeName ?? "first_name",
-            LastNameAttributeName = request.LastNameAttributeName ?? "last_name",
+            EmailAttributeName = NormalizeSamlAttribute(request.EmailAttributeName, "email"),
+            FirstNameAttributeName = NormalizeSamlAttribute(request.FirstNameAttributeName, "first_name"),
+            LastNameAttributeName = NormalizeSamlAttribute(request.LastNameAttributeName, "last_name"),
+            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             IsEnabled = true
@@ -792,6 +807,7 @@ public sealed partial class SqlOSAdminService
 
         _context.Set<SqlOSSsoConnection>().Add(connection);
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync("saml.connection.created", "admin", null, organizationId: connection.OrganizationId, data: new { connection.Id, connection.IdentityProviderEntityId }, cancellationToken: cancellationToken);
         return connection;
     }
 
@@ -847,7 +863,15 @@ public sealed partial class SqlOSAdminService
             .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found.");
 
-        var metadata = ParseFederationMetadata(request.MetadataXml);
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(connection.ConfigurationOwner, "SAML connection metadata");
+
+        var metadata = NormalizeSamlConnection(request.MetadataXml, null, null, null);
+        if (await _context.Set<SqlOSSsoConnection>().AnyAsync(
+            x => x.Id != connection.Id && x.IdentityProviderEntityId == metadata.IdentityProviderEntityId,
+            cancellationToken))
+        {
+            throw new InvalidOperationException("A SAML connection already uses this IdP entity ID.");
+        }
         connection.IdentityProviderEntityId = metadata.IdentityProviderEntityId;
         connection.SingleSignOnUrl = metadata.SingleSignOnUrl;
         connection.X509CertificatePem = metadata.X509CertificatePem;
@@ -855,6 +879,7 @@ public sealed partial class SqlOSAdminService
         connection.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync("saml.connection.metadata-imported", "admin", null, organizationId: connection.OrganizationId, data: new { connection.Id, connection.IdentityProviderEntityId }, cancellationToken: cancellationToken);
         return connection;
     }
 
@@ -862,7 +887,7 @@ public sealed partial class SqlOSAdminService
     {
         try
         {
-            var metadata = ParseFederationMetadata(request.MetadataXml);
+            var metadata = NormalizeSamlConnection(request.MetadataXml, null, null, null);
             return new SqlOSSsoMetadataValidationResult(
                 true,
                 null,
@@ -874,6 +899,31 @@ public sealed partial class SqlOSAdminService
         {
             return new SqlOSSsoMetadataValidationResult(false, ex.Message, null, null, false);
         }
+    }
+
+    public async Task<SqlOSSsoConnection> SetSsoConnectionEnabledAsync(
+        string connectionId,
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await _context.Set<SqlOSSsoConnection>()
+            .FirstOrDefaultAsync(x => x.Id == connectionId, cancellationToken)
+            ?? throw new InvalidOperationException("SAML connection not found.");
+        if (enabled && GetSsoSetupStatus(connection) == "draft")
+        {
+            throw new InvalidOperationException("Import valid SAML metadata before enabling this connection.");
+        }
+        connection.IsEnabled = enabled;
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            enabled ? "saml.connection.enabled" : "saml.connection.disabled",
+            "admin",
+            null,
+            organizationId: connection.OrganizationId,
+            data: new { connection.Id, connection.ConfigurationOwner },
+            cancellationToken: cancellationToken);
+        return connection;
     }
 
     public async Task<SqlOSClientApplication> RequireClientAsync(
@@ -1735,7 +1785,12 @@ public sealed partial class SqlOSAdminService
                 x.AppleTeamId,
                 x.AppleKeyId,
                 x.IsEnabled,
-                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(x.ConfigurationOwner, x.ConfigurationSourceKey, x.LastReconciledAt, x.ConfigurationFingerprint, x.ConfigurationOrphanedAt),
+                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                    x.ConfigurationOwner,
+                    x.ConfigurationSourceKey,
+                    x.LastReconciledAt,
+                    x.ConfigurationFingerprint,
+                    x.ConfigurationOrphanedAt),
                 x.CreatedAt,
                 x.UpdatedAt
             })
@@ -1763,6 +1818,7 @@ public sealed partial class SqlOSAdminService
                 x.Organization!.PrimaryDomain,
                 x.AutoProvisionUsers,
                 x.AutoLinkByEmail,
+                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(x.ConfigurationOwner, x.ConfigurationSourceKey, x.LastReconciledAt, x.ConfigurationFingerprint, x.ConfigurationOrphanedAt),
                 SetupStatus = GetSsoSetupStatus(x),
                 ServiceProviderEntityId = GetServiceProviderEntityId(),
                 AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)
@@ -1791,6 +1847,11 @@ public sealed partial class SqlOSAdminService
                 PrimaryDomain = x.Organization!.PrimaryDomain,
                 x.AutoProvisionUsers,
                 x.AutoLinkByEmail,
+                x.ConfigurationOwner,
+                x.ConfigurationSourceKey,
+                x.LastReconciledAt,
+                x.ConfigurationFingerprint,
+                x.ConfigurationOrphanedAt,
                 SetupStatus = string.IsNullOrWhiteSpace(x.IdentityProviderEntityId) || string.IsNullOrWhiteSpace(x.SingleSignOnUrl) || string.IsNullOrWhiteSpace(x.X509CertificatePem)
                     ? "draft"
                     : x.IsEnabled ? "active" : "ready_to_activate"
@@ -1818,6 +1879,7 @@ public sealed partial class SqlOSAdminService
                 PrimaryDomain = x.PrimaryDomain,
                 x.AutoProvisionUsers,
                 x.AutoLinkByEmail,
+                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(x.ConfigurationOwner, x.ConfigurationSourceKey, x.LastReconciledAt, x.ConfigurationFingerprint, x.ConfigurationOrphanedAt),
                 x.SetupStatus,
                 ServiceProviderEntityId = serviceProviderEntityId,
                 AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)

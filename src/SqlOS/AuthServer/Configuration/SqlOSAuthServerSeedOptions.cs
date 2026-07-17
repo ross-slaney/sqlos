@@ -267,6 +267,30 @@ public sealed class SqlOSScimConnectionSeedOptions
     }
 }
 
+/// <summary>Declarative upstream SAML connection reconciled by a stable source key.</summary>
+public sealed class SqlOSSamlConnectionSeedOptions
+{
+    public string Key { get; set; } = string.Empty;
+    public string? OrganizationId { get; set; }
+    public string? OrganizationSlug { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    /// <summary>Optional federation metadata XML. Use this or the three explicit IdP fields below.</summary>
+    public string? MetadataXml { get; set; }
+    public string? IdentityProviderEntityId { get; set; }
+    public string? SingleSignOnUrl { get; set; }
+    public string? X509CertificatePem { get; set; }
+    public string? PrimaryDomain { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public bool AutoProvisionUsers { get; set; } = true;
+    public bool AutoLinkByEmail { get; set; }
+    public string? NameIdFormat { get; set; }
+    public string EmailAttributeName { get; set; } = "email";
+    public string FirstNameAttributeName { get; set; } = "first_name";
+    public string LastNameAttributeName { get; set; } = "last_name";
+    public bool TrustUpstreamMfa { get; set; }
+    public List<string> AcceptedAuthnContextClassRefs { get; } = [];
+}
+
 public sealed class SqlOSScimGroupMappingSeedOptions
 {
     public string SourceKey { get; set; } = string.Empty;

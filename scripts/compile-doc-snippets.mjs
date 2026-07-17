@@ -104,6 +104,13 @@ const snippetSpecs = [
     marker: "revocations.PreviewAsync(",
     wrap: asSessionRevocationProgram,
   },
+  {
+    name: "code-first SAML connection",
+    relativePath: "web/content/docs/authserver/saml-sso.mdx",
+    heading: "### Code-first connection",
+    marker: "SeedSamlConnection(",
+    wrap: asSamlSeedProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
@@ -259,6 +266,18 @@ SqlOSSessionRevocationService revocations = null!;
 var organizationId = "org_acme";
 var clientApplicationId = "client_portal";
 var ct = CancellationToken.None;
+
+${snippet}
+`;
+}
+
+function asSamlSeedProgram(snippet) {
+  return `using Microsoft.Extensions.Configuration;
+using SqlOS.AuthServer.Configuration;
+using SqlOS.Configuration;
+
+var builder = WebApplication.CreateBuilder(args);
+var options = new SqlOSOptions();
 
 ${snippet}
 `;

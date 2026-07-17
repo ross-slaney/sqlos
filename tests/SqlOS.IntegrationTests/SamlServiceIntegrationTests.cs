@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
@@ -24,6 +25,57 @@ public sealed class SamlServiceIntegrationTests
 {
     private const string TrustedSamlMfaContext =
         "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken";
+
+    [TestMethod]
+    public async Task SeededSamlConnection_CompletesRealSignedLogin()
+    {
+        await using var context = await AspireFixture.CreateIsolatedAuthContextAsync("SeededSamlLogin");
+        try
+        {
+            var optionsValue = new SqlOSAuthServerOptions
+            {
+                Issuer = AspireFixture.Options.Issuer,
+                BasePath = AspireFixture.Options.BasePath
+            };
+            var options = Options.Create(optionsValue);
+            var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+            var admin = new SqlOSAdminService(context, options, crypto);
+            var saml = new SqlOSSamlService(context, options, admin, crypto);
+            var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Seeded signed login", "seeded-signed-login"));
+            var client = await CreateSamlClientAsync(admin, "seeded-signed");
+            using var rsa = RSA.Create(2048);
+            var certificateRequest = new CertificateRequest("CN=SeededSamlLogin", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            using var certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+            optionsValue.SeedSamlConnection("signed-login", seed =>
+            {
+                seed.OrganizationId = organization.Id;
+                seed.DisplayName = "Seeded signed login";
+                seed.IdentityProviderEntityId = "urn:seeded-signed-login:idp";
+                seed.SingleSignOnUrl = "https://idp.example.test/sso";
+                seed.X509CertificatePem = certificate.ExportCertificatePem();
+                seed.AutoProvisionUsers = true;
+            });
+            await admin.UpsertSeededSamlConnectionsAsync();
+            var connection = await context.Set<SqlOSSsoConnection>().SingleAsync();
+            var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+            var response = BuildSignedSamlResponse(
+                certificate,
+                connection.IdentityProviderEntityId,
+                "seeded-user@example.test",
+                "Seeded",
+                "User",
+                flow);
+
+            var redirect = await saml.HandleAcsAsync(connection.Id, response, flow.RelayState, default);
+
+            redirect.Should().StartWith("https://client.example.local/callback");
+            (await context.Set<SqlOSUserEmail>().AnyAsync(x => x.NormalizedEmail == "SEEDED-USER@EXAMPLE.TEST")).Should().BeTrue();
+        }
+        finally
+        {
+            await context.Database.EnsureDeletedAsync();
+        }
+    }
 
     [TestMethod]
     public async Task SamlAuthnContext_WithoutTrustPolicy_DoesNotSatisfyMfa()

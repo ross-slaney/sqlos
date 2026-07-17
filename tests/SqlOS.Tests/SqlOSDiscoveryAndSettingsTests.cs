@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -28,7 +30,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             "Contoso SSO",
             "urn:test:idp",
             "https://idp.example.test/sso",
-            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            CreateCertificatePem(),
             true,
             false,
             "email",
@@ -67,7 +69,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             "Member SSO",
             "urn:member:idp",
             "https://idp.member.test/sso",
-            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            CreateCertificatePem(),
             false,
             true,
             "email",
@@ -96,7 +98,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             "No JIT SSO",
             "urn:nojit:idp",
             "https://idp.nojit.test/sso",
-            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            CreateCertificatePem(),
             false,
             true,
             "email",
@@ -133,7 +135,7 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             "Password SSO",
             "urn:password:idp",
             "https://idp.password.test/sso",
-            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            CreateCertificatePem(),
             false,
             false,
             "email",
@@ -207,5 +209,13 @@ public sealed class SqlOSDiscoveryAndSettingsTests
         userEmail.VerifiedAt = DateTime.UtcNow;
         await context.SaveChangesAsync();
         return user;
+    }
+
+    private static string CreateCertificatePem()
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSDiscoveryIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        return certificate.ExportCertificatePem();
     }
 }
