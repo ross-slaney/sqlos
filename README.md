@@ -6,7 +6,7 @@
 [![NuGet](https://img.shields.io/nuget/v/SqlOS)](https://www.nuget.org/packages/SqlOS)
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com)
 
-SqlOS 3.22.0 provides a hosted OAuth server, branded login, organizations, sessions, and optional fine-grained authorization to an ASP.NET Core application. It runs in your process and stores its data in your SQL Server database, so you do not need a separate identity or authorization service to get started.
+SqlOS 3.23.0 provides a hosted OAuth server, branded login, organizations, sessions, and optional fine-grained authorization to an ASP.NET Core application. It runs in your process and stores its data in your SQL Server database, so you do not need a separate identity or authorization service to get started.
 
 Start with one application and hosted login. Add SAML SSO, social login, Email OTP, audit logs, calendar connections, or hierarchical authorization when your product needs them.
 
@@ -35,10 +35,10 @@ Requirements:
 Install the package:
 
 ```bash
-dotnet add package SqlOS --version 3.22.0
+dotnet add package SqlOS --version 3.23.0
 ```
 
-> The `main` branch is staged for the 3.22.0 package contract. If NuGet does not list 3.22.0 yet, run the repository examples from source or wait for the package release; do not pair these source docs with an older package.
+> The `main` branch is staged for the 3.23.0 package contract. If NuGet does not list 3.23.0 yet, run the repository examples from source or wait for the package release; do not pair these source docs with an older package.
 
 Use `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare one application with `UseSingleApplication`:
 

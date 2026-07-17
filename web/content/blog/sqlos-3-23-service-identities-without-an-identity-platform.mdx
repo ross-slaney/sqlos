@@ -1,0 +1,92 @@
+---
+title: "SqlOS 3.23: Service Identities Without an Identity Platform"
+description: "Use OAuth client credentials and SqlOS FGA for background workers while keeping credentials, policy, and revocation inside your application and SQL Server."
+date: "2026-07-16"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "Client Credentials", "Service Accounts", "FGA", "SqlOS"]
+---
+
+SqlOS 3.23 adds a standards-based path for service-to-service authentication without turning an embedded .NET library into another identity platform you have to operate.
+
+A background worker can now exchange its own credential at the normal token endpoint, receive a short-lived audience-bound access token, and arrive at your API as an existing SqlOS FGA service-account subject. The secret hash, client policy, grants, and lifecycle state remain in your application's SQL Server database. There is no cloud key vault integration, extra authorization service, or new middleware order to learn.
+
+## The normal setup stays code-owned
+
+Explicitly seed a confidential client and opt it into the grant:
+
+```csharp
+options.AuthServer.ClientSeeds.Add(new SqlOSClientSeedOptions
+{
+    ClientId = "ledger-exporter",
+    Name = "Ledger Exporter",
+    Audience = "https://api.example.com/ledger",
+    ClientType = "confidential",
+    EnableClientCredentials = true,
+    RequirePkce = false,
+    AllowedScopes = ["ledger.export"]
+});
+```
+
+The opt-in matters. Existing browser and native clients do not silently become machine clients, public dynamic registration cannot request the grant, and discovery advertises it only when an active configured client can use it.
+
+Provision the corresponding FGA service account from a trusted administrative command. Generate at least 256 random bits, retain only the slow hash in SqlOS, and deliver the raw value directly to the worker's existing secret store:
+
+```csharp
+var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+await db.ProvisionServiceAccountSubjectAsync(
+    subjectId: "service_account::ledger-exporter",
+    displayName: "Ledger Exporter",
+    clientId: "ledger-exporter",
+    clientSecretHash: crypto.HashPassword(secret),
+    organizationId: "northwind",
+    cancellationToken: ct);
+
+await db.GrantRoleAsync(
+    "service_account::ledger-exporter",
+    "ledger::northwind",
+    "export_reader",
+    ct);
+await db.SaveChangesAsync(ct);
+```
+
+Do not print that secret or return it from a later read endpoint. SqlOS cannot recover it because the database contains only the password hash.
+
+## Exchange the credential using the OAuth protocol
+
+The worker authenticates with HTTP Basic and asks for the exact configured resource and an allowed scope:
+
+```bash
+curl -u 'ledger-exporter:YOUR_SECRET' \
+  -d 'grant_type=client_credentials' \
+  -d 'resource=https://api.example.com/ledger' \
+  -d 'scope=ledger.export' \
+  https://identity.example.com/sqlos/auth/token
+```
+
+The response contains a short-lived access token and no refresh token. The token carries `sub=service_account::ledger-exporter`, `client_id`, `azp`, `scope`, and `token_kind=service`. It deliberately has no human email or browser-session claim. Your API continues to validate the issuer and its own audience before applying the same FGA checks it uses for other subject types.
+
+SqlOS rejects credentials in the request body, scopes that were not seeded, and resources that do not exactly match the client's audience. Unknown and known client IDs also follow the same lookup and slow-hash verification shape so a caller cannot cheaply probe which machine identities exist.
+
+## Rotation and revocation are local operations
+
+Rotation is an explicit cutover: generate a new secret, replace the stored hash in one transaction, deliver the new value to the worker, and restart or reconfigure it. The previous credential immediately stops minting tokens.
+
+Already-issued access tokens remain useful only for their short lifetime. For immediate revocation, expire the service account; database-backed token validation and FGA lifecycle enforcement then reject the identity. Issuance, failed authentication, rotation, and revocation are written to the SqlOS audit log.
+
+There is no automatic dependency on Azure, AWS, or any platform key service. A deployment can still store the worker's one-time raw secret in whatever secret mechanism it already trusts, but SqlOS itself remains portable across modern .NET environments.
+
+## More security work in 3.23
+
+The release also closes several less-visible authorization and federation edges:
+
+- admin APIs now share one explicit authorization policy;
+- FGA hierarchy depth and lifecycle rules are consistent across point checks and SQL query filtering;
+- FGA SQL functions deploy safely across upgrades and reject cycles;
+- public throttling can coordinate through SQL across application instances;
+- AuthServer endpoint mapping is split into auditable protocol modules; and
+- upstream MFA is trusted only when both the provider and the individual claim mapping are explicitly configured.
+
+Each change went through an adversarial review and follow-up iteration with negative-path, protocol-level, and real-SQL integration coverage. The result is a higher security floor without adding production infrastructure to the everyday developer experience.
+
+For the complete setup, including a lower-level application-owned alternative, see [Background jobs with service accounts](/docs/guides/service-account-jobs).
