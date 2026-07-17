@@ -97,6 +97,13 @@ const snippetSpecs = [
     marker: "client.AssignOrganization(",
     wrap: asApplicationAccessSeedProgram,
   },
+  {
+    name: "platform-admin session revocation",
+    relativePath: "web/content/docs/authserver/sessions-and-tokens.mdx",
+    heading: "### Platform-admin revocation",
+    marker: "revocations.PreviewAsync(",
+    wrap: asSessionRevocationProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
@@ -239,6 +246,19 @@ function asApplicationAccessSeedProgram(snippet) {
 using SqlOS.AuthServer.Contracts;
 
 var auth = new SqlOSAuthServerOptions();
+
+${snippet}
+`;
+}
+
+function asSessionRevocationProgram(snippet) {
+  return `using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Services;
+
+SqlOSSessionRevocationService revocations = null!;
+var organizationId = "org_acme";
+var clientApplicationId = "client_portal";
+var ct = CancellationToken.None;
 
 ${snippet}
 `;

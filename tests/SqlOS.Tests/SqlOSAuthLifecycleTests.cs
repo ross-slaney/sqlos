@@ -423,6 +423,27 @@ public sealed class SqlOSAuthLifecycleTests
     }
 
     [TestMethod]
+    public async Task AdminRevocation_ImmediatelyInvalidatesAccessAndRefreshTokens()
+    {
+        await using var harness = await LifecycleHarness.CreateAsync();
+        var subject = await harness.CreateOrganizationSubjectAsync("admin-revoke");
+        var tokens = await harness.IssueTokensAsync(subject);
+        var revocations = new SqlOSSessionRevocationService(
+            harness.Context,
+            new SqlOS.AuditLogs.SqlOSAuditLogService(harness.Context, harness.Crypto));
+
+        await revocations.RevokeAsync(new SqlOSAdminSessionRevocationRequest(
+            SessionId: tokens.SessionId,
+            Reason: "compromised_device",
+            Confirm: true));
+
+        (await harness.Auth.ValidateAccessTokenAsync(tokens.AccessToken, subject.Client.Audience)).Should().BeNull();
+        await FluentActions.Invoking(() => harness.Auth.RefreshAsync(
+                new SqlOSRefreshRequest(tokens.RefreshToken, subject.Organization.Id)))
+            .Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [TestMethod]
     public async Task InactiveUser_PasswordAuthenticationUsesGenericFailure()
     {
         await using var harness = await LifecycleHarness.CreateAsync();

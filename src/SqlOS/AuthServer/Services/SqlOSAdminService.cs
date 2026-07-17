@@ -1848,6 +1848,7 @@ public sealed partial class SqlOSAdminService
                 x.IdleExpiresAt,
                 x.AbsoluteExpiresAt,
                 x.RevokedAt,
+                x.RevocationReason,
                 x.UserAgent,
                 x.IpAddress
             });
@@ -1875,6 +1876,7 @@ public sealed partial class SqlOSAdminService
                 x.IdleExpiresAt,
                 x.AbsoluteExpiresAt,
                 x.RevokedAt,
+                x.RevocationReason,
                 x.UserAgent,
                 x.IpAddress
             });

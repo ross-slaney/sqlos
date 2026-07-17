@@ -110,6 +110,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSDynamicClientRegistrationService>();
         services.AddScoped<SqlOSClientResolutionService>();
         services.AddScoped<SqlOSAdminService>();
+        services.AddScoped<SqlOSSessionRevocationService>();
         services.AddScoped<SqlOSAuthService>();
         services.AddScoped<SqlOSAuthPageSessionService>();
         services.AddScoped<SqlOSAuthorizationServerService>();
