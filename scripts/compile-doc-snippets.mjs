@@ -118,6 +118,13 @@ const snippetSpecs = [
     marker: "SeedMachineClient(",
     wrap: asMachineClientSeedProgram,
   },
+  {
+    name: "3.24 machine-client release example",
+    relativePath: "web/content/blog/sqlos-3-24-three-control-planes-one-auth-system.mdx",
+    heading: "## One machine client instead of four disconnected records",
+    marker: "SeedMachineClient(",
+    wrap: asMachineClientSeedProgram,
+  },
 ];
 
 function extractCsharpBlock({ relativePath, heading, marker }) {
