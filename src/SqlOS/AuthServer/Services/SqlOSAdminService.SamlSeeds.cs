@@ -71,7 +71,7 @@ public sealed partial class SqlOSAdminService
                 .FirstOrDefaultAsync(x => x.Id != (existing == null ? string.Empty : existing.Id)
                     && x.IdentityProviderEntityId == resolved.Definition.IdentityProviderEntityId,
                     cancellationToken);
-            if (existing == null && conflict != null)
+            if (conflict != null)
             {
                 throw new InvalidOperationException(
                     $"Cannot reconcile SAML seed '{resolved.SourceKey}' because an existing '{conflict.ConfigurationOwner}' connection uses the same IdP entity ID.");
@@ -83,6 +83,11 @@ public sealed partial class SqlOSAdminService
                     existing.ConfigurationSourceKey,
                     resolved.SourceKey,
                     $"SAML connection '{displayName}'");
+                if (!string.Equals(existing.OrganizationId, resolved.Organization.Id, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"SAML seed '{resolved.SourceKey}' is already bound to organization '{existing.OrganizationId}' and cannot be moved to '{resolved.Organization.Id}'. Use a new seed key or explicitly replace the connection.");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(seed.PrimaryDomain))

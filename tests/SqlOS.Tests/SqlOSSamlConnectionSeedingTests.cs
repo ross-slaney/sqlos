@@ -89,6 +89,45 @@ public sealed class SqlOSSamlConnectionSeedingTests
     }
 
     [TestMethod]
+    public async Task Seed_UpdateCannotCollideWithAnotherEntityIdOrMoveOrganizations()
+    {
+        await using var context = CreateContext();
+        var certificate = CreateCertificatePem();
+        var optionsValue = new SqlOSAuthServerOptions();
+        var options = Options.Create(optionsValue);
+        var admin = new SqlOSAdminService(context, options, TestCryptoService.Create(context, options));
+        var firstOrganization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("First", "first"));
+        var secondOrganization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Second", "second"));
+        optionsValue.SeedSamlConnection("first", seed =>
+        {
+            seed.OrganizationId = firstOrganization.Id;
+            seed.DisplayName = "First SSO";
+            seed.IdentityProviderEntityId = "urn:first:idp";
+            seed.SingleSignOnUrl = "https://first.example.test/sso";
+            seed.X509CertificatePem = certificate;
+        });
+        await admin.UpsertSeededSamlConnectionsAsync();
+        await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            secondOrganization.Id, "Second SSO", "urn:second:idp", "https://second.example.test/sso", certificate,
+            true, false, "email", "first_name", "last_name"));
+
+        optionsValue.SamlConnectionSeeds[0].IdentityProviderEntityId = "urn:second:idp";
+        await FluentActions.Invoking(() => admin.UpsertSeededSamlConnectionsAsync())
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*same IdP entity ID*");
+
+        optionsValue.SamlConnectionSeeds[0].IdentityProviderEntityId = "urn:first:idp";
+        optionsValue.SamlConnectionSeeds[0].OrganizationId = secondOrganization.Id;
+        await FluentActions.Invoking(() => admin.UpsertSeededSamlConnectionsAsync())
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot be moved*");
+
+        var original = await context.Set<SqlOSSsoConnection>().SingleAsync(x => x.ConfigurationSourceKey == "first");
+        original.OrganizationId.Should().Be(firstOrganization.Id);
+        original.IdentityProviderEntityId.Should().Be("urn:first:idp");
+    }
+
+    [TestMethod]
     public async Task Seed_RejectsExpiredCertificateAndMixedMetadataModes()
     {
         await using var context = CreateContext();
