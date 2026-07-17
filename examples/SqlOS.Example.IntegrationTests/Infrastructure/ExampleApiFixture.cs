@@ -57,12 +57,36 @@ public static class ExampleApiFixture
         return BuildFactory(configureBuilder);
     }
 
-    private static WebApplicationFactory<Program> BuildFactory(Action<IWebHostBuilder>? configureBuilder = null)
+    public static IsolatedExampleApiFactory CreateIsolatedFactory(Action<IWebHostBuilder>? configureBuilder = null)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+        {
+            throw new InvalidOperationException("ExampleApiFixture has not been initialized.");
+        }
+
+        var databaseName = $"SqlOSExample_{Guid.NewGuid():N}"[..30];
+        var connectionBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(_connectionString);
+        var masterBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(_connectionString) { InitialCatalog = "master" };
+        using (var connection = new Microsoft.Data.SqlClient.SqlConnection(masterBuilder.ConnectionString))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $"CREATE DATABASE [{databaseName}]";
+            command.ExecuteNonQuery();
+        }
+        connectionBuilder.InitialCatalog = databaseName;
+        var isolatedConnectionString = connectionBuilder.ConnectionString;
+        return new IsolatedExampleApiFactory(BuildFactory(configureBuilder, isolatedConnectionString), isolatedConnectionString);
+    }
+
+    private static WebApplicationFactory<Program> BuildFactory(
+        Action<IWebHostBuilder>? configureBuilder = null,
+        string? connectionString = null)
         => new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("environment", "Development");
-                builder.UseSetting("ConnectionStrings:DefaultConnection", _connectionString);
+                builder.UseSetting("ConnectionStrings:DefaultConnection", connectionString ?? _connectionString);
                 builder.UseSetting("SqlOS:Issuer", "https://localhost/sqlos/auth");
                 builder.UseSetting("SqlOS:Dashboard:AuthMode", "DevelopmentOnly");
                 builder.ConfigureServices(services =>
@@ -103,5 +127,30 @@ public static class ExampleApiFixture
             await _app.StopAsync();
             await _app.DisposeAsync();
         }
+    }
+}
+
+public sealed class IsolatedExampleApiFactory : IAsyncDisposable
+{
+    private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _connectionString;
+
+    internal IsolatedExampleApiFactory(WebApplicationFactory<Program> factory, string connectionString)
+    {
+        _factory = factory;
+        _connectionString = connectionString;
+    }
+
+    public HttpClient CreateClient(WebApplicationFactoryClientOptions options)
+        => _factory.CreateClient(options);
+
+    public async ValueTask DisposeAsync()
+    {
+        await _factory.DisposeAsync();
+        var dbOptions = new DbContextOptionsBuilder<ExampleAppDbContext>()
+            .UseSqlServer(_connectionString)
+            .Options;
+        await using var context = new ExampleAppDbContext(dbOptions);
+        await context.Database.EnsureDeletedAsync();
     }
 }

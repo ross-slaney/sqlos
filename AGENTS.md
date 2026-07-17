@@ -32,3 +32,12 @@ Administrative product capabilities should be designed as one domain model expos
 - Add parity tests that exercise realistic paths through each applicable control plane and prove they share behavior rather than merely sharing data shapes.
 - Document ownership and reconciliation semantics, especially how code-owned and dashboard-owned records coexist.
 - Internal secure defaults do not need artificial configuration or dashboard switches. Apply this standard to product capabilities operators manage, not invisible protocol hardening such as token validation rules.
+
+### Parity test checklist
+
+- Use `ControlPlaneParityHarness` for administrative capabilities supported by code, service/API, and dashboard control planes.
+- Arrange the same intent through the production seed, public administration service, and the exact dashboard HTTP route and payload.
+- Compare canonical redacted projections; assert ownership differences explicitly and do not snapshot generated IDs, timestamps, tokens, encrypted values, or secret hashes.
+- Exercise a real runtime boundary in addition to stored shape, plus invalid input, disable/re-enable, audit, and secret-reveal behavior where relevant.
+- Add a dashboard JavaScript contract assertion for new routes or payloads. Use real SQL integration coverage when persistence, reconciliation, locking, or concurrency is material.
+- State why a control plane is not applicable instead of inventing an operator switch for an internal security default.

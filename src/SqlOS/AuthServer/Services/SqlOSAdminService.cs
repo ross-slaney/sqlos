@@ -1161,6 +1161,7 @@ public sealed partial class SqlOSAdminService
             item.DuplicateFingerprint,
             item.DuplicateCount,
             item.LifecycleState,
+            item.Ownership,
             client.MetadataJson,
             RecentAuditEvents = recentAuditEvents
         };
