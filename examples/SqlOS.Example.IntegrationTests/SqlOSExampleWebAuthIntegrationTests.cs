@@ -105,7 +105,11 @@ public sealed class SqlOSExampleWebAuthIntegrationTests
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSEntraMetadata", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
-        var metadataXml = BuildFederationMetadata("https://sts.windows.net/test-tenant/", "https://login.microsoftonline.com/test-tenant/saml2", certificate);
+        var tenantId = Guid.NewGuid().ToString("N");
+        var metadataXml = BuildFederationMetadata(
+            $"https://sts.windows.net/{tenantId}/",
+            $"https://login.microsoftonline.com/{tenantId}/saml2",
+            certificate);
 
         var importResponse = await ExampleApiFixture.Client.PostAsJsonAsync($"/sqlos/admin/auth/api/sso-connections/{connectionId}/metadata", new
         {

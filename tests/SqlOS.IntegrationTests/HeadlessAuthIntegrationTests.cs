@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -850,13 +852,27 @@ public sealed class HeadlessAuthIntegrationTests
             "Headless SSO",
             $"urn:headless:{Guid.NewGuid():N}",
             "https://idp.example.test/sso",
-            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            CreateSamlCertificatePem(),
             true,
             true,
             "email",
             "first_name",
             "last_name"));
         return organization;
+    }
+
+    private static string CreateSamlCertificatePem()
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=HeadlessAuthIntegrationIdP",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(30));
+        return certificate.ExportCertificatePem();
     }
 
     private static string? ExtractCookieValue(string setCookieHeader, string cookieName)

@@ -1,0 +1,91 @@
+---
+title: "SqlOS 3.24: Three Control Planes, One Auth System"
+description: "Configure identity in code, operate it through authenticated APIs, and troubleshoot it in the dashboard without adding an external identity platform."
+date: "2026-07-17"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "SAML", "OTP", "Service Accounts", "Dashboard", "SqlOS"]
+---
+
+SqlOS has always aimed for a particular kind of developer experience: add one .NET library, keep identity data in your SQL Server database, and get a real OAuth and authorization system without adopting a second platform.
+
+That simplicity becomes harder to preserve as an identity product grows. Enterprise SAML, machine clients, application policy, revocation, and delivery diagnostics all need serious operational controls. The easy failure mode is to make every developer configure those controls manually—or to move them into a cloud service that becomes another production dependency.
+
+SqlOS 3.24 takes a different approach. Important identity features now share three explicit control planes:
+
+- **Code-first configuration** for reproducible, source-controlled desired state.
+- **Programmable administration** for authenticated services and admin APIs.
+- **Dashboard workflows** for setup, testing, troubleshooting, rotation, revocation, and audit visibility.
+
+The three paths converge on the same normalization, ownership, and runtime services. A normal application still starts without dashboard setup. Production operators gain the controls they need when they need them.
+
+## Code-owned configuration no longer means invisible configuration
+
+Startup declarations now carry explicit ownership metadata and stable source keys. Reconciliation is idempotent: an unchanged restart does not churn records or audit history. Dashboard-owned data is not silently adopted or overwritten. If a declaration disappears, SqlOS surfaces an orphan instead of deleting or disabling a working production integration.
+
+The dashboard can display code-owned records and their source keys, but it does not pretend they are ordinary editable rows. Operational actions that are safe and meaningful remain available; configuration that would be overwritten at the next restart points the operator back to code.
+
+This shared foundation now covers OAuth clients, application access assignments, OIDC, SCIM, MFA policy, SAML connections, and machine clients. It is also backed by control-plane parity tests so code, service/API, and dashboard paths cannot quietly normalize the same feature differently.
+
+## SAML can be declared without adding infrastructure
+
+An upstream SAML connection can now be seeded with a stable key, an organization ID or slug, metadata XML or explicit IdP settings, domain policy, attribute mapping, JIT behavior, and MFA trust policy.
+
+SqlOS validates HTTPS endpoints and the real X.509 signing certificate before accepting the declaration. Reconciliation will not adopt a dashboard-owned connection with the same entity ID, move a stable connection across organizations, or allow two providers to collide on an entity ID.
+
+There is no metadata-fetching daemon, cloud key service, or external control plane. The certificate is public verification material; the normal SqlOS signing keys remain protected locally through the existing Data Protection custody model.
+
+Operators can still disable a code-owned SAML connection during an incident. That emergency disable survives restart instead of being immediately undone by desired-state reconciliation.
+
+## OTP readiness without exposing provider secrets
+
+Email and phone OTP already worked through hosted AuthPage, headless flows, and the SDK. The missing piece was operational: an operator could not quickly answer whether delivery was configured, what was missing, or whether the provider would accept a test.
+
+The Security dashboard and authenticated admin API now return a redacted readiness model for both methods. It includes enabled state, provider type, bounded reason codes, exact host-configuration keys, and useful non-secret limits. ACS and Twilio credentials remain deployment-owned and never enter a dashboard response or database row.
+
+Explicit test delivery uses the same runtime abstractions as authentication, but creates no SqlOS user, session, or login challenge. Tests are limited per destination and per operator source through the distributed SQL-backed limiter. Recent diagnostics contain masked destinations and bounded provider outcomes.
+
+Phone verification also received an important protocol hardening: runtime checks are now bound to the exact stored Twilio verification SID. A code created by an administrative test—or by any other verification for the same phone number—cannot satisfy a different SqlOS login challenge.
+
+## One machine client instead of four disconnected records
+
+SqlOS 3.23 introduced OAuth client credentials for service identities. Version 3.24 completes the administrative model around it.
+
+`SeedMachineClient` declares the confidential OAuth client, FGA service-account subject, organization, audience, scopes, expiry, and initial grants together. The secret comes from an application-supplied resolver, so it can use the deployment secret mechanism you already trust:
+
+```csharp
+options.AuthServer.SeedMachineClient("ledger-exporter", (client, machine) =>
+{
+    client.Name = "Ledger Exporter";
+    client.Audience = "https://api.example.com/ledger";
+    client.AllowedScopes = ["ledger.export"];
+
+    machine.OrganizationSlug = "northwind";
+    machine.SecretResolver = () =>
+        builder.Configuration["SqlOS:MachineClients:LedgerExporter:Secret"];
+    machine.Grant("ledger::northwind", "export_reader");
+});
+```
+
+SqlOS stores only the slow hash. Missing or malformed secret material fails closed, and an unchanged restart neither generates a credential nor recreates grants.
+
+The dashboard/API path creates the same runtime identity atomically and reveals a generated secret once. Operators can test the credential plus its exact audience and scopes without issuing a token, rotate it with immediate old-secret rejection, inspect its FGA relationship, or revoke it so database-validated issued tokens stop working. Code-owned clients remain visible and testable without becoming silently dashboard-owned.
+
+## Revocation and application policy are operational features
+
+Application access policy now has a complete code-first declaration for organization, user, group, service-account, agent, and role assignments. Ownership and orphan state are visible in the API and dashboard.
+
+Platform administrators also have a complete session and refresh-token revocation workflow. Preview and execute are scope-bound and audited; operation identifiers cannot be reused against another target. User, organization, application, and session views expose the appropriate action without requiring direct SQL or a custom maintenance endpoint.
+
+## Security work should preserve the reason people chose the library
+
+Every feature in this release went through an adversarial review after implementation, with the findings and fixes recorded on its pull request. The tests include real SQL concurrency, real signed SAML login, a real client-credentials token lifecycle, distributed throttling across application contexts, dashboard/API authorization, redaction, and compiled documentation examples.
+
+The important outcome is not merely more controls. It is that the controls live behind the same ergonomic boundary as the rest of SqlOS:
+
+- no required Azure, AWS, or hosted identity dependency;
+- no setup tax for applications that do not use the feature;
+- no plaintext credential recovery path;
+- no separate policy engine for the dashboard; and
+- no hidden difference between what code declares and what the runtime enforces.
+
+Start with [Add SqlOS to your app](/docs/quickstarts/add-to-app). For the new operational paths, continue with [SAML SSO](/docs/authserver/saml-sso), [Email OTP](/docs/authserver/email-otp), [Phone OTP](/docs/authserver/phone-otp), or [Background jobs with service accounts](/docs/guides/service-account-jobs).

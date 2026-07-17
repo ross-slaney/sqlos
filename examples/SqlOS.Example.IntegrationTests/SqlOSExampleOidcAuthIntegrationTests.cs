@@ -652,8 +652,9 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         var request = new CertificateRequest("CN=SqlOSEntraMetadata", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
         var rawCertificate = Convert.ToBase64String(certificate.Export(X509ContentType.Cert));
+        var tenantId = Guid.NewGuid().ToString("N");
         var metadataXml = $"""
-        <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://sts.windows.net/test-tenant/">
+        <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://sts.windows.net/{tenantId}/">
           <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
             <KeyDescriptor use="signing">
               <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
@@ -662,7 +663,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
                 </X509Data>
               </KeyInfo>
             </KeyDescriptor>
-            <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://login.microsoftonline.com/test-tenant/saml2" />
+            <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://login.microsoftonline.com/{tenantId}/saml2" />
           </IDPSSODescriptor>
         </EntityDescriptor>
         """;
