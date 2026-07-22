@@ -10,6 +10,12 @@ SqlOS 3.24.0 provides a hosted OAuth server, branded login, organizations, sessi
 
 Start with one application and hosted login. Add SAML SSO, social login, Email OTP, audit logs, calendar connections, or hierarchical authorization when your product needs them.
 
+## Roadmap
+
+[![SqlOS Value Table showing the highest-value open roadmap items](https://ross-slaney.github.io/sqlos/roadmap.svg)](https://github.com/users/ross-slaney/projects/1/views/5)
+
+[Open the interactive Value Table](https://github.com/users/ross-slaney/projects/1/views/5) to see every item, filter the roadmap, or inspect an issue.
+
 ## One capability, three control planes
 
 SqlOS keeps infrastructure optional without making operations opaque. Administrative capabilities are designed as one underlying implementation exposed in three ways:
