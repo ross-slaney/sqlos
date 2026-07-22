@@ -92,11 +92,11 @@
 % ABSTRACT
 % ===========================================================================
 \begin{abstract}
-Enterprise applications must answer two authorization questions: ``can this principal act on this resource?'' (point check) and ``which resources can this principal access, filtered, sorted, and paginated?'' (list filtering). Point checks are boolean decisions with well-understood evaluation strategies. List filtering is harder: it requires composing authorization decisions with application-defined filtering, sorting, and pagination into a single efficient query. We present SHRBAC (Scoped Hierarchical Role-Based Access Control), a formal authorization model whose structural constraints---tree-structured resources, flat roles, non-recursive groups, and scoped temporal grants---make enforcement a composable database predicate with bounded cost. Polymorphic principals allow the same grant semantics to cover human users, service accounts, and autonomous agents; agent support is an application of the model rather than a separate agent-specific mechanism. We formalize the model, prove soundness and completeness of an inline Table-Valued Function (TVF) enforcement, and show that under cursor pagination, bounded principal sets and grant multiplicity, and indexed nested-loop plans, per-page cost is $O(k \cdot D)$. Empirical evaluation on SQL Server 2022 with 1.2M resource nodes ($D{=}5$) and 1.5M resource nodes ($D{=}10$) confirms $N$-independence across three orders of magnitude in the evaluated dense-access workloads.
+Enterprise applications must answer two authorization questions: ``can this principal act on this resource?'' (point check) and ``which resources can this principal access, filtered, sorted, and paginated?'' (list filtering). The latter is harder: it requires composing authorization with application-defined filtering, sorting, and pagination into a single efficient query. We present SHRBAC (Scoped Hierarchical Role-Based Access Control), an authorization model whose structural constraints---tree-structured resources, flat roles, non-recursive groups, and scoped temporal grants---make enforcement a composable database predicate with bounded cost, and whose polymorphic principals extend the same grant semantics to human users, service accounts, and autonomous agents. We formalize the model, prove soundness and completeness of an inline Table-Valued Function (TVF) enforcement, and show that under cursor pagination, bounded principal sets and grant multiplicity, and indexed nested-loop plans, per-page cost is $O(k \cdot D)$. Empirical evaluation on SQL Server 2022 at 1.2M resource nodes ($D{=}5$) and 1.5M ($D{=}10$) confirms $N$-independence across three orders of magnitude in dense-access workloads.
 \end{abstract}
 
 \begin{IEEEkeywords}
-access control, RBAC, authorization, query composition, table-valued function, resource hierarchy, autonomous principals
+access control, RBAC, authorization, query composition, autonomous principals
 \end{IEEEkeywords}
 
 % ===========================================================================
@@ -113,102 +113,25 @@ Modern B2B SaaS applications require authorization systems that answer two funda
 \item \textbf{List filtering}: ``What resources of type $T$ can principal $p$ access, given search criteria $C$, sorted by $S$, paginated to page $k$?''---a set-returning query integrated with application data.
 \end{enumerate}
 
-The first question is well-understood. Google's Zanzibar~\cite{zanzibar} and its descendants handle millions of point checks per second through graph traversal and caching.
+The first is well-understood: Google's Zanzibar~\cite{zanzibar} and its descendants handle millions of point checks per second through graph traversal and caching. The second---the \textbf{list filtering problem}---is trivial for flat access models (\texttt{WHERE tenant\_id = @currentTenant} composes directly) but becomes substantially harder when access derives from grants at varying hierarchy levels, resolved through group memberships, under temporal constraints.
 
-The second question---the \textbf{list filtering problem}---is well-solved for flat access models. A single-tenant predicate (\texttt{WHERE tenant\_id = @currentTenant}) composes trivially. However, when access is determined by grants at varying levels of a resource hierarchy, resolved through group memberships, and subject to temporal constraints, list filtering becomes substantially more complex.
+Increasingly, principals are not only human users but \textbf{autonomous AI agents} that enumerate and filter large resource sets in loops. SHRBAC introduces no agent-specific policy semantics; it treats agents as first-class principals, so the same scoped, temporal grant model applies to human and autonomous callers, and the \textbf{principle of least privilege}~\cite{saltzer} is enforced structurally: narrow grants (specific subtree, limited role, bounded duration) guard against broad, long-lived authority.
 
-Increasingly, principals are not only human users but \textbf{autonomous AI agents} that issue queries and perform actions over enterprise data. These agents can operate in loops, enumerating and filtering large resource sets programmatically. SHRBAC does not introduce agent-specific policy semantics; it treats agents as first-class principals so that the same scoped and temporal grant model applies to human and autonomous callers. For such callers, efficient list filtering is not merely a user-experience optimization---it bounds the cost of repeated resource enumeration. An agent that makes $N$ external authorization calls per page degrades linearly; an agent whose authorization is a composable database predicate operates at constant cost per page under the assumptions stated in Section~\ref{sec:complexity}.
+When authorization logic resides outside the database, an impedance mismatch arises. Industry bridges this gap through ID lookups, batch post-filtering, partial policy evaluation, or materialized permission views---each trading scalability, consistency, or complexity. SHRBAC instead chooses structural constraints so that per-page enforcement cost is $O(k \cdot D)$ under bounded local parameters---linear in page size and tree depth, independent of total resource count $N$ and policy set size.
 
-Beyond efficient querying, the authorization model must enforce the \textbf{principle of least privilege}~\cite{saltzer}: principals, whether human or autonomous, should operate with minimum necessary authority scoped to specific resources and time windows. For agents, narrow grants (specific subtree, limited role, bounded duration) provide an operational guardrail against broad, long-lived authority.
-
-When authorization logic resides outside the database, an impedance mismatch arises. Industry bridges this gap through ID lookups, batch post-filtering, partial policy evaluation, or materialized permission views---each trading scalability, consistency, or complexity. Some of these approaches are SQL-implementable, but they require runtime predicate construction that changes shape as the policy set evolves.
-
-SHRBAC takes a different approach: the model's structural constraints are chosen so that per-page enforcement cost is $O(k \cdot D)$ under bounded local parameters---linear in page size and tree depth, independent of total resource count $N$ and overall policy set size (Fig.~\ref{fig:enforcement}).
-
-\textbf{Notation.} Throughout the paper, $N$ denotes total entities or resource nodes under evaluation, $k$ the requested page size, $D$ the maximum resource-tree depth, $M=|\mathit{resolve}(p)|$ the number of effective principals for caller $p$, $G_{\max}$ the maximum active grant multiplicity for the same principal-resource pair, and $\sigma$ the selectivity of authorized rows. Model-level symbols use math notation; database artifacts such as \texttt{Resources}, \texttt{Grants}, and \texttt{fn\_IsResourceAccessible} appear in monospace.
-
-% ---- FIGURE: Enforcement artifact vs policy count ----
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    width=\columnwidth,
-    height=5.0cm,
-    xlabel={Active grants (policy count)},
-    ylabel={Predicate terms in WHERE clause},
-    xmin=0, xmax=1100,
-    ymin=0, ymax=1100,
-    xtick={0,250,500,750,1000},
-    ytick={0,250,500,750,1000},
-    legend style={at={(0.03,0.97)}, anchor=north west, font=\scriptsize, draw=gray!50},
-    grid=major,
-    grid style={gray!20},
-    every axis label/.style={font=\small},
-    every tick label/.style={font=\scriptsize},
-    clip=false,
-]
-
-% Runtime-compiled: predicate grows linearly with grants
-\addplot[
-    color=red!70!black,
-    thick,
-    mark=square*,
-    mark size=2pt,
-    mark repeat=1,
-] coordinates {
-    (10, 10)
-    (100, 100)
-    (500, 500)
-    (1000, 1000)
-};
-\addlegendentry{Runtime-compiled predicate}
-
-% SHRBAC: constant — always 1 TVF invocation
-\addplot[
-    color=blue!70!black,
-    thick,
-    mark=*,
-    mark size=2pt,
-    mark repeat=1,
-] coordinates {
-    (10, 1)
-    (100, 1)
-    (500, 1)
-    (1000, 1)
-};
-\addlegendentry{SHRBAC TVF (fixed artifact)}
-
-% Annotation on the growing line
-\node[font=\tiny, text=red!70!black, anchor=south west, text width=2.2cm] at (axis cs:550,600) {predicate must be recompiled per query};
-
-% Annotation on the flat line
-\node[font=\tiny, text=blue!70!black, anchor=north west, text width=2.8cm] at (axis cs:350,80) {same \texttt{EXISTS(TVF(\ldots))} --- grants are data rows, not code};
-
-\end{axis}
-\end{tikzpicture}
-\caption{Enforcement artifact complexity as the policy set grows. Runtime-compiled approaches emit a WHERE clause whose size is proportional to the number of active grants. SHRBAC's TVF is a single, fixed predicate defined at schema time---grants are rows in a table, not terms in a predicate. The enforcement artifact never changes.}
-\label{fig:enforcement}
-\end{figure}
+\textbf{Notation.} Throughout the paper, $N$ denotes total entities or resource nodes under evaluation, $k$ the requested page size, $D$ the maximum resource-tree depth, $M=|\mathit{resolve}(p)|$ the number of effective principals for caller $p$, $G_{\max}$ the maximum active grant multiplicity for the same principal-resource pair, and $\sigma$ the selectivity of authorized rows.
 
 \subsection{Contributions}
 
 \begin{enumerate}
-\item \textbf{Constraint-driven model with composability guarantee.} We introduce SHRBAC, whose four structural constraints---tree-structured resources, non-recursive principal groups, flat roles, and scoped grants (principal $\times$ role $\times$ resource $\times$ time)---are deliberately chosen so that enforcement admits a fixed, schema-level relational artifact with bounded cost independent of policy set size.
+\item \textbf{Constraint-driven model.} We introduce SHRBAC, whose four structural constraints---tree-structured resources, non-recursive principal groups, flat roles, and scoped temporal grants (principal $\times$ role $\times$ resource $\times$ time)---are deliberately chosen so that enforcement admits a fixed, schema-level relational artifact with bounded cost independent of policy set size. Polymorphic principals make users, groups, service accounts, and autonomous agents first-class grant recipients with least-privilege, time-bounded authority.
 
-\item \textbf{Formalization with two-dimensional resolution.} Access evaluation performs upward traversal over a bounded-depth resource tree and outward expansion over effective principals (humans, groups, and agents). We prove soundness and completeness and bound per-row cost at $O(D \cdot M \cdot G_{\max})$. Unlike prior hierarchical RBAC models, the cost structure is part of the model definition.
+\item \textbf{Formalization with proved enforcement.} Access evaluation is two-dimensional---upward over a bounded-depth resource tree, outward over effective principals. We realize enforcement as a single inline Table-Valued Function \texttt{EXISTS} predicate defined at schema time and prove it sound and complete; grants are data rows, not predicate terms, requiring no runtime compilation, post-filtering, or external graph traversal.
 
-\item \textbf{Fixed inline TVF enforcement.} In the lineage of Stonebraker~\cite{stonebraker}, we realize enforcement as a parameterized inline Table-Valued Function---a single \texttt{EXISTS} predicate defined at schema time whose shape is constant regardless of policy size. Grants are data rows, not predicate terms, requiring no runtime compilation, post-filtering, or external graph traversal.
+\item \textbf{Complexity theorem for list filtering.} Per-row cost is bounded at $O(D \cdot M \cdot G_{\max})$; under cursor pagination, per-page cost is $O(k \cdot D)$ when $M$ and $G_{\max}$ are bounded---independent of resource count $N$, policy set size, and page depth. This formal bound for the list-filtering problem is absent in prior RBAC, ABAC, and ReBAC models.
 
-\item \textbf{Complexity theorem for list filtering.} Under cursor pagination, per-page cost is $O(k \cdot D)$ when $M$ and $G_{\max}$ are bounded---independent of resource count $N$, policy set size, and page depth. This formal bound for the list-filtering problem is absent in prior RBAC, ABAC, and ReBAC models.
-
-\item \textbf{Production-scale empirical validation.} At 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$), we confirm $N$-independence across three orders of magnitude, linear scaling in $k$ and $D$, constant per-CTE-hop cost (${\sim}$0.029ms), cursor-depth independence, and grant-breadth independence in tested dense-access workloads.
-
-\item \textbf{Polymorphic principal model for autonomous callers.} SHRBAC includes autonomous agents as first-class grant recipients with least-privilege, time-bounded authority. This contribution is intentionally scoped: agents use the same grant relation as other principals, so agent-driven list queries inherit the same database-native enforcement guarantees.
+\item \textbf{Production-scale empirical validation.} At 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$), we confirm $N$-independence across three orders of magnitude, linear scaling in $k$ and $D$, constant per-CTE-hop cost, cursor-depth independence, and grant-breadth independence in tested dense-access workloads.
 \end{enumerate}
-
-\subsection{Paper Organization}
-
-Section~\ref{sec:related} surveys related work. Sections~\ref{sec:model}--\ref{sec:algorithm} define SHRBAC from the access-control model perspective: principals, resources, grants, and access decisions. Sections~\ref{sec:tvf}--\ref{sec:empirical} then switch to the database perspective: relational enforcement, query composition, complexity, and empirical behavior. Section~\ref{sec:discussion} discusses design constraints, autonomous-principal applications, and limitations. Section~\ref{sec:conclusion} concludes.
 
 % ===========================================================================
 % 2. BACKGROUND AND RELATED WORK
@@ -222,25 +145,15 @@ Sandhu et al.~\cite{rbac96} defined the RBAC96 family: RBAC0 (core), RBAC1 (hier
 
 \subsection{Hierarchical Models}
 
-Three models extend RBAC with organizational or resource structure:
-
-\textbf{ROBAC} (Zhang et al.~\cite{robac}) introduced the (user, role, organization) triple with an organization hierarchy where grants cascade from parent to child organizations. SHRBAC's (principal, role, resource) grant is structurally identical, but ROBAC defines a policy semantics without constraining the model to admit a fixed, schema-level enforcement artifact with bounded evaluation cost. SHRBAC's novelty is not the hierarchy alone, but the alignment of model constraints with relational query planning guarantees---extending the subject to polymorphic principals and providing a concrete enforcement mechanism whose per-row cost is analyzable.
-
-\textbf{RRBAC} (Solanki et al.~\cite{rrbac}) explicitly formalized resource hierarchies with grant cascade semantics, but did not address polymorphic principals, query composition, or enforcement mechanisms.
-
-\textbf{OrBAC} (Kalam et al.~\cite{orbac}) generalized RBAC with five hierarchies (organizations, roles, activities, views, contexts). SHRBAC is a practical engineering subset---OrBAC's expressiveness exceeds what TVF-based enforcement requires.
+\textbf{ROBAC} (Zhang et al.~\cite{robac}) introduced the (user, role, organization) triple with grants cascading down an organization hierarchy. SHRBAC's (principal, role, resource) grant is structurally identical, but ROBAC defines a policy semantics without constraining the model to admit a fixed enforcement artifact with bounded evaluation cost. SHRBAC's novelty is the alignment of model constraints with relational query-planning guarantees, extended to polymorphic principals. \textbf{RRBAC} (Solanki et al.~\cite{rrbac}) formalized resource hierarchies with grant cascade but did not address polymorphic principals, query composition, or enforcement mechanisms. \textbf{OrBAC} (Kalam et al.~\cite{orbac}) generalized RBAC with five hierarchies; its expressiveness exceeds what TVF-based enforcement requires---SHRBAC is a practical engineering subset.
 
 \subsection{Query Modification and Enforcement}
 
-Stonebraker and Wong~\cite{stonebraker} introduced query modification for INGRES, transparently rewriting queries to enforce access control. This is the ancestor of Oracle VPD, SQL Server RLS, and PostgreSQL RLS. Rizvi et al.~\cite{rizvi} distinguished the \emph{Truman model} (silent filtering) from the \emph{Non-Truman model} (query rejection). SHRBAC implements the Truman model. Pappachan et al.~\cite{sieve} showed that naive predicate injection does not scale with thousands of policies; SHRBAC avoids this because the predicate is always a single TVF invocation regardless of policy count.
+Stonebraker and Wong~\cite{stonebraker} introduced query modification for INGRES---the ancestor of Oracle VPD and SQL Server/PostgreSQL row-level security. Rizvi et al.~\cite{rizvi} distinguished the \emph{Truman model} (silent filtering, which SHRBAC implements) from the \emph{Non-Truman model} (query rejection). Pappachan et al.~\cite{sieve} showed that naive predicate injection does not scale with thousands of policies; SHRBAC's predicate is a single TVF invocation regardless of policy count.
 
-\subsection{Zanzibar and ReBAC}
+\subsection{Zanzibar, ReBAC, and List Filtering}
 
-Google's Zanzibar~\cite{zanzibar} uses relationship tuples with a userset rewrite system. Fong~\cite{fong} formalized ReBAC using modal logic. Zanzibar's \texttt{tuple\_to\_userset} handles resource hierarchies through general graph traversal. SHRBAC constrains resources to a tree (not an arbitrary graph) and uses typed roles rather than arbitrary relation composition---this constraint is what makes TVF enforcement tractable, as tree traversal has bounded depth while general graph traversal does not.
-
-\subsection{The List Filtering Problem}
-
-Despite its practical importance, composing authorization into list queries has no canonical academic name. AuthZed calls it ``ACL-aware filtering''~\cite{authzed}, Oso calls it ``list filtering''~\cite{oso}, Cerbos frames it as a ``query plan'' problem~\cite{cerbos}. SpiceDB's documentation reveals the architectural tension: at scale, they recommend progressively more complex strategies (LookupResources $\to$ CheckBulkPermissions $\to$ Materialize). SHRBAC is designed so that the integration surface is a relational predicate---composable by construction.
+Google's Zanzibar~\cite{zanzibar} uses relationship tuples with a userset rewrite system; Fong~\cite{fong} formalized ReBAC using modal logic. Zanzibar's \texttt{tuple\_to\_userset} handles resource hierarchies through general graph traversal. SHRBAC constrains resources to a tree and uses typed roles rather than arbitrary relation composition---tree traversal has bounded depth, which is what makes TVF enforcement tractable. Composing authorization into list queries has no canonical academic name: vendors call it ``ACL-aware filtering,'' ``list filtering,'' or a ``query plan'' problem~\cite{vendor-docs}. At scale, SpiceDB recommends progressively more complex strategies (LookupResources $\to$ CheckBulkPermissions $\to$ Materialize). SHRBAC is designed so that the integration surface is a relational predicate---composable by construction.
 
 \subsection{Summary of Gaps}
 
@@ -276,29 +189,11 @@ Formal enforcement     & No & No & No & No & Graph trav. & Query mod. \\
 
 \subsection{Basic Sets}
 
-\begin{itemize}
-\item $\mathcal{P}$ --- a finite set of \emph{principals}. Each principal has a type $\tau(p) \in \{\text{user}, \text{group}, \text{service\_account}, \text{agent}\}$. An agent principal represents an autonomous process---an AI agent, orchestration pipeline, or background service---that issues queries and mutations on behalf of an organization. Agents participate in the same grant relation as human users, subject to the same scoping and temporal constraints.
-\item $\mathcal{R}$ --- a finite set of \emph{roles}.
-\item $\mathit{PERM}$ --- a finite set of \emph{permissions}. Each permission is an atomic capability (e.g., \textsc{project\_view}, \textsc{subcontractor\_edit}).
-\item $\mathit{RES}$ --- a finite set of \emph{resources}, forming nodes in a rooted tree.
-\item $\mathit{RT}$ --- a finite set of \emph{resource types} (e.g., \texttt{portal\_root}, \texttt{agency}, \texttt{project}). Each resource has a type: $\mathit{type}: \mathit{RES} \to \mathit{RT}$.
-\item $\mathcal{T}$ --- the time domain (UTC timestamps).
-\end{itemize}
+The model comprises: a finite set $\mathcal{P}$ of \emph{principals}, each typed $\tau(p) \in \{\text{user}, \text{group}, \text{service\_account}, \text{agent}\}$, where an agent is an autonomous process (AI agent, orchestration pipeline, or background service) participating in the same grant relation as human users under the same scoping and temporal constraints; a finite set $\mathcal{R}$ of \emph{roles}; a finite set $\mathit{PERM}$ of atomic \emph{permissions} (e.g., \textsc{project\_view}); a finite set $\mathit{RES}$ of \emph{resources} forming nodes in a rooted tree, each carrying a type from $\mathit{RT}$ (e.g., \texttt{portal\_root}, \texttt{agency}, \texttt{project}); and the time domain $\mathcal{T}$ (UTC timestamps).
 
 \subsection{Resource Hierarchy}
 
-The resource hierarchy is a rooted tree $(\mathit{RES}, \mathit{parent})$ where:
-
-\begin{itemize}
-\item $\mathit{parent}: \mathit{RES} \to \mathit{RES} \cup \{\bot\}$ maps each resource to its parent. The root $r_0$ has $\mathit{parent}(r_0) = \bot$.
-\item $\mathit{ancestors}(r) = \{\mathit{parent}^i(r) \mid i \geq 0 \wedge \mathit{parent}^i(r) \neq \bot\}$. Note that $r \in \mathit{ancestors}(r)$.
-\item $\mathit{descendants}(r) = \{r' \in \mathit{RES} \mid r \in \mathit{ancestors}(r')\}$
-\item $\mathit{depth}(r) = |\mathit{ancestors}(r)| - 1$ (root has depth 0).
-\end{itemize}
-
-The tree is bounded: $\mathit{depth}(r) \leq D$ for all $r$. In practice, $D = 3$--$5$ for typical SaaS and up to $10$--$15$ for deep enterprise hierarchies.
-
-An \textbf{authorized entity} is a row in an application table carrying a \texttt{ResourceId} referencing a node in the resource tree.
+The resource hierarchy is a rooted tree $(\mathit{RES}, \mathit{parent})$ with $\mathit{parent}: \mathit{RES} \to \mathit{RES} \cup \{\bot\}$ and $\mathit{parent}(r_0) = \bot$ for the root $r_0$. Define $\mathit{ancestors}(r) = \{\mathit{parent}^i(r) \mid i \geq 0 \wedge \mathit{parent}^i(r) \neq \bot\}$ (note $r \in \mathit{ancestors}(r)$), $\mathit{descendants}(r) = \{r' \in \mathit{RES} \mid r \in \mathit{ancestors}(r')\}$, and $\mathit{depth}(r) = |\mathit{ancestors}(r)| - 1$. The tree is bounded: $\mathit{depth}(r) \leq D$ for all $r$; in practice $D = 3$--$5$ for typical SaaS and up to $10$--$15$ for deep enterprise hierarchies. An \textbf{authorized entity} is a row in an application table carrying a \texttt{ResourceId} referencing a node in the resource tree.
 
 \subsection{Role-Permission Assignment}
 
@@ -319,7 +214,7 @@ For non-user principals (groups, service accounts, agents), $\mathit{resolve}(p)
 
 $G \subseteq \mathcal{P} \times \mathcal{R} \times \mathit{RES} \times (\mathcal{T} \cup \{\bot\}) \times (\mathcal{T} \cup \{\bot\})$
 
-A grant $g = (p, \mathit{role}, \mathit{res}, t_{\mathit{from}}, t_{\mathit{to}})$ assigns role $\mathit{role}$ to principal $p$ at resource $\mathit{res}$, effective during the closed interval $[t_{\mathit{from}}, t_{\mathit{to}}]$. Both bounds are inclusive. If $t_{\mathit{from}} = \bot$, effective from the beginning of time; if $t_{\mathit{to}} = \bot$, effective indefinitely.
+A grant $g = (p, \mathit{role}, \mathit{res}, t_{\mathit{from}}, t_{\mathit{to}})$ assigns role $\mathit{role}$ to principal $p$ at resource $\mathit{res}$, effective during the closed (inclusive) interval $[t_{\mathit{from}}, t_{\mathit{to}}]$; a $\bot$ bound means unbounded.
 
 \textbf{Active grants} at time $t$:
 \begin{multline*}
@@ -342,252 +237,126 @@ Given principal $p$, permission $\mathit{perm}$, resource $r$, and time $t$:
 
 Access is granted if \emph{any} effective identity has \emph{any} active grant at \emph{any} ancestor of the target resource with a role including the requested permission. This is \textbf{two-dimensional resolution}: simultaneously walking UP the resource tree and expanding OUT the principal set.
 
-\textbf{Running example.} Consider a resource tree: \texttt{portal\_root} $\to$ \texttt{agency\_7} $\to$ \texttt{project\_42}, with user Alice who belongs to the \texttt{engineering} group. A grant exists: (\texttt{engineering}, \textsc{Viewer}, \texttt{agency\_7}). To evaluate $\mathit{allowed}(\text{alice}, \textsc{project\_view}, \texttt{project\_42}, \mathit{now})$: $\mathit{resolve}(\text{alice}) = \{\text{alice}, \text{engineering}\}$; $\mathit{ancestors}(\texttt{project\_42}) = \{\texttt{project\_42}, \texttt{agency\_7}, \texttt{portal\_root}\}$. The algorithm searches the $2 \times 3$ grid of (principal, ancestor) pairs. At (\texttt{engineering}, \texttt{agency\_7}), it finds the \textsc{Viewer} grant, which includes \textsc{project\_view}. Access is granted---the grant at \texttt{agency\_7} cascades to its descendant \texttt{project\_42}.
+\textbf{Running example.} Let \texttt{portal\_root} $\to$ \texttt{agency\_7} $\to$ \texttt{project\_42}, with Alice in group \texttt{engineering} and a single grant (\texttt{engineering}, \textsc{Viewer}, \texttt{agency\_7}). Evaluating $\mathit{allowed}(\text{alice}, \textsc{project\_view}, \texttt{project\_42}, \mathit{now})$ searches the $2 \times 3$ grid $\mathit{resolve}(\text{alice}) \times \mathit{ancestors}(\texttt{project\_42})$ and finds the \textsc{Viewer} grant at (\texttt{engineering}, \texttt{agency\_7}): access is granted---the grant cascades to the descendant \texttt{project\_42} (Fig.~\ref{fig:resolution}).
 
-% ---- FIGURE 1: Two-dimensional resolution grid ----
+% ---- FIGURE: Two-dimensional resolution grid ----
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[
-  cell/.style={minimum width=2.2cm, minimum height=0.8cm, draw, font=\scriptsize, anchor=center},
-  header/.style={minimum width=2.2cm, minimum height=0.8cm, font=\scriptsize\bfseries, anchor=center},
+  cell/.style={minimum width=2.2cm, minimum height=0.75cm, draw, font=\scriptsize, anchor=center},
+  header/.style={minimum width=2.2cm, minimum height=0.75cm, font=\scriptsize\bfseries, anchor=center},
   match/.style={cell, fill=green!25, thick},
   miss/.style={cell, fill=gray!10},
 ]
 
-% Column headers (ancestors - bottom to top)
-\node[header] at (0, 3.2) {Ancestors $\downarrow$};
-\node[header] at (2.5, 3.2) {\textsf{alice}};
-\node[header] at (5.0, 3.2) {\textsf{engineering}};
+% Column headers
+\node[header] at (0, 3.0) {Ancestors $\downarrow$};
+\node[header] at (2.5, 3.0) {\textsf{alice}};
+\node[header] at (5.0, 3.0) {\textsf{engineering}};
 
-% Row headers and cells
 % Row 1: project_42
-\node[header, anchor=east] at (-0.3, 2.4) {\texttt{project\_42}};
-\node[miss] at (2.5, 2.4) {---};
-\node[miss] at (5.0, 2.4) {---};
+\node[header, anchor=east] at (-0.3, 2.25) {\texttt{project\_42}};
+\node[miss] at (2.5, 2.25) {---};
+\node[miss] at (5.0, 2.25) {---};
 
 % Row 2: agency_7
-\node[header, anchor=east] at (-0.3, 1.6) {\texttt{agency\_7}};
-\node[miss] at (2.5, 1.6) {---};
-\node[match] at (5.0, 1.6) {\checkmark{} Viewer};
+\node[header, anchor=east] at (-0.3, 1.5) {\texttt{agency\_7}};
+\node[miss] at (2.5, 1.5) {---};
+\node[match] at (5.0, 1.5) {\checkmark{} Viewer};
 
 % Row 3: portal_root
-\node[header, anchor=east] at (-0.3, 0.8) {\texttt{portal\_root}};
-\node[miss] at (2.5, 0.8) {\textsf{(skip)}};
-\node[miss] at (5.0, 0.8) {\textsf{(skip)}};
+\node[header, anchor=east] at (-0.3, 0.75) {\texttt{portal\_root}};
+\node[miss] at (2.5, 0.75) {\textsf{(skip)}};
+\node[miss] at (5.0, 0.75) {\textsf{(skip)}};
 
 % Arrows
-\draw[->, thick, blue!60!black] (2.5, 2.0) -- (2.5, 1.2) node[midway, left, font=\tiny\itshape] {up};
-\draw[->, thick, red!60!black] (3.2, 2.4) -- (4.3, 2.4) node[midway, above, font=\tiny\itshape] {out};
-
-% Label
-\node[font=\scriptsize\itshape, text width=5.5cm, align=center] at (3.0, 0.1) {First match at (\textsf{engineering}, \texttt{agency\_7}) short-circuits.};
+\draw[->, thick, blue!60!black] (2.5, 1.87) -- (2.5, 1.13) node[midway, left, font=\tiny\itshape] {up};
+\draw[->, thick, red!60!black] (3.2, 2.25) -- (4.3, 2.25) node[midway, above, font=\tiny\itshape] {out};
 
 \end{tikzpicture}
-\caption{Two-dimensional resolution for $\mathit{allowed}(\text{alice}, \textsc{project\_view}, \texttt{project\_42}, \mathit{now})$. The principal set is expanded outward (columns) while the ancestor chain is walked upward (rows). The first matching grant short-circuits evaluation.}
+\caption{Two-dimensional resolution for the running example: principals expand outward (columns), ancestors are walked upward (rows), and the first match short-circuits.}
 \label{fig:resolution}
 \end{figure}
 
 \subsection{Properties}
 
 \begin{property}[Monotonicity of Hierarchy]
-If $\mathit{allowed}(p, \mathit{perm}, r, t)$ and $r' \in \mathit{descendants}(r)$, then the same grant provides access at $r'$.
+If $\mathit{allowed}(p, \mathit{perm}, r, t)$ and $r' \in \mathit{descendants}(r)$, then the same grant provides access at $r'$ (immediate from transitivity of the ancestor relation).
 \end{property}
-\begin{proof}
-If $(p', \mathit{role}, r_{\mathit{anc}}) \in \mathit{active}(t)$ and $r_{\mathit{anc}} \in \mathit{ancestors}(r)$, then since $r' \in \mathit{descendants}(r)$, we have $r \in \mathit{ancestors}(r')$, and by transitivity $r_{\mathit{anc}} \in \mathit{ancestors}(r')$. Therefore the same grant satisfies the access decision for $r'$. \qed
-\end{proof}
 
 \begin{property}[Monotonicity of Groups]
-Adding $p$ to group $g$ preserves existing access and may grant additional access.
+Adding $p$ to group $g$ preserves existing access and may grant additional access (existential quantification over an expanded $\mathit{resolve}(p)$).
 \end{property}
-\begin{proof}
-Adding $p$ to group $g$ expands $\mathit{resolve}(p)$ to $\mathit{resolve}(p) \cup \{g\}$. Since the access decision uses existential quantification over $\mathit{resolve}(p)$, all previously satisfying assignments remain valid. Any grant held by $g$ additionally becomes effective for $p$. \qed
-\end{proof}
 
 \begin{property}[Bounded Evaluation]
 For any access decision, evaluation examines at most $|\mathit{resolve}(p)| \times |\mathit{ancestors}(r)| \times G_{\max}$ grant entries, giving $O(M \cdot D \cdot G_{\max})$.
 \end{property}
 
 % ===========================================================================
-% 4. THE ACCESS EVALUATION ALGORITHM
-% ===========================================================================
-\section{The Access Evaluation Algorithm}
-\label{sec:algorithm}
-
-\subsection{Point Check}
-
-\begin{lstlisting}[style=pseudo]
-ALGORITHM PointCheck(p, perm, r, t):
-  principals <- resolve(p)
-  ancestors <- getAncestors(r)
-  FOR EACH r' IN ancestors:
-    FOR EACH p' IN principals:
-      grants <- getActiveGrants(p', r', t)
-      FOR EACH g IN grants:
-        IF perm in perms(g.role): RETURN allowed
-  RETURN denied
-\end{lstlisting}
-
-\subsection{List Filter}
-
-For list filtering, the algorithm is expressed as a SQL predicate:
-
-\begin{lstlisting}[style=pseudo]
-ALGORITHM ListFilter(p, perm, query, t):
-  principals <- resolve(p)
-  principalIds <- join(principals, ',')
-  permId <- lookupPermissionId(perm)
-  now <- UTC_NOW()
-  RETURN query.WHERE(entity =>
-    EXISTS(fn_IsResourceAccessible(
-      entity.ResourceId, principalIds,
-      permId, now)))
-\end{lstlisting}
-
-The TVF is evaluated per-row by the database engine, composed with user-defined filters, sorting, and pagination into a single execution plan.
-
-% ===========================================================================
-% 5. QUERY-COMPOSABLE ENFORCEMENT VIA TVF
+% 4. QUERY-COMPOSABLE ENFORCEMENT VIA TVF
 % ===========================================================================
 \section{Query-Composable Enforcement via TVF}
 \label{sec:tvf}
 
 \subsection{The Table-Valued Function}
 
-The enforcement mechanism is an inline Table-Valued Function (iTVF):
+The enforcement mechanism realizes Definition~1 directly as an inline Table-Valued Function (iTVF), evaluated per row as an \texttt{EXISTS} predicate:
 
 \begin{lstlisting}[style=sql]
 CREATE FUNCTION dbo.fn_IsResourceAccessible(
-    @ResourceId NVARCHAR(128),
-    @PrincipalIds NVARCHAR(MAX),
-    @PermissionId NVARCHAR(128),
-    @Now DATETIME2
-)
-RETURNS TABLE
-AS
-RETURN
-(
-    WITH ancestors AS (
-        SELECT Id, ParentId, 0 AS Depth
-        FROM Resources WHERE Id = @ResourceId
-        UNION ALL
-        SELECT r.Id, r.ParentId, a.Depth + 1
-        FROM Resources r
-        INNER JOIN ancestors a ON r.Id = a.ParentId
-        WHERE a.Depth < 10
-    )
-    SELECT TOP 1 a.Id
-    FROM ancestors a
+  @ResourceId NVARCHAR(128), @PrincipalIds NVARCHAR(MAX),
+  @PermissionId NVARCHAR(128), @Now DATETIME2)
+RETURNS TABLE AS RETURN (
+  WITH ancestors AS (
+    SELECT Id, ParentId, 0 AS Depth
+      FROM Resources WHERE Id = @ResourceId
+    UNION ALL
+    SELECT r.Id, r.ParentId, a.Depth + 1
+      FROM Resources r
+      INNER JOIN ancestors a ON r.Id = a.ParentId
+      WHERE a.Depth < 10)
+  SELECT TOP 1 a.Id FROM ancestors a
     INNER JOIN Grants g ON a.Id = g.ResourceId
-    INNER JOIN RolePermissions rp
-      ON g.RoleId = rp.RoleId
-    WHERE g.PrincipalId IN (
-        SELECT LTRIM(RTRIM(value))
-        FROM STRING_SPLIT(@PrincipalIds, ',')
-    )
-      AND rp.PermissionId = @PermissionId
-      AND (g.EffectiveFrom IS NULL
-           OR g.EffectiveFrom <= @Now)
-      AND (g.EffectiveTo IS NULL
-           OR g.EffectiveTo >= @Now)
-)
+    INNER JOIN RolePermissions rp ON g.RoleId = rp.RoleId
+  WHERE g.PrincipalId IN (SELECT LTRIM(RTRIM(value))
+          FROM STRING_SPLIT(@PrincipalIds, ','))
+    AND rp.PermissionId = @PermissionId
+    AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= @Now)
+    AND (g.EffectiveTo IS NULL OR g.EffectiveTo >= @Now))
 \end{lstlisting}
 
-The recursive CTE walks UP from the target resource to the root (at most $D$ levels), joining against active grants at each ancestor. \texttt{TOP 1} provides existential semantics---one matching grant suffices. The caller-controlled \texttt{@Now} parameter ensures deterministic evaluation across all rows in a query. As an inline TVF, the optimizer composes its body into the calling query's execution plan, enabling authorization, user filtering, sorting, and pagination in a single statement. We use SQL Server as an exemplar because its optimizer aggressively inlines iTVFs; however, the enforcement requires only recursive CTEs and predicate inlining, both supported by PostgreSQL and other modern engines.
+The recursive CTE walks UP from the target resource to the root (at most $D$ levels), joining against active grants at each ancestor. \texttt{TOP 1} provides existential semantics---one matching grant suffices. The caller-controlled \texttt{@Now} parameter ensures deterministic evaluation across all rows in a query. As an inline TVF, the optimizer composes its body into the calling query's execution plan: the application layer resolves group memberships once per request, then appends the TVF as an \texttt{EXISTS} predicate alongside application-defined filters, cursor pagination, and sorting---authorization and application logic execute as a single database operation, one round-trip, zero external calls. We use SQL Server as an exemplar because its optimizer aggressively inlines iTVFs; the enforcement requires only recursive CTEs and predicate inlining, both supported by PostgreSQL and other modern engines.
 
 \subsection{Correctness}
 
-\begin{theorem}[Soundness]
-If the TVF returns a non-empty result for entity $e$, then $\mathit{allowed}(p, \mathit{perm}, e.\mathit{ResourceId}, \mathit{now}) = \text{true}$.
+\begin{theorem}[Soundness and Completeness]
+For entities with $\mathit{depth} \leq 10$, the TVF returns a non-empty result for entity $e$ iff $\mathit{allowed}(p, \mathit{perm}, e.\mathit{ResourceId}, \mathit{now}) = \text{true}$.
 \end{theorem}
 \begin{proof}
-The recursive CTE produces exactly $\mathit{ancestors}(e.\mathit{ResourceId})$: the base case selects the resource itself, and each recursive step follows $\mathit{parent}$ pointers until the root. The JOIN against \texttt{Grants} on \texttt{ResourceId} and \texttt{PrincipalId~$\in$~resolve($p$)} implements the existential quantification $\exists\,p' \in \mathit{resolve}(p),\; \exists\,r' \in \mathit{ancestors}(r)$ in Definition~1. The temporal predicates (\texttt{EffectiveFrom~$\leq$~@Now}, \texttt{EffectiveTo~$\geq$~@Now}) correspond to $\mathit{active}(t)$. The JOIN against \texttt{RolePermissions} verifies $\mathit{perm} \in \mathit{perms}(\mathit{role})$. A non-empty result therefore witnesses a satisfying $(p', \mathit{role}, r')$ triple. \qed
+The recursive CTE (guard \texttt{Depth~$<$~10}) produces exactly $\mathit{ancestors}(e.\mathit{ResourceId})$; the joins against \texttt{Grants} and \texttt{RolePermissions} with the temporal predicates implement the existential quantification of Definition~1 over $\mathit{active}(t)$. A non-empty result therefore witnesses a satisfying $(p', \mathit{role}, r')$ triple, and conversely any satisfying witness matches the corresponding CTE row, principal filter, and temporal and role-permission predicates by construction.
 \end{proof}
-
-\begin{theorem}[Completeness]
-If $\mathit{allowed}(p, \mathit{perm}, e.\mathit{ResourceId}, \mathit{now}) = \text{true}$, the TVF returns a non-empty result, provided $\mathit{depth} \leq 10$.
-\end{theorem}
-\begin{proof}
-The CTE with guard \texttt{Depth~$<$~10} produces all ancestors for resources with depth $\leq 10$. For any satisfying witness $(p', \mathit{role}, r')$ in the formal model, the CTE includes $r'$ (since $r' \in \mathit{ancestors}(r)$), the principal filter includes $p'$ (since $p' \in \mathit{resolve}(p)$), and the temporal and role-permission predicates match by construction. The witness therefore produces a matching row. \qed
-\end{proof}
-
-\subsection{Composition into Application Queries}
-
-Because the TVF is an inline function, the query optimizer composes its body into the calling query's execution plan. The application layer resolves the principal's group memberships once per request, then appends the TVF as a predicate alongside application-defined filters, cursor pagination, and sorting:
-
-\begin{lstlisting}[basicstyle=\ttfamily\scriptsize, frame=none, xleftmargin=1em]
-FUNCTION AuthorizedList(principal, permission,
-                        filters, cursor, k):
-  principalIds <- ResolveGroupMemberships(principal)
-  query <- FROM table
-           WHERE Accessible(row.ResourceId,
-                   principalIds, permission)
-             AND ApplyFilters(row, filters)
-             AND row.SortKey > cursor
-           ORDER BY row.SortKey
-           LIMIT k
-  RETURN Execute(query)  // single DB operation
-\end{lstlisting}
-
-Authorization, application filtering, pagination, and sorting compose into a single database operation---one round-trip, zero external calls.
 
 % ===========================================================================
-% 6. COMPLEXITY ANALYSIS
+% 5. COMPLEXITY ANALYSIS
 % ===========================================================================
 \section{Complexity Analysis}
 \label{sec:complexity}
 
 \subsection{Per-Row TVF Cost}
 
-For a single entity with resource at depth $d \leq D$:
-
-\begin{enumerate}
-\item \textbf{CTE expansion:} $O(D)$ index seeks on \texttt{Resources(Id)}.
-\item \textbf{Grant matching:} Joins $D$ ancestors against \texttt{Grants(ResourceId, PrincipalId)} and \texttt{RolePermissions(RoleId, PermissionId)}. With $M = |\mathit{resolve}(p)|$ principals, examines at most $D \cdot M \cdot G_{\max}$ candidates.
-\item \textbf{TOP 1 exit:} Short-circuits on first match.
-\end{enumerate}
-
-\textbf{Per-row cost:} $O(D \cdot M \cdot G_{\max})$. With $D = 5$, $M = 10$, $G_{\max} = 3$: ${\sim}150$ index lookups.
+For a single entity with resource at depth $d \leq D$, the CTE performs $O(D)$ index seeks on \texttt{Resources(Id)}; joining the $D$ ancestors against \texttt{Grants} and \texttt{RolePermissions} examines at most $D \cdot M \cdot G_{\max}$ candidates; and \texttt{TOP 1} short-circuits on the first match. \textbf{Per-row cost:} $O(D \cdot M \cdot G_{\max})$---with $D = 5$, $M = 10$, $G_{\max} = 3$, ${\sim}150$ index lookups.
 
 \subsection{Per-Page Cost Under Pagination}
 
 \begin{theorem}[Per-Page Complexity]
-Let $N$ be total entities, $k$ the page size, $D$ the max tree depth, $M = |\mathit{resolve}(p)|$, $G_{\max}$ the max active grants per (principal, resource) pair, and $\sigma \in (0,1]$ the selectivity. Assume: (1) index coverage on Resources, Grants, RolePermissions, and entity ResourceId; (2) cursor pagination on an indexed ordering key; (3) nested loops plan with index seeks. Then:
-\begin{itemize}
-\item \textbf{Dense ($\sigma \approx 1$):} $O(k \cdot D \cdot M \cdot G_{\max})$, simplified to $O(k \cdot D)$ when $M$ and $G_{\max}$ are bounded constants.
-\item \textbf{Sparse ($\sigma \to 0$):} $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$. Degenerate case (no access): $O(N \cdot D \cdot M \cdot G_{\max})$.
-\end{itemize}
+\label{thm:perpage}
+Assume (1) index coverage on Resources, Grants, RolePermissions, and entity ResourceId; (2) cursor pagination on an indexed ordering key; (3) nested-loops plans with index seeks. Then dense access ($\sigma \approx 1$) costs $O(k \cdot D \cdot M \cdot G_{\max})$ per page---$O(k \cdot D)$ when $M$ and $G_{\max}$ are bounded constants---and sparse access costs $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$, degenerating to $O(N \cdot D \cdot M \cdot G_{\max})$ when no rows are authorized.
 \end{theorem}
 \begin{proof}
-With cursor pagination, the engine seeks to the cursor position in $O(\log N)$ and evaluates rows sequentially. Each candidate row incurs a TVF evaluation: the CTE performs $O(D)$ index seeks to walk ancestors, each ancestor is joined against Grants ($M$ principal checks, $G_{\max}$ grants each) and RolePermissions (one seek per grant), yielding $O(D \cdot M \cdot G_{\max})$ per row. \texttt{TOP~1} short-circuits on the first matching grant, so this is an upper bound. To collect $k$ authorized rows with selectivity $\sigma$, the engine examines ${\sim}k/\sigma$ candidates. Total: $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$. When $\sigma \approx 1$, this simplifies to $O(k \cdot D \cdot M \cdot G_{\max})$. Critically, the cursor start position is resolved by index seek, not by scanning prior pages, so cost is independent of page depth and dataset size $N$. \qed
+With cursor pagination the engine seeks to the cursor in $O(\log N)$ and evaluates candidates sequentially, each costing $O(D \cdot M \cdot G_{\max})$ by the per-row bound above; collecting $k$ authorized rows at selectivity $\sigma$ examines ${\sim}k/\sigma$ candidates, giving $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$. The cursor start is resolved by index seek, not by scanning prior pages, so cost is independent of page depth and $N$.
 \end{proof}
 
-The per-page cost is \emph{parameterized and predictable}---independent of $N$, linear in $D$.
-
-\subsection{Comparison with Alternatives}
-
-Table~\ref{tab:comparison} separates SHRBAC's database-local enforcement path from common alternatives that either call an external authorization service, compile policies into query predicates, or maintain materialized permission state. The comparison is asymptotic and assumes the same cursor-pagination workload used in Theorem~3.
-
-\begin{table}[t]
-\centering
-\caption{Per-page cost comparison across authorization approaches.}
-\label{tab:comparison}
-\scriptsize
-\begin{tabular}{@{}llll@{}}
-\toprule
-\textbf{Approach} & \textbf{Per-page} & \textbf{Deps.} & \textbf{Consist.} \\
-\midrule
-SHRBAC (cursor) & $O(k \cdot D)$ & Local DB & Strong \\
-LookupResources + IN & $O(\text{graph}) + O(k)$ & External & Eventual \\
-Batch post-filter & $O(k/\sigma \cdot \ell)$ & External & Per-check \\
-Partial evaluation & $O(k) + O(\text{comp})$ & Policy eng. & Varies \\
-Materialized JOIN & $O(k)$ & Denorm. & Eventual \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Known Considerations}
-
-\texttt{STRING\_SPLIT} can produce poor cardinality estimates; the SQL Server benchmarks in this paper nevertheless use the \texttt{STRING\_SPLIT}-based TVF shown in Section~\ref{sec:tvf}, so the reported $M$-scaling numbers include that overhead for $M \leq 21$. For larger principal sets, table-valued parameters are recommended. CTE traversal is not short-circuitable; a closure table replaces $O(D)$ recursive expansion with $O(1)$ lookup for deep hierarchies. Plan shape assumes nested loops with index seeks (observed under correct indexing); stale statistics may produce hash joins, mitigated by \texttt{UPDATE STATISTICS}.
+The per-page cost is \emph{parameterized and predictable}---independent of $N$, linear in $D$. Alternatives instead pay an external-service round trip per page (LookupResources, batch post-filtering), a policy-compilation step (partial evaluation), or eventual-consistency denormalization infrastructure (materialized views); SHRBAC's cost is database-local with strong consistency.
 
 % ===========================================================================
 % 7. EMPIRICAL EVALUATION
@@ -599,217 +368,19 @@ We evaluate SHRBAC on SQL Server 2022 (Docker, 4 vCPU, 8~GB RAM) across three ti
 
 \subsection{Benchmark Methodology}
 
-\textbf{Measurement protocol.} Each query: 3 warmup runs (discarded), 20 measured runs. Each run opens a fresh connection and records wall-clock elapsed time via \texttt{Stopwatch}. We report median and P95; IQR was recorded for validation. Page size $k = 20$ unless stated otherwise.
+\textbf{Measurement protocol.} Each query: 3 warmup runs (discarded), 20 measured runs, each on a fresh connection, recording wall-clock elapsed time. We report median and P95. Page size $k = 20$ unless stated otherwise.
 
-\textbf{Query pattern.} All list filtering benchmarks execute the canonical authorized-list query:
+\textbf{Query pattern.} All list-filtering benchmarks execute the canonical authorized-list query: select the top $k$ \texttt{Products} rows satisfying \texttt{EXISTS(fn\_IsResourceAccessible(\ldots))} with a cursor predicate (\texttt{Id > @cursor}) and \texttt{ORDER BY Id}. Point checks use the same TVF against a single ResourceId. Query plans were verified to use nested loops with index seeks.
 
-\begin{lstlisting}[style=sql]
-SELECT TOP (@k) p.Id, p.Name, p.SKU,
-       p.Price, p.ResourceId
-FROM Products p
-WHERE EXISTS (
-    SELECT 1 FROM dbo.fn_IsResourceAccessible(
-        p.ResourceId, @principalIds,
-        'product_view'))
-AND p.Id > @cursor
-ORDER BY p.Id
-\end{lstlisting}
-
-Point checks use the same TVF against a single ResourceId. Query plans verified to use nested loops with index seeks.
-
-\textbf{Principal parameter passing.} All reported SQL Server benchmarks use the \texttt{STRING\_SPLIT} implementation in Section~\ref{sec:tvf}, including the $M{=}11$ and $M{=}21$ isolation and point-check experiments. No table-valued parameters are used in the reported measurements; therefore the conclusion is limited to the tested practical range of effective principals.
+\textbf{Principal parameter passing.} All reported benchmarks, including the $M{=}11$ and $M{=}21$ experiments, use the \texttt{STRING\_SPLIT} TVF of Section~\ref{sec:tvf} (no table-valued parameters), so $M$-scaling conclusions are limited to the tested range. \texttt{STRING\_SPLIT} can produce poor cardinality estimates; table-valued parameters are recommended for larger principal sets.
 
 \textbf{Hierarchies.} $D{=}5$: root $\to$ 15 chains $\to$ 150 regions $\to$ 15K stores $\to$ 1.2M products = \textbf{1,215,166 resources}. $D{=}10$: root $\to$ 5 divisions $\to$ 25 regions $\to$ 125 districts $\to$ 500 areas $\to$ 2K zones $\to$ 12K stores $\to$ 60K departments $\to$ 240K sections $\to$ 1.2M products = \textbf{1,514,656 resources}. Resources and domain rows are bulk-inserted; \texttt{UPDATE STATISTICS} is run before benchmarks.
 
-\textbf{Isolation tests.} All benchmarks use the same retail SaaS domain model. Isolation tests (Benchmarks 1--7) seed a hierarchy of real domain tables scaled to the target depth: at $D{=}3$, root $\to$ Regions (10) $\to$ Stores (100) $\to$ Products ($N$); at $D{=}5$, root $\to$ Divisions (10) $\to$ Chains (100) $\to$ Regions (1K) $\to$ Stores (10K) $\to$ Products ($N$). Each intermediate level has its own domain table with domain-appropriate columns, and each row maps to a unique resource in the tree. The benchmark query always targets the Products table, ensuring that even small-scale isolation tests exercise the same schema structure and query patterns as the production-scale benchmarks.
+\textbf{Isolation tests} (Benchmarks 1--7) use the same retail domain model scaled to the target depth (e.g., $D{=}3$: root $\to$ Regions $\to$ Stores $\to$ Products($N$)). Each level is a real domain table whose rows map to unique resources, and the benchmark query always targets Products, so small-scale tests exercise the same schema and query patterns as the production-scale ones.
 
 \subsection{Isolation Tests (1K--100K)}
 
-Table~\ref{tab:isolation} presents results from controlled single-factor experiments, re-seeded for each configuration to isolate individual factors.
-
-\begin{table}[t]
-\centering
-\caption{Isolation test results. $k{=}20$ throughout.}
-\label{tab:isolation}
-\scriptsize
-\begin{tabular}{@{}llrr@{}}
-\toprule
-\textbf{Experiment} & \textbf{Configuration} & \textbf{Med.\ (ms)} & \textbf{P95 (ms)} \\
-\midrule
-\multirow{5}{*}{$N$ (resource count)} & $N{=}$1K, $D{=}$3 & 3.57 & 4.19 \\
- & $N{=}$5K, $D{=}$3 & 3.51 & 4.58 \\
- & $N{=}$10K, $D{=}$3 & 3.39 & 4.01 \\
- & $N{=}$50K, $D{=}$3 & 3.63 & 4.05 \\
- & $N{=}$100K, $D{=}$3 & 3.32 & 4.07 \\
-\addlinespace
-\multirow{5}{*}{Depth} & $D{=}$1, $N{=}$10K & 2.45 & 4.90 \\
- & $D{=}$2, $N{=}$10K & 2.94 & 3.96 \\
- & $D{=}$3, $N{=}$10K & 3.17 & 6.16 \\
- & $D{=}$4, $N{=}$10K & 3.55 & 4.43 \\
- & $D{=}$5, $N{=}$10K & 4.21 & 4.79 \\
-\addlinespace
-\multirow{4}{*}{Principal set ($M$)} & $M{=}$1, $N{=}$10K & 3.47 & 5.53 \\
- & $M{=}$4, $N{=}$10K & 3.14 & 3.75 \\
- & $M{=}$11, $N{=}$10K & 3.45 & 4.81 \\
- & $M{=}$21, $N{=}$10K & 3.32 & 4.09 \\
-\addlinespace
-\multirow{2}{*}{TVF vs.\ mater.} & TVF EXISTS, $N{=}$100K & 3.42 & 3.97 \\
- & Materialized JOIN, $N{=}$100K & 1.01 & 1.28 \\
-\addlinespace
-\multirow{2}{*}{Pagination} & Cursor, $N{=}$100K & 3.30 & 4.22 \\
- & Offset COUNT, $N{=}$100K & 2{,}310 & 2{,}473 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-These isolation results confirm core predictions: $N$-independence across 1K--100K (3.32--3.63ms at $D{=}3$), monotonic depth scaling from 2.45ms at $D{=}1$ to 4.21ms at $D{=}5$ consistent with $O(k \cdot D)$, negligible principal set size effect (3.14--3.47ms across $M{=}1$--$21$), and constant cursor pagination cost independent of dataset size. The question is whether these properties hold at production resource scale.
-
-\subsection[Production-Scale at D=5 (1.2M Resources)]{Production-Scale at $D{=}5$ (1.2M Resources)}
-
-We constructed a retail SaaS hierarchy: root $\to$ 15 chains $\to$ 150 regions $\to$ 15K stores $\to$ 1.2M products, yielding \textbf{1,215,166 resource nodes} at $D{=}5$. Principals range from company administrators (all 1.2M products accessible) to store managers (${\sim}$80 products).
-
-Table~\ref{tab:production} presents results across three dimensions.
-
-\begin{table}[t]
-\centering
-\caption{Production-scale results at 1.2M resources, $D{=}5$.}
-\label{tab:production}
-\scriptsize
-\begin{tabular}{@{}llrr@{}}
-\toprule
-\textbf{Sub-experiment} & \textbf{Configuration} & \textbf{Med.\ (ms)} & \textbf{P95 (ms)} \\
-\midrule
-\multirow{4}{*}{Page size ($k$)} & $k{=}10$ & 2.28 & 7.59 \\
- & $k{=}20$ & 3.47 & 4.55 \\
- & $k{=}50$ & 6.89 & 8.65 \\
- & $k{=}100$ & 13.71 & 20.25 \\
-\addlinespace
-\multirow{4}{*}{Scope level} & Company admin (1.2M) & 3.47 & 4.55 \\
- & Chain manager (${\sim}$80K) & 3.20 & 3.95 \\
- & Region manager (${\sim}$8K) & 3.11 & 6.34 \\
- & Store manager (${\sim}$80) & 2.02 & 2.57 \\
-\addlinespace
-\multirow{3}{*}{Deep cursor} & Page 1 & 3.08 & 4.04 \\
- & ${\sim}$Page 50 & 3.25 & 3.63 \\
- & ${\sim}$Page 500 & 3.48 & 4.28 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Page size} scales linearly: the ratio $13.71/2.28 = 6.01\times$ for a $10\times$ increase in $k$ confirms $O(k)$. Per-row cost at $D{=}5$: ${\sim}$0.14ms, corresponding to ${\sim}$0.034ms per CTE hop.
-
-\textbf{Scope level}: despite a $15{,}000\times$ difference in accessible product count, latency varies minimally---store-level grants fastest in median because CTE short-circuits.
-
-\textbf{Cursor depth} is flat: page 500 at 3.48ms is indistinguishable from page~1 at 3.08ms.
-
-\subsection[Deep Hierarchy at D=10 (1.5M Resources)]{Deep Hierarchy at $D{=}10$ (1.5M Resources)}
-
-To test whether $O(k \cdot D)$ scaling holds at deeper hierarchies, we constructed a 10-level tree yielding \textbf{1,514,656 resource nodes}. Table~\ref{tab:d10} compares identical queries across both tree depths.
-
-\begin{table}[t]
-\centering
-\caption{Page size comparison: $D{=}5$ vs.\ $D{=}10$.}
-\label{tab:d10}
-\scriptsize
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-$k$ & \textbf{$D{=}5$ (ms)} & \textbf{$D{=}10$ (ms)} & \textbf{Ratio} \\
-\midrule
-10 & 2.28 & 3.44 & 1.51$\times$ \\
-20 & 3.47 & 5.69 & 1.64$\times$ \\
-50 & 6.89 & 11.80 & 1.71$\times$ \\
-100 & 13.71 & 22.01 & 1.61$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The $D{=}10$/$D{=}5$ ratio ranges from $1.51\times$ to $1.71\times$. Per-row cost at $D{=}10$: ${\sim}$0.22ms, or ${\sim}$0.024ms per CTE hop. The per-hop cost difference (0.034ms at $D{=}5$ vs 0.024ms at $D{=}10$) suggests fixed per-page overhead is proportionally larger at $D{=}5$; at larger $k$ the costs converge.
-
-Scope-level and cursor-depth results at $D{=}10$ mirror $D{=}5$: scope varies minimally (3.06--5.54ms), and cursor depth is flat (5.11--5.38ms across pages 1--500).
-
-\subsection{Point Access Checks}
-
-While SHRBAC's primary contribution is list filtering, the TVF also serves as a point check. Table~\ref{tab:pointcheck} measures point check latency at both $D{=}5$ (1.2M resources) and $D{=}10$ (1.5M resources).
-
-\begin{table}[t]
-\centering
-\caption{Point access check latency. $D{=}5$: 1.2M resources; $D{=}10$: 1.5M resources.}
-\label{tab:pointcheck}
-\scriptsize
-\begin{tabular}{@{}llrr@{}}
-\toprule
-\textbf{Depth} & \textbf{Level} & \textbf{$D{=}5$ (ms)} & \textbf{$D{=}10$ (ms)} \\
-\midrule
-0 & Root & 0.86 & 0.89 \\
-1 & Chain / Division & 0.97 & 0.95 \\
-2 & Region & 1.06 & 1.27 \\
-3 & Store / District & 1.04 & 0.99 \\
-4 & Product / Area & 1.31 & 1.09 \\
-5--9 & (D=10 only) & --- & 1.13--1.46 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Even at depth~9 with 1.5M resource nodes, all point checks complete in \textbf{under 1.5ms median}. Grant set size (1--20 active grants) produces 1.19--1.38ms---flat. Principal set size ($M{=}1$--$21$) produces 0.98--1.28ms---near-constant in the tested \texttt{STRING\_SPLIT} range. The CTE examines only the target resource's ancestor chain (${\leq}D$ nodes), not the grant table at large.
-
-\subsection{Factor Analysis}
-
-The multi-dimensional benchmarks at 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$) enable a comprehensive factor analysis (Table~\ref{tab:factors}).
-
-\begin{table*}[t]
-\centering
-\caption{Factor sensitivity analysis at production scale. Results from $D{=}5$ (1.2M resources) and $D{=}10$ (1.5M resources).}
-\label{tab:factors}
-\scriptsize
-\begin{tabular}{@{}lllllc@{}}
-\toprule
-\textbf{Factor} & \textbf{Range} & \textbf{List filter effect} & \textbf{Point check effect} & \textbf{Predicted} & \textbf{Confirmed?} \\
-\midrule
-$N$ (resource count) & 1K--1.5M & None (3.39ms $\to$ 3.47ms*) & N/A (CTE-local) & $O(1)$ & \checkmark \\
-$k$ (page size) & 10--100 & Linear (2.28--13.71ms $D{=}5$; 3.44--22.01ms $D{=}10$) & N/A & $O(k)$ & \checkmark \\
-$D$ (tree depth) & 1--10 & Linear (2.45 $\to$ 4.21 $\to$ 5.69ms) & Sub-1.5ms both & $O(D)$ & \checkmark \\
-Per-hop cost & $D{=}5$ vs $D{=}10$ & 0.034ms $D{=}5$, 0.024ms $D{=}10$ & --- & $O(1)$ & \checkmark \\
-$M$ (principals) & 1--11 & Negligible (3.32--3.44ms $D{=}5$; 5.42--5.85ms $D{=}10$) & None (0.98--1.28ms) & $O(M)$ & Negligible \\
-Grant breadth & 1--10 scopes & None (3.23--3.40ms $D{=}5$; 5.00--5.80ms $D{=}10$) & None (1.19--1.38ms) & $O(1)$ if $G_{\max}$ bounded & \checkmark \\
-Cursor depth & Page 1--500 & None (3.08--3.48ms $D{=}5$; 5.11--5.38ms $D{=}10$) & N/A & $O(1)$ & \checkmark \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\noindent *The 10K$\to$1.2M increase (3.39$\to$3.47ms) compares $D{=}3$ isolation vs $D{=}5$ production; the difference is attributable to depth, not resource count.
-
-\noindent Grant breadth is distinct from $G_{\max}$. The breadth experiments vary the number of distinct resource scopes granted to a principal; for any candidate row, the TVF still probes only that row's ancestor chain. $G_{\max}$ denotes multiple active grants for the same principal-resource pair. The point-check experiments did not show sensitivity for 1--20 active grants, but the list-filtering evaluation does not refute the formal $O(G_{\max})$ factor under high local grant multiplicity.
-
-Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
-
-\begin{table}[t]
-\centering
-\caption{Dimensional analysis at 1.2M resources, $D{=}5$, $k{=}20$.}
-\label{tab:dimensional}
-\scriptsize
-\begin{tabular}{@{}llr@{}}
-\toprule
-\textbf{Dimension} & \textbf{Configuration} & \textbf{Med.\ (ms)} \\
-\midrule
-\multirow{4}{*}{Principal set (list)} & $M{=}1$ & 3.36 \\
- & $M{=}3$ & 3.32 \\
- & $M{=}6$ & 3.36 \\
- & $M{=}11$ & 3.44 \\
-\addlinespace
-\multirow{4}{*}{Grant breadth} & 1 chain (${\sim}$80K accessible) & 3.31 \\
- & 3 chains (${\sim}$240K) & 3.23 \\
- & 5 chains (${\sim}$400K) & 3.41 \\
- & 10 chains (${\sim}$800K) & 3.40 \\
-\addlinespace
-\multirow{4}{*}{Grant scope} & Chain grant (inherit all) & 3.12 \\
- & 100 store grants & 4.27 \\
- & 10 store grants & 2.50 \\
- & 1 store grant & 2.28 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Analysis}
+Controlled single-factor experiments, re-seeded per configuration, confirm the core predictions: $N$-independence across 1K--100K (3.32--3.57ms median at $D{=}3$; Fig.~\ref{fig:scaling}), monotonic depth scaling from 2.45ms ($D{=}1$) through 3.17ms ($D{=}3$) to 4.21ms ($D{=}5$) consistent with $O(k \cdot D)$, and a negligible principal-set effect (3.32--3.47ms across $M{=}1$--$21$). P95 stayed below 6.2ms in every configuration.
 
 % ---- FIGURE: N-independence across three orders of magnitude ----
 \begin{figure}[t]
@@ -817,7 +388,7 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \begin{tikzpicture}
 \begin{axis}[
     width=\columnwidth,
-    height=4.0cm,
+    height=3.2cm,
     xlabel={Dataset size $N$},
     ylabel={Median latency (ms)},
     symbolic x coords={1K,10K,50K,100K,1.2M},
@@ -838,56 +409,52 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \addplot coordinates {(1K, 3.57) (10K, 3.39) (50K, 3.63) (100K, 3.32) (1.2M, 3.47)};
 \end{axis}
 \end{tikzpicture}
-\caption{Per-page median latency ($k{=}20$, cursor) across three orders of magnitude. Latency remains flat at ${\sim}$3.3--3.6ms. The small increase at 1.2M is attributable to depth ($D{=}5$ vs $D{=}3$), not resource count.}
+\caption{Per-page median latency ($k{=}20$, cursor) is flat at ${\sim}$3.3--3.6ms across three orders of magnitude; the small increase at 1.2M is a depth effect ($D{=}5$ vs $D{=}3$), not resource count.}
 \label{fig:scaling}
 \end{figure}
 
-\textbf{$N$-independence extends to 1.5M resources (Fig.~\ref{fig:scaling}).} With 1,215,166 unique resource nodes at $D{=}5$, list filtering median is 3.47ms ($k{=}20$)---compared to 3.39ms at $N{=}$10K with $D{=}3$ in isolation tests. The small increase is attributable to depth ($D{=}5$ vs $D{=}3$), not resource count. At $D{=}10$ with 1,514,656 resources, per-page cost is 5.69ms---again a depth effect.
+\subsection[Production-Scale at D=5 (1.2M Resources)]{Production-Scale at $D{=}5$ (1.2M Resources)}
 
-\textbf{Per-hop cost.} At $D{=}5$, per-row cost is ${\sim}$0.14ms (4 CTE hops $\times$ 0.034ms/hop). At $D{=}10$, per-row cost is ${\sim}$0.22ms (9 CTE hops $\times$ 0.024ms/hop). The per-hop cost converges at higher page sizes as fixed per-page overhead diminishes, giving $O(k \cdot D)$ a concrete, measurable constant.
+Principals range from company administrators (all 1.2M products accessible) to store managers (${\sim}$80 products); page-size results appear in Table~\ref{tab:d10}. \textbf{Scope level}: despite a $15{,}000\times$ difference in accessible product count, latency varies minimally---company admin 3.47ms, chain manager 3.20ms, region manager 3.11ms, store manager 2.02ms median (P95 $\leq$ 6.34ms)---store-level grants fastest because the CTE short-circuits. \textbf{Cursor depth} is flat: 3.08ms at page~1, 3.25ms at page~50, 3.48ms at page~500.
 
-\textbf{Grant breadth is not local grant multiplicity.} At $D{=}5$, 1 vs.\ 10 chain scopes changes median latency by 0.09ms (3.31 vs.\ 3.40ms). At $D{=}10$, 1 vs.\ 5 division scopes changes latency from 5.00ms to 5.76ms. These experiments vary the breadth of a principal's authority, not $G_{\max}$: unrelated grant rows at other scopes are not scanned when evaluating a candidate resource. The formal per-row bound remains $O(D \cdot M \cdot G_{\max})$.
+\subsection[Deep Hierarchy at D=10 (1.5M Resources)]{Deep Hierarchy at $D{=}10$ (1.5M Resources)}
 
-% ---- FIGURE: Leaf grants vs inherited grants ----
-\begin{figure}[t]
+Table~\ref{tab:d10} compares identical queries across both tree depths.
+
+\begin{table}[t]
 \centering
-\begin{tikzpicture}
-\begin{axis}[
-    width=\columnwidth,
-    height=4.0cm,
-    ylabel={Median latency (ms)},
-    symbolic x coords={Chain grant,{100 stores},{10 stores},{1 store}},
-    xtick=data,
-    ymin=0, ymax=6,
-    ybar,
-    bar width=14pt,
-    nodes near coords,
-    nodes near coords style={font=\tiny},
-    every node near coord/.append style={above},
-    grid=major,
-    grid style={gray!20},
-    every axis label/.style={font=\small},
-    every tick label/.style={font=\scriptsize},
-    x tick label style={rotate=15, anchor=east},
-]
-\addplot[fill=red!40, draw=red!70!black] coordinates {(Chain grant, 3.12)};
-\addplot[fill=blue!50, draw=blue!70!black] coordinates {({100 stores}, 4.27) ({10 stores}, 2.50) ({1 store}, 2.28)};
-\legend{Inherited, Store-level}
-\end{axis}
-\end{tikzpicture}
-\caption{Grant scope and locality at 1.2M resources. A single store grant is faster than a chain-level grant because it short-circuits closer to the leaf. The 100-store case is slower, showing that many disjoint narrow grants can affect constants through selectivity and locality even though unrelated grant rows are not scanned for a candidate resource.}
-\label{fig:leafgrants}
-\end{figure}
+\caption{Page size comparison: $D{=}5$ vs.\ $D{=}10$.}
+\label{tab:d10}
+\scriptsize
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+$k$ & \textbf{$D{=}5$ (ms)} & \textbf{$D{=}10$ (ms)} & \textbf{Ratio} \\
+\midrule
+10 & 2.28 & 3.44 & 1.51$\times$ \\
+20 & 3.47 & 5.69 & 1.64$\times$ \\
+50 & 6.89 & 11.80 & 1.71$\times$ \\
+100 & 13.71 & 22.01 & 1.61$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\textbf{Narrow grants can improve constants (Fig.~\ref{fig:leafgrants}).} A chain-level grant (3.12ms) is 37\% slower than a single store grant (2.28ms). The CTE walks UP from the product toward the root; a store-level grant can match at the first ancestor hop, while a chain-level grant requires 3--4 hops. However, the 100-store case (4.27ms) shows that many disjoint narrow grants are not monotonically faster; selectivity, row ordering, and plan estimates can affect constants. This reconciles the grant-breadth result with the store-grant experiment and preserves the stated $O(D \cdot M \cdot G_{\max})$ per-row bound.
+Page size scales linearly at both depths: $k{=}10 \to 100$ yields $6.01\times$ at $D{=}5$ and $6.40\times$ at $D{=}10$, closely tracking $O(k)$. The $D{=}10$/$D{=}5$ ratio (1.51--1.71$\times$) is below the theoretical $9/4 = 2.25\times$ because fixed per-page overhead is proportionally larger at $D{=}5$; the gap narrows at larger $k$. Per-row cost is ${\sim}$0.14ms at $D{=}5$ (${\sim}$0.034ms per CTE hop) and ${\sim}$0.22ms at $D{=}10$ (${\sim}$0.024ms per hop), giving $O(k \cdot D)$ a concrete, measurable constant. Scope-level and cursor-depth results at $D{=}10$ mirror $D{=}5$: scope varies minimally (3.06--5.54ms), and cursor depth is flat (5.11--5.38ms across pages 1--500).
 
-\textbf{Principal set size is negligible in the tested range.} $M{=}1$ vs $M{=}11$ produces 3.36 vs.\ 3.44ms. At $D{=}10$: 5.63 vs.\ 5.85ms. Because these experiments used \texttt{STRING\_SPLIT}, the result should be read as an empirical observation for small effective-principal sets ($M \leq 21$), not a claim that parameter passing is irrelevant for large $M$.
+\subsection{Point Access Checks}
 
-\textbf{Point checks are sub-1.5ms even at $D{=}10$.} At depth~9 (the deepest leaf), point checks complete in 1.32ms median. Grant set size (1--20) and principal set size ($M{=}1$--$21$) have no measurable impact.
+The TVF also serves as a point check. Across target depths 0--4 at $D{=}5$ (1.2M resources), point checks complete in 0.86--1.31ms median; across depths 0--9 at $D{=}10$ (1.5M resources), in 0.89--1.46ms---all \textbf{under 1.5ms median} even at depth~9. Grant set size (1--20 active grants; 1.19--1.38ms) and principal set size ($M{=}1$--$21$; 0.98--1.28ms) are flat in the tested \texttt{STRING\_SPLIT} range. The CTE examines only the target resource's ancestor chain (${\leq}D$ nodes), not the grant table at large.
 
-\textbf{Page size scales linearly.} $k{=}10 \to 100$ yields 2.28 $\to$ 13.71ms ($6.01\times$ for $10\times$). At 1.5M resources ($D{=}10$): 3.44 $\to$ 22.01ms ($6.40\times$ for $10\times$). Both closely track $O(k)$.
+\subsection{Analysis}
 
-\textbf{Cursor vs.\ offset pagination (Fig.~\ref{fig:pagination}).} Offset COUNT costs grow linearly: 231ms ($N{=}$10K) $\to$ 1{,}114ms ($N{=}$50K) $\to$ 2{,}310ms ($N{=}$100K). Cursor pagination remains at ${\sim}$3.3ms. At $N{=}$100K, cursor is $700\times$ faster.
+\textbf{$N$-independence extends to 1.5M resources (Fig.~\ref{fig:scaling}).} With 1,215,166 unique resource nodes at $D{=}5$, list filtering median is 3.47ms ($k{=}20$)---compared to 3.39ms at $N{=}$10K with $D{=}3$ in isolation tests. The small increase is attributable to depth, not resource count. At $D{=}10$ with 1,514,656 resources, per-page cost is 5.69ms---again a depth effect.
+
+\textbf{Grant breadth is not local grant multiplicity.} The breadth experiments vary the number of distinct resource scopes granted to a principal: at $D{=}5$, 1 vs.\ 10 chain scopes changes median latency by 0.09ms (3.31 vs.\ 3.40ms); at $D{=}10$, 1 vs.\ 5 division scopes changes it from 5.00ms to 5.76ms. Unrelated grant rows at other scopes are not scanned when evaluating a candidate resource. $G_{\max}$---multiple active grants for the same principal-resource pair---is a different factor: point checks showed no sensitivity for 1--20 active grants, though the evaluation does not refute the formal $O(G_{\max})$ factor.
+
+\textbf{Narrow grants can improve constants.} A chain-level grant (3.12ms) is 37\% slower than a single store grant (2.28ms): the CTE walks UP from the product, so a store-level grant matches at the first ancestor hop while a chain-level grant requires 3--4 hops. The 100-store case (4.27ms vs.\ 2.50ms for 10 stores) shows many disjoint narrow grants are not monotonically faster; selectivity and plan estimates affect constants without violating the per-row bound.
+
+\textbf{Principal set size is negligible in the tested range.} $M{=}1$ vs $M{=}11$ produces 3.36 vs.\ 3.44ms ($D{=}5$) and 5.63 vs.\ 5.85ms ($D{=}10$). Because these experiments used \texttt{STRING\_SPLIT}, this is an empirical observation for small effective-principal sets ($M \leq 21$), not a claim that parameter passing is irrelevant for large $M$.
+
+\textbf{Cursor vs.\ offset pagination (Fig.~\ref{fig:pagination}).} Offset COUNT costs grow linearly with $N$ while cursor pagination remains at ${\sim}$3.3ms: $700\times$ faster at $N{=}$100K.
 
 % ---- FIGURE: Cursor vs Offset pagination ----
 \begin{figure}[t]
@@ -895,11 +462,12 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \begin{tikzpicture}
 \begin{axis}[
     width=\columnwidth,
-    height=4.5cm,
+    height=3.6cm,
     xlabel={Dataset size $N$},
     ylabel={Per-page latency (ms)},
     xtick={10000,50000,100000},
     xticklabels={10K,50K,100K},
+    scaled x ticks=false,
     ymin=0, ymax=2800,
     legend style={at={(0.03,0.97)}, anchor=north west, font=\scriptsize},
     grid=major,
@@ -934,17 +502,13 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 };
 \addlegendentry{Cursor (index seek)}
 
-% Annotations
-\node[font=\tiny, anchor=west, text=red!70!black] at (axis cs:102000,2310) {2{,}310ms};
-\node[font=\tiny, anchor=west, text=blue!70!black] at (axis cs:102000,250) {$\sim$3.3ms};
-
 \end{axis}
 \end{tikzpicture}
-\caption{Offset COUNT per-page cost grows linearly with $N$: 231ms ($N{=}$10K) $\to$ 1{,}114ms ($N{=}$50K) $\to$ 2{,}310ms ($N{=}$100K). Cursor pagination maintains ${\sim}$3.3ms. At $N{=}$100K, cursor is $700\times$ faster.}
+\caption{Offset COUNT grows linearly: 231ms (10K) $\to$ 1{,}114ms (50K) $\to$ 2{,}310ms (100K); cursor holds at ${\sim}$3.3ms ($700\times$ faster at 100K).}
 \label{fig:pagination}
 \end{figure}
 
-\textbf{TVF vs.\ materialized.} The materialized approach is ${\sim}$3.4$\times$ faster per-page (1.01ms vs.\ 3.42ms at $N{=}$100K) but requires denormalization infrastructure. Both are $N$-independent under cursor pagination. SHRBAC's TVF provides strong consistency with zero infrastructure overhead.
+\textbf{TVF vs.\ materialized.} The materialized approach is ${\sim}$3.4$\times$ faster per-page (1.01ms vs.\ 3.42ms at $N{=}$100K) but requires denormalization infrastructure. Both are $N$-independent under cursor pagination; the TVF provides strong consistency with zero infrastructure overhead.
 
 % ===========================================================================
 % 8. DISCUSSION
@@ -952,45 +516,27 @@ Table~\ref{tab:dimensional} presents the dimensional analysis at $D{=}5$.
 \section{Discussion}
 \label{sec:discussion}
 
-The theoretical analysis in Sections~\ref{sec:model}--\ref{sec:complexity} established the conditions under which SHRBAC's per-page enforcement cost simplifies to $O(k \cdot D)$, and the empirical results in Section~\ref{sec:empirical} confirmed this behavior across three orders of magnitude for dense-access workloads on SQL Server. This section examines the design trade-offs that make these guarantees possible, positions SHRBAC relative to alternative authorization models, and discusses implications for autonomous principals.
-
 \subsection{Constraints as Architectural Choice}
 
-SHRBAC's performance guarantees are a direct consequence of four structural constraints. Each constraint eliminates a source of unbounded computation in the enforcement path:
+SHRBAC's performance guarantees are a direct consequence of four structural constraints, each eliminating a source of unbounded computation in the enforcement path:
 
 \begin{theorem}[Constraint-Composability Tradeoff]
-SHRBAC intentionally disallows: (C1)~DAG-structured resources---resources form a tree, not a DAG; (C2)~recursive group membership---groups cannot contain groups; (C3)~role hierarchies---roles are flat; (C4)~arbitrary attribute predicates---only role + resource-scope + time are evaluated. In return: (G1)~CTE traversal is bounded at $O(D)$; (G2)~principal resolution is a single join producing a fixed set; (G3)~the TVF body is fixed at schema design time---no runtime policy compilation; (G4)~enforcement is a standard SQL \texttt{EXISTS} subquery composable with arbitrary \texttt{WHERE}, \texttt{ORDER BY}, and pagination.
+SHRBAC intentionally disallows (C1)~DAG-structured resources, (C2)~recursive group membership, (C3)~role hierarchies, and (C4)~arbitrary attribute predicates. In return, (G1)~CTE traversal is bounded at $O(D)$; (G2)~principal resolution is a single join producing a fixed set; (G3)~the TVF body is fixed at schema design time---no runtime policy compilation; and (G4)~enforcement is a standard SQL \texttt{EXISTS} subquery composable with arbitrary \texttt{WHERE}, \texttt{ORDER BY}, and pagination.
 \end{theorem}
 
-Each constraint enables its corresponding guarantee. Relaxing (C1) to allow DAGs replaces a unique bounded ancestor chain with potentially unbounded multiple ancestor paths, eliminating deterministic $O(D)$ traversal and breaking~(G1). Relaxing~(C2) to allow nested groups turns principal resolution into a recursive traversal, breaking~(G2). Relaxing~(C3) to allow role inheritance requires transitive closure at evaluation time, breaking~(G3). Relaxing~(C4) to allow arbitrary predicates requires runtime policy compilation, breaking~(G4).
-
-Crucially, these constraints are not artificial restrictions imposed to simplify the model---they codify the \emph{de facto} structure of most multi-tenant B2B SaaS systems. Resource containment naturally forms a tree rooted at a tenant boundary (organization $\to$ departments $\to$ projects $\to$ artifacts). Groups are typically flat membership lists. Roles enumerate permissions rather than inheriting from other roles. SHRBAC formalizes this common but undocumented pattern and demonstrates that when the dominant structural assumptions are embraced explicitly, strong composability and performance guarantees follow.
+Relaxing any constraint breaks its guarantee: DAGs yield unbounded ancestor paths (G1), nested groups recursive resolution (G2), role inheritance transitive closure at evaluation time (G3), arbitrary predicates runtime policy compilation (G4). These constraints are not artificial---they codify the \emph{de facto} structure of most multi-tenant B2B SaaS systems: containment trees rooted at a tenant boundary, flat membership groups, and roles that enumerate permissions. SHRBAC formalizes this common but undocumented pattern.
 
 \subsection{Relationship to ABAC and ReBAC}
 
-SHRBAC evaluates two attributes---role and resource-scope---making it a two-attribute constrained ABAC system~\cite{abac-nist}. The resource tree can be viewed as a constrained ReBAC graph where all relationships are \texttt{parent\_of} typed and the graph is a tree. The tree constraint (bounded depth, deterministic ancestor chains) is what makes TVF enforcement tractable. For applications requiring arbitrary relationship graphs, ReBAC/Zanzibar is more appropriate; for organizational hierarchies, SHRBAC's constraint matches the domain and provides predictable performance.
+SHRBAC evaluates two attributes---role and resource-scope---making it a two-attribute constrained ABAC system~\cite{abac-nist}. The resource tree can be viewed as a constrained ReBAC graph in which every relationship is \texttt{parent\_of} typed and the graph is a tree; that constraint (bounded depth, deterministic ancestor chains) is what makes TVF enforcement tractable. For arbitrary relationship graphs, ReBAC is more appropriate; for organizational hierarchies, SHRBAC's constraint matches the domain.
 
 \subsection{SHRBAC for Autonomous Principals}
 
-SHRBAC's polymorphic principal model accommodates autonomous AI agents in a narrow but useful sense. An agent is a principal with $\tau(p) = \text{agent}$ that participates in the same grant relation as human users. SHRBAC therefore supports database authorization for agents that query or mutate application resources, but it does not address prompt injection, tool-selection safety, model alignment, delegation-chain reasoning, or semantic policy generation. Within this scope, three properties follow directly from the common grant model:
-
-\textbf{Least-privilege delegation.} SHRBAC's grant triple (principal, role, resource) with temporal bounds directly enforces least-privilege delegation: an agent receives only the role it needs, at only the resource subtree it operates on, for only the duration of its task. A 15-minute grant at a specific project subtree is expressible directly, without special-case logic.
-
-\textbf{Predictable query cost.} Agents that enumerate resources in loops amplify per-query costs. Under the same pagination, indexing, and selectivity assumptions as human callers, the TVF's per-page bound ensures that agent-driven queries have predictable database impact with respect to total resource count.
-
-\textbf{Auditability.} Every agent action traces to a specific (agent, role, resource) grant with temporal bounds. When an agent's authority expires ($\mathit{EffectiveTo} < \mathit{now}$), access ceases immediately without requiring token revocation infrastructure.
+An agent is a principal with $\tau(p) = \text{agent}$ in the same grant relation as human users. SHRBAC therefore supports database authorization for agents that query or mutate application resources; it does not address prompt injection, tool-selection safety, model alignment, delegation-chain reasoning, or semantic policy generation. Within this scope, three properties follow directly. \emph{Least-privilege delegation}: an agent receives only the role it needs, at only the subtree it operates on, for only the duration of its task (e.g., a 15-minute grant at one project subtree). \emph{Predictable query cost}: under the same pagination and indexing assumptions as human callers, the per-page bound makes agent-driven enumeration loops independent of total resource count. \emph{Auditability}: every agent action traces to a specific (agent, role, resource) grant, and when $\mathit{EffectiveTo} < \mathit{now}$, access ceases immediately without token-revocation infrastructure.
 
 \subsection{Scope and Limitations}
 
-\begin{itemize}
-\item \textbf{Tree constraint (C1):} DAG resources (matrix management, multi-parent projects) are not supported. ReBAC is more appropriate for these domains.
-\item \textbf{Non-recursive groups (C2):} Deeply nested group structures require extending $\mathit{resolve}(p)$ with CTE traversal.
-\item \textbf{Flat roles (C3):} Role definitions must explicitly enumerate permissions rather than inheriting.
-\item \textbf{No arbitrary attributes (C4):} IP-based, device-type, or other dynamic attribute conditions are not expressible.
-\item \textbf{Low-selectivity workloads:} The evaluation focuses on dense authorized-list workloads. Theorem~3 predicts $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$ for sparse access and $O(N \cdot D \cdot M \cdot G_{\max})$ when no rows are authorized; deny-heavy workloads remain an empirical failure mode to stress-test.
-\item \textbf{Engine and hardware constants:} All measurements use SQL Server 2022 in Docker with 4 vCPU and 8~GB RAM. The measured constants (for example, 0.024--0.034ms per hop) are not production SLAs; storage latency, memory pressure, concurrent workloads, and network topology can change the coefficient even when the asymptotic plan shape holds.
-\item \textbf{Cross-DBMS validation:} PostgreSQL and MySQL 8.0+ support the necessary primitives (recursive CTEs and predicate inlining), but this paper validates only SQL Server 2022. Cross-DBMS performance and optimizer stability are future work.
-\end{itemize}
+The constraints exclude expressiveness by design: DAG resources such as matrix management are not supported (C1; ReBAC is more appropriate there), deeply nested groups require extending $\mathit{resolve}(p)$ with CTE traversal (C2), roles must enumerate permissions rather than inherit (C3), and dynamic attribute conditions such as IP or device type are not expressible (C4). For very deep hierarchies, a closure table replaces the $O(D)$ recursive CTE expansion with $O(1)$ lookup. The evaluation focuses on dense authorized-list workloads: Theorem~\ref{thm:perpage} predicts $O(k/\sigma \cdot D \cdot M \cdot G_{\max})$ for sparse access and $O(N \cdot D \cdot M \cdot G_{\max})$ when no rows are authorized---deny-heavy workloads remain an empirical failure mode to stress-test. Finally, all measurements use SQL Server 2022 in Docker (4 vCPU, 8~GB RAM); the measured constants are not production SLAs, and although PostgreSQL and MySQL 8.0+ support the required primitives (recursive CTEs and predicate inlining), cross-DBMS validation is future work.
 
 % ===========================================================================
 % 9. CONCLUSION
@@ -998,38 +544,36 @@ SHRBAC's polymorphic principal model accommodates autonomous AI agents in a narr
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented SHRBAC, a formal authorization model whose structural constraints allow per-page enforcement cost to simplify to $O(k \cdot D)$ under bounded principal sets, bounded local grant multiplicity, cursor pagination, correct indexing, and stable nested-loop plans. The model sits at the intersection of hierarchical RBAC (ROBAC/RRBAC), polymorphic principal resolution, and Stonebraker's query modification.
+We presented SHRBAC, a formal authorization model at the intersection of hierarchical RBAC, polymorphic principal resolution, and Stonebraker's query modification, whose structural constraints allow per-page enforcement cost to simplify to $O(k \cdot D)$ under bounded principal sets, bounded local grant multiplicity, cursor pagination, correct indexing, and stable nested-loop plans. Empirical evaluation at 1.2M ($D{=}5$) and 1.5M ($D{=}10$) resources confirms the predicted behavior for dense-access workloads: per-page latency is $N$-independent across three orders of magnitude, scales linearly with $k$ and $D$, and is unaffected by cursor depth or grant breadth in tested configurations.
 
-Empirical evaluation at 1.2M resources ($D{=}5$) and 1.5M resources ($D{=}10$) confirms the predicted behavior for the evaluated dense-access workloads: per-page latency is $N$-independent across three orders of magnitude, scales linearly with $k$ and $D$, and is unaffected by cursor depth or grant breadth in tested configurations. The per-CTE-hop cost is constant across both tree depths, giving $O(k \cdot D)$ a measurable coefficient. A notable finding is that narrow grants can be faster when they match closer to the leaf, though many disjoint narrow grants can affect constants.
-
-As autonomous agents become principals in enterprise systems, the need for scoped, auditable, time-bounded authorization with efficient list filtering will intensify. SHRBAC provides this database-native authorization substrate by applying the same scoped grant model to autonomous and human principals; broader agent-specific safety mechanisms remain outside the model.
+As autonomous agents become principals in enterprise systems, the need for scoped, auditable, time-bounded authorization with efficient list filtering will intensify. SHRBAC provides this database-native substrate by applying the same scoped grant model to autonomous and human principals.
 
 % ===========================================================================
 % AI DISCLOSURE
 % ===========================================================================
 \section*{AI Disclosure}
-In accordance with IEEE policy, the author discloses that AI tools (Claude, Anthropic) were used to assist with manuscript preparation and editing. All technical content, formal definitions, proofs, implementation, and experimental design are the work of the author.
+In accordance with IEEE policy, the author discloses that AI tools (Claude, Anthropic) assisted with manuscript preparation and editing; all technical content, formal definitions, proofs, implementation, and experimental design are the author's work.
 
 % ===========================================================================
 % REFERENCES
 % ===========================================================================
 \balance
-\begin{thebibliography}{20}
+\begin{thebibliography}{15}
 
 \bibitem{zanzibar}
-R.~Pang, R.~Caceres, M.~Burrows, Z.~Chen, P.~Dave, N.~Germer, A.~Golynski, K.~Graney, N.~Kang, L.~Kissner, J.~L. Korn, A.~Parmar, C.~D. Richards, and M.~Wang, ``Zanzibar: Google's Consistent, Global Authorization System,'' in \emph{Proc. USENIX ATC}, pp.~33--46, 2019.
+R.~Pang et~al., ``Zanzibar: Google's Consistent, Global Authorization System,'' in \emph{Proc. USENIX ATC}, pp.~33--46, 2019.
 
 \bibitem{saltzer}
 J.~H. Saltzer and M.~D. Schroeder, ``The Protection of Information in Computer Systems,'' \emph{Proc. IEEE}, vol.~63, no.~9, pp.~1278--1308, 1975.
 
 \bibitem{robac}
-Z.~Zhang, X.~Zhang, and R.~Sandhu, ``ROBAC: Scalable Role and Organization Based Access Control Models,'' in \emph{Proc. CollaborateCom}, 2006.
+Z.~Zhang et~al., ``ROBAC: Scalable Role and Organization Based Access Control Models,'' in \emph{Proc. CollaborateCom}, 2006.
 
 \bibitem{stonebraker}
 M.~Stonebraker and E.~Wong, ``Access Control in a Relational Data Base Management System by Query Modification,'' in \emph{Proc. ACM National Conf.}, 1974, pp.~180--187.
 
 \bibitem{rbac96}
-R.~Sandhu, E.~J. Coyne, H.~L. Feinstein, and C.~E. Youman, ``Role-Based Access Control Models,'' \emph{IEEE Computer}, vol.~29, no.~2, pp.~38--47, 1996.
+R.~Sandhu et~al., ``Role-Based Access Control Models,'' \emph{IEEE Computer}, vol.~29, no.~2, pp.~38--47, 1996.
 
 \bibitem{nist-rbac}
 D.~F. Ferraiolo et~al., ``Proposed NIST Standard for Role-Based Access Control,'' \emph{ACM TISSEC}, vol.~4, no.~3, pp.~224--274, 2001.
@@ -1041,40 +585,19 @@ N.~Solanki et~al., ``Resource and Role Hierarchy Based Access Control for Resour
 A.~Abou El~Kalam et~al., ``Organization Based Access Control,'' in \emph{Proc. IEEE POLICY}, 2003.
 
 \bibitem{rizvi}
-S.~Rizvi, A.~Mendelzon, S.~Sudarshan, and P.~Roy, ``Extending Query Rewriting Techniques for Fine-Grained Access Control,'' in \emph{Proc. ACM SIGMOD}, pp.~551--562, 2004.
+S.~Rizvi et~al., ``Extending Query Rewriting Techniques for Fine-Grained Access Control,'' in \emph{Proc. ACM SIGMOD}, pp.~551--562, 2004.
 
 \bibitem{sieve}
-P.~Pappachan, R.~Yus, S.~Mehrotra, and J.-C. Freytag, ``Sieve: A Middleware Approach to Scalable Access Control for Database Management Systems,'' \emph{PVLDB}, vol.~13, no.~12, 2020.
+P.~Pappachan et~al., ``Sieve: A Middleware Approach to Scalable Access Control for Database Management Systems,'' \emph{PVLDB}, vol.~13, no.~12, 2020.
 
 \bibitem{fong}
 P.~W.~L. Fong, ``Relationship-Based Access Control: Protection Model and Policy Language,'' in \emph{Proc. CODASPY}, pp.~191--202, 2011.
 
-\bibitem{authzed}
-AuthZed, ``Protecting a List Endpoint,'' SpiceDB Documentation. [Online].
-
-\bibitem{oso}
-Oso, ``List Filtering,'' Oso Documentation. [Online].
-
-\bibitem{cerbos}
-Cerbos, ``Filtering Data Using Authorization Logic,'' Cerbos Blog. [Online].
+\bibitem{vendor-docs}
+AuthZed, ``Protecting a List Endpoint,'' SpiceDB Documentation; Oso, ``List Filtering,'' Oso Documentation; Cerbos, ``Filtering Data Using Authorization Logic,'' Cerbos Blog. [Online].
 
 \bibitem{abac-nist}
 V.~C. Hu et~al., ``Guide to Attribute Based Access Control (ABAC) Definition and Considerations,'' \emph{NIST SP 800-162}, 2014.
-
-\bibitem{azure-rbac}
-Microsoft, ``What is Azure role-based access control (Azure RBAC)?'' Microsoft Learn. [Online].
-
-\bibitem{trbac}
-E.~Bertino, P.~Bonatti, and E.~Ferrari, ``TRBAC: A Temporal Role-Based Access Control Model,'' \emph{ACM TISSEC}, vol.~4, no.~3, 2001.
-
-\bibitem{arbac}
-R.~Sandhu, V.~Bhamidipati, and Q.~Munawer, ``The ARBAC97 Model for Role-Based Administration of Roles,'' \emph{ACM TISSEC}, vol.~2, no.~1, pp.~105--135, 1999.
-
-\bibitem{kuhn}
-D.~R. Kuhn, E.~J. Coyne, and T.~R. Weil, ``Adding Attributes to Role-Based Access Control,'' \emph{IEEE Computer}, vol.~43, no.~6, pp.~79--81, 2010.
-
-\bibitem{rls}
-Microsoft, ``Row-Level Security,'' SQL Server Documentation. [Online].
 
 \end{thebibliography}
 
