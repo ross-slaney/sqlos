@@ -82,6 +82,13 @@ public sealed class ClientCredentialsIntegrationTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         });
+        context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+        {
+            Id = $"clcred_{suffix}",
+            ClientApplicationId = $"cli_{suffix}",
+            SecretHash = crypto.HashPassword(secret),
+            CreatedAt = DateTime.UtcNow
+        });
         context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
         {
             Id = subjectId,

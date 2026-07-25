@@ -94,6 +94,11 @@ public sealed class SqlOSAuthorizationServerService
         {
             grantTypes.Add(SqlOSOAuthGrantTypes.ClientCredentials);
         }
+        var supportsClientSecretBasic = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .AnyAsync(x => x.IsActive
+                && x.DisabledAt == null
+                && x.TokenEndpointAuthMethod == "client_secret_basic", cancellationToken);
 
         return new SqlOSAuthorizationServerMetadataDto
         {
@@ -108,7 +113,7 @@ public sealed class SqlOSAuthorizationServerService
             GrantTypesSupported = grantTypes.ToArray(),
             CodeChallengeMethodsSupported = ["S256"],
             ScopesSupported = scopes,
-            TokenEndpointAuthMethodsSupported = grantTypes.Contains(SqlOSOAuthGrantTypes.ClientCredentials)
+            TokenEndpointAuthMethodsSupported = supportsClientSecretBasic
                 ? ["none", "client_secret_basic"]
                 : ["none"],
             RegistrationEndpoint = _options.ClientRegistration.Dcr.Enabled
@@ -1033,7 +1038,9 @@ public sealed class SqlOSAuthorizationServerService
             var refreshResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
                 ? request.Resource.Trim()
                 : null;
-            var refreshed = await _authService.RefreshAsync(new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource), cancellationToken);
+            var refreshed = await _authService.RefreshAsync(
+                new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
+                cancellationToken);
             return new SqlOSTokenEndpointResult(refreshed, null);
         }
 

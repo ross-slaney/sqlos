@@ -54,6 +54,7 @@ public sealed class SqlOSMachineClientAdminService
     {
         var normalized = await NormalizeCreateAsync(request, cancellationToken);
         var secret = GenerateSecret();
+        var secretHash = _crypto.HashPassword(secret);
         await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         if (await _context.Set<SqlOSClientApplication>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken)
             || await _context.Set<SqlOSFgaServiceAccount>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken))
@@ -71,12 +72,19 @@ public sealed class SqlOSMachineClientAdminService
         var account = new SqlOSFgaServiceAccount
         {
             Id = _crypto.GenerateId("sa"), SubjectId = subject.Id, ClientId = normalized.ClientId,
-            ClientSecretHash = _crypto.HashPassword(secret), Description = normalized.Description, ExpiresAt = normalized.ExpiresAt,
+            ClientSecretHash = secretHash, Description = normalized.Description, ExpiresAt = normalized.ExpiresAt,
             ConfigurationOwner = SqlOSConfigurationOwners.Dashboard, CreatedAt = now, UpdatedAt = now
+        };
+        var credential = new SqlOSClientCredential
+        {
+            Id = _crypto.GenerateId("clcred"), ClientApplicationId = client.Id, SecretHash = secretHash,
+            DisplayName = "Machine client credential", CreatedAt = now,
+            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard
         };
         _context.Set<SqlOSClientApplication>().Add(client);
         _context.Set<SqlOSFgaSubject>().Add(subject);
         _context.Set<SqlOSFgaServiceAccount>().Add(account);
+        _context.Set<SqlOSClientCredential>().Add(credential);
         AddGrants(subject.Id, normalized.Grants, now, marker: null);
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.created", "admin", null, organizationId: normalized.OrganizationId,
@@ -103,8 +111,23 @@ public sealed class SqlOSMachineClientAdminService
         var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
         EnsureDashboardOwned(account);
         var secret = GenerateSecret();
-        account.ClientSecretHash = _crypto.HashPassword(secret);
-        account.UpdatedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        var secretHash = _crypto.HashPassword(secret);
+        account.ClientSecretHash = secretHash;
+        account.UpdatedAt = now;
+        var activeCredentials = await _context.Set<SqlOSClientCredential>()
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var credential in activeCredentials)
+        {
+            credential.RevokedAt = now;
+        }
+        _context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+        {
+            Id = _crypto.GenerateId("clcred"), ClientApplicationId = client.Id, SecretHash = secretHash,
+            DisplayName = "Machine client credential", CreatedAt = now,
+            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard
+        });
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.secret_rotated", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, subjectId = subject.Id }, cancellationToken: cancellationToken);
@@ -116,8 +139,27 @@ public sealed class SqlOSMachineClientAdminService
     {
         var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
         var now = DateTime.UtcNow;
+        var credentialHashes = await _context.Set<SqlOSClientCredential>().AsNoTracking()
+            .Where(x => x.ClientApplicationId == client.Id
+                && x.RevokedAt == null
+                && (x.ExpiresAt == null || x.ExpiresAt > now))
+            .Select(x => x.SecretHash)
+            .ToListAsync(cancellationToken);
+        var credentialVerified = false;
+        var candidateSecret = secret.Length <= 256 ? secret : string.Empty;
+        if (credentialHashes.Count == 0)
+        {
+            _ = _crypto.VerifyPassword(SqlOSClientAuthenticationService.DummyCredentialHash, candidateSecret);
+        }
+        else
+        {
+            foreach (var hash in credentialHashes)
+            {
+                credentialVerified |= _crypto.VerifyPassword(hash, candidateSecret);
+            }
+        }
         var valid = client.IsActive && client.DisabledAt == null && (account.ExpiresAt == null || account.ExpiresAt > now)
-            && secret.Length is >= 43 and <= 256 && _crypto.VerifyPassword(SqlOSClientCredentialsService.ResolveCredentialHashForVerification(account), secret)
+            && secret.Length is >= 43 and <= 256 && credentialVerified
             && string.Equals(resource, client.Audience, StringComparison.Ordinal)
             && scopes.All(scope => SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson).Contains(scope, StringComparer.Ordinal));
         await _admin.RecordAuditAsync(valid ? "machine_client.credential_test_succeeded" : "machine_client.credential_test_failed",
@@ -133,6 +175,13 @@ public sealed class SqlOSMachineClientAdminService
         client.IsActive = false;
         client.DisabledAt = account.ExpiresAt;
         client.DisabledReason = "machine_client_revoked";
+        var credentials = await _context.Set<SqlOSClientCredential>()
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var credential in credentials)
+        {
+            credential.RevokedAt = account.ExpiresAt;
+        }
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.revoked", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, subjectId = subject.Id }, cancellationToken: cancellationToken);
@@ -150,6 +199,49 @@ public sealed class SqlOSMachineClientAdminService
             await _admin.RecordAuditAsync("machine_client.grant_added", "admin", null, organizationId: subject.OrganizationId,
                 data: new { clientId, request.ResourceId, request.RoleId }, cancellationToken: cancellationToken);
         }
+    }
+
+    public async Task MigrateLegacyClientCredentialsAsync(CancellationToken cancellationToken = default)
+    {
+        var clients = await _context.Set<SqlOSClientApplication>()
+            .Where(x => x.TokenEndpointAuthMethod == "client_secret_basic")
+            .ToListAsync(cancellationToken);
+        if (clients.Count == 0)
+        {
+            return;
+        }
+
+        var clientIds = clients.Select(x => x.ClientId).ToArray();
+        var accounts = await _context.Set<SqlOSFgaServiceAccount>()
+            .Where(x => clientIds.Contains(x.ClientId))
+            .ToDictionaryAsync(x => x.ClientId, cancellationToken);
+        var applicationIds = clients.Select(client => client.Id).ToArray();
+        var existingClientIds = await _context.Set<SqlOSClientCredential>()
+            .Where(x => applicationIds.Contains(x.ClientApplicationId))
+            .Select(x => x.ClientApplicationId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var client in clients.Where(x => !existingClientIds.Contains(x.Id)))
+        {
+            if (!accounts.TryGetValue(client.ClientId, out var account)
+                || string.IsNullOrWhiteSpace(account.ClientSecretHash))
+            {
+                continue;
+            }
+            _context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+            {
+                Id = _crypto.GenerateId("clcred"),
+                ClientApplicationId = client.Id,
+                SecretHash = account.ClientSecretHash,
+                DisplayName = "Migrated machine-client credential",
+                CreatedAt = now,
+                ConfigurationOwner = account.ConfigurationOwner,
+                ConfigurationSourceKey = account.ConfigurationOwner == SqlOSConfigurationOwners.Code ? "primary" : null,
+                LastReconciledAt = account.LastReconciledAt
+            });
+        }
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     public async Task RemoveGrantAsync(string clientId, string grantId, CancellationToken cancellationToken = default)

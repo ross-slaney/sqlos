@@ -82,6 +82,7 @@ public sealed class SqlOSBootstrapper
 
         await _adminService.UpsertSeededClientsAsync(cancellationToken);
         await _machineClients.UpsertSeededMachineClientsAsync(cancellationToken);
+        await _machineClients.MigrateLegacyClientCredentialsAsync(cancellationToken);
         await _adminService.UpsertSeededOidcConnectionsAsync(cancellationToken);
         await _adminService.UpsertSeededSamlConnectionsAsync(cancellationToken);
         await _adminService.UpsertSeededScimConnectionsAsync(cancellationToken);

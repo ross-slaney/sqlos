@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -66,6 +68,73 @@ public sealed class SqlOSControlPlaneParityTests
         enabled.EnsureSuccessStatusCode();
         new[] { await code.ProjectClientAsync("parity-client"), await service.ProjectClientAsync("parity-client"), await dashboard.ProjectClientAsync("parity-client") }
             .Should().OnlyContain(x => x.IsEnabled);
+    }
+
+    [TestMethod]
+    public async Task ConfidentialOAuthClient_CredentialsAreEquivalentRedactedAndIndependentOfFga()
+    {
+        const string codeSecret = "code-secret-with-at-least-256-bits-of-entropy-123456789";
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options => options.SeedClient(seed =>
+        {
+            seed.ClientId = "confidential-parity-client";
+            seed.Name = "Confidential Parity Client";
+            seed.ClientType = "confidential";
+            seed.RedirectUris = [Callback];
+            seed.AllowedScopes = ["openid", "profile"];
+            seed.ClientSecretResolver = () => codeSecret;
+        }));
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+
+        await code.ReconcileStartupAsync();
+        var serviceClient = await service.Admin.CreateClientAsync(ConfidentialClientRequest());
+        var serviceCredential = await service.ClientAuthentication.CreateCredentialAsync(
+            serviceClient.Id,
+            "Initial credential");
+        var dashboardClient = await dashboard.PostDashboardAsync(
+            DashboardAdminContracts.Clients,
+            ConfidentialClientPayload());
+        var dashboardCredential = await dashboard.PostDashboardAsync(
+            DashboardAdminContracts.ClientCredentials(dashboardClient.GetProperty("id").GetString()!),
+            new { displayName = "Initial credential", expiresAt = (DateTime?)null });
+        var dashboardSecret = dashboardCredential.GetProperty("clientSecret").GetString();
+
+        var projections = new[]
+        {
+            await code.ProjectClientAsync("confidential-parity-client"),
+            await service.ProjectClientAsync("confidential-parity-client"),
+            await dashboard.ProjectClientAsync("confidential-parity-client")
+        };
+        projections[1].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[2].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[0].Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        projections.Skip(1).Select(x => x.Owner)
+            .Should().OnlyContain(x => x == SqlOSConfigurationOwners.Dashboard);
+
+        await AssertClientAuthenticatesAsync(code, "confidential-parity-client", codeSecret);
+        await AssertClientAuthenticatesAsync(
+            service,
+            "confidential-parity-client",
+            serviceCredential.ClientSecret);
+        await AssertClientAuthenticatesAsync(
+            dashboard,
+            "confidential-parity-client",
+            dashboardSecret!);
+
+        foreach (var harness in new[] { code, service, dashboard })
+        {
+            (await harness.Context.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>().CountAsync())
+                .Should().Be(0, "confidential OAuth clients do not imply an FGA identity");
+            var client = await harness.Context.Set<SqlOSClientApplication>()
+                .SingleAsync(x => x.ClientId == "confidential-parity-client");
+            var listed = await harness.Client.GetStringAsync(
+                DashboardAdminContracts.ClientCredentials(client.Id));
+            listed.Should().NotContain("secretHash");
+            listed.Should().NotContain("clientSecret");
+            listed.Should().NotContain(codeSecret);
+            listed.Should().NotContain(serviceCredential.ClientSecret);
+            listed.Should().NotContain(dashboardSecret);
+        }
     }
 
     [TestMethod]
@@ -213,7 +282,8 @@ public sealed class SqlOSControlPlaneParityTests
         AssertDashboardContract(
             Section(javascript, "async function renderAuthClients(route)", "async function renderAuthOidc()"),
             "`${authApiBasePath}/clients`",
-            "clientId", "redirectUris", "allowedScopes");
+            "`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`",
+            "clientId", "redirectUris", "allowedScopes", "confidential", "clientSecret");
         AssertDashboardContract(
             Section(javascript, "function buildOidcPayload(form)", "function renderStatsGroup"),
             "providerType", "clientSecret", "displayName");
@@ -272,12 +342,54 @@ public sealed class SqlOSControlPlaneParityTests
     private static SqlOSCreateClientRequest ClientRequest()
         => new("parity-client", "Parity Client", "sqlos", [Callback], AllowedScopes: ["openid", "profile"]);
 
+    private static SqlOSCreateClientRequest ConfidentialClientRequest()
+        => new(
+            "confidential-parity-client",
+            "Confidential Parity Client",
+            "sqlos",
+            [Callback],
+            AllowedScopes: ["openid", "profile"],
+            ClientType: "confidential");
+
     private static object ClientPayload() => new
     {
         clientId = "parity-client", name = "Parity Client", audience = "sqlos", redirectUris = new[] { Callback },
         description = (string?)null, allowedScopes = new[] { "openid", "profile" }, requirePkce = true,
         isFirstParty = false, allowNativeHeadlessAuth = false, allowDeviceAuthorization = false, clientType = "public_pkce"
     };
+
+    private static object ConfidentialClientPayload() => new
+    {
+        clientId = "confidential-parity-client",
+        name = "Confidential Parity Client",
+        audience = "sqlos",
+        redirectUris = new[] { Callback },
+        description = (string?)null,
+        allowedScopes = new[] { "openid", "profile" },
+        requirePkce = true,
+        isFirstParty = false,
+        allowNativeHeadlessAuth = false,
+        allowDeviceAuthorization = false,
+        clientType = "confidential"
+    };
+
+    private static async Task AssertClientAuthenticatesAsync(
+        ControlPlaneParityHarness harness,
+        string clientId,
+        string secret)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{secret}"))).ToString();
+        var authenticated = await harness.ClientAuthentication.AuthenticateTokenEndpointClientAsync(
+            new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["client_id"] = clientId
+            }),
+            context);
+        authenticated.ClientId.Should().Be(clientId);
+    }
 
     private static SqlOSCreateOidcConnectionRequest OidcRequest()
         => new(

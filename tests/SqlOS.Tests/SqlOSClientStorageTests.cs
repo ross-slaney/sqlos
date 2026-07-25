@@ -78,7 +78,8 @@ public sealed class SqlOSClientStorageTests
             ClientType = "confidential",
             EnableClientCredentials = true,
             RequirePkce = false,
-            AllowedScopes = ["jobs.run"]
+            AllowedScopes = ["jobs.run"],
+            ClientSecretResolver = () => "worker-secret-with-at-least-256-bits-of-entropy-123456789"
         });
         var options = Options.Create(optionsValue);
         var admin = new SqlOSAdminService(context, options, TestCryptoService.Create(context, options));
@@ -90,6 +91,7 @@ public sealed class SqlOSClientStorageTests
         client.GrantTypesJson.Should().Be("[\"client_credentials\"]");
         client.RedirectUrisJson.Should().Be("[]");
         client.RequirePkce.Should().BeFalse();
+        (await context.Set<SqlOSClientCredential>().CountAsync()).Should().Be(1);
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()

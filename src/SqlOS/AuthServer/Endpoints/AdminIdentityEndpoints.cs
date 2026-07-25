@@ -366,6 +366,62 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapGet("/clients/{clientId}/credentials", async (HttpContext context, string clientId, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await clientAuthentication.ListCredentialsAsync(clientId, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/clients/{clientId}/credentials", async (HttpContext context, string clientId, SqlOSCreateClientCredentialRequest request, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await clientAuthentication.CreateCredentialAsync(
+                    clientId,
+                    request.DisplayName,
+                    request.ExpiresAt,
+                    cancellationToken: cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapDelete("/clients/{clientId}/credentials/{credentialId}", async (HttpContext context, string clientId, string credentialId, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                await clientAuthentication.RevokeCredentialAsync(clientId, credentialId, cancellationToken: cancellationToken);
+                return Results.Ok(new { revoked = true });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapGet("/applications/{applicationId}/assignments", async (HttpContext context, string applicationId, bool? includeRevoked, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -503,6 +559,8 @@ public static partial class EndpointRouteBuilderExtensions
                     client.Name,
                     client.Audience,
                     client.AccessMode,
+                    client.ClientType,
+                    client.TokenEndpointAuthMethod,
                     client.AllowNativeHeadlessAuth,
                     client.AllowDeviceAuthorization,
                     RedirectUris = SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson),

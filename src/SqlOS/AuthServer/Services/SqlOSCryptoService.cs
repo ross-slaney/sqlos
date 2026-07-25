@@ -656,23 +656,31 @@ public sealed class SqlOSCryptoService
                     return null;
                 }
 
-                var serviceNow = DateTime.UtcNow;
-                var serviceAccount = await _context.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>()
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.SubjectId == serviceSubjectId
-                        && x.ClientId == serviceClientId
-                        && (x.ExpiresAt == null || x.ExpiresAt > serviceNow), cancellationToken);
                 var serviceClient = await _context.Set<SqlOSClientApplication>()
                     .AsNoTracking()
                     .FirstOrDefaultAsync(x => x.ClientId == serviceClientId && x.IsActive && x.DisabledAt == null, cancellationToken);
-                var serviceSubject = await _context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>()
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x => x.Id == serviceSubjectId && x.SubjectTypeId == "service_account", cancellationToken);
-                if (serviceAccount == null || serviceSubject == null || serviceClient == null
+                if (serviceClient == null
                     || !SqlOSAdminService.DeserializeJsonList(serviceClient.GrantTypesJson)
                         .Contains(SqlOSOAuthGrantTypes.ClientCredentials, StringComparer.Ordinal))
                 {
                     return null;
+                }
+
+                if (!string.Equals(serviceSubjectId, serviceClientId, StringComparison.Ordinal))
+                {
+                    var serviceNow = DateTime.UtcNow;
+                    var serviceAccount = await _context.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.SubjectId == serviceSubjectId
+                            && x.ClientId == serviceClientId
+                            && (x.ExpiresAt == null || x.ExpiresAt > serviceNow), cancellationToken);
+                    var serviceSubject = await _context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.Id == serviceSubjectId && x.SubjectTypeId == "service_account", cancellationToken);
+                    if (serviceAccount == null || serviceSubject == null)
+                    {
+                        return null;
+                    }
                 }
 
                 return new SqlOSValidatedToken(

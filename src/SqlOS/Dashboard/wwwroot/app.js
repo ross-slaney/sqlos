@@ -28,6 +28,7 @@
     let latestSsoPortalSession = null;
     let latestScimToken = null;
     let latestMachineClientSecret = null;
+    let latestClientSecret = null;
     const pagerState = new Map();
     let selectedClientId = null;
     let clientDraftState = null;
@@ -91,6 +92,17 @@
             clientIdHint: "my-web-app",
             allowedScopes: ["openid", "profile", "email"],
             isFirstParty: true
+        },
+        "owned-server-web": {
+            title: "Owned Server Web",
+            description: "Best for a server-rendered or backend-for-frontend app that can protect a client secret.",
+            name: "Owned Server Web App",
+            audience: "sqlos",
+            redirectHint: "https://app.example.com/auth/callback",
+            clientIdHint: "my-server-web-app",
+            allowedScopes: ["openid", "profile", "email", "offline_access"],
+            isFirstParty: true,
+            confidential: true
         },
         "owned-native": {
             title: "Owned Native / Mobile",
@@ -761,7 +773,8 @@
             allowedScopes: (preset.allowedScopes || []).join("\n"),
             requirePkce: preset.requirePkce !== false,
             isFirstParty: !!preset.isFirstParty,
-            allowDeviceAuthorization: !!preset.allowDeviceAuthorization
+            allowDeviceAuthorization: !!preset.allowDeviceAuthorization,
+            confidential: !!preset.confidential
         };
     }
 
@@ -790,6 +803,7 @@
             allowedScopes: String(data.get("allowedScopes") || ""),
             requirePkce: data.get("requirePkce") === "on",
             allowDeviceAuthorization: data.get("allowDeviceAuthorization") === "on",
+            confidential: data.get("confidential") === "on",
             isFirstParty: previousDraft.isFirstParty
         };
     }
@@ -2742,10 +2756,12 @@
         const clientItems = Array.isArray(clients.data) ? clients.data : [];
         let clientDetail = null;
         let clientAccess = null;
+        let clientCredentials = [];
         if (selectedClientId) {
             try {
                 clientDetail = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(selectedClientId)}`);
                 clientAccess = await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments`);
+                clientCredentials = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`);
                 selectedClientId = clientDetail.id;
             } catch {
                 if (route?.clientApplicationId) {
@@ -2769,6 +2785,7 @@
 
         content.innerHTML = `
             ${consumeFlashHtml()}
+            ${latestClientSecret ? `<section class="panel callout"><h2>Copy this client secret now</h2><p>SqlOS stores only a slow hash and cannot show this value again.</p><div class="inline-code">${esc(latestClientSecret.secret)}</div><p><strong>Client ID:</strong> ${esc(latestClientSecret.clientId)}</p><button id="client-secret-ack" type="button">I copied it</button></section>` : ""}
             <div class="panel-stack">
                 <section class="panel">
                     <div class="panel-actions">
@@ -2877,6 +2894,7 @@
                                     <textarea name="allowedScopes" placeholder="Optional scopes, one per line">${esc(draft.allowedScopes)}</textarea>
                                     <label class="checkbox-row"><input name="requirePkce" type="checkbox" ${draft.requirePkce ? "checked" : ""}> Require PKCE</label>
                                     <label class="checkbox-row"><input name="allowDeviceAuthorization" type="checkbox" ${draft.allowDeviceAuthorization ? "checked" : ""}> Allow device authorization</label>
+                                    <label class="checkbox-row"><input name="confidential" type="checkbox" ${draft.confidential ? "checked" : ""}> Confidential client (issue a client secret)</label>
                                 </div>
                             </details>
                             <button type="submit">Create manual client</button>
@@ -3015,6 +3033,37 @@
                                         "No assignments for this application."
                                     )}
                                 </div>
+                                <div>
+                                    <h3>Client credentials</h3>
+                                    <p>Credentials are write-only. Creating another credential allows an overlap window while callers move to the new secret.</p>
+                                    ${clientDetail.tokenEndpointAuthMethod === "client_secret_basic" && clientDetail.ownership?.isEditable ? `
+                                        <form id="create-client-credential-form">
+                                            <input name="displayName" placeholder="Credential label, for example July rotation">
+                                            <input name="expiresAt" type="datetime-local">
+                                            <button type="submit">Create credential</button>
+                                        </form>
+                                    ` : ""}
+                                    ${renderList(
+                                        clientCredentials,
+                                        credential => `
+                                            <div class="client-list-row">
+                                                <div class="client-list-header">
+                                                    <strong>${esc(credential.displayName || credential.id)}</strong>
+                                                    ${credential.revokedAt || credential.configurationOwner !== "dashboard" ? "" : `<button type="button" data-client-credential-revoke="${esc(credential.id)}">Revoke</button>`}
+                                                </div>
+                                                ${renderMetadataRows([
+                                                    { label: "Credential ID", value: credential.id },
+                                                    { label: "Owner", value: credential.configurationOwner },
+                                                    { label: "Created", value: formatDate(credential.createdAt) },
+                                                    { label: "Expires", value: formatDate(credential.expiresAt) },
+                                                    { label: "Last used", value: formatDate(credential.lastUsedAt) },
+                                                    { label: "Status", value: credential.revokedAt ? `Revoked ${formatDate(credential.revokedAt)}` : "Active" }
+                                                ])}
+                                            </div>
+                                        `,
+                                        "No client credentials configured."
+                                    )}
+                                </div>
                                 <details>
                                     <summary>Raw metadata</summary>
                                     <pre class="json-preview">${esc(formatJson(clientDetail.metadataJson))}</pre>
@@ -3116,7 +3165,8 @@
         });
 
         bindForm("create-client-form", async form => {
-            await fetchJson(`${authApiBasePath}/clients`, {
+            const confidential = form.get("confidential") === "on";
+            const created = await fetchJson(`${authApiBasePath}/clients`, {
                 method: "POST",
                 body: JSON.stringify({
                     clientId: form.get("clientId"),
@@ -3134,13 +3184,53 @@
                     requirePkce: form.get("requirePkce") === "on",
                     isFirstParty: draft.isFirstParty,
                     allowDeviceAuthorization: form.get("allowDeviceAuthorization") === "on",
-                    clientType: form.get("allowDeviceAuthorization") === "on" ? "public_cli" : "public_pkce"
+                    clientType: confidential ? "confidential" : form.get("allowDeviceAuthorization") === "on" ? "public_cli" : "public_pkce"
                 })
             });
-            setFlash("success", "Manual client created.");
+            if (confidential) {
+                const credential = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(created.id)}/credentials`, {
+                    method: "POST",
+                    body: JSON.stringify({ displayName: "Initial client credential", expiresAt: null })
+                });
+                latestClientSecret = { clientId: created.clientId, secret: credential.clientSecret };
+            }
+            setFlash("success", confidential ? "Confidential client created. Copy its secret now." : "Manual client created.");
             clientDraftState = createClientDraftFromPreset(clientViewState.preset);
             suppressClientDraftSync = true;
             setPagerPage("auth-clients", 1);
+        });
+
+        document.getElementById("client-secret-ack")?.addEventListener("click", async () => {
+            latestClientSecret = null;
+            await render();
+        });
+
+        bindForm("create-client-credential-form", async form => {
+            if (!clientDetail) {
+                return;
+            }
+            const result = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`, {
+                method: "POST",
+                body: JSON.stringify({
+                    displayName: form.get("displayName") || null,
+                    expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null
+                })
+            });
+            latestClientSecret = { clientId: clientDetail.clientId, secret: result.clientSecret };
+            setFlash("success", "Client credential created. Existing active credentials remain valid until revoked.");
+        });
+
+        document.querySelectorAll("[data-client-credential-revoke]").forEach(button => {
+            button.addEventListener("click", async () => {
+                if (!clientDetail || !window.confirm("Revoke this client credential immediately?")) {
+                    return;
+                }
+                await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials/${encodeURIComponent(button.dataset.clientCredentialRevoke)}`, {
+                    method: "DELETE"
+                });
+                setFlash("success", "Client credential revoked.");
+                await render();
+            });
         });
 
         bindPagination("#clients-pagination-top", async page => {

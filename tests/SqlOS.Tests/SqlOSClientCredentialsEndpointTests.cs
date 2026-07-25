@@ -16,7 +16,6 @@ using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Extensions;
-using SqlOS.Fga.Models;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -24,11 +23,12 @@ namespace SqlOS.Tests;
 [TestClass]
 public sealed class SqlOSClientCredentialsEndpointTests
 {
+    private const string Secret = "endpoint-secret-with-at-least-256-bits-of-randomness-123456";
+
     [TestMethod]
     public async Task TokenEndpoint_BasicAuthentication_IssuesAccessTokenOnlyAndRejectsWrongAudience()
     {
         using var host = await StartHostAsync();
-        const string secret = "endpoint-secret-with-at-least-256-bits-of-randomness-123456";
         using (var scope = host.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
@@ -36,29 +36,19 @@ public sealed class SqlOSClientCredentialsEndpointTests
             var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
             await crypto.EnsureActiveSigningKeyAsync();
             await admin.UpsertSeededClientsAsync();
-            db.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject
-            {
-                Id = "service_account::endpoint-worker",
-                SubjectTypeId = "service_account",
-                DisplayName = "Endpoint Worker"
-            });
-            db.Set<SqlOSFgaServiceAccount>().Add(new SqlOSFgaServiceAccount
-            {
-                Id = "sa-endpoint-worker",
-                SubjectId = "service_account::endpoint-worker",
-                ClientId = "endpoint-worker",
-                ClientSecretHash = crypto.HashPassword(secret)
-            });
-            await db.SaveChangesAsync();
             var configuredClient = await db.Set<SqlOSClientApplication>().SingleAsync();
             configuredClient.ClientType.Should().Be("confidential");
             configuredClient.TokenEndpointAuthMethod.Should().Be("client_secret_basic");
             configuredClient.GrantTypesJson.Should().Contain("client_credentials");
             configuredClient.Audience.Should().Be("https://api.example.test/jobs");
             configuredClient.AllowedScopesJson.Should().Contain("jobs.run");
+            (await db.Set<SqlOSClientCredential>().CountAsync()).Should().Be(1);
+            (await db.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>().CountAsync()).Should().Be(
+                0,
+                "OAuth client authentication must not create or require an FGA service account");
         }
 
-        using var request = TokenRequest("https://api.example.test/jobs", secret);
+        using var request = TokenRequest("https://api.example.test/jobs", Secret);
         var response = await host.GetTestClient().SendAsync(request);
         var responseBody = await response.Content.ReadAsStringAsync();
 
@@ -68,7 +58,7 @@ public sealed class SqlOSClientCredentialsEndpointTests
         json.RootElement.TryGetProperty("refresh_token", out _).Should().BeFalse();
         json.RootElement.GetProperty("scope").GetString().Should().Be("jobs.run");
 
-        using var wrongAudience = TokenRequest("https://api.example.test/other", secret);
+        using var wrongAudience = TokenRequest("https://api.example.test/other", Secret);
         (await host.GetTestClient().SendAsync(wrongAudience)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         var secretPost = await host.GetTestClient().PostAsync(
@@ -77,7 +67,7 @@ public sealed class SqlOSClientCredentialsEndpointTests
             {
                 ["grant_type"] = "client_credentials",
                 ["client_id"] = "endpoint-worker",
-                ["client_secret"] = secret,
+                ["client_secret"] = Secret,
                 ["resource"] = "https://api.example.test/jobs",
                 ["scope"] = "jobs.run"
             }));
@@ -126,7 +116,8 @@ public sealed class SqlOSClientCredentialsEndpointTests
                             ClientType = "confidential",
                             EnableClientCredentials = true,
                             RequirePkce = false,
-                            AllowedScopes = ["jobs.run"]
+                            AllowedScopes = ["jobs.run"],
+                            ClientSecretResolver = () => Secret
                         });
                     });
                     foreach (var service in services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())

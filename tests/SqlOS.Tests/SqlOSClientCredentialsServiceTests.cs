@@ -86,10 +86,8 @@ public sealed class SqlOSClientCredentialsServiceTests
     {
         await using var harness = await CreateHarnessAsync();
 
-        SqlOSClientCredentialsService.ResolveCredentialHashForVerification(null)
-            .Should().BeSameAs(SqlOSClientCredentialsService.DummyCredentialHash);
         harness.Crypto.VerifyPassword(
-            SqlOSClientCredentialsService.DummyCredentialHash,
+            SqlOSClientAuthenticationService.DummyCredentialHash,
             "unknown-client-secret-with-sufficient-length-123456789").Should().BeFalse();
         await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
             "unknown-client",
@@ -108,8 +106,8 @@ public sealed class SqlOSClientCredentialsServiceTests
         var first = await harness.Service.ExchangeAsync(
             "ledger-worker", harness.Secret, "https://api.example.test/ledger", "ledger.read",
             new DefaultHttpContext(), default);
-        var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
-        account.ClientSecretHash = harness.Crypto.HashPassword("replacement-secret-with-enough-entropy-123456789");
+        var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        credential.SecretHash = harness.Crypto.HashPassword("replacement-secret-with-enough-entropy-123456789");
         await harness.Context.SaveChangesAsync();
 
         await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
@@ -166,6 +164,13 @@ public sealed class SqlOSClientCredentialsServiceTests
             AllowedScopesJson = "[\"ledger.read\"]",
             Audience = "https://api.example.test/ledger",
             IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+        {
+            Id = "clcred-worker",
+            ClientApplicationId = "app-worker",
+            SecretHash = crypto.HashPassword(secret),
             CreatedAt = DateTime.UtcNow
         });
         context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject

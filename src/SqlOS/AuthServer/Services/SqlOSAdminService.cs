@@ -221,7 +221,7 @@ public sealed partial class SqlOSAdminService
                     ConfigurationSourceKey = sourceKey,
                     ConfigurationFingerprint = fingerprint,
                     LastReconciledAt = now,
-                    TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none",
+                    TokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(normalized.ClientType),
                     GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
@@ -249,7 +249,7 @@ public sealed partial class SqlOSAdminService
             existing.LastReconciledAt = now;
             existing.ConfigurationOrphanedAt = null;
             if (outcome != null) auditOutcomes.Add((existing.Id, sourceKey, outcome, fingerprint));
-            existing.TokenEndpointAuthMethod = normalized.EnableClientCredentials ? "client_secret_basic" : "none";
+            existing.TokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(normalized.ClientType);
             existing.GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes);
             existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
                 ? JsonSerializer.Serialize(new[] { "code" })
@@ -272,10 +272,111 @@ public sealed partial class SqlOSAdminService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await ReconcileSeededClientCredentialsAsync(seeds, now, cancellationToken);
         await ReconcileSeededApplicationAssignmentsAsync(seeds, now, cancellationToken);
         foreach (var audit in auditOutcomes)
         {
             await RecordAuditAsync("configuration.reconciled", "system", "startup", data: new { resourceType = "oauth_client", resourceId = audit.ResourceId, owner = SqlOSConfigurationOwners.Code, sourceKey = audit.SourceKey, outcome = audit.Outcome, fingerprint = audit.Fingerprint }, cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task ReconcileSeededClientCredentialsAsync(
+        IReadOnlyList<SqlOSClientSeedOptions> seeds,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        foreach (var seed in seeds)
+        {
+            var sourceKey = seed.ClientId.Trim();
+            var client = await _context.Set<SqlOSClientApplication>()
+                .SingleAsync(x => x.ClientId == sourceKey, cancellationToken);
+            var secretResolver = seed.ClientSecretResolver ?? seed.MachineClient?.SecretResolver;
+            var hashResolver = seed.ClientSecretHashResolver ?? seed.MachineClient?.SecretHashResolver;
+            var configuredResolverCount = (seed.ClientSecretResolver == null ? 0 : 1)
+                + (seed.ClientSecretHashResolver == null ? 0 : 1)
+                + (seed.MachineClient?.SecretResolver == null ? 0 : 1)
+                + (seed.MachineClient?.SecretHashResolver == null ? 0 : 1);
+            var credential = await _context.Set<SqlOSClientCredential>()
+                .SingleOrDefaultAsync(x => x.ClientApplicationId == client.Id
+                    && x.ConfigurationOwner == SqlOSConfigurationOwners.Code
+                    && x.ConfigurationSourceKey == "primary", cancellationToken);
+
+            if (!string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal))
+            {
+                if (configuredResolverCount != 0)
+                {
+                    throw new InvalidOperationException($"Public client '{sourceKey}' cannot declare a client-secret resolver.");
+                }
+                if (credential != null && credential.RevokedAt == null)
+                {
+                    credential.RevokedAt = now;
+                    credential.LastReconciledAt = now;
+                }
+                continue;
+            }
+
+            if (configuredResolverCount != 1 || (secretResolver == null) == (hashResolver == null))
+            {
+                throw new InvalidOperationException($"Confidential client '{sourceKey}' requires exactly one client-secret or client-secret-hash resolver.");
+            }
+
+            string secretHash;
+            if (hashResolver != null)
+            {
+                secretHash = hashResolver()?.Trim()
+                    ?? throw new InvalidOperationException($"Confidential client '{sourceKey}' secret-hash resolver returned no value.");
+                if (!IsSupportedPasswordHash(secretHash))
+                {
+                    throw new InvalidOperationException($"Confidential client '{sourceKey}' secret-hash resolver returned an unsupported PasswordHasher payload.");
+                }
+            }
+            else
+            {
+                var secret = secretResolver!()?.Trim();
+                if (string.IsNullOrWhiteSpace(secret) || secret.Length is < 43 or > 256)
+                {
+                    throw new InvalidOperationException($"Confidential client '{sourceKey}' secret resolver must return 43 to 256 characters.");
+                }
+                secretHash = credential != null && _cryptoService.VerifyPassword(credential.SecretHash, secret)
+                    ? credential.SecretHash
+                    : _cryptoService.HashPassword(secret);
+            }
+
+            if (credential == null)
+            {
+                _context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+                {
+                    Id = _cryptoService.GenerateId("clcred"),
+                    ClientApplicationId = client.Id,
+                    SecretHash = secretHash,
+                    DisplayName = "Code-owned primary credential",
+                    CreatedAt = now,
+                    ConfigurationOwner = SqlOSConfigurationOwners.Code,
+                    ConfigurationSourceKey = "primary",
+                    LastReconciledAt = now
+                });
+            }
+            else
+            {
+                credential.SecretHash = secretHash;
+                credential.RevokedAt = null;
+                credential.LastReconciledAt = now;
+            }
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool IsSupportedPasswordHash(string hash)
+    {
+        try
+        {
+            var payload = Convert.FromBase64String(hash);
+            return payload.Length >= 13 && payload[0] is 0x00 or 0x01;
+        }
+        catch (FormatException)
+        {
+            return false;
         }
     }
 
@@ -595,7 +696,7 @@ public sealed partial class SqlOSAdminService
             Audience = normalized.Audience,
             ClientType = normalized.ClientType,
             RegistrationSource = "manual",
-            TokenEndpointAuthMethod = "none",
+            TokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(normalized.ClientType),
             GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
             ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
             RequirePkce = normalized.RequirePkce,
@@ -3055,6 +3156,18 @@ public sealed partial class SqlOSAdminService
         var normalizedClientType = string.IsNullOrWhiteSpace(clientType)
             ? "public_pkce"
             : clientType.Trim();
+        if (normalizedClientType is not ("public_pkce" or "public_cli" or "confidential"))
+        {
+            throw new InvalidOperationException($"Client '{normalizedClientId}' has unsupported client type '{normalizedClientType}'.");
+        }
+        if (enableClientCredentials && !string.Equals(normalizedClientType, "confidential", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Client '{normalizedClientId}' must be confidential to enable client_credentials.");
+        }
+        if (allowDeviceAuthorization && string.Equals(normalizedClientType, "confidential", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Client '{normalizedClientId}' cannot combine device authorization with confidential client authentication.");
+        }
         var normalizedRedirectUris = (redirectUris ?? [])
             .Where(static uri => !string.IsNullOrWhiteSpace(uri))
             .Select(static uri => uri.Trim())
@@ -3116,6 +3229,11 @@ public sealed partial class SqlOSAdminService
         }
         return grants.Distinct(StringComparer.Ordinal).ToList();
     }
+
+    private static string ResolveTokenEndpointAuthMethod(string clientType)
+        => string.Equals(clientType, "confidential", StringComparison.Ordinal)
+            ? "client_secret_basic"
+            : "none";
 
     private static string RequireText(string? value, string name)
     {

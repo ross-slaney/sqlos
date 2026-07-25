@@ -99,7 +99,7 @@ The application that requests authorization and receives tokens: for example, a 
 
 ### Client secret
 
-A credential a confidential OAuth client can keep server-side. Browser, native, and CLI applications cannot safely retain one and should be public clients using PKCE. SqlOS's first-party browser/client helpers create public clients; external OIDC provider connections may still require a provider-issued client secret that SqlOS stores using Data Protection.
+A credential a confidential OAuth client can keep server-side. Browser, native, and CLI applications cannot safely retain one and should be public clients using PKCE. SqlOS stores its own confidential-client secrets only as slow hashes and requires them for authorization-code and refresh exchanges; external OIDC provider connections use separate provider-issued secrets protected with Data Protection. An OAuth client secret does not imply an FGA service account.
 
 ### Credential
 

@@ -512,7 +512,25 @@ public sealed class SqlOSClientApplication
     public string? DisabledReason { get; set; }
     public DateTime CreatedAt { get; set; }
 
+    public ICollection<SqlOSClientCredential> ClientCredentials { get; set; } = new List<SqlOSClientCredential>();
     public ICollection<SqlOSApplicationAssignment> ApplicationAssignments { get; set; } = new List<SqlOSApplicationAssignment>();
+}
+
+public sealed class SqlOSClientCredential
+{
+    public string Id { get; set; } = string.Empty;
+    public string ClientApplicationId { get; set; } = string.Empty;
+    public string SecretHash { get; set; } = string.Empty;
+    public string? DisplayName { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+
+    public SqlOSClientApplication? ClientApplication { get; set; }
 }
 
 public sealed class SqlOSApplicationAssignment

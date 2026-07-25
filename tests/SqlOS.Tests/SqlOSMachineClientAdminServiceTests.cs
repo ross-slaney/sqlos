@@ -107,14 +107,56 @@ public sealed class SqlOSMachineClientAdminServiceTests
             machine.SecretResolver = () => null;
             machine.Grant(resource.Id, role.Id);
         });
-        await admin.UpsertSeededClientsAsync();
-        await FluentActions.Invoking(() => service.UpsertSeededMachineClientsAsync())
+        await FluentActions.Invoking(() => admin.UpsertSeededClientsAsync())
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*43 to 256*");
 
         optionsValue.ClientSeeds[0].MachineClient!.SecretResolver = null;
         optionsValue.ClientSeeds[0].MachineClient!.SecretHashResolver = () => "not-a-password-hash";
-        await FluentActions.Invoking(() => service.UpsertSeededMachineClientsAsync())
+        await FluentActions.Invoking(() => admin.UpsertSeededClientsAsync())
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*unsupported PasswordHasher payload*");
+    }
+
+    [TestMethod]
+    public async Task LegacyMachineClientCredential_IsMigratedOnceToOAuthClientCredentialStore()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var service = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        const string secret = "legacy-secret-with-at-least-256-bits-of-entropy-123456789";
+        context.Set<SqlOSClientApplication>().Add(new()
+        {
+            Id = "legacy-app",
+            ClientId = "legacy-worker",
+            Name = "Legacy worker",
+            ClientType = "confidential",
+            TokenEndpointAuthMethod = "client_secret_basic",
+            GrantTypesJson = "[\"client_credentials\"]",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        context.Set<SqlOSFgaSubject>().Add(new()
+        {
+            Id = "service_account::legacy-worker",
+            SubjectTypeId = "service_account",
+            DisplayName = "Legacy worker"
+        });
+        context.Set<SqlOSFgaServiceAccount>().Add(new()
+        {
+            Id = "legacy-account",
+            SubjectId = "service_account::legacy-worker",
+            ClientId = "legacy-worker",
+            ClientSecretHash = crypto.HashPassword(secret)
+        });
+        await context.SaveChangesAsync();
+
+        await service.MigrateLegacyClientCredentialsAsync();
+        await service.MigrateLegacyClientCredentialsAsync();
+
+        var credential = await context.Set<SqlOSClientCredential>().SingleAsync();
+        crypto.VerifyPassword(credential.SecretHash, secret).Should().BeTrue();
+        credential.DisplayName.Should().Be("Migrated machine-client credential");
     }
 
     private static async Task<(SqlOSOrganization Organization, SqlOSFgaResource Resource, SqlOSFgaRole Role)> SeedDependenciesAsync(TestSqlOSInMemoryDbContext context, SqlOSAdminService admin)

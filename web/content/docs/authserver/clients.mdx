@@ -73,6 +73,52 @@ The Admin API requires an operator session; see [Authenticate operator API calls
 | `audience` | No | Token audience claim |
 | `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
 
+## Confidential server-side clients
+
+Use a confidential client when the OAuth callback and refresh-token exchange run
+in server-side code that can protect a secret. SqlOS then requires
+`client_secret_basic` authentication for both the authorization-code and refresh
+grants. Public browser, native, and CLI clients continue to use PKCE without a
+secret.
+
+The credential belongs to the OAuth client. Creating a confidential client does
+not create or require an FGA service account. Use `SeedMachineClient` only when
+the same application also needs an FGA subject and grants for service-to-service
+authorization.
+
+For code-owned configuration, resolve the secret from the host's existing
+secret provider:
+
+```csharp
+options.AuthServer.SeedClient(client =>
+{
+    client.ClientId = "billing-server";
+    client.Name = "Billing Server";
+    client.ClientType = "confidential";
+    client.RedirectUris = ["https://billing.example.com/auth/callback"];
+    client.AllowedScopes = ["openid", "profile", "offline_access"];
+    client.ClientSecretResolver = () =>
+        builder.Configuration["SqlOS:Clients:BillingServer:Secret"];
+});
+```
+
+Secrets must contain 43 to 256 characters. Startup fails closed when a
+confidential code-owned client cannot resolve exactly one plaintext secret or
+compatible password hash. SqlOS stores only the slow hash.
+
+In the dashboard, choose **Owned Server Web**, create the client, and copy the
+generated secret from the one-time reveal. The equivalent admin API flow is:
+
+1. `POST /sqlos/admin/auth/api/clients` with
+   `"clientType": "confidential"`;
+2. `POST /sqlos/admin/auth/api/clients/{id}/credentials`;
+3. copy the returned `clientSecret` before leaving the response.
+
+Credential list responses contain only metadata. Create a second credential for
+a deployment overlap window, move callers to it, and then revoke the old
+credential. Authentication failures return a generic `invalid_client` response
+and do not consume the authorization code or refresh token.
+
 ## CLI and terminal apps
 
 Use the **CLI / Device OAuth** dashboard preset or seed a CLI client:
