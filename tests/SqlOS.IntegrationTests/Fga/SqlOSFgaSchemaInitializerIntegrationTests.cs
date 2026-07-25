@@ -4,8 +4,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
-using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.Fga.Services;
+using SqlOS.IntegrationTests.Fga.Infrastructure;
+using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -131,7 +132,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task EnsureSchema_SetsCorrectVersion()
+    public async Task EnsureSchema_EachEmbeddedMigrationPersistsItsOwnVersion()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         var initializer = new SqlOSFgaSchemaInitializer(
@@ -142,7 +143,38 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         var version = await GetSchemaVersionAsync();
-        Assert.IsTrue(version >= 6, $"Schema version should be at least 6, was {version}");
+        Assert.AreEqual(GetLatestMigrationVersion(), version);
+    }
+
+    [TestMethod]
+    public async Task EnsureSchema_RepairsStaleVersionMarker_ThenSkipsLatestMigration()
+    {
+        await using var context = await AspireFixture.CreateIsolatedAuthContextAsync("FgaSchemaVersionGuard");
+        var options = Options.Create(new SqlOSFgaOptions());
+        var logger = new RecordingLogger<SqlOSFgaSchemaInitializer>();
+        var initializer = new SqlOSFgaSchemaInitializer(context, options, logger);
+        var latestVersion = GetLatestMigrationVersion();
+
+        await initializer.EnsureSchemaAsync();
+        Assert.AreEqual(latestVersion, await GetSchemaVersionAsync(context));
+
+        await SetSchemaVersionAsync(context, latestVersion - 1);
+        logger.Clear();
+
+        await initializer.EnsureSchemaAsync();
+
+        Assert.AreEqual(latestVersion, await GetSchemaVersionAsync(context));
+        Assert.IsTrue(
+            logger.Messages.Any(message => message.Contains($"Running migration {latestVersion}:", StringComparison.Ordinal)),
+            "A stale marker should cause the latest embedded migration to repair the persisted version.");
+
+        logger.Clear();
+        await initializer.EnsureSchemaAsync();
+
+        Assert.AreEqual(latestVersion, await GetSchemaVersionAsync(context));
+        Assert.IsFalse(
+            logger.Messages.Any(message => message.Contains($"Running migration {latestVersion}:", StringComparison.Ordinal)),
+            "A second startup at the latest schema version must not execute the migration again.");
     }
 
     private async Task<bool> TableExistsAsync(string tableName)
@@ -210,9 +242,9 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         }
     }
 
-    private async Task<int> GetSchemaVersionAsync()
+    private async Task<int> GetSchemaVersionAsync(TestSqlOSDbContext? context = null)
     {
-        var connection = Context.Database.GetDbConnection();
+        var connection = (context ?? Context).Database.GetDbConnection();
         await connection.OpenAsync();
         try
         {
@@ -225,5 +257,43 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         {
             await connection.CloseAsync();
         }
+    }
+
+    private static async Task SetSchemaVersionAsync(TestSqlOSDbContext context, int version)
+    {
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE [dbo].[SqlOSFgaSchema] SET [Version] = {version}");
+    }
+
+    private static int GetLatestMigrationVersion()
+    {
+        const string resourcePrefix = "SqlOS.Fga.Schema.";
+
+        return typeof(SqlOSFgaSchemaInitializer).Assembly
+            .GetManifestResourceNames()
+            .Where(name => name.StartsWith(resourcePrefix, StringComparison.Ordinal)
+                && name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+            .Select(name => name[resourcePrefix.Length..].Split('_', 2)[0])
+            .Select(int.Parse)
+            .Max();
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+
+        public void Clear() => Messages.Clear();
     }
 }

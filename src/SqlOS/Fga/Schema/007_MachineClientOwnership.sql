@@ -19,3 +19,6 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_{ServiceAccounts}_ConfigurationSource' AND object_id = OBJECT_ID('[{Schema}].[{ServiceAccounts}]'))
     CREATE UNIQUE INDEX [UX_{ServiceAccounts}_ConfigurationSource] ON [{Schema}].[{ServiceAccounts}] ([ConfigurationOwner], [ConfigurationSourceKey]) WHERE [ConfigurationSourceKey] IS NOT NULL;
 GO
+
+UPDATE [{Schema}].[SqlOSFgaSchema] SET [Version] = 7 WHERE [Version] < 7;
+GO

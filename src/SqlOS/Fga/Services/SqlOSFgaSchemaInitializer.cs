@@ -58,8 +58,7 @@ END";
             _logger.LogInformation("Fresh install detected. Running all migrations (v1 -> v{MaxVersion})...", maxVersion);
             foreach (var migration in migrations.OrderBy(m => m.Version))
             {
-                _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
-                await RunScriptAsync(migration.ResourceName, cancellationToken);
+                await RunMigrationAsync(schema, migration, cancellationToken);
             }
             _logger.LogInformation("Schema v{Version} installed successfully.", maxVersion);
         }
@@ -69,14 +68,37 @@ END";
             var pendingMigrations = migrations.Where(m => m.Version > currentVersion).OrderBy(m => m.Version);
             foreach (var migration in pendingMigrations)
             {
-                _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
-                await RunScriptAsync(migration.ResourceName, cancellationToken);
+                await RunMigrationAsync(schema, migration, cancellationToken);
             }
             _logger.LogInformation("Schema upgraded to v{Version}.", maxVersion);
         }
         else
         {
             _logger.LogInformation("Schema is up to date (v{Version}).", currentVersion);
+        }
+    }
+
+    private async Task RunMigrationAsync(
+        string schema,
+        MigrationScript migration,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Running migration {Version}: {Name}", migration.Version, migration.Name);
+        await RunScriptAsync(migration.ResourceName, cancellationToken);
+        await EnsurePersistedVersionAsync(schema, migration.Version, cancellationToken);
+    }
+
+    private async Task EnsurePersistedVersionAsync(
+        string schema,
+        int expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var persistedVersion = await GetCurrentVersionAsync(schema, cancellationToken);
+        if (persistedVersion != expectedVersion)
+        {
+            throw new InvalidOperationException(
+                $"SqlOSFga migration v{expectedVersion} completed, " +
+                $"but the persisted schema version is {persistedVersion?.ToString() ?? "missing"}.");
         }
     }
 
