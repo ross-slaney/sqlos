@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Configuration;
-using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.Fga.Services;
+using SqlOS.IntegrationTests.Fga.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga;
 
@@ -131,7 +131,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task EnsureSchema_SetsCorrectVersion()
+    public async Task EnsureSchema_EachEmbeddedMigrationPersistsItsOwnVersion()
     {
         var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
         var initializer = new SqlOSFgaSchemaInitializer(
@@ -142,7 +142,7 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         var version = await GetSchemaVersionAsync();
-        Assert.IsTrue(version >= 6, $"Schema version should be at least 6, was {version}");
+        Assert.AreEqual(GetLatestMigrationVersion(), version);
     }
 
     private async Task<bool> TableExistsAsync(string tableName)
@@ -225,5 +225,18 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         {
             await connection.CloseAsync();
         }
+    }
+
+    private static int GetLatestMigrationVersion()
+    {
+        const string resourcePrefix = "SqlOS.Fga.Schema.";
+
+        return typeof(SqlOSFgaSchemaInitializer).Assembly
+            .GetManifestResourceNames()
+            .Where(name => name.StartsWith(resourcePrefix, StringComparison.Ordinal)
+                && name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+            .Select(name => name[resourcePrefix.Length..].Split('_', 2)[0])
+            .Select(int.Parse)
+            .Max();
     }
 }
