@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
@@ -423,6 +424,103 @@ public sealed class AuthServiceIntegrationTests
         var unrelatedRefresh = await verification.Auth.RefreshAsync(
             new SqlOSRefreshRequest(unrelatedSourceTokens.RefreshToken, sourceOrganizationId));
         unrelatedRefresh.OrganizationId.Should().Be(sourceOrganizationId);
+    }
+
+    [TestMethod]
+    public async Task OrganizationDeactivation_SerializesAgainstStalePortalMutationAcrossDbContexts()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        string organizationId;
+        string portalSessionId;
+        string pendingSetupToken;
+        string openedPortalCookie;
+        SqlOSUpdateOrganizationRequest deactivationRequest;
+
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var organization = await issuance.Admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(
+                    $"Portal Deactivation Race {suffix}",
+                    null,
+                    $"{suffix}.portal-race.test"));
+            organizationId = organization.Id;
+            deactivationRequest = new SqlOSUpdateOrganizationRequest(
+                organization.Name,
+                organization.Slug,
+                organization.PrimaryDomain,
+                IsActive: false);
+            var created = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id, Provider: "okta"),
+                new DefaultHttpContext());
+            portalSessionId = created.Id;
+            var pending = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+                new DefaultHttpContext());
+            pendingSetupToken = QueryHelpers.ParseQuery(new Uri(pending.SetupUrl!).Query)["token"].ToString();
+            var opened = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+                new DefaultHttpContext());
+            var openContext = new DefaultHttpContext();
+            await issuance.Portal.OpenSessionAsync(
+                QueryHelpers.ParseQuery(new Uri(opened.SetupUrl!).Query)["token"].ToString(),
+                openContext);
+            openedPortalCookie = openContext.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        }
+
+        await using var mutation = BuildIsolatedLifecycleStack();
+        var stalePortalSession = await mutation.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == portalSessionId);
+        stalePortalSession.Provider.Should().Be("okta");
+
+        await using var deactivation = BuildIsolatedLifecycleStack();
+        await using var deactivationTransaction = await deactivation.Context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+        await deactivation.Admin.UpdateOrganizationAsync(
+            organizationId,
+            deactivationRequest);
+
+        var mutationTask = mutation.Portal.SetProviderAsync(
+            stalePortalSession,
+            new SqlOSUpdateSsoPortalProviderRequest("google-workspace"),
+            new DefaultHttpContext());
+        await Task.Delay(250);
+        mutationTask.IsCompleted.Should().BeFalse(
+            "the portal mutation must serialize behind the organization lifecycle transaction");
+
+        await deactivationTransaction.CommitAsync();
+
+        var mutationAction = async () => await mutationTask;
+        await mutationAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        (await verification.Context.Set<SqlOSOrganization>()
+            .SingleAsync(x => x.Id == organizationId)).IsActive.Should().BeFalse();
+        var revokedSession = await verification.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == portalSessionId);
+        revokedSession.Provider.Should().Be("okta");
+        revokedSession.RevokedAt.Should().NotBeNull();
+        revokedSession.RevokedReason.Should().Be("organization_deactivated");
+        (await verification.Context.Set<SqlOSSsoPortalSession>()
+            .Where(x => x.OrganizationId == organizationId)
+            .ToListAsync()).Should().OnlyContain(x =>
+                x.RevokedAt != null && x.RevokedReason == "organization_deactivated");
+
+        var pendingOpen = async () => await verification.Portal.OpenSessionAsync(
+            pendingSetupToken,
+            new DefaultHttpContext());
+        await pendingOpen.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal setup token is invalid or expired.");
+        var openedRequest = new DefaultHttpContext();
+        openedRequest.Request.Headers.Cookie = openedPortalCookie;
+        (await verification.Portal.TryGetSessionAsync(openedRequest)).Should().BeNull();
+
+        (await verification.Context.Set<SqlOSAuditEvent>().AnyAsync(x =>
+            x.EventType == "sso.portal.sessions.revoked"
+            && x.OrganizationId == organizationId
+            && x.MetadataJson != null
+            && x.MetadataJson.Contains("\"revokedSessions\":3")))
+            .Should().BeTrue();
     }
 
     [TestMethod]

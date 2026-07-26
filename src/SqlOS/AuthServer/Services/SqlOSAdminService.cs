@@ -618,8 +618,52 @@ public sealed partial class SqlOSAdminService
         return organization;
     }
 
-    public async Task<SqlOSOrganization> UpdateOrganizationAsync(string organizationId, SqlOSUpdateOrganizationRequest request, CancellationToken cancellationToken = default)
+    public async Task<SqlOSOrganization> UpdateOrganizationAsync(
+        string organizationId,
+        SqlOSUpdateOrganizationRequest request,
+        CancellationToken cancellationToken = default)
     {
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            await SqlOSSsoPortalOrganizationLock.AcquireAsync(_context, organizationId, cancellationToken);
+            return await UpdateOrganizationCoreAsync(organizationId, request, cancellationToken);
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        return await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable,
+                cancellationToken);
+            await SqlOSSsoPortalOrganizationLock.AcquireAsync(_context, organizationId, cancellationToken);
+            var updated = await UpdateOrganizationCoreAsync(organizationId, request, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return updated;
+        });
+    }
+
+    private async Task<SqlOSOrganization> UpdateOrganizationCoreAsync(
+        string organizationId,
+        SqlOSUpdateOrganizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_context is DbContext dbContext)
+        {
+            var trackedOrganization = dbContext.ChangeTracker
+                .Entries<SqlOSOrganization>()
+                .FirstOrDefault(x => x.Entity.Id == organizationId);
+            if (trackedOrganization != null)
+            {
+                await trackedOrganization.ReloadAsync(cancellationToken);
+            }
+        }
+
         var organization = await _context.Set<SqlOSOrganization>()
             .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
             ?? throw new InvalidOperationException("Organization not found.");
@@ -640,16 +684,41 @@ public sealed partial class SqlOSAdminService
 
         if (isDeactivating)
         {
+            var now = DateTime.UtcNow;
             await SqlOSAuthLifecyclePolicy.RevokeAsync(
                 _context,
                 userId: null,
                 organizationId: organization.Id,
                 reason: "organization_deactivated",
-                now: DateTime.UtcNow,
+                now: now,
+                cancellationToken: cancellationToken);
+
+            var portalSessions = await _context.Set<SqlOSSsoPortalSession>()
+                .Where(x => x.OrganizationId == organization.Id && x.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+            foreach (var portalSession in portalSessions)
+            {
+                portalSession.RevokedAt = now;
+                portalSession.RevokedReason = "organization_deactivated";
+            }
+
+            await RecordAuditAsync(
+                "sso.portal.sessions.revoked",
+                "admin",
+                actorId: null,
+                organizationId: organization.Id,
+                data: new
+                {
+                    reason = "organization_deactivated",
+                    revokedSessions = portalSessions.Count
+                },
                 cancellationToken: cancellationToken);
         }
+        else
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
-        await _context.SaveChangesAsync(cancellationToken);
         return organization;
     }
 

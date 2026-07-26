@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -206,33 +207,53 @@ public sealed class SqlOSSsoPortalService
             throw new InvalidOperationException("Portal setup token is required.");
         }
 
-        var now = DateTime.UtcNow;
         var tokenHash = _cryptoService.HashToken(rawLinkToken.Trim());
-        var session = await _context.Set<SqlOSSsoPortalSession>()
-            .Include(x => x.Organization)
-            .Include(x => x.Connection)
-            .FirstOrDefaultAsync(x => x.LinkTokenHash == tokenHash, cancellationToken)
-            ?? throw new InvalidOperationException("Portal setup token is invalid or expired.");
-
-        EnsureSessionCanOpen(session, now);
+        var organizationId = await _context.Set<SqlOSSsoPortalSession>()
+            .AsNoTracking()
+            .Where(x => x.LinkTokenHash == tokenHash)
+            .Select(x => x.OrganizationId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(organizationId))
+        {
+            throw new InvalidOperationException("Portal setup token is invalid or expired.");
+        }
 
         var rawSessionToken = _cryptoService.GenerateOpaqueToken();
-        session.SessionTokenHash = _cryptoService.HashToken(rawSessionToken);
-        session.OpenedAt = now;
-        session.LastSeenAt = now;
-        session.IpAddress = httpContext.Connection.RemoteIpAddress?.ToString();
-        session.UserAgent = httpContext.Request.Headers.UserAgent.ToString();
-        await _context.SaveChangesAsync(cancellationToken);
+        var sessionTokenHash = _cryptoService.HashToken(rawSessionToken);
 
-        SetPortalCookie(httpContext, rawSessionToken, session.ExpiresAt);
-        await RecordPortalAuditAsync(
-            "sso.portal.session.opened",
-            session,
-            httpContext,
-            new { session.Id, session.ConnectionId },
-            cancellationToken);
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            return await OpenSessionCoreAsync(
+                tokenHash,
+                organizationId,
+                rawSessionToken,
+                sessionTokenHash,
+                httpContext,
+                cancellationToken);
+        }
 
-        return ToSessionResult(session, setupUrl: null);
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        return await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var opened = await OpenSessionCoreAsync(
+                tokenHash,
+                organizationId,
+                rawSessionToken,
+                sessionTokenHash,
+                httpContext,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return opened;
+        });
     }
 
     public async Task<SqlOSSsoPortalSession?> TryGetSessionAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -248,7 +269,13 @@ public sealed class SqlOSSsoPortalService
         var session = await _context.Set<SqlOSSsoPortalSession>()
             .Include(x => x.Organization)
             .Include(x => x.Connection)
-            .FirstOrDefaultAsync(x => x.SessionTokenHash == tokenHash, cancellationToken);
+            .FirstOrDefaultAsync(
+                x => x.SessionTokenHash == tokenHash
+                    && x.Organization != null
+                    && x.Organization.IsActive
+                    && x.RevokedAt == null
+                    && x.ExpiresAt > now,
+                cancellationToken);
         if (session == null || !IsSessionUsable(session, now))
         {
             ClearPortalCookie(httpContext);
@@ -284,13 +311,20 @@ public sealed class SqlOSSsoPortalService
         ClearPortalCookie(httpContext);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> GetStateAsync(
+    public Task<SqlOSSsoPortalStateResult> GetStateAsync(
         SqlOSSsoPortalSession session,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => GetStateCoreAsync(lockedSession, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> GetStateCoreAsync(
+        SqlOSSsoPortalSession session,
+        CancellationToken cancellationToken)
     {
-        var organization = await _context.Set<SqlOSOrganization>()
-            .AsNoTracking()
-            .FirstAsync(x => x.Id == session.OrganizationId, cancellationToken);
+        var organization = session.Organization!;
         var connection = await EnsurePortalConnectionAsync(organization, cancellationToken, session);
         var domain = await _domainService.GetPreferredDomainAsync(organization.Id, cancellationToken);
 
@@ -316,11 +350,22 @@ public sealed class SqlOSSsoPortalService
             BuildAllowedActions(organization, connection, domain));
     }
 
-    public async Task<SqlOSSsoPortalStateResult> SetProviderAsync(
+    public Task<SqlOSSsoPortalStateResult> SetProviderAsync(
         SqlOSSsoPortalSession session,
         SqlOSUpdateSsoPortalProviderRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => SetProviderCoreAsync(lockedSession, request, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> SetProviderCoreAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSUpdateSsoPortalProviderRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         session.Provider = NormalizeProvider(request.Provider)
             ?? throw new InvalidOperationException("Provider is required.");
@@ -335,11 +380,22 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> UpdateEnrollmentPolicyAsync(
+    public Task<SqlOSSsoPortalStateResult> UpdateEnrollmentPolicyAsync(
         SqlOSSsoPortalSession session,
         SqlOSSsoPortalEnrollmentPolicyRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => UpdateEnrollmentPolicyCoreAsync(lockedSession, request, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> UpdateEnrollmentPolicyCoreAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalEnrollmentPolicyRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         var connection = await RequirePortalConnectionAsync(session, cancellationToken);
         connection.AutoLinkByEmail = request.RequireSsoForExistingMembers;
@@ -365,11 +421,22 @@ public sealed class SqlOSSsoPortalService
     public SqlOSSsoMetadataValidationResult ValidateMetadata(SqlOSSsoPortalMetadataRequest request)
         => _adminService.ValidateSsoMetadata(new SqlOSImportSsoMetadataRequest(request.MetadataXml));
 
-    public async Task<SqlOSSsoPortalStateResult> StartDomainVerificationAsync(
+    public Task<SqlOSSsoPortalStateResult> StartDomainVerificationAsync(
         SqlOSSsoPortalSession session,
         SqlOSSsoPortalDomainRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => StartDomainVerificationCoreAsync(lockedSession, request, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> StartDomainVerificationCoreAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalDomainRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         await _domainService.StartVerificationAsync(
             session.OrganizationId,
@@ -380,21 +447,43 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipAsync(
+    public Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipAsync(
         SqlOSSsoPortalSession session,
         string domainId,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => ConfirmDomainOwnershipCoreAsync(lockedSession, domainId, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipCoreAsync(
+        SqlOSSsoPortalSession session,
+        string domainId,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         await _domainService.ConfirmOwnershipAsync(session.OrganizationId, domainId, httpContext, cancellationToken);
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> ImportMetadataAsync(
+    public Task<SqlOSSsoPortalStateResult> ImportMetadataAsync(
         SqlOSSsoPortalSession session,
         SqlOSSsoPortalMetadataRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => ImportMetadataCoreAsync(lockedSession, request, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> ImportMetadataCoreAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalMetadataRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         var connection = await RequirePortalConnectionAsync(session, cancellationToken);
         var updated = await _adminService.ImportSsoMetadataAsync(
@@ -418,10 +507,20 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> ActivateAsync(
+    public Task<SqlOSSsoPortalStateResult> ActivateAsync(
         SqlOSSsoPortalSession session,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => ActivateCoreAsync(lockedSession, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> ActivateCoreAsync(
+        SqlOSSsoPortalSession session,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         var connection = await RequirePortalConnectionAsync(session, cancellationToken);
         EnsureConnectionHasMetadata(connection);
@@ -440,10 +539,20 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalStateResult> DisableAsync(
+    public Task<SqlOSSsoPortalStateResult> DisableAsync(
         SqlOSSsoPortalSession session,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => DisableCoreAsync(lockedSession, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalStateResult> DisableCoreAsync(
+        SqlOSSsoPortalSession session,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         var connection = await RequirePortalConnectionAsync(session, cancellationToken);
         connection.IsEnabled = false;
@@ -460,11 +569,22 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public async Task<SqlOSSsoPortalRevokeOrganizationSessionsResult> RevokeOrganizationSessionsAsync(
+    public Task<SqlOSSsoPortalRevokeOrganizationSessionsResult> RevokeOrganizationSessionsAsync(
         SqlOSSsoPortalSession session,
         SqlOSSsoPortalRevokeOrganizationSessionsRequest request,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => RevokeOrganizationSessionsCoreAsync(lockedSession, request, httpContext, cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalRevokeOrganizationSessionsResult> RevokeOrganizationSessionsCoreAsync(
+        SqlOSSsoPortalSession session,
+        SqlOSSsoPortalRevokeOrganizationSessionsRequest request,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         if (!request.Confirm)
         {
@@ -560,13 +680,32 @@ public sealed class SqlOSSsoPortalService
             now);
     }
 
-    public async Task<SqlOSSsoPortalTestResult> RecordTestAsync(
+    public Task<SqlOSSsoPortalTestResult> RecordTestAsync(
         SqlOSSsoPortalSession session,
         string status,
         string message,
         string? authorizationUrl,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
+        => ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => RecordTestCoreAsync(
+                lockedSession,
+                status,
+                message,
+                authorizationUrl,
+                httpContext,
+                cancellationToken),
+            cancellationToken);
+
+    private async Task<SqlOSSsoPortalTestResult> RecordTestCoreAsync(
+        SqlOSSsoPortalSession session,
+        string status,
+        string message,
+        string? authorizationUrl,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         session.LastTestedAt = now;
@@ -656,7 +795,7 @@ public sealed class SqlOSSsoPortalService
             await SetProviderAsync(session, request, httpContext, cancellationToken);
             return await ViewActionAsync(session, "domain", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(
                 session,
@@ -678,7 +817,7 @@ public sealed class SqlOSSsoPortalService
             await UpdateEnrollmentPolicyAsync(session, request, httpContext, cancellationToken);
             return await ViewActionAsync(session, "policy", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(session, "policy", ex.Message, null, cancellationToken);
         }
@@ -692,15 +831,10 @@ public sealed class SqlOSSsoPortalService
     {
         try
         {
-            await _domainService.StartVerificationAsync(
-                session.OrganizationId,
-                request,
-                httpContext,
-                session.CreatedByUserId,
-                cancellationToken);
+            await StartDomainVerificationAsync(session, request, httpContext, cancellationToken);
             return await ViewActionAsync(session, "domain", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(
                 session,
@@ -719,15 +853,16 @@ public sealed class SqlOSSsoPortalService
     {
         try
         {
-            var domain = await _domainService.ConfirmOwnershipAsync(session.OrganizationId, domainId, httpContext, cancellationToken);
+            var state = await ConfirmDomainOwnershipAsync(session, domainId, httpContext, cancellationToken);
+            var domain = state.Domain;
             return await ViewActionAsync(
                 session,
-                domain.Status == SqlOSOrganizationDomainStatuses.Active ? "metadata" : "domain",
-                domain.Status == SqlOSOrganizationDomainStatuses.Active ? null : domain.LastError,
+                domain?.Status == SqlOSOrganizationDomainStatuses.Active ? "metadata" : "domain",
+                domain?.Status == SqlOSOrganizationDomainStatuses.Active ? null : domain?.LastError,
                 null,
                 cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(session, "domain", ex.Message, null, cancellationToken);
         }
@@ -744,7 +879,7 @@ public sealed class SqlOSSsoPortalService
             await ImportMetadataAsync(session, request, httpContext, cancellationToken);
             return await ViewActionAsync(session, "activate", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(
                 session,
@@ -765,7 +900,7 @@ public sealed class SqlOSSsoPortalService
             await ActivateAsync(session, httpContext, cancellationToken);
             return await ViewActionAsync(session, "test", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(session, "activate", ex.Message, null, cancellationToken);
         }
@@ -781,7 +916,7 @@ public sealed class SqlOSSsoPortalService
             await DisableAsync(session, httpContext, cancellationToken);
             return await ViewActionAsync(session, "activate", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(session, "activate", ex.Message, null, cancellationToken);
         }
@@ -834,7 +969,7 @@ public sealed class SqlOSSsoPortalService
                 cancellationToken);
             return await ViewActionAsync(session, "test", null, null, cancellationToken);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (ex is not SqlOSSsoPortalSessionUnavailableException)
         {
             return await ViewActionAsync(session, "test", ex.Message, null, cancellationToken);
         }
@@ -847,6 +982,138 @@ public sealed class SqlOSSsoPortalService
         IReadOnlyDictionary<string, string>? fieldErrors,
         CancellationToken cancellationToken)
         => new("view", null, await GetSetupViewAsync(session, view, error, fieldErrors, cancellationToken));
+
+    private async Task<SqlOSSsoPortalSessionResult> OpenSessionCoreAsync(
+        string linkTokenHash,
+        string organizationId,
+        string rawSessionToken,
+        string sessionTokenHash,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        await SqlOSSsoPortalOrganizationLock.AcquireAsync(_context, organizationId, cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var session = await _context.Set<SqlOSSsoPortalSession>()
+            .Include(x => x.Organization)
+            .Include(x => x.Connection)
+            .FirstOrDefaultAsync(
+                x => x.LinkTokenHash == linkTokenHash
+                    && x.OrganizationId == organizationId
+                    && x.Organization != null
+                    && x.Organization.IsActive
+                    && x.RevokedAt == null
+                    && x.ExpiresAt > now,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Portal setup token is invalid or expired.");
+
+        if (session.OpenedAt != null
+            && string.Equals(session.SessionTokenHash, sessionTokenHash, StringComparison.Ordinal))
+        {
+            SetPortalCookie(httpContext, rawSessionToken, session.ExpiresAt);
+            return ToSessionResult(session, setupUrl: null);
+        }
+
+        EnsureSessionCanOpen(session, now);
+
+        session.SessionTokenHash = sessionTokenHash;
+        session.OpenedAt = now;
+        session.LastSeenAt = now;
+        session.IpAddress = httpContext.Connection.RemoteIpAddress?.ToString();
+        session.UserAgent = httpContext.Request.Headers.UserAgent.ToString();
+        await _context.SaveChangesAsync(cancellationToken);
+
+        SetPortalCookie(httpContext, rawSessionToken, session.ExpiresAt);
+        await RecordPortalAuditAsync(
+            "sso.portal.session.opened",
+            session,
+            httpContext,
+            new { session.Id, session.ConnectionId },
+            cancellationToken);
+
+        return ToSessionResult(session, setupUrl: null);
+    }
+
+    private async Task<TResult> ExecutePortalOperationAsync<TResult>(
+        string sessionId,
+        string organizationId,
+        Func<SqlOSSsoPortalSession, Task<TResult>> mutation,
+        CancellationToken cancellationToken)
+    {
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            return await ExecutePortalOperationCoreAsync(
+                sessionId,
+                organizationId,
+                mutation,
+                cancellationToken);
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        return await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var result = await ExecutePortalOperationCoreAsync(
+                sessionId,
+                organizationId,
+                mutation,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        });
+    }
+
+    private async Task<TResult> ExecutePortalOperationCoreAsync<TResult>(
+        string sessionId,
+        string organizationId,
+        Func<SqlOSSsoPortalSession, Task<TResult>> mutation,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(organizationId))
+        {
+            throw new SqlOSSsoPortalSessionUnavailableException();
+        }
+
+        await SqlOSSsoPortalOrganizationLock.AcquireAsync(_context, organizationId, cancellationToken);
+        var session = await RequireAvailableSessionAsync(
+            sessionId,
+            organizationId,
+            cancellationToken);
+        return await mutation(session);
+    }
+
+    private async Task<SqlOSSsoPortalSession> RequireAvailableSessionAsync(
+        string sessionId,
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var session = await _context.Set<SqlOSSsoPortalSession>()
+            .Include(x => x.Organization)
+            .Include(x => x.Connection)
+            .FirstOrDefaultAsync(
+                x => x.Id == sessionId
+                    && x.OrganizationId == organizationId
+                    && x.Organization != null
+                    && x.Organization.IsActive
+                    && x.RevokedAt == null
+                    && x.ExpiresAt > now,
+                cancellationToken);
+        if (session == null || !IsSessionAvailableForOperation(session, now))
+        {
+            throw new SqlOSSsoPortalSessionUnavailableException();
+        }
+
+        return session;
+    }
 
     private async Task<SqlOSSsoConnection> EnsurePortalConnectionAsync(
         SqlOSOrganization organization,
@@ -1060,7 +1327,9 @@ public sealed class SqlOSSsoPortalService
 
     private static void EnsureSessionCanOpen(SqlOSSsoPortalSession session, DateTime now)
     {
-        if (session.RevokedAt != null || session.ExpiresAt <= now)
+        if (session.Organization?.IsActive != true
+            || session.RevokedAt != null
+            || session.ExpiresAt <= now)
         {
             throw new InvalidOperationException("Portal setup token is invalid or expired.");
         }
@@ -1072,10 +1341,19 @@ public sealed class SqlOSSsoPortalService
     }
 
     private bool IsSessionUsable(SqlOSSsoPortalSession session, DateTime now)
-        => session.RevokedAt == null
+        => session.Organization?.IsActive == true
+           && session.RevokedAt == null
            && session.ExpiresAt > now
            && !string.IsNullOrWhiteSpace(session.SessionTokenHash)
            && (session.LastSeenAt == null || session.LastSeenAt.Value.Add(_portalOptions.SessionIdleTimeout) > now);
+
+    private bool IsSessionAvailableForOperation(SqlOSSsoPortalSession session, DateTime now)
+        => session.Organization?.IsActive == true
+           && session.RevokedAt == null
+           && session.ExpiresAt > now
+           && (string.IsNullOrWhiteSpace(session.SessionTokenHash)
+               || session.LastSeenAt == null
+               || session.LastSeenAt.Value.Add(_portalOptions.SessionIdleTimeout) > now);
 
     private static void EnsureConnectionHasMetadata(SqlOSSsoConnection connection)
     {

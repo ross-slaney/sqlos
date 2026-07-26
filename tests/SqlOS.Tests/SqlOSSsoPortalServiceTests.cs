@@ -130,6 +130,157 @@ public sealed class SqlOSSsoPortalServiceTests
     }
 
     [TestMethod]
+    public async Task OrganizationDeactivation_RevokesPortalCapabilitiesAndReactivationDoesNotReviveThem()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Deactivated Portal Org", null, "deactivated-portal.test"));
+        var pending = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id, Provider: "okta"),
+            harness.Http);
+        var opened = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id, Provider: "microsoft-entra"),
+            harness.Http);
+        var openHttp = PortalHarness.CreateHttpContext();
+        await harness.Portal.OpenSessionAsync(ExtractToken(opened.SetupUrl!), openHttp);
+        var openedCookie = openHttp.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+
+        await harness.Admin.UpdateOrganizationAsync(
+            org.Id,
+            new SqlOSUpdateOrganizationRequest(
+                org.Name,
+                org.Slug,
+                org.PrimaryDomain,
+                IsActive: false));
+
+        var revoked = await harness.Context.Set<SqlOSSsoPortalSession>()
+            .Where(x => x.OrganizationId == org.Id)
+            .ToListAsync();
+        revoked.Should().HaveCount(2);
+        revoked.Should().OnlyContain(x =>
+            x.RevokedAt != null && x.RevokedReason == "organization_deactivated");
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x =>
+            x.EventType == "sso.portal.sessions.revoked"
+            && x.OrganizationId == org.Id
+            && x.MetadataJson != null
+            && x.MetadataJson.Contains("\"reason\":\"organization_deactivated\"", StringComparison.Ordinal)
+            && x.MetadataJson.Contains("\"revokedSessions\":2", StringComparison.Ordinal)))
+            .Should().BeTrue();
+
+        var pendingOpen = async () => await harness.Portal.OpenSessionAsync(
+            ExtractToken(pending.SetupUrl!),
+            PortalHarness.CreateHttpContext());
+        await pendingOpen.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal setup token is invalid or expired.");
+
+        var openedRequest = PortalHarness.CreateHttpContext();
+        openedRequest.Request.Headers.Cookie = openedCookie;
+        (await harness.Portal.TryGetSessionAsync(openedRequest)).Should().BeNull();
+
+        await harness.Admin.UpdateOrganizationAsync(
+            org.Id,
+            new SqlOSUpdateOrganizationRequest(
+                org.Name,
+                org.Slug,
+                org.PrimaryDomain,
+                IsActive: true));
+
+        await pendingOpen.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal setup token is invalid or expired.");
+        var reactivatedRequest = PortalHarness.CreateHttpContext();
+        reactivatedRequest.Request.Headers.Cookie = openedCookie;
+        (await harness.Portal.TryGetSessionAsync(reactivatedRequest)).Should().BeNull();
+
+        var replacement = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id),
+            harness.Http);
+        replacement.SetupUrl.Should().NotBeNullOrWhiteSpace();
+        replacement.Id.Should().NotBe(pending.Id).And.NotBe(opened.Id);
+    }
+
+    [TestMethod]
+    public async Task InactiveOrganization_FailsClosedEvenWhenPortalSessionsWereNotRevoked()
+    {
+        using var harness = await PortalHarness.CreateAsync();
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Defense In Depth Org", null, "defense-in-depth.test"));
+        var pending = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id, Provider: "okta"),
+            harness.Http);
+        var opened = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id, Provider: "microsoft-entra"),
+            harness.Http);
+        var openHttp = PortalHarness.CreateHttpContext();
+        await harness.Portal.OpenSessionAsync(ExtractToken(opened.SetupUrl!), openHttp);
+        var openedCookie = openHttp.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        var openedSession = await harness.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == opened.Id);
+
+        org.IsActive = false;
+        await harness.Context.SaveChangesAsync();
+        (await harness.Context.Set<SqlOSSsoPortalSession>()
+            .Where(x => x.OrganizationId == org.Id)
+            .AllAsync(x => x.RevokedAt == null)).Should().BeTrue();
+
+        var pendingOpen = async () => await harness.Portal.OpenSessionAsync(
+            ExtractToken(pending.SetupUrl!),
+            PortalHarness.CreateHttpContext());
+        await pendingOpen.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal setup token is invalid or expired.");
+
+        var openedRequest = PortalHarness.CreateHttpContext();
+        openedRequest.Request.Headers.Cookie = openedCookie;
+        (await harness.Portal.TryGetSessionAsync(openedRequest)).Should().BeNull();
+
+        var read = async () => await harness.Portal.GetStateAsync(openedSession);
+        await read.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+        var mutation = async () => await harness.Portal.SetProviderAsync(
+            openedSession,
+            new SqlOSUpdateSsoPortalProviderRequest("google-workspace"),
+            harness.Http);
+        await mutation.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+        openedSession.Provider.Should().Be("microsoft-entra");
+    }
+
+    [TestMethod]
+    public async Task TryGetSessionAsync_RejectsIdleAndAbsoluteExpiry()
+    {
+        using var harness = await PortalHarness.CreateAsync(options =>
+            options.SsoPortal.SessionIdleTimeout = TimeSpan.FromMinutes(1));
+        var org = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Expired Portal Org", null, "expired-portal.test"));
+        var idle = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id),
+            harness.Http);
+        var idleOpenHttp = PortalHarness.CreateHttpContext();
+        await harness.Portal.OpenSessionAsync(ExtractToken(idle.SetupUrl!), idleOpenHttp);
+        var idleCookie = idleOpenHttp.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        var idleSession = await harness.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == idle.Id);
+        idleSession.LastSeenAt = DateTime.UtcNow.AddMinutes(-2);
+
+        var absolute = await harness.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(org.Id),
+            harness.Http);
+        var absoluteOpenHttp = PortalHarness.CreateHttpContext();
+        await harness.Portal.OpenSessionAsync(ExtractToken(absolute.SetupUrl!), absoluteOpenHttp);
+        var absoluteCookie = absoluteOpenHttp.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        var absoluteSession = await harness.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == absolute.Id);
+        absoluteSession.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        await harness.Context.SaveChangesAsync();
+
+        var idleRequest = PortalHarness.CreateHttpContext();
+        idleRequest.Request.Headers.Cookie = idleCookie;
+        (await harness.Portal.TryGetSessionAsync(idleRequest)).Should().BeNull();
+        var absoluteRequest = PortalHarness.CreateHttpContext();
+        absoluteRequest.Request.Headers.Cookie = absoluteCookie;
+        (await harness.Portal.TryGetSessionAsync(absoluteRequest)).Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task ImportMetadataAndActivateAsync_EnableHomeRealmDiscoveryForOnlyPortalOrganization()
     {
         using var harness = await PortalHarness.CreateAsync();
