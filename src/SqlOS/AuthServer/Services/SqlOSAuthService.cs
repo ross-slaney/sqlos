@@ -673,6 +673,11 @@ public sealed class SqlOSAuthService
             ?? throw new InvalidOperationException("Refresh token is invalid.");
 
         var session = refreshToken.Session ?? throw new InvalidOperationException("Refresh token session missing.");
+        if (!string.IsNullOrWhiteSpace(request.ClientId)
+            && !string.Equals(session.ClientApplication?.ClientId, request.ClientId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Refresh token was not issued for this client.");
+        }
         if (refreshToken.RevokedAt != null || refreshToken.ExpiresAt <= DateTime.UtcNow)
         {
             throw new InvalidOperationException("Refresh token is no longer valid.");

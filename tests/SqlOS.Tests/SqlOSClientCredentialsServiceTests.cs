@@ -86,10 +86,8 @@ public sealed class SqlOSClientCredentialsServiceTests
     {
         await using var harness = await CreateHarnessAsync();
 
-        SqlOSClientCredentialsService.ResolveCredentialHashForVerification(null)
-            .Should().BeSameAs(SqlOSClientCredentialsService.DummyCredentialHash);
         harness.Crypto.VerifyPassword(
-            SqlOSClientCredentialsService.DummyCredentialHash,
+            SqlOSClientAuthenticationService.DummyCredentialHash,
             "unknown-client-secret-with-sufficient-length-123456789").Should().BeFalse();
         await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
             "unknown-client",
@@ -108,8 +106,8 @@ public sealed class SqlOSClientCredentialsServiceTests
         var first = await harness.Service.ExchangeAsync(
             "ledger-worker", harness.Secret, "https://api.example.test/ledger", "ledger.read",
             new DefaultHttpContext(), default);
-        var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
-        account.ClientSecretHash = harness.Crypto.HashPassword("replacement-secret-with-enough-entropy-123456789");
+        var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        credential.SecretHash = harness.Crypto.HashPassword("replacement-secret-with-enough-entropy-123456789");
         await harness.Context.SaveChangesAsync();
 
         await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
@@ -141,6 +139,31 @@ public sealed class SqlOSClientCredentialsServiceTests
         audits.Should().Contain("oauth.client_credentials.revoked");
     }
 
+    [TestMethod]
+    public async Task CodeOwnedMachineClientRotation_IsRejectedWithoutMutatingCredential()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
+        var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        account.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+        account.ConfigurationSourceKey = "ledger-worker";
+        credential.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+        credential.ConfigurationSourceKey = "primary";
+        await harness.Context.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => harness.Service.RotateSecretAsync(
+                "ledger-worker",
+                "replacement-secret-with-at-least-256-bits-123456789",
+                "admin-1"))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*owned by the 'code' configuration source*");
+
+        harness.Context.ChangeTracker.Clear();
+        var retained = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        retained.RevokedAt.Should().BeNull();
+        harness.Crypto.VerifyPassword(retained.SecretHash, harness.Secret).Should().BeTrue();
+    }
+
     private static async Task<Harness> CreateHarnessAsync()
     {
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
@@ -166,6 +189,13 @@ public sealed class SqlOSClientCredentialsServiceTests
             AllowedScopesJson = "[\"ledger.read\"]",
             Audience = "https://api.example.test/ledger",
             IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+        {
+            Id = "clcred-worker",
+            ClientApplicationId = "app-worker",
+            SecretHash = crypto.HashPassword(secret),
             CreatedAt = DateTime.UtcNow
         });
         context.Set<SqlOSFgaSubject>().Add(new SqlOSFgaSubject

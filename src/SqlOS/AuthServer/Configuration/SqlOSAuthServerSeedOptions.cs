@@ -107,6 +107,10 @@ public sealed class SqlOSClientSeedOptions
     public bool AllowDeviceAuthorization { get; set; }
     /// <summary>Enables OAuth client credentials for this confidential, non-browser client.</summary>
     public bool EnableClientCredentials { get; set; }
+    /// <summary>Resolves the confidential OAuth client's secret from the host secret provider.</summary>
+    public Func<string?>? ClientSecretResolver { get; set; }
+    /// <summary>Alternatively resolves an ASP.NET Core PasswordHasher-compatible client-secret hash.</summary>
+    public Func<string?>? ClientSecretHashResolver { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>
     /// Controls which organizations and principals may use this application. When omitted, new

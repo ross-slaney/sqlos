@@ -18,6 +18,8 @@ namespace SqlOS.Tests.Infrastructure;
 internal static class DashboardAdminContracts
 {
     public const string Clients = "/sqlos/admin/auth/api/clients";
+    public static string ClientCredentials(string clientId)
+        => $"/sqlos/admin/auth/api/clients/{clientId}/credentials";
     public const string OidcConnections = "/sqlos/admin/auth/api/oidc-connections";
     public const string MfaSettings = "/sqlos/admin/auth/api/settings/mfa";
     public static string OrganizationScimConnections(string organizationId)
@@ -50,6 +52,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         Context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
         Options = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SqlOSAuthServerOptions>>().Value;
         Admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+        ClientAuthentication = scope.ServiceProvider.GetRequiredService<SqlOSClientAuthenticationService>();
         Settings = scope.ServiceProvider.GetRequiredService<SqlOSSettingsService>();
         Oidc = scope.ServiceProvider.GetRequiredService<SqlOSOidcAuthService>();
         Scim = scope.ServiceProvider.GetRequiredService<SqlOSScimService>();
@@ -59,6 +62,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public TestSqlOSInMemoryDbContext Context { get; }
     public SqlOSAuthServerOptions Options { get; }
     public SqlOSAdminService Admin { get; }
+    public SqlOSClientAuthenticationService ClientAuthentication { get; }
     public SqlOSSettingsService Settings { get; }
     public SqlOSOidcAuthService Oidc { get; }
     public SqlOSScimService Scim { get; }
@@ -111,6 +115,11 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public async Task<ParityProjection> ProjectClientAsync(string clientId)
     {
         var item = await Context.Set<SqlOSClientApplication>().AsNoTracking().SingleAsync(x => x.ClientId == clientId);
+        var now = DateTime.UtcNow;
+        var activeCredentialCount = await Context.Set<SqlOSClientCredential>().AsNoTracking()
+            .CountAsync(x => x.ClientApplicationId == item.Id
+                && x.RevokedAt == null
+                && (x.ExpiresAt == null || x.ExpiresAt > now));
         var response = await Client.GetFromJsonAsync<JsonElement>($"{DashboardAdminContracts.Clients}?search={Uri.EscapeDataString(clientId)}&page=1&pageSize=10");
         var dashboardItem = response.GetProperty("data").EnumerateArray().Single(x => x.GetProperty("clientId").GetString() == clientId);
         return new ParityProjection("oauth_client", new Dictionary<string, string?>
@@ -120,7 +129,10 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             ["audience"] = item.Audience,
             ["redirectUris"] = CanonicalJsonArray(item.RedirectUrisJson),
             ["scopes"] = CanonicalJsonArray(item.AllowedScopesJson),
-            ["pkce"] = item.RequirePkce.ToString()
+            ["pkce"] = item.RequirePkce.ToString(),
+            ["clientType"] = item.ClientType,
+            ["tokenEndpointAuthMethod"] = item.TokenEndpointAuthMethod,
+            ["activeCredentialCount"] = activeCredentialCount.ToString()
         }, item.ConfigurationOwner, ReadEditable(dashboardItem), item.IsActive, true);
     }
 

@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
@@ -32,6 +30,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
+            SqlOSClientAuthenticationService clientAuthenticationService,
             SqlOSClientCredentialsService clientCredentialsService,
             CancellationToken cancellationToken) =>
         {
@@ -45,10 +44,12 @@ public static partial class EndpointRouteBuilderExtensions
                     SqlOSClientCredentialsTokenResult clientResult;
                     try
                     {
-                        var (clientId, clientSecret) = ReadClientCredentials(context, form);
+                        var client = await clientAuthenticationService.AuthenticateTokenEndpointClientAsync(
+                            form,
+                            context,
+                            cancellationToken);
                         clientResult = await clientCredentialsService.ExchangeAsync(
-                            clientId,
-                            clientSecret,
+                            client,
                             form["resource"].ToString(),
                             form["scope"].ToString(),
                             context,
@@ -93,12 +94,22 @@ public static partial class EndpointRouteBuilderExtensions
                     });
                 }
 
+                if (!string.Equals(grantType, SqlOSOAuthGrantTypes.AuthorizationCode, StringComparison.Ordinal)
+                    && !string.Equals(grantType, SqlOSOAuthGrantTypes.RefreshToken, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Unsupported grant type.");
+                }
+
+                var authenticatedClient = await clientAuthenticationService.AuthenticateTokenEndpointClientAsync(
+                    form,
+                    context,
+                    cancellationToken);
                 var result = await authorizationServerService.ExchangeAuthorizationCodeAsync(
                     new SqlOSTokenRequest(
                         grantType,
                         form["code"].ToString(),
                         form["redirect_uri"].ToString(),
-                        form["client_id"].ToString(),
+                        authenticatedClient.ClientId,
                         form["code_verifier"].ToString(),
                         form["refresh_token"].ToString(),
                         form["resource"].ToString()),
@@ -118,39 +129,17 @@ public static partial class EndpointRouteBuilderExtensions
             {
                 return Results.BadRequest(BuildDeviceAuthorizationError(ex));
             }
+            catch (SqlOSClientAuthenticationException ex)
+            {
+                context.Response.Headers.WWWAuthenticate = "Basic";
+                return Results.Json(
+                    new { error = ex.Error, error_description = ex.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
             catch (InvalidOperationException ex)
             {
                 return await PublicOAuthTokenErrorAsync(context, ex, cancellationToken);
             }
         });
-    }
-
-    private static (string ClientId, string ClientSecret) ReadClientCredentials(
-        HttpContext context,
-        IFormCollection form)
-    {
-        var authorization = context.Request.Headers.Authorization.ToString();
-        if (AuthenticationHeaderValue.TryParse(authorization, out var parsed)
-            && string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(parsed.Parameter))
-        {
-            try
-            {
-                var decoded = System.Text.Encoding.UTF8.GetString(
-                    Convert.FromBase64String(parsed.Parameter));
-                var separator = decoded.IndexOf(':');
-                if (separator > 0)
-                {
-                    return (
-                        WebUtility.UrlDecode(decoded[..separator]),
-                        WebUtility.UrlDecode(decoded[(separator + 1)..]));
-                }
-            }
-            catch (FormatException)
-            {
-            }
-        }
-
-        return (string.Empty, string.Empty);
     }
 }

@@ -448,6 +448,25 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.DisabledReason).HasMaxLength(500);
         });
 
+        modelBuilder.Entity<SqlOSClientCredential>(entity =>
+        {
+            entity.ToTable("SqlOSClientCredentials", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ClientApplicationId, x.RevokedAt, x.ExpiresAt });
+            entity.HasIndex(x => new { x.ClientApplicationId, x.ConfigurationOwner, x.ConfigurationSourceKey })
+                .IsUnique()
+                .HasFilter("[ConfigurationSourceKey] IS NOT NULL")
+                .HasDatabaseName("UX_SqlOSClientCredentials_Client_Owner_SourceKey");
+            entity.Property(x => x.ClientApplicationId).HasMaxLength(64);
+            entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(160);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany(x => x.ClientCredentials)
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<SqlOSApplicationAssignment>(entity =>
         {
             entity.ToTable("SqlOSApplicationAssignments", schema, t => t.ExcludeFromMigrations());

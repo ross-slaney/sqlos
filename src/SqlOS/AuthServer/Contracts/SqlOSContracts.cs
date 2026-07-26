@@ -97,7 +97,8 @@ public sealed record SqlOSSelectOrganizationRequest(
 public sealed record SqlOSRefreshRequest(
     string RefreshToken,
     string? OrganizationId,
-    string? Resource = null);
+    string? Resource = null,
+    string? ClientId = null);
 
 public sealed record SqlOSForgotPasswordRequest(
     string Email,

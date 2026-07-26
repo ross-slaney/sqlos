@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 36;
+    private const int CurrentSchemaVersion = 37;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -38,6 +38,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
                      "SqlOSClientApplications",
+                     "SqlOSClientCredentials",
                      "SqlOSApplicationAssignments",
                      "SqlOSSessions",
                      "SqlOSRefreshTokens",

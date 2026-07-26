@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -12,8 +11,6 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSClientCredentialsService
 {
-    internal static readonly string DummyCredentialHash =
-        new PasswordHasher<object>().HashPassword(new object(), "sqlos-invalid-client-dummy-secret");
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSCryptoService _crypto;
     private readonly SqlOSAdminService _admin;
@@ -41,37 +38,72 @@ public sealed class SqlOSClientCredentialsService
     {
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
-        var grants = client == null ? [] : SqlOSAdminService.DeserializeJsonList(client.GrantTypesJson);
-        var account = await _context.Set<SqlOSFgaServiceAccount>()
-            .SingleOrDefaultAsync(x => x.ClientId == clientId, cancellationToken);
-        var subjectIdForLookup = account?.SubjectId ?? "__invalid_service_subject__";
-        var subject = await _context.Set<SqlOSFgaSubject>()
-            .SingleOrDefaultAsync(x => x.Id == subjectIdForLookup, cancellationToken);
-        var candidateSecret = clientSecret.Length <= 256 ? clientSecret : string.Empty;
-        var credentialVerified = _crypto.VerifyPassword(
-            ResolveCredentialHashForVerification(account),
-            candidateSecret);
         var now = DateTime.UtcNow;
-        var valid = client != null
-            && client.IsActive
-            && client.DisabledAt == null
-            && string.Equals(client.ClientType, "confidential", StringComparison.Ordinal)
-            && string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
-            && grants.Contains(SqlOSOAuthGrantTypes.ClientCredentials, StringComparer.Ordinal)
-            && account != null
-            && subject != null
-            && string.Equals(subject.SubjectTypeId, "service_account", StringComparison.Ordinal)
-            && (account.ExpiresAt == null || account.ExpiresAt > now)
-            && clientSecret.Length is >= 43 and <= 256
-            && credentialVerified;
-        if (!valid)
+        var credentials = client == null
+            ? []
+            : await _context.Set<SqlOSClientCredential>()
+                .Where(x => x.ClientApplicationId == client.Id
+                    && x.RevokedAt == null
+                    && (x.ExpiresAt == null || x.ExpiresAt > now))
+                .ToListAsync(cancellationToken);
+        var candidateSecret = clientSecret.Length <= 256 ? clientSecret : string.Empty;
+        var credentialVerified = false;
+        if (credentials.Count == 0)
         {
-            await AuditAsync("oauth.client_credentials.failed", clientId, account?.SubjectId, httpContext, cancellationToken);
+            _ = _crypto.VerifyPassword(SqlOSClientAuthenticationService.DummyCredentialHash, candidateSecret);
+        }
+        else
+        {
+            foreach (var credential in credentials)
+            {
+                credentialVerified |= _crypto.VerifyPassword(credential.SecretHash, candidateSecret);
+            }
+        }
+        if (client == null
+            || !client.IsActive
+            || client.DisabledAt != null
+            || !string.Equals(client.ClientType, "confidential", StringComparison.Ordinal)
+            || !string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
+            || clientSecret.Length is < 43 or > 256
+            || !credentialVerified)
+        {
+            await AuditAsync("oauth.client_credentials.failed", clientId, null, httpContext, cancellationToken);
+            throw new SqlOSClientCredentialsException("invalid_client", "Client authentication failed.", StatusCodes.Status401Unauthorized);
+        }
+
+        return await ExchangeAsync(client, resource, requestedScope, httpContext, cancellationToken);
+    }
+
+    public async Task<SqlOSClientCredentialsTokenResult> ExchangeAsync(
+        SqlOSClientApplication client,
+        string resource,
+        string? requestedScope,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var grants = SqlOSAdminService.DeserializeJsonList(client.GrantTypesJson);
+        var now = DateTime.UtcNow;
+        if (!client.IsActive
+            || client.DisabledAt != null
+            || !string.Equals(client.ClientType, "confidential", StringComparison.Ordinal)
+            || !string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
+            || !grants.Contains(SqlOSOAuthGrantTypes.ClientCredentials, StringComparer.Ordinal))
+        {
+            await AuditAsync("oauth.client_credentials.failed", client.ClientId, null, httpContext, cancellationToken);
+            throw new SqlOSClientCredentialsException("unauthorized_client", "The client is not authorized to use this grant.");
+        }
+
+        var account = await _context.Set<SqlOSFgaServiceAccount>()
+            .Include(x => x.Subject)
+            .SingleOrDefaultAsync(x => x.ClientId == client.ClientId, cancellationToken);
+        if (account?.ExpiresAt <= now)
+        {
+            await AuditAsync("oauth.client_credentials.failed", client.ClientId, account.SubjectId, httpContext, cancellationToken);
             throw new SqlOSClientCredentialsException("invalid_client", "Client authentication failed.", StatusCodes.Status401Unauthorized);
         }
 
         if (string.IsNullOrWhiteSpace(resource)
-            || !string.Equals(resource, client!.Audience, StringComparison.Ordinal))
+            || !string.Equals(resource, client.Audience, StringComparison.Ordinal))
         {
             throw new SqlOSClientCredentialsException("invalid_target", "An authorized resource is required.");
         }
@@ -86,18 +118,22 @@ public sealed class SqlOSClientCredentialsService
             throw new SqlOSClientCredentialsException("invalid_scope", "The requested scope is not authorized.");
         }
 
+        var tokenSubject = account?.SubjectId ?? client.ClientId;
         var token = await _crypto.CreateServiceAccessTokenAsync(
-            account!.SubjectId,
+            tokenSubject,
             client,
             resource,
             scopes,
-            subject!.OrganizationId,
+            account?.Subject?.OrganizationId,
             cancellationToken);
-        account.LastUsedAt = now;
-        account.UpdatedAt = now;
+        if (account != null)
+        {
+            account.LastUsedAt = now;
+            account.UpdatedAt = now;
+        }
         client.LastSeenAt = now;
         await _context.SaveChangesAsync(cancellationToken);
-        await AuditAsync("oauth.client_credentials.issued", clientId, account.SubjectId, httpContext, cancellationToken);
+        await AuditAsync("oauth.client_credentials.issued", client.ClientId, account?.SubjectId, httpContext, cancellationToken);
         return new SqlOSClientCredentialsTokenResult(token, now.Add(_options.AccessTokenLifetime), scopes);
     }
 
@@ -113,8 +149,33 @@ public sealed class SqlOSClientCredentialsService
         }
 
         var account = await RequireServiceAccountAsync(clientId, cancellationToken);
-        account.ClientSecretHash = _crypto.HashPassword(newSecret);
-        account.UpdatedAt = DateTime.UtcNow;
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(
+            account.ConfigurationOwner,
+            $"Machine client '{clientId}'");
+        var client = await _context.Set<SqlOSClientApplication>()
+            .SingleAsync(x => x.ClientId == clientId, cancellationToken);
+        var now = DateTime.UtcNow;
+        var secretHash = _crypto.HashPassword(newSecret);
+        account.ClientSecretHash = secretHash;
+        account.UpdatedAt = now;
+        var activeCredentials = await _context.Set<SqlOSClientCredential>()
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var credential in activeCredentials)
+        {
+            credential.RevokedAt = now;
+        }
+        _context.Set<SqlOSClientCredential>().Add(new SqlOSClientCredential
+        {
+            Id = _crypto.GenerateId("clcred"),
+            ClientApplicationId = client.Id,
+            SecretHash = secretHash,
+            DisplayName = "Machine client credential",
+            CreatedAt = now,
+            ConfigurationOwner = account.ConfigurationOwner,
+            ConfigurationSourceKey = account.ConfigurationOwner == SqlOSConfigurationOwners.Code ? "primary" : null,
+            LastReconciledAt = account.LastReconciledAt
+        });
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync(
             "oauth.client_credentials.rotated",
@@ -131,8 +192,17 @@ public sealed class SqlOSClientCredentialsService
         CancellationToken cancellationToken = default)
     {
         var account = await RequireServiceAccountAsync(clientId, cancellationToken);
+        var client = await _context.Set<SqlOSClientApplication>()
+            .SingleAsync(x => x.ClientId == clientId, cancellationToken);
         account.ExpiresAt = DateTime.UtcNow;
         account.UpdatedAt = account.ExpiresAt.Value;
+        var credentials = await _context.Set<SqlOSClientCredential>()
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var credential in credentials)
+        {
+            credential.RevokedAt = account.ExpiresAt;
+        }
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync(
             "oauth.client_credentials.revoked",
@@ -156,11 +226,6 @@ public sealed class SqlOSClientCredentialsService
         }
         return account;
     }
-
-    internal static string ResolveCredentialHashForVerification(SqlOSFgaServiceAccount? account)
-        => string.IsNullOrWhiteSpace(account?.ClientSecretHash)
-            ? DummyCredentialHash
-            : account.ClientSecretHash;
 
     private Task AuditAsync(
         string action,
