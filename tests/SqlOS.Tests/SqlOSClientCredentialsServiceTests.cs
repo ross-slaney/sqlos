@@ -139,6 +139,31 @@ public sealed class SqlOSClientCredentialsServiceTests
         audits.Should().Contain("oauth.client_credentials.revoked");
     }
 
+    [TestMethod]
+    public async Task CodeOwnedMachineClientRotation_IsRejectedWithoutMutatingCredential()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var account = await harness.Context.Set<SqlOSFgaServiceAccount>().SingleAsync();
+        var credential = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        account.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+        account.ConfigurationSourceKey = "ledger-worker";
+        credential.ConfigurationOwner = SqlOSConfigurationOwners.Code;
+        credential.ConfigurationSourceKey = "primary";
+        await harness.Context.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => harness.Service.RotateSecretAsync(
+                "ledger-worker",
+                "replacement-secret-with-at-least-256-bits-123456789",
+                "admin-1"))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*owned by the 'code' configuration source*");
+
+        harness.Context.ChangeTracker.Clear();
+        var retained = await harness.Context.Set<SqlOSClientCredential>().SingleAsync();
+        retained.RevokedAt.Should().BeNull();
+        harness.Crypto.VerifyPassword(retained.SecretHash, harness.Secret).Should().BeTrue();
+    }
+
     private static async Task<Harness> CreateHarnessAsync()
     {
         var dbOptions = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()

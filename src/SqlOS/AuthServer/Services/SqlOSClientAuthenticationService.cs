@@ -1,3 +1,4 @@
+using System.Data;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Http;
@@ -115,10 +116,10 @@ public sealed class SqlOSClientAuthenticationService
         string clientApplicationId,
         CancellationToken cancellationToken = default)
     {
-        await RequireClientAsync(clientApplicationId, cancellationToken);
+        var client = await RequireClientAsync(clientApplicationId, cancellationToken);
         return await _context.Set<SqlOSClientCredential>()
             .AsNoTracking()
-            .Where(x => x.ClientApplicationId == clientApplicationId)
+            .Where(x => x.ClientApplicationId == client.Id)
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new SqlOSClientCredentialDto(
                 x.Id,
@@ -139,7 +140,62 @@ public sealed class SqlOSClientAuthenticationService
         string? actorId = null,
         CancellationToken cancellationToken = default)
     {
+        var secret = _crypto.GenerateOpaqueToken(48);
+        var prepared = new PreparedCredential(
+            _crypto.GenerateId("clcred"),
+            _crypto.HashPassword(secret),
+            secret,
+            NormalizeDisplayName(displayName),
+            DateTime.UtcNow,
+            expiresAt);
+        if (!_context.Database.IsRelational())
+        {
+            return await CreateCredentialCoreAsync(
+                clientApplicationId,
+                prepared,
+                actorId,
+                cancellationToken);
+        }
+
+        if (_context.Database.CurrentTransaction != null)
+        {
+            return await CreateCredentialCoreAsync(
+                clientApplicationId,
+                prepared,
+                actorId,
+                cancellationToken);
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        return await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var created = await CreateCredentialCoreAsync(
+                clientApplicationId,
+                prepared,
+                actorId,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        });
+    }
+
+    private async Task<SqlOSClientCredentialCreated> CreateCredentialCoreAsync(
+        string clientApplicationId,
+        PreparedCredential prepared,
+        string? actorId,
+        CancellationToken cancellationToken)
+    {
         var client = await RequireClientAsync(clientApplicationId, cancellationToken);
+        await AcquireCredentialCreationLockAsync(client.Id, cancellationToken);
         SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(client.ConfigurationOwner, $"OAuth client '{client.ClientId}'");
         if (!string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
             || !string.Equals(client.ClientType, "confidential", StringComparison.Ordinal))
@@ -147,7 +203,15 @@ public sealed class SqlOSClientAuthenticationService
             throw new InvalidOperationException("Client credentials can only be issued to confidential clients using client_secret_basic.");
         }
 
-        var now = DateTime.UtcNow;
+        var existing = await _context.Set<SqlOSClientCredential>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == prepared.Id, cancellationToken);
+        if (existing != null)
+        {
+            return new SqlOSClientCredentialCreated(ToDto(existing), prepared.Secret);
+        }
+
+        var now = prepared.CreatedAt;
         var activeCount = await _context.Set<SqlOSClientCredential>()
             .CountAsync(x => x.ClientApplicationId == client.Id
                 && x.RevokedAt == null
@@ -157,15 +221,14 @@ public sealed class SqlOSClientAuthenticationService
             throw new InvalidOperationException($"A client can have at most {MaximumActiveCredentials} active credentials.");
         }
 
-        var secret = _crypto.GenerateOpaqueToken(48);
         var credential = new SqlOSClientCredential
         {
-            Id = _crypto.GenerateId("clcred"),
+            Id = prepared.Id,
             ClientApplicationId = client.Id,
-            SecretHash = _crypto.HashPassword(secret),
-            DisplayName = NormalizeDisplayName(displayName),
+            SecretHash = prepared.SecretHash,
+            DisplayName = prepared.DisplayName,
             CreatedAt = now,
-            ExpiresAt = expiresAt,
+            ExpiresAt = prepared.ExpiresAt,
             ConfigurationOwner = SqlOSConfigurationOwners.Dashboard
         };
         _context.Set<SqlOSClientCredential>().Add(credential);
@@ -176,7 +239,31 @@ public sealed class SqlOSClientAuthenticationService
             actorId,
             data: new { clientId = client.ClientId, credentialId = credential.Id, credential.ExpiresAt },
             cancellationToken: cancellationToken);
-        return new SqlOSClientCredentialCreated(ToDto(credential), secret);
+        return new SqlOSClientCredentialCreated(ToDto(credential), prepared.Secret);
+    }
+
+    private async Task AcquireCredentialCreationLockAsync(
+        string clientApplicationId,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(
+            _context.Database.ProviderName,
+            "Microsoft.EntityFrameworkCore.SqlServer",
+            StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var resource = $"SqlOS:ClientCredentialCreation:{clientApplicationId}";
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = {resource},
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 30000;
+            IF @result < 0 THROW 51000, 'Could not acquire the client-credential creation lock.', 1;
+            """, cancellationToken);
     }
 
     public async Task RevokeCredentialAsync(
@@ -299,6 +386,14 @@ public sealed class SqlOSClientAuthenticationService
         bool HasAuthorizationHeader,
         bool HasBasicCredentials,
         bool IsUnambiguous);
+
+    private sealed record PreparedCredential(
+        string Id,
+        string SecretHash,
+        string Secret,
+        string? DisplayName,
+        DateTime CreatedAt,
+        DateTime? ExpiresAt);
 }
 
 public sealed record SqlOSClientCredentialDto(

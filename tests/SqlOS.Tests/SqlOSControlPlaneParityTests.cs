@@ -91,6 +91,8 @@ public sealed class SqlOSControlPlaneParityTests
         var serviceCredential = await service.ClientAuthentication.CreateCredentialAsync(
             serviceClient.Id,
             "Initial credential");
+        (await service.ClientAuthentication.ListCredentialsAsync(serviceClient.ClientId))
+            .Should().ContainSingle(x => x.Id == serviceCredential.Credential.Id);
         var dashboardClient = await dashboard.PostDashboardAsync(
             DashboardAdminContracts.Clients,
             ConfidentialClientPayload());

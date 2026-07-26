@@ -149,6 +149,9 @@ public sealed class SqlOSClientCredentialsService
         }
 
         var account = await RequireServiceAccountAsync(clientId, cancellationToken);
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(
+            account.ConfigurationOwner,
+            $"Machine client '{clientId}'");
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleAsync(x => x.ClientId == clientId, cancellationToken);
         var now = DateTime.UtcNow;
