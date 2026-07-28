@@ -30,6 +30,8 @@ public static partial class EndpointRouteBuilderExtensions
         RouteGroupBuilder portal,
         RouteGroupBuilder setupApi)
     {
+        setupApi.AddEndpointFilter<SqlOSSsoPortalSessionAvailabilityFilter>();
+
         adminApi.MapGet("/organizations/{organizationId}/sso-portal/sessions", async (HttpContext context, string organizationId, int? page, int? pageSize, SqlOSSsoPortalService portalService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -130,6 +132,7 @@ public static partial class EndpointRouteBuilderExtensions
             : Results.NotFound());
 
         var api = portal.MapGroup("/api");
+        api.AddEndpointFilter<SqlOSSsoPortalSessionAvailabilityFilter>();
 
         api.MapGet("/state", async (HttpContext context, SqlOSSsoPortalService portalService, CancellationToken cancellationToken) =>
         {
@@ -575,5 +578,24 @@ public static partial class EndpointRouteBuilderExtensions
             await portalService.SignOutAsync(context, cancellationToken);
             return Results.Ok(new SqlOSSsoSetupActionResult("redirect", null, null));
         });
+    }
+}
+
+internal sealed class SqlOSSsoPortalSessionAvailabilityFilter : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        try
+        {
+            return await next(context);
+        }
+        catch (SqlOSSsoPortalSessionUnavailableException)
+        {
+            return Results.Json(
+                new { message = SqlOSSsoPortalSessionUnavailableException.PublicMessage },
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
     }
 }

@@ -122,9 +122,90 @@ public sealed class SqlOSOrganizationDomainService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
+        var ownershipCheck = await CheckOwnershipAsync(
+            organizationId,
+            domainId,
+            cancellationToken);
+        return await ApplyOwnershipCheckAsync(
+            ownershipCheck,
+            httpContext,
+            cancellationToken);
+    }
+
+    internal async Task<SqlOSOrganizationDomainOwnershipCheck> CheckOwnershipAsync(
+        string organizationId,
+        string domainId,
+        CancellationToken cancellationToken = default)
+    {
+        var claim = await _context.Set<SqlOSOrganizationDomain>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == domainId
+                    && x.OrganizationId == organizationId
+                    && x.RevokedAt == null,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Domain verification request was not found.");
+
+        if (claim.Status == SqlOSOrganizationDomainStatuses.Active)
+        {
+            return new SqlOSOrganizationDomainOwnershipCheck(
+                claim.OrganizationId,
+                claim.Id,
+                claim.Domain,
+                claim.VerificationToken,
+                Verified: true);
+        }
+
+        if (string.IsNullOrWhiteSpace(claim.VerificationToken))
+        {
+            throw new InvalidOperationException("Domain verification token is missing.");
+        }
+
+        var ownership = SqlOSDomainOwnershipVerification.BuildOwnershipRecord(
+            claim.Domain,
+            claim.VerificationToken,
+            _options.SsoPortal);
+        var verified = SqlOSDomainOwnershipVerification.IsLocalhostDomain(claim.Domain)
+            && _options.SsoPortal.AllowLocalhostDomainVerification;
+        if (!verified)
+        {
+            verified = await _dnsVerifier.HasTxtRecordValueAsync(
+                ownership.Name,
+                ownership.Value,
+                cancellationToken);
+        }
+
+        return new SqlOSOrganizationDomainOwnershipCheck(
+            claim.OrganizationId,
+            claim.Id,
+            claim.Domain,
+            claim.VerificationToken,
+            verified);
+    }
+
+    internal async Task<SqlOSOrganizationDomainResult> ApplyOwnershipCheckAsync(
+        SqlOSOrganizationDomainOwnershipCheck ownershipCheck,
+        HttpContext? httpContext = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context is DbContext dbContext)
+        {
+            var trackedClaim = dbContext.ChangeTracker
+                .Entries<SqlOSOrganizationDomain>()
+                .FirstOrDefault(x => x.Entity.Id == ownershipCheck.DomainId);
+            if (trackedClaim != null)
+            {
+                await trackedClaim.ReloadAsync(cancellationToken);
+            }
+        }
+
         var claim = await _context.Set<SqlOSOrganizationDomain>()
             .Include(x => x.Organization)
-            .FirstOrDefaultAsync(x => x.Id == domainId && x.OrganizationId == organizationId && x.RevokedAt == null, cancellationToken)
+            .FirstOrDefaultAsync(
+                x => x.Id == ownershipCheck.DomainId
+                    && x.OrganizationId == ownershipCheck.OrganizationId
+                    && x.RevokedAt == null,
+                cancellationToken)
             ?? throw new InvalidOperationException("Domain verification request was not found.");
 
         if (claim.Status == SqlOSOrganizationDomainStatuses.Active)
@@ -137,21 +218,23 @@ public sealed class SqlOSOrganizationDomainService
             throw new InvalidOperationException("Domain verification token is missing.");
         }
 
+        if (!string.Equals(claim.Domain, ownershipCheck.Domain, StringComparison.Ordinal)
+            || !string.Equals(
+                claim.VerificationToken,
+                ownershipCheck.VerificationToken,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Domain verification request changed. Retry ownership verification.");
+        }
+
         var ownership = SqlOSDomainOwnershipVerification.BuildOwnershipRecord(
             claim.Domain,
             claim.VerificationToken,
             _options.SsoPortal);
         var now = DateTime.UtcNow;
-        var verified = SqlOSDomainOwnershipVerification.IsLocalhostDomain(claim.Domain)
-            && _options.SsoPortal.AllowLocalhostDomainVerification;
-        if (!verified)
-        {
-            verified = await _dnsVerifier.HasTxtRecordValueAsync(ownership.Name, ownership.Value, cancellationToken);
-        }
-
         claim.LastCheckedAt = now;
         claim.UpdatedAt = now;
-        if (!verified)
+        if (!ownershipCheck.Verified)
         {
             claim.LastError = $"TXT record not found. Create {ownership.Type} {ownership.Name} with value {ownership.Value}.";
             await _context.SaveChangesAsync(cancellationToken);
@@ -165,14 +248,20 @@ public sealed class SqlOSOrganizationDomainService
             return ToResult(claim);
         }
 
-        await EnsureNoActiveClaimElsewhereAsync(organizationId, claim.Domain, cancellationToken);
+        await EnsureNoActiveClaimElsewhereAsync(
+            ownershipCheck.OrganizationId,
+            claim.Domain,
+            cancellationToken);
         claim.Status = SqlOSOrganizationDomainStatuses.Active;
         claim.VerifiedAt = now;
         claim.LastError = null;
 
         if (claim.Organization != null
             && string.IsNullOrWhiteSpace(claim.Organization.PrimaryDomain)
-            && !await IsPrimaryDomainInUseElsewhereAsync(organizationId, claim.Domain, cancellationToken))
+            && !await IsPrimaryDomainInUseElsewhereAsync(
+                ownershipCheck.OrganizationId,
+                claim.Domain,
+                cancellationToken))
         {
             claim.Organization.PrimaryDomain = claim.Domain;
         }
@@ -304,3 +393,10 @@ public sealed class SqlOSOrganizationDomainService
             cancellationToken: cancellationToken);
     }
 }
+
+internal sealed record SqlOSOrganizationDomainOwnershipCheck(
+    string OrganizationId,
+    string DomainId,
+    string Domain,
+    string? VerificationToken,
+    bool Verified);

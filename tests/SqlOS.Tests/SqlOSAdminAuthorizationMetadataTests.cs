@@ -12,6 +12,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Extensions;
+using SqlOS.AuthServer.Services;
 using SqlOS.Dashboard;
 using SqlOS.Extensions;
 using SqlOS.Tests.Infrastructure;
@@ -112,6 +115,78 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             && endpoint.Metadata.GetMetadata<SqlOSAdminRequiredMetadata>() == null);
     }
 
+    [TestMethod]
+    public async Task DeactivatedOrganization_PortalRoutesReturnOnlyGenericCapabilityErrors()
+    {
+        await using var app = await CreateAppAsync(Environments.Production);
+        string setupToken;
+        string portalCookie;
+
+        await using (var scope = app.Services.CreateAsyncScope())
+        {
+            var admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+            var portal = scope.ServiceProvider.GetRequiredService<SqlOSSsoPortalService>();
+            var organization = await admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(
+                    "Generic Portal Error Org",
+                    null,
+                    "generic-portal-error.test"));
+            var pending = await portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id));
+            setupToken = ExtractSetupToken(pending.SetupUrl!);
+            var opened = await portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id));
+            var openContext = new DefaultHttpContext();
+            await portal.OpenSessionAsync(ExtractSetupToken(opened.SetupUrl!), openContext);
+            portalCookie = openContext.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+
+            await admin.UpdateOrganizationAsync(
+                organization.Id,
+                new SqlOSUpdateOrganizationRequest(
+                    organization.Name,
+                    organization.Slug,
+                    organization.PrimaryDomain,
+                    IsActive: false));
+        }
+
+        var client = app.GetTestClient();
+        var startResponse = await client.GetAsync(
+            $"{PortalPrefix}/start?token={Uri.EscapeDataString(setupToken)}");
+        startResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var startBody = await startResponse.Content.ReadAsStringAsync();
+        startBody.Should().Contain("Portal setup token is invalid or expired.");
+        startBody.ToLowerInvariant().Should().NotContain("organization");
+
+        using var stateRequest = new HttpRequestMessage(HttpMethod.Get, $"{PortalApiPrefix}/state");
+        stateRequest.Headers.Add("Cookie", portalCookie);
+        var stateResponse = await client.SendAsync(stateRequest);
+        stateResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await stateResponse.Content.ReadAsStringAsync())
+            .Should().Contain("Portal session is invalid or expired.")
+            .And.NotContain("organization");
+    }
+
+    [TestMethod]
+    public async Task PortalSessionAvailabilityFilter_MapsRevalidationRaceToGenericUnauthorized()
+    {
+        var filter = new SqlOSSsoPortalSessionAvailabilityFilter();
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(new DefaultHttpContext()),
+            _ => ValueTask.FromException<object?>(
+                new SqlOSSsoPortalSessionUnavailableException()));
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        ((IValueHttpResult)result!).Value.Should().BeEquivalentTo(
+            new { message = "Portal session is invalid or expired." });
+    }
+
+    private static string ExtractSetupToken(string setupUrl)
+    {
+        var query = new Uri(setupUrl).Query;
+        return Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(query)["token"].ToString();
+    }
+
     private static async Task<WebApplication> CreateAppAsync(string environment)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -134,5 +209,16 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         app.MapSqlOS();
         await app.StartAsync();
         return app;
+    }
+
+    private sealed class TestEndpointFilterInvocationContext(HttpContext httpContext)
+        : EndpointFilterInvocationContext
+    {
+        public override HttpContext HttpContext { get; } = httpContext;
+
+        public override IList<object?> Arguments { get; } = [];
+
+        public override T GetArgument<T>(int index)
+            => (T)Arguments[index]!;
     }
 }

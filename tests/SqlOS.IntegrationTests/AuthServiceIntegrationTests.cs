@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
@@ -426,6 +427,202 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task OrganizationDeactivation_SerializesAgainstStalePortalMutationAcrossDbContexts()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        string organizationId;
+        string portalSessionId;
+        string pendingSetupToken;
+        string openedPortalCookie;
+        SqlOSUpdateOrganizationRequest deactivationRequest;
+
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var organization = await issuance.Admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(
+                    $"Portal Deactivation Race {suffix}",
+                    null,
+                    $"{suffix}.portal-race.test"));
+            organizationId = organization.Id;
+            deactivationRequest = new SqlOSUpdateOrganizationRequest(
+                organization.Name,
+                organization.Slug,
+                organization.PrimaryDomain,
+                IsActive: false);
+            var created = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id, Provider: "okta"),
+                new DefaultHttpContext());
+            portalSessionId = created.Id;
+            var pending = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+                new DefaultHttpContext());
+            pendingSetupToken = QueryHelpers.ParseQuery(new Uri(pending.SetupUrl!).Query)["token"].ToString();
+            var opened = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+                new DefaultHttpContext());
+            var openContext = new DefaultHttpContext();
+            await issuance.Portal.OpenSessionAsync(
+                QueryHelpers.ParseQuery(new Uri(opened.SetupUrl!).Query)["token"].ToString(),
+                openContext);
+            openedPortalCookie = openContext.Response.Headers.SetCookie.ToString().Split(';', 2)[0];
+        }
+
+        await using var mutation = BuildIsolatedLifecycleStack();
+        var stalePortalSession = await mutation.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == portalSessionId);
+        stalePortalSession.Provider.Should().Be("okta");
+
+        await using var deactivation = BuildIsolatedLifecycleStack();
+        await using var deactivationTransaction = await deactivation.Context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+        await deactivation.Admin.UpdateOrganizationAsync(
+            organizationId,
+            deactivationRequest);
+
+        var mutationTask = mutation.Portal.SetProviderAsync(
+            stalePortalSession,
+            new SqlOSUpdateSsoPortalProviderRequest("google-workspace"),
+            new DefaultHttpContext());
+        await Task.Delay(250);
+        mutationTask.IsCompleted.Should().BeFalse(
+            "the portal mutation must serialize behind the organization lifecycle transaction");
+
+        await deactivationTransaction.CommitAsync();
+
+        var mutationAction = async () => await mutationTask;
+        await mutationAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        (await verification.Context.Set<SqlOSOrganization>()
+            .SingleAsync(x => x.Id == organizationId)).IsActive.Should().BeFalse();
+        var revokedSession = await verification.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == portalSessionId);
+        revokedSession.Provider.Should().Be("okta");
+        revokedSession.RevokedAt.Should().NotBeNull();
+        revokedSession.RevokedReason.Should().Be("organization_deactivated");
+        (await verification.Context.Set<SqlOSSsoPortalSession>()
+            .Where(x => x.OrganizationId == organizationId)
+            .ToListAsync()).Should().OnlyContain(x =>
+                x.RevokedAt != null && x.RevokedReason == "organization_deactivated");
+
+        var pendingOpen = async () => await verification.Portal.OpenSessionAsync(
+            pendingSetupToken,
+            new DefaultHttpContext());
+        await pendingOpen.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal setup token is invalid or expired.");
+        var openedRequest = new DefaultHttpContext();
+        openedRequest.Request.Headers.Cookie = openedPortalCookie;
+        (await verification.Portal.TryGetSessionAsync(openedRequest)).Should().BeNull();
+
+        (await verification.Context.Set<SqlOSAuditEvent>().AnyAsync(x =>
+            x.EventType == "sso.portal.sessions.revoked"
+            && x.OrganizationId == organizationId
+            && x.MetadataJson != null
+            && x.MetadataJson.Contains("\"revokedSessions\":3")))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task OrganizationDeactivation_SerializesAgainstPortalCapabilityIssuance()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var pause = new PausePortalSessionInsertInterceptor();
+        await using var issuance = BuildIsolatedLifecycleStack(interceptor: pause);
+        var organization = await issuance.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest(
+                $"Portal Issuance Race {suffix}",
+                null,
+                $"{suffix}.portal-issuance-race.test"));
+
+        var createTask = issuance.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+            new DefaultHttpContext());
+        await pause.InsertReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        await using var deactivation = BuildIsolatedLifecycleStack();
+        var deactivationTask = deactivation.Admin.UpdateOrganizationAsync(
+            organization.Id,
+            new SqlOSUpdateOrganizationRequest(
+                organization.Name,
+                organization.Slug,
+                organization.PrimaryDomain,
+                IsActive: false));
+
+        var firstCompleted = await Task.WhenAny(
+            deactivationTask,
+            Task.Delay(TimeSpan.FromSeconds(2)));
+        pause.ReleaseInsert.TrySetResult(true);
+
+        firstCompleted.Should().NotBe(
+            deactivationTask,
+            "capability issuance must hold the organization lock until its insert commits");
+        var created = await createTask;
+        await deactivationTask;
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        var stored = await verification.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == created.Id);
+        stored.RevokedAt.Should().NotBeNull();
+        stored.RevokedReason.Should().Be("organization_deactivated");
+    }
+
+    [TestMethod]
+    public async Task OrganizationDeactivation_DoesNotWaitForPortalDnsVerification()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var dns = new PauseDomainDnsVerifier();
+        await using var confirmation = BuildIsolatedLifecycleStack(dnsVerifier: dns);
+        var organization = await confirmation.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest(
+                $"Portal DNS Race {suffix}",
+                null,
+                $"{suffix}.portal-dns-race.test"));
+        var created = await confirmation.Portal.CreateSessionAsync(
+            new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+            new DefaultHttpContext());
+        var session = await confirmation.Context.Set<SqlOSSsoPortalSession>()
+            .SingleAsync(x => x.Id == created.Id);
+        var state = await confirmation.Portal.StartDomainVerificationAsync(
+            session,
+            new SqlOSSsoPortalDomainRequest($"{suffix}.verification.test"),
+            new DefaultHttpContext());
+
+        var confirmationTask = confirmation.Portal.ConfirmDomainOwnershipAsync(
+            session,
+            state.Domain!.Id,
+            new DefaultHttpContext());
+        await dns.LookupReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        await using var deactivation = BuildIsolatedLifecycleStack();
+        var deactivationTask = deactivation.Admin.UpdateOrganizationAsync(
+            organization.Id,
+            new SqlOSUpdateOrganizationRequest(
+                organization.Name,
+                organization.Slug,
+                organization.PrimaryDomain,
+                IsActive: false));
+        var firstCompleted = await Task.WhenAny(
+            deactivationTask,
+            Task.Delay(TimeSpan.FromSeconds(5)));
+        dns.ReleaseLookup.TrySetResult(true);
+
+        firstCompleted.Should().Be(
+            deactivationTask,
+            "outbound DNS work must not hold the organization transaction lock");
+        await deactivationTask;
+        var confirmationAction = async () => await confirmationTask;
+        await confirmationAction.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Portal session is invalid or expired.");
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        var storedDomain = await verification.Context.Set<SqlOSOrganizationDomain>()
+            .SingleAsync(x => x.Id == state.Domain.Id);
+        storedDomain.Status.Should().Be(SqlOSOrganizationDomainStatuses.PendingOwnership);
+        storedDomain.VerifiedAt.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task Signup_Refresh_Logout_RoundTrips()
     {
         var auth = BuildAuthService();
@@ -653,9 +850,11 @@ public sealed class AuthServiceIntegrationTests
         return new TestSqlOSDbContext(dbOptions);
     }
 
-    private static IsolatedLifecycleStack BuildIsolatedLifecycleStack()
+    private static IsolatedLifecycleStack BuildIsolatedLifecycleStack(
+        IInterceptor? interceptor = null,
+        ISqlOSDomainDnsVerifier? dnsVerifier = null)
     {
-        var context = BuildIsolatedContext();
+        var context = BuildIsolatedContext(interceptor);
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(context, options, crypto);
@@ -677,7 +876,7 @@ public sealed class AuthServiceIntegrationTests
             options,
             crypto,
             admin,
-            new RejectingDomainDnsVerifier());
+            dnsVerifier ?? new RejectingDomainDnsVerifier());
         var portal = new SqlOSSsoPortalService(context, options, crypto, admin, domains);
         return new IsolatedLifecycleStack(context, crypto, admin, auth, authPage, authorization, portal);
     }
@@ -709,6 +908,53 @@ public sealed class AuthServiceIntegrationTests
             string expectedValue,
             CancellationToken cancellationToken = default)
             => Task.FromResult(false);
+    }
+
+    private sealed class PauseDomainDnsVerifier : ISqlOSDomainDnsVerifier
+    {
+        public TaskCompletionSource<bool> LookupReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseLookup { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<bool> HasTxtRecordValueAsync(
+            string recordName,
+            string expectedValue,
+            CancellationToken cancellationToken = default)
+        {
+            LookupReached.TrySetResult(true);
+            return await ReleaseLookup.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private sealed class PausePortalSessionInsertInterceptor : SaveChangesInterceptor
+    {
+        private int _hasPaused;
+
+        public TaskCompletionSource<bool> InsertReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseInsert { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var context = eventData.Context;
+            var isPortalSessionInsert = context != null
+                && context.ChangeTracker.Entries<SqlOSSsoPortalSession>()
+                    .Any(entry => entry.State == EntityState.Added);
+            if (isPortalSessionInsert && Interlocked.Exchange(ref _hasPaused, 1) == 0)
+            {
+                InsertReached.TrySetResult(true);
+                await ReleaseInsert.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
+        }
     }
 
     [TestMethod]
