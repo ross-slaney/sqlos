@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Extensions;
 using SqlOS.AuthServer.Services;
 using SqlOS.Dashboard;
 using SqlOS.Extensions;
@@ -165,6 +166,21 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
             .And.NotContain("organization");
     }
 
+    [TestMethod]
+    public async Task PortalSessionAvailabilityFilter_MapsRevalidationRaceToGenericUnauthorized()
+    {
+        var filter = new SqlOSSsoPortalSessionAvailabilityFilter();
+        var result = await filter.InvokeAsync(
+            new TestEndpointFilterInvocationContext(new DefaultHttpContext()),
+            _ => ValueTask.FromException<object?>(
+                new SqlOSSsoPortalSessionUnavailableException()));
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        ((IValueHttpResult)result!).Value.Should().BeEquivalentTo(
+            new { message = "Portal session is invalid or expired." });
+    }
+
     private static string ExtractSetupToken(string setupUrl)
     {
         var query = new Uri(setupUrl).Query;
@@ -193,5 +209,16 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
         app.MapSqlOS();
         await app.StartAsync();
         return app;
+    }
+
+    private sealed class TestEndpointFilterInvocationContext(HttpContext httpContext)
+        : EndpointFilterInvocationContext
+    {
+        public override HttpContext HttpContext { get; } = httpContext;
+
+        public override IList<object?> Arguments { get; } = [];
+
+        public override T GetArgument<T>(int index)
+            => (T)Arguments[index]!;
     }
 }

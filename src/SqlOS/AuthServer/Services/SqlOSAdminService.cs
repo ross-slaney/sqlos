@@ -668,6 +668,7 @@ public sealed partial class SqlOSAdminService
             .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
             ?? throw new InvalidOperationException("Organization not found.");
         var isDeactivating = organization.IsActive && !request.IsActive;
+        var isReactivating = !organization.IsActive && request.IsActive;
 
         var slug = string.IsNullOrWhiteSpace(request.Slug) ? Slugify(request.Name) : Slugify(request.Slug);
         var slugExists = await _context.Set<SqlOSOrganization>()
@@ -692,14 +693,21 @@ public sealed partial class SqlOSAdminService
                 reason: "organization_deactivated",
                 now: now,
                 cancellationToken: cancellationToken);
+        }
 
+        if (isDeactivating || isReactivating)
+        {
+            var now = DateTime.UtcNow;
+            var revocationReason = isDeactivating
+                ? "organization_deactivated"
+                : "organization_reactivated";
             var portalSessions = await _context.Set<SqlOSSsoPortalSession>()
                 .Where(x => x.OrganizationId == organization.Id && x.RevokedAt == null)
                 .ToListAsync(cancellationToken);
             foreach (var portalSession in portalSessions)
             {
                 portalSession.RevokedAt = now;
-                portalSession.RevokedReason = "organization_deactivated";
+                portalSession.RevokedReason = revocationReason;
             }
 
             await RecordAuditAsync(
@@ -709,7 +717,7 @@ public sealed partial class SqlOSAdminService
                 organizationId: organization.Id,
                 data: new
                 {
-                    reason = "organization_deactivated",
+                    reason = revocationReason,
                     revokedSessions = portalSessions.Count
                 },
                 cancellationToken: cancellationToken);

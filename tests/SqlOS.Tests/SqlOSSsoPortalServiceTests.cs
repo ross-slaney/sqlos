@@ -177,6 +177,11 @@ public sealed class SqlOSSsoPortalServiceTests
         openedRequest.Request.Headers.Cookie = openedCookie;
         (await harness.Portal.TryGetSessionAsync(openedRequest)).Should().BeNull();
 
+        var legacyPending = revoked.Single(x => x.Id == pending.Id);
+        legacyPending.RevokedAt = null;
+        legacyPending.RevokedReason = null;
+        await harness.Context.SaveChangesAsync();
+
         await harness.Admin.UpdateOrganizationAsync(
             org.Id,
             new SqlOSUpdateOrganizationRequest(
@@ -190,6 +195,15 @@ public sealed class SqlOSSsoPortalServiceTests
         var reactivatedRequest = PortalHarness.CreateHttpContext();
         reactivatedRequest.Request.Headers.Cookie = openedCookie;
         (await harness.Portal.TryGetSessionAsync(reactivatedRequest)).Should().BeNull();
+        legacyPending.RevokedAt.Should().NotBeNull();
+        legacyPending.RevokedReason.Should().Be("organization_reactivated");
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x =>
+            x.EventType == "sso.portal.sessions.revoked"
+            && x.OrganizationId == org.Id
+            && x.MetadataJson != null
+            && x.MetadataJson.Contains("\"reason\":\"organization_reactivated\"", StringComparison.Ordinal)
+            && x.MetadataJson.Contains("\"revokedSessions\":1", StringComparison.Ordinal)))
+            .Should().BeTrue();
 
         var replacement = await harness.Portal.CreateSessionAsync(
             new SqlOSCreateSsoPortalSessionRequest(org.Id),

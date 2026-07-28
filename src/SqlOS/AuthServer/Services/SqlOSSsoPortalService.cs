@@ -90,10 +90,6 @@ public sealed class SqlOSSsoPortalService
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
-        var organization = await _context.Set<SqlOSOrganization>()
-            .FirstOrDefaultAsync(x => x.Id == request.OrganizationId && x.IsActive, cancellationToken)
-            ?? throw new InvalidOperationException("Organization not found.");
-
         var now = DateTime.UtcNow;
         var expiresAt = request.ExpiresAt ?? now.Add(_portalOptions.DefaultLinkLifetime);
         if (expiresAt <= now)
@@ -102,37 +98,49 @@ public sealed class SqlOSSsoPortalService
         }
 
         var provider = NormalizeProvider(request.Provider);
-        var connection = await EnsurePortalConnectionAsync(organization, cancellationToken);
         var rawLinkToken = _cryptoService.GenerateOpaqueToken();
-        var session = new SqlOSSsoPortalSession
+        var linkTokenHash = _cryptoService.HashToken(rawLinkToken);
+        var sessionId = _cryptoService.GenerateId("ssp");
+
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
         {
-            Id = _cryptoService.GenerateId("ssp"),
-            OrganizationId = organization.Id,
-            ConnectionId = connection.Id,
-            LinkTokenHash = _cryptoService.HashToken(rawLinkToken),
-            Provider = provider,
-            ReturnUrl = NormalizeOptional(request.ReturnUrl),
-            ActorType = "platform_admin",
-            CreatedByUserId = NormalizeOptional(request.CreatedByUserId),
-            CreatedAt = now,
-            ExpiresAt = expiresAt,
-            IpAddress = httpContext?.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = httpContext?.Request.Headers.UserAgent.ToString()
-        };
+            return await CreateSessionCoreAsync(
+                request,
+                sessionId,
+                rawLinkToken,
+                linkTokenHash,
+                provider,
+                now,
+                expiresAt,
+                httpContext,
+                cancellationToken);
+        }
 
-        _context.Set<SqlOSSsoPortalSession>().Add(session);
-        await _context.SaveChangesAsync(cancellationToken);
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var attempt = 0;
+        return await strategy.ExecuteAsync(async () =>
+        {
+            if (attempt++ > 0 && _context is DbContext retryContext)
+            {
+                retryContext.ChangeTracker.Clear();
+            }
 
-        await RecordPortalAuditAsync(
-            "sso.portal.session.created",
-            session,
-            httpContext,
-            new { session.Id, connectionId = connection.Id, provider, expiresAt },
-            cancellationToken);
-
-        session.Organization = organization;
-        session.Connection = connection;
-        return ToSessionResult(session, BuildSetupUrl(rawLinkToken, httpContext));
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var created = await CreateSessionCoreAsync(
+                request,
+                sessionId,
+                rawLinkToken,
+                linkTokenHash,
+                provider,
+                now,
+                expiresAt,
+                httpContext,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        });
     }
 
     public async Task<object> ListOrganizationSessionsAsync(
@@ -447,24 +455,44 @@ public sealed class SqlOSSsoPortalService
         return await GetStateAsync(session, cancellationToken);
     }
 
-    public Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipAsync(
+    public async Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipAsync(
         SqlOSSsoPortalSession session,
         string domainId,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
-        => ExecutePortalOperationAsync(
+    {
+        _ = await ExecutePortalOperationAsync(
             session.Id,
             session.OrganizationId,
-            lockedSession => ConfirmDomainOwnershipCoreAsync(lockedSession, domainId, httpContext, cancellationToken),
+            _ => Task.FromResult(true),
             cancellationToken);
+
+        var ownershipCheck = await _domainService.CheckOwnershipAsync(
+            session.OrganizationId,
+            domainId,
+            cancellationToken);
+
+        return await ExecutePortalOperationAsync(
+            session.Id,
+            session.OrganizationId,
+            lockedSession => ConfirmDomainOwnershipCoreAsync(
+                lockedSession,
+                ownershipCheck,
+                httpContext,
+                cancellationToken),
+            cancellationToken);
+    }
 
     private async Task<SqlOSSsoPortalStateResult> ConfirmDomainOwnershipCoreAsync(
         SqlOSSsoPortalSession session,
-        string domainId,
+        SqlOSOrganizationDomainOwnershipCheck ownershipCheck,
         HttpContext? httpContext,
         CancellationToken cancellationToken)
     {
-        await _domainService.ConfirmOwnershipAsync(session.OrganizationId, domainId, httpContext, cancellationToken);
+        await _domainService.ApplyOwnershipCheckAsync(
+            ownershipCheck,
+            httpContext,
+            cancellationToken);
         return await GetStateAsync(session, cancellationToken);
     }
 
@@ -1032,6 +1060,74 @@ public sealed class SqlOSSsoPortalService
             cancellationToken);
 
         return ToSessionResult(session, setupUrl: null);
+    }
+
+    private async Task<SqlOSSsoPortalSessionResult> CreateSessionCoreAsync(
+        SqlOSCreateSsoPortalSessionRequest request,
+        string sessionId,
+        string rawLinkToken,
+        string linkTokenHash,
+        string? provider,
+        DateTime now,
+        DateTime expiresAt,
+        HttpContext? httpContext,
+        CancellationToken cancellationToken)
+    {
+        await SqlOSSsoPortalOrganizationLock.AcquireAsync(
+            _context,
+            request.OrganizationId,
+            cancellationToken);
+
+        var organization = await _context.Set<SqlOSOrganization>()
+            .FirstOrDefaultAsync(
+                x => x.Id == request.OrganizationId && x.IsActive,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Organization not found.");
+
+        var existing = await _context.Set<SqlOSSsoPortalSession>()
+            .Include(x => x.Connection)
+            .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+        if (existing != null)
+        {
+            if (!string.Equals(existing.LinkTokenHash, linkTokenHash, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Portal session identifier collision.");
+            }
+
+            existing.Organization = organization;
+            return ToSessionResult(existing, BuildSetupUrl(rawLinkToken, httpContext));
+        }
+
+        var connection = await EnsurePortalConnectionAsync(organization, cancellationToken);
+        var session = new SqlOSSsoPortalSession
+        {
+            Id = sessionId,
+            OrganizationId = organization.Id,
+            ConnectionId = connection.Id,
+            LinkTokenHash = linkTokenHash,
+            Provider = provider,
+            ReturnUrl = NormalizeOptional(request.ReturnUrl),
+            ActorType = "platform_admin",
+            CreatedByUserId = NormalizeOptional(request.CreatedByUserId),
+            CreatedAt = now,
+            ExpiresAt = expiresAt,
+            IpAddress = httpContext?.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = httpContext?.Request.Headers.UserAgent.ToString()
+        };
+
+        _context.Set<SqlOSSsoPortalSession>().Add(session);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordPortalAuditAsync(
+            "sso.portal.session.created",
+            session,
+            httpContext,
+            new { session.Id, connectionId = connection.Id, provider, expiresAt },
+            cancellationToken);
+
+        session.Organization = organization;
+        session.Connection = connection;
+        return ToSessionResult(session, BuildSetupUrl(rawLinkToken, httpContext));
     }
 
     private async Task<TResult> ExecutePortalOperationAsync<TResult>(
