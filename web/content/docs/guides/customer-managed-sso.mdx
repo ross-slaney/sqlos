@@ -249,6 +249,8 @@ Check that the resulting session uses SAML authentication and that the user and 
 
 Creating a new setup link does not invalidate earlier links. Revoke obsolete setup sessions from the organization SSO tab, especially after a support handoff or accidental disclosure. Link/session revocation affects only the delegated setup credential; it does not revoke end-user OAuth sessions.
 
+Organization deactivation is the enclosing security boundary. When an organization transitions to inactive, SqlOS revokes every pending or opened setup session in the same transaction. In-flight portal operations are serialized against that lifecycle change and reload the current organization and session state before making a change. Old links and continuation cookies therefore fail with the same generic invalid-or-expired response after deactivation. Reactivating the organization does not revive them; issue a new setup link for a new administrative handoff.
+
 Activation also does not revoke active end-user sessions. If existing matching-domain members must immediately sign in again through SSO, use the separate **Revoke organization sessions** action and confirm it explicitly. It requires an active connection and active verified domain, then revokes matching-domain OAuth/refresh sessions and hosted AuthPage sessions for that organization. It does not revoke users from other domains or organizations.
 
 Portal creation, open, close, revoke, provider selection, enrollment-policy changes, domain verification, metadata import, activation, disable, tests, and organization-session revocation write organization-scoped audit events. Review them in **Governance → Audit Logs**.
@@ -273,6 +275,7 @@ For a local portal-only test, create the organization with a primary domain befo
 
 - Customer IT admins configure only their organization without global dashboard access.
 - The setup URL is single-use and replaceable through a new, independently revocable session.
+- Deactivating the organization invalidates all of its delegated setup links and cookies; reactivation requires a new link.
 - DNS ownership, metadata readiness, enrollment policy, and PKCE test status are visible before activation.
 - Eligible matching-domain users route through SSO; other users follow the configured fallback policy.
 - Session revocation happens only through the separate confirm-gated action.

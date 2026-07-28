@@ -1,0 +1,69 @@
+---
+title: "SqlOS 3.24.1: Fail Closed at the Boundaries"
+description: "A patch release that tightens schema upgrades, confidential OAuth client authentication, and delegated SSO setup lifecycles."
+date: "2026-07-27"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "SAML", "FGA", "Security", "SqlOS"]
+---
+
+SqlOS 3.24.1 is a focused security and correctness release. It does not introduce a new identity model. It makes three existing boundaries behave the way operators and developers reasonably expect when the surrounding state changes:
+
+- a schema upgrade is complete only when the database records the matching schema version;
+- a confidential OAuth client must authenticate as that client when it exchanges a code or refresh token; and
+- a delegated SSO setup capability stops working when its organization is deactivated.
+
+The common principle is simple: cached, partial, or adjacent state must not be enough to cross an identity boundary.
+
+## Schema upgrades now prove their own version
+
+SqlOS applies its FGA schema from embedded, numbered migrations. One migration added the machine-client ownership fields but did not advance the persisted FGA schema marker. The SQL change could succeed while the database continued to identify itself as the previous version, causing the migration to run again on later startups.
+
+Version 3.24.1 fixes that migration and adds a version-independent guard. After every FGA migration, startup reloads the persisted schema version and requires it to match the migration that just ran. If a future script forgets its version update—or writes the wrong one—initialization fails at that script.
+
+This is deliberately broader than a one-off correction. The integration test derives the expected version from the embedded migration set, so adding migration 8, 9, or 20 without advancing the database marker breaks CI before it becomes an upgrade problem.
+
+For production, keep using a canary upgrade against a restored database before rolling the package to every replica. See [Production Readiness](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance) for the rollout boundary.
+
+## Confidential OAuth clients authenticate on every token exchange
+
+A confidential client is a server-side application that can keep a credential. Its secret authenticates the OAuth application; it is not a user password and it does not grant FGA permissions.
+
+SqlOS now applies `client_secret_basic` at the shared token endpoint for all confidential-client exchanges:
+
+- authorization code;
+- refresh token; and
+- client credentials.
+
+The authorization code and refresh token remain bound to their original client. A credential for client A cannot exchange an artifact issued to client B. Missing, malformed, disabled, revoked, expired, or ambiguous credentials return generic OAuth errors without consuming the code or refresh token, so an invalid attempt cannot burn a legitimate exchange.
+
+Public browser, native, device, CIMD, and DCR clients remain public. They continue to use PKCE or their existing public-client flow and are not forced to invent a secret they cannot protect.
+
+Dashboard-managed confidential clients can overlap two hashed credentials during a rotation: create the replacement, move the server-side application, and revoke the old credential. Code-owned clients resolve their secret from the host configuration or secret provider and fail startup closed when the material is unavailable.
+
+The [Clients reference](/docs/authserver/clients#confidential-server-side-clients) covers server-side web clients. For service-to-service tokens and optional SqlOS FGA grants, use [Background jobs with service accounts](/docs/guides/service-account-jobs).
+
+## Organization deactivation closes delegated SSO setup
+
+Customer-managed SSO uses a narrow capability: a one-time setup link becomes a short-lived continuation cookie that can configure one organization's SAML connection. That capability must be subordinate to the organization lifecycle.
+
+In 3.24.1, deactivating an organization revokes all of its pending and opened SSO setup sessions in the same transaction. Portal operations serialize against organization lifecycle changes and reload current database state before reading or mutating configuration. An operation either completes before deactivation and is then revoked, or observes the inactive organization and fails closed.
+
+The public response stays generic, so callers cannot use the portal to distinguish an inactive organization from an expired or revoked capability. Reactivating the organization does not restore old links or cookies; an operator must issue a new setup link.
+
+This is separate from end-user OAuth session revocation. Organization deactivation already enforces the broader authentication lifecycle. The 3.24.1 change closes the delegated administration path that was not previously included in that lifecycle.
+
+See [Let customer admins set up enterprise SSO](/docs/guides/customer-managed-sso#10-operate-and-revoke-safely) for the complete capability and revocation model.
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 3.24.1
+```
+
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test the identity paths your application uses.
+
+If you use confidential clients, ensure every server-side code and refresh-token exchange supplies its configured client secret. Public clients require no change. If an organization was deactivated and later reactivated, issue a fresh SSO setup link instead of expecting an older capability to work.
+
+This patch is backed by real SQL upgrade and concurrency tests, full confidential-client exchange coverage, public-client regression coverage, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
