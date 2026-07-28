@@ -233,6 +233,8 @@ The SQL authorization function is installed with `CREATE OR ALTER FUNCTION`, whi
 
 Each AuthServer script and its ledger entry commit in one transaction, so an interrupted startup safely retries the unrecorded script. The initializer does **not** acquire a distributed migration lock, wrap the entire release upgrade in one cross-script transaction, or provide down migrations.
 
+FGA migration scripts carry a matching persisted schema version. After every FGA migration, SqlOS reloads `SqlOSFgaSchema.Version` and requires it to match the embedded migration number before startup can continue. A missing, stale, or incorrectly advanced marker fails initialization at the offending migration instead of reporting a schema level the database has not actually reached. Do not edit shipped scripts or their version updates; add a new numbered migration and validate the upgrade against a restored database.
+
 Use this rollout sequence:
 
 1. Back up the database and Data Protection key ring; record the application and SqlOS package versions.
