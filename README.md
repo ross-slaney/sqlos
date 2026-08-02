@@ -167,4 +167,4 @@ dotnet build SqlOS.sln
 ./scripts/docs-check.sh
 ```
 
-SqlOS is [MIT licensed](LICENSE). Issues and pull requests are welcome.
+SqlOS is MIT licensed. Issues and pull requests are welcome.
