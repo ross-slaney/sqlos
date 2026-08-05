@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import BrandMark from "@/components/BrandMark";
-import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { GitHubIcon } from "@/components/icons";
 
 const navLinks = [
@@ -70,7 +69,6 @@ export default function Header() {
           >
             <GitHubIcon className="h-4 w-4" />
           </a>
-          <ThemeSwitcher className="ml-1" />
           <Link
             href="/docs/getting-started"
             className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -80,7 +78,6 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-2 md:hidden">
-          <ThemeSwitcher />
           <button
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
