@@ -149,13 +149,13 @@ inventoryApi.MapPut("/locations/{locationId}/inventory/{itemId}", async (
             ["newQuantity"] = item.QuantityOnHand,
             ["delta"] = item.QuantityOnHand - previousQuantity
         },
-        IdempotencyKey: $"retail:inventory:{item.Id}:updated:{userId}:{httpContext.TraceIdentifier}"),
+        IdempotencyKey: $"inventory-update:{request.OperationId}"),
         ct);
 
     return Results.Ok(item);
 });
 
-public sealed record UpdateInventoryRequest(int QuantityOnHand);
+public sealed record UpdateInventoryRequest(int QuantityOnHand, string OperationId);
 ```
 
 This example uses a representative host-owned `InventoryItem` model with an explicit `OrganizationId`. The query binds the resource to the token's organization, then the FGA check proves the same actor may edit that resource. If your schema derives tenancy from a parent or FGA root instead, resolve and verify that trusted ownership mapping before mutation and use the resolved organization in the audit row. A valid token alone is not authorization.
@@ -168,15 +168,15 @@ Use `ApplicationKey` for the product surface that produced the event. If the key
 
 ## 4. Make retries safe
 
-Set `IdempotencyKey` when a request may be retried. SqlOS hashes the key before storage. A duplicate key returns the original event instead of inserting another row.
+Set `IdempotencyKey` when an operation may be retried. SqlOS hashes the key together with the normalized organization, resolved application, source, and exact action. A duplicate inside that exact namespace returns the original event instead of inserting another row; the same key in another scope creates an independent event.
 
 Good idempotency keys usually include:
 
-- application key
-- action
-- target resource id
-- actor id
-- request id or domain operation id
+- a stable domain operation id, such as `share:{shareOperationId}`
+- an outbox message id that stays unchanged across delivery attempts
+- a business command id persisted with the mutation
+
+Do not generate a fresh request or trace id for each retry. The scope fields are already part of the namespace, so they do not need to be repeated in the key. Always derive organization and application scope from trusted server-side state; a retry returns an existing event only when all scope fields match.
 
 ## 5. Keep metadata safe
 

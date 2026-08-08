@@ -47,7 +47,11 @@ Prefer short outcome fields such as:
 
 ## Idempotency
 
-`IdempotencyKey` is hashed before storage. If a caller retries the same event with the same key, `RecordAsync` returns the original event and does not insert a duplicate. Include the application key, action, target id, actor id, and request id when building keys for retry-safe writes.
+`IdempotencyKey` is hashed before storage as part of a versioned namespace containing the normalized organization id (including an explicit global/null value), resolved application id and key, source, and exact action. If a caller retries the same event with the same key inside that namespace, `RecordAsync` returns the original event and does not insert a duplicate. The same key in another organization, application, source, or action namespace creates an independent event.
+
+Use a stable business-operation identifier such as `share:{shareOperationId}` or an outbox message id. Do not use a fresh request or trace id for each retry. The namespace already supplies the organization, application, source, and action dimensions, so callers do not need to repeat those values in the key. A retry must supply the same scope fields as the original call; this is also what prevents a caller from receiving an event created in another scope.
+
+Existing audit rows keep their legacy key hash during schema upgrade. SqlOS does not recover or rewrite raw keys. A retry can return a legacy row only when its organization, resolved application id/key, source, and action all match the current request. New rows use only the scoped hash and remain concurrency-safe through a unique filtered index. A detected hash/index conflict that cannot be resolved to an event in the caller's exact scope throws `SqlOSAuditLogIdempotencyConflictException` with error code `idempotency_conflict`; it never returns the conflicting row.
 
 ## Dashboard And Export
 

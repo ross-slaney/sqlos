@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
@@ -51,6 +52,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
     {
         var action = NormalizeRequired(request.Action, nameof(request.Action), 160);
         var source = NormalizeNullable(request.Source, 80) ?? "application";
+        var organizationId = NormalizeNullable(request.OrganizationId, 64);
         var actor = NormalizeActor(request.Actor);
         var targets = NormalizeTargets(request.Targets);
         var now = DateTime.UtcNow;
@@ -59,13 +61,27 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
             request.ApplicationId,
             request.ApplicationKey,
             cancellationToken);
-        var idempotencyKeyHash = HashIdempotencyKey(request.IdempotencyKey);
+        var normalizedIdempotencyKey = NormalizeNullable(request.IdempotencyKey, 512);
+        var legacyIdempotencyKeyHash = HashValue(normalizedIdempotencyKey);
+        var idempotencyScopeHash = HashIdempotencyScope(
+            organizationId,
+            applicationId,
+            applicationKey,
+            source,
+            action,
+            normalizedIdempotencyKey);
 
-        if (idempotencyKeyHash != null)
+        if (idempotencyScopeHash != null)
         {
-            var existing = await _context.Set<SqlOSAuditEvent>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.IdempotencyKeyHash == idempotencyKeyHash, cancellationToken);
+            var existing = await FindIdempotentEventAsync(
+                idempotencyScopeHash,
+                legacyIdempotencyKeyHash!,
+                organizationId,
+                applicationId,
+                applicationKey,
+                source,
+                action,
+                cancellationToken);
             if (existing != null)
             {
                 return new SqlOSAuditLogRecordResult(existing.Id, Created: false, MapEvent(existing));
@@ -83,7 +99,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         var entity = new SqlOSAuditEvent
         {
             Id = _cryptoService.GenerateId("evt"),
-            OrganizationId = NormalizeNullable(request.OrganizationId, 64),
+            OrganizationId = organizationId,
             ApplicationId = applicationId,
             ApplicationKey = applicationKey,
             UserId = NormalizeNullable(request.UserId, 64)
@@ -105,7 +121,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
             UserAgent = NormalizeNullable(request.Context?.UserAgent, 512),
             RequestId = NormalizeNullable(request.Context?.RequestId, 128),
             CorrelationId = NormalizeNullable(request.Context?.CorrelationId, 128),
-            IdempotencyKeyHash = idempotencyKeyHash
+            IdempotencyScopeHash = idempotencyScopeHash
         };
 
         _context.Set<SqlOSAuditEvent>().Add(entity);
@@ -114,21 +130,49 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException) when (idempotencyKeyHash != null)
+        catch (DbUpdateException exception) when (
+            idempotencyScopeHash != null && IsUniqueConstraintViolation(exception))
         {
-            var existing = await _context.Set<SqlOSAuditEvent>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.IdempotencyKeyHash == idempotencyKeyHash, cancellationToken);
+            var existing = await FindIdempotentEventAsync(
+                idempotencyScopeHash,
+                legacyIdempotencyKeyHash!,
+                organizationId,
+                applicationId,
+                applicationKey,
+                source,
+                action,
+                cancellationToken);
             if (existing != null)
             {
                 return new SqlOSAuditLogRecordResult(existing.Id, Created: false, MapEvent(existing));
             }
 
-            throw;
+            throw new SqlOSAuditLogIdempotencyConflictException(exception);
         }
 
         return new SqlOSAuditLogRecordResult(entity.Id, Created: true, MapEvent(entity));
     }
+
+    private async Task<SqlOSAuditEvent?> FindIdempotentEventAsync(
+        string idempotencyScopeHash,
+        string legacyIdempotencyKeyHash,
+        string? organizationId,
+        string? applicationId,
+        string? applicationKey,
+        string source,
+        string action,
+        CancellationToken cancellationToken)
+        => await _context.Set<SqlOSAuditEvent>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x =>
+                (x.IdempotencyScopeHash == idempotencyScopeHash
+                    || (x.IdempotencyScopeHash == null && x.IdempotencyKeyHash == legacyIdempotencyKeyHash))
+                && x.OrganizationId == organizationId
+                && x.ApplicationId == applicationId
+                && x.ApplicationKey == applicationKey
+                && x.Source == source
+                && x.Action == action,
+                cancellationToken);
 
     public async Task<SqlOSAuditLogListResult> ListAsync(
         SqlOSAuditLogListRequest request,
@@ -569,7 +613,13 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         return value[..maxLength];
     }
 
-    private static string? HashIdempotencyKey(string? idempotencyKey)
+    internal static string? HashIdempotencyScope(
+        string? organizationId,
+        string? applicationId,
+        string? applicationKey,
+        string source,
+        string action,
+        string? idempotencyKey)
     {
         var normalized = NormalizeNullable(idempotencyKey, 512);
         if (normalized == null)
@@ -577,9 +627,46 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
             return null;
         }
 
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        var canonical = new StringBuilder("sqlos-audit-idempotency-v2");
+        AppendNamespacePart(canonical, NormalizeNullable(organizationId, 64));
+        AppendNamespacePart(canonical, NormalizeNullable(applicationId, 64));
+        AppendNamespacePart(canonical, NormalizeNullable(applicationKey, 200));
+        AppendNamespacePart(canonical, NormalizeNullable(source, 80) ?? "application");
+        AppendNamespacePart(canonical, NormalizeRequired(action, nameof(action), 160));
+        AppendNamespacePart(canonical, normalized);
+        return HashValue(canonical.ToString());
+    }
+
+    internal static string? HashLegacyIdempotencyKey(string? idempotencyKey)
+        => HashValue(NormalizeNullable(idempotencyKey, 512));
+
+    private static string? HashValue(string? value)
+    {
+        if (value == null)
+        {
+            return null;
+        }
+
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
+
+    private static void AppendNamespacePart(StringBuilder builder, string? value)
+    {
+        builder.Append('|');
+        if (value == null)
+        {
+            builder.Append("-1:");
+            return;
+        }
+
+        builder.Append(value.Length.ToString(CultureInfo.InvariantCulture));
+        builder.Append(':');
+        builder.Append(value);
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+        => exception.GetBaseException() is SqlException { Number: 2601 or 2627 };
 
     private static string EscapeForJsonContains(string value)
         => value.Replace("\\", "\\\\", StringComparison.Ordinal)

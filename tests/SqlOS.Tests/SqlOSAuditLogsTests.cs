@@ -112,6 +112,108 @@ public sealed class SqlOSAuditLogsTests
     }
 
     [TestMethod]
+    public async Task AuditLogs_RecordAsync_IdempotencyNamespaceSeparatesSecurityAndOperationScopes()
+    {
+        using var context = CreateContext();
+        var service = CreateService(context);
+        const string key = "business-operation-42";
+
+        var baseline = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_1",
+            applicationKey: "workspace-web",
+            source: "application",
+            idempotencyKey: key));
+        var sameScope = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_1",
+            applicationKey: "workspace-web",
+            source: "application",
+            idempotencyKey: key));
+        var otherOrganization = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_2",
+            applicationKey: "workspace-web",
+            source: "application",
+            idempotencyKey: key));
+        var globalOrganization = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: null,
+            applicationKey: "workspace-web",
+            source: "application",
+            idempotencyKey: key));
+        var otherApplication = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_1",
+            applicationKey: "admin-web",
+            source: "application",
+            idempotencyKey: key));
+        var otherSource = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_1",
+            applicationKey: "workspace-web",
+            source: "authserver",
+            idempotencyKey: key));
+        var otherAction = await service.RecordAsync(CreateRecord(
+            "document.unshared",
+            organizationId: "org_1",
+            applicationKey: "workspace-web",
+            source: "application",
+            idempotencyKey: key));
+
+        baseline.Created.Should().BeTrue();
+        sameScope.Created.Should().BeFalse();
+        sameScope.EventId.Should().Be(baseline.EventId);
+        new[] { otherOrganization, globalOrganization, otherApplication, otherSource, otherAction }
+            .Should().OnlyContain(x => x.Created);
+        (await context.Set<SqlOSAuditEvent>().CountAsync()).Should().Be(6);
+        (await context.Set<SqlOSAuditEvent>().ToListAsync())
+            .Should().OnlyContain(x => x.IdempotencyKeyHash == null && x.IdempotencyScopeHash != null);
+    }
+
+    [TestMethod]
+    public async Task AuditLogs_RecordAsync_LegacyHashReturnsOnlyMatchingScope()
+    {
+        using var context = CreateContext();
+        const string key = "legacy-operation-42";
+        context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
+        {
+            Id = "evt_legacy",
+            OrganizationId = "org_1",
+            ApplicationKey = "workspace-web",
+            Source = "application",
+            Action = "document.shared",
+            EventType = "document.shared",
+            ActorType = "user",
+            ActorId = "usr_1",
+            TargetsJson = "[]",
+            OccurredAt = DateTime.UtcNow,
+            IngestedAt = DateTime.UtcNow,
+            IdempotencyKeyHash = SqlOSAuditLogService.HashLegacyIdempotencyKey(key)
+        });
+        await context.SaveChangesAsync();
+        var service = CreateService(context);
+
+        var retry = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_1",
+            applicationKey: "workspace-web",
+            idempotencyKey: key));
+        var otherTenant = await service.RecordAsync(CreateRecord(
+            "document.shared",
+            organizationId: "org_2",
+            applicationKey: "workspace-web",
+            idempotencyKey: key));
+
+        retry.Created.Should().BeFalse();
+        retry.EventId.Should().Be("evt_legacy");
+        retry.Event.OrganizationId.Should().Be("org_1");
+        otherTenant.Created.Should().BeTrue();
+        otherTenant.Event.OrganizationId.Should().Be("org_2");
+        (await context.Set<SqlOSAuditEvent>().CountAsync()).Should().Be(2);
+    }
+
+    [TestMethod]
     public async Task AuditLogs_RecordAsync_RedactsDisallowedMetadataFields()
     {
         using var context = CreateContext();
@@ -327,7 +429,7 @@ public sealed class SqlOSAuditLogsTests
 
     private static SqlOSAuditLogRecordRequest CreateRecord(
         string action,
-        string organizationId = "org_1",
+        string? organizationId = "org_1",
         string? applicationKey = null,
         string source = "application",
         string actorType = "user",

@@ -653,6 +653,7 @@ public sealed class SqlOSAuditEvent
     public string? RequestId { get; set; }
     public string? CorrelationId { get; set; }
     public string? IdempotencyKeyHash { get; set; }
+    public string? IdempotencyScopeHash { get; set; }
     public string? DataJson { get; set; }
 }
 
