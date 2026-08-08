@@ -131,8 +131,8 @@ SqlOS still enforces its own dashboard policy inside the process. Edge protectio
 
 SqlOS applies browser security headers automatically to every hosted AuthPage, verification page, SSO setup page, and dashboard HTML response:
 
-- `X-Frame-Options: DENY`;
-- `Content-Security-Policy` with `frame-ancestors 'none'`;
+- `X-Frame-Options: DENY` on hosted auth and top-level dashboard pages;
+- `Content-Security-Policy` with `frame-ancestors 'none'` on hosted auth and top-level dashboard pages;
 - nonce-bound first-party scripts and styles, with no `unsafe-inline` script permission;
 - `X-Content-Type-Options: nosniff`;
 - `Referrer-Policy: no-referrer`.
@@ -146,7 +146,7 @@ options.BrowserSecurity.ContentSecurityPolicy =
     "script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}' https://cdn.example.com";
 ```
 
-SqlOS validates this value at startup. It must be one header-safe line, must contain `{nonce}`, and cannot declare `frame-ancestors`; SqlOS always appends `frame-ancestors 'none'` so a customization cannot accidentally make credential or consent UI frameable.
+SqlOS validates this value at startup. It must be one header-safe line, must contain `{nonce}`, and cannot declare `frame-ancestors`; SqlOS owns that directive so a customization cannot make credential or consent UI frameable. The intentional embedded FGA shell alone uses `frame-ancestors 'self'`, and its unified dashboard parent remains non-frameable while allowing that same-origin child through `frame-src 'self'`.
 
 Set `Strict-Transport-Security` at the TLS-terminating reverse proxy or host for the whole application domain, not only SqlOS routes. Verify the header on `/sqlos`, `/sqlos/auth/login`, and normal application responses after deployment. Do not enable long-lived HSTS on a domain until every route is reliably HTTPS.
 

@@ -171,7 +171,7 @@ internal static class SqlOSOptionsValidator
 
         if (options.ContentSecurityPolicy.Contains("frame-ancestors", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot configure frame-ancestors; SqlOS always enforces frame-ancestors 'none'.");
+            errors.Add("BrowserSecurity.ContentSecurityPolicy cannot configure frame-ancestors; SqlOS controls it for each hosted surface.");
         }
     }
 

@@ -215,7 +215,7 @@ Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict netwo
 
 ## Hosted UI security headers
 
-Hosted auth and dashboard HTML use a restrictive nonce-based Content Security Policy and deny framing automatically. No setting is required for the built-in UI. If a reviewed customization loads scripts, styles, images, or fonts from another origin, set `options.BrowserSecurity.ContentSecurityPolicy` and keep the required `{nonce}` placeholder. `frame-ancestors 'none'` is always enforced and cannot be overridden. See [Production Readiness](/docs/guides/production-readiness#keep-the-hosted-ui-browser-boundary-intact) for the default headers and a customization example.
+Hosted auth and top-level dashboard HTML use a restrictive nonce-based Content Security Policy and deny framing automatically. No setting is required for the built-in UI. The intentional embedded FGA shell is limited to a same-origin unified dashboard parent; this narrow exception is controlled by SqlOS and is not configurable. If a reviewed customization loads scripts, styles, images, or fonts from another origin, set `options.BrowserSecurity.ContentSecurityPolicy` and keep the required `{nonce}` placeholder. `frame-ancestors` cannot be configured or overridden. See [Production Readiness](/docs/guides/production-readiness#keep-the-hosted-ui-browser-boundary-intact) for the default headers and a customization example.
 
 ## Schema ownership
 

@@ -95,7 +95,7 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         // Serve static files
-        await ServeStaticFile(context, relativePath);
+        await ServeStaticFile(context, relativePath, embedMode);
     }
 
     private async Task<bool> IsAuthorizedAsync(HttpContext context)
@@ -1015,7 +1015,7 @@ public class SqlOSFgaDashboardMiddleware
         return int.TryParse(value, out var parsed) ? parsed : defaultValue;
     }
 
-    private async Task ServeStaticFile(HttpContext context, string relativePath)
+    private async Task ServeStaticFile(HttpContext context, string relativePath, bool embedMode)
     {
         var serveShell = false;
         if (string.IsNullOrEmpty(relativePath) || relativePath == "/")
@@ -1039,7 +1039,7 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
-        var contentType = GetContentType(relativePath);
+        var contentType = serveShell ? "text/html" : GetContentType(relativePath);
         context.Response.ContentType = contentType;
 
         await using var stream = fileInfo.CreateReadStream();
@@ -1049,7 +1049,9 @@ public class SqlOSFgaDashboardMiddleware
             var html = await reader.ReadToEndAsync();
             html = html.Replace("__SQL_OS_FGA_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(GetDashboardShellPrefix().TrimEnd('/')), StringComparison.Ordinal);
             html = html.Replace("__SQL_OS_BASE_PATH__", GetDashboardShellPrefix().TrimEnd('/'), StringComparison.Ordinal);
-            html = _securityHeaders.PrepareHtml(context, html);
+            html = embedMode
+                ? _securityHeaders.PrepareSameOriginEmbeddedHtml(context, html)
+                : _securityHeaders.PrepareHtml(context, html);
             await context.Response.WriteAsync(html);
             return;
         }

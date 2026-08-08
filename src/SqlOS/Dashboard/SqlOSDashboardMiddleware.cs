@@ -503,7 +503,7 @@ public sealed class SqlOSDashboardMiddleware
             JsonSerializer.Serialize(new { scimEnabled = _scimEnabled }),
             StringComparison.Ordinal);
         html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
-        html = _securityHeaders.PrepareHtml(context, html);
+        html = _securityHeaders.PrepareDashboardHtml(context, html);
         await context.Response.WriteAsync(html);
     }
 

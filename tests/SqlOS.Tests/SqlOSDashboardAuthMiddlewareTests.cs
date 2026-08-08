@@ -182,9 +182,26 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         response.ContentTypeOptions.Should().Be("nosniff");
         response.ReferrerPolicy.Should().Be("no-referrer");
         response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
+        response.ContentSecurityPolicy.Should().Contain("frame-src 'self'");
         response.ContentSecurityPolicy.Should().NotContain("unsafe-inline");
         response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\">");
         response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\" src=");
+    }
+
+    [TestMethod]
+    public void DashboardShell_CustomFrameSource_CannotExcludeIntentionalSameOriginChild()
+    {
+        var options = new SqlOSOptions();
+        options.BrowserSecurity.ContentSecurityPolicy += "; frame-src 'none'";
+        var headers = new SqlOSBrowserSecurityHeaders(Options.Create(options));
+        var context = new DefaultHttpContext();
+
+        headers.PrepareDashboardHtml(context, "<html></html>");
+
+        var policy = context.Response.Headers.ContentSecurityPolicy.ToString();
+        policy.Should().Contain("frame-src 'self'");
+        policy.Should().NotContain("frame-src 'none'");
+        policy.Split("frame-src", StringSplitOptions.None).Should().HaveCount(2);
     }
 
     [TestMethod]
@@ -246,6 +263,69 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task FgaDashboardShell_NormalNavigation_RemainsNonFrameable()
+    {
+        var response = await GetFgaDashboardAsync("/sqlos/admin/fga/resources");
+
+        response.StatusCode.Should().Be(StatusCodes.Status200OK);
+        response.XFrameOptions.Should().Be("DENY");
+        response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
+        response.ContentType.Should().Be("text/html");
+        response.Body.Should().Contain("SqlOSFga Dashboard");
+    }
+
+    [TestMethod]
+    public async Task FgaDashboardShell_IntentionalEmbed_AllowsOnlySameOriginFraming()
+    {
+        var resources = await GetFgaDashboardAsync("/sqlos/admin/fga/resources", "?embed=1");
+        var roles = await GetFgaDashboardAsync("/sqlos/admin/fga/roles", "?embed=1");
+
+        foreach (var response in new[] { resources, roles })
+        {
+            response.StatusCode.Should().Be(StatusCodes.Status200OK);
+            response.XFrameOptions.Should().Be("SAMEORIGIN");
+            response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'self'");
+            response.ContentSecurityPolicy.Should().NotContain("frame-ancestors 'none'");
+            response.ContentType.Should().Be("text/html");
+            response.Body.Should().Contain("SqlOSFga Dashboard");
+        }
+    }
+
+    [TestMethod]
+    public async Task DashboardShell_EmbedQuery_CannotRelaxNonFgaFramingPolicy()
+    {
+        using var harness = CreateHarness(options =>
+        {
+            options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
+            options.AuthorizationCallback = _ => Task.FromResult(true);
+        });
+
+        var response = await harness.GetAsync("/sqlos/", "?embed=1");
+
+        response.StatusCode.Should().Be(StatusCodes.Status200OK);
+        response.XFrameOptions.Should().Be("DENY");
+        response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
+        response.ContentSecurityPolicy.Should().Contain("frame-src 'self'");
+    }
+
+    [TestMethod]
+    public async Task FgaDashboardShell_EmbedQuery_StillRequiresDashboardAuthorization()
+    {
+        var response = await GetFgaDashboardAsync(
+            "/sqlos/admin/fga/resources",
+            "?embed=1",
+            options =>
+            {
+                options.AuthMode = SqlOSDashboardAuthMode.Password;
+                options.Password = "correct-password";
+            });
+
+        response.StatusCode.Should().Be(StatusCodes.Status302Found);
+        response.Location.Should().StartWith("/sqlos/login?next=");
+        response.XFrameOptions.Should().Be("DENY");
+    }
+
+    [TestMethod]
     public async Task DashboardClientReturnPath_UsesExactOrChildSegmentBoundary()
     {
         var files = new ManifestEmbeddedFileProvider(
@@ -301,6 +381,58 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             provider.GetRequiredService<IOptions<SqlOSOptions>>());
 
         return new DashboardMiddlewareHarness(provider, middleware);
+    }
+
+    private static async Task<DashboardResponse> GetFgaDashboardAsync(
+        string path,
+        string? queryString = null,
+        Action<SqlOSDashboardOptions>? configure = null)
+    {
+        var dashboardOptions = new SqlOSDashboardOptions
+        {
+            AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly,
+            AuthorizationCallback = _ => Task.FromResult(true)
+        };
+        configure?.Invoke(dashboardOptions);
+
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        await using var provider = services.BuildServiceProvider();
+        var middleware = new SqlOSFgaDashboardMiddleware(
+            context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status418ImATeapot;
+                return Task.CompletedTask;
+            },
+            "/sqlos/admin/fga",
+            new TestHostEnvironment(),
+            dashboardOptions,
+            provider.GetRequiredService<SqlOSDashboardSessionService>(),
+            Options.Create(new SqlOSOptions()));
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Request.Path = path;
+        if (queryString != null)
+        {
+            context.Request.QueryString = new QueryString(queryString);
+        }
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        return new DashboardResponse(
+            context.Response.StatusCode,
+            await reader.ReadToEndAsync(),
+            Array.Empty<string>(),
+            null,
+            context.Response.Headers["X-Frame-Options"].ToString(),
+            context.Response.Headers["X-Content-Type-Options"].ToString(),
+            context.Response.Headers["Referrer-Policy"].ToString(),
+            context.Response.Headers["Content-Security-Policy"].ToString(),
+            context.Response.Headers.Location.ToString(),
+            context.Response.ContentType);
     }
 
     private sealed class DashboardMiddlewareHarness : IDisposable
@@ -391,7 +523,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
                 context.Response.Headers["X-Frame-Options"].ToString(),
                 context.Response.Headers["X-Content-Type-Options"].ToString(),
                 context.Response.Headers["Referrer-Policy"].ToString(),
-                context.Response.Headers["Content-Security-Policy"].ToString());
+                context.Response.Headers["Content-Security-Policy"].ToString(),
+                context.Response.Headers.Location.ToString(),
+                context.Response.ContentType);
         }
 
         public void Dispose()
@@ -406,7 +540,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         string XFrameOptions,
         string ContentTypeOptions,
         string ReferrerPolicy,
-        string ContentSecurityPolicy);
+        string ContentSecurityPolicy,
+        string Location,
+        string? ContentType);
 
     private sealed class TestHostEnvironment : IHostEnvironment
     {

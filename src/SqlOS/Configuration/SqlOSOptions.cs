@@ -88,8 +88,8 @@ public sealed class SqlOSBrowserSecurityOptions
     public const string NoncePlaceholder = "{nonce}";
 
     /// <summary>
-    /// Content Security Policy applied to hosted SqlOS HTML. SqlOS always appends
-    /// <c>frame-ancestors 'none'</c>; callers cannot relax the anti-framing boundary.
+    /// Content Security Policy applied to hosted SqlOS HTML. SqlOS owns each
+    /// surface's <c>frame-ancestors</c> policy; callers cannot relax the anti-framing boundary.
     /// </summary>
     public string ContentSecurityPolicy { get; set; } =
         "default-src 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; " +
