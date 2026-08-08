@@ -44,7 +44,7 @@ With the normal `builder.AddSqlOS<TContext>(...)` and `app.MapSqlOS()` setup, `D
 
 `AuthServer.Issuer` must be an absolute URI whose path matches the derived auth base. When `PublicOrigin` is configured, the issuer must be `{PublicOrigin}{BasePath}`.
 
-The dashboard shell and FGA dashboard are middleware installed by `AddSqlOS`. `MapSqlOS` maps AuthServer, audit, email, and—when enabled—calendar endpoints. This distinction matters if you compose the ASP.NET Core pipeline manually.
+The unified dashboard shell and the FGA component API/assets are middleware installed by `AddSqlOS`. FGA page routes are served by the unified shell; the FGA middleware does not expose a second dashboard document. `MapSqlOS` maps AuthServer, audit, email, and—when enabled—calendar endpoints. This distinction matters if you compose the ASP.NET Core pipeline manually.
 
 ## OAuth discovery and keys
 
@@ -364,7 +364,7 @@ The callback consumes the one-time state and redirects to the exact `ReturnUri` 
 
 ## Dashboard and operator APIs
 
-SqlOS also exposes APIs used by the embedded auth, FGA, audit, email, SSO-setup, and optional calendar dashboards. Endpoint groups are mapped by `MapSqlOS`; the root and FGA dashboards are middleware installed by `AddSqlOS`. These surfaces:
+SqlOS also exposes APIs used by the embedded auth, FGA, audit, email, SSO-setup, and optional calendar dashboards. Endpoint groups are mapped by `MapSqlOS`; the unified shell and FGA component API/assets are middleware installed by `AddSqlOS`. These surfaces:
 
 - are excluded from ApiExplorer/OpenAPI descriptions;
 - are protected by the dashboard authorization/session rules, except delegated SSO setup routes that use their own one-time setup token and organization-scoped portal cookie;

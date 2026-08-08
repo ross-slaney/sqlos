@@ -165,6 +165,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         disabled.Body.Should().Contain("window.__SQL_OS_CAPABILITIES__ = {\"scimEnabled\":false};");
         enabled.StatusCode.Should().Be(StatusCodes.Status200OK);
         enabled.Body.Should().Contain("window.__SQL_OS_CAPABILITIES__ = {\"scimEnabled\":true};");
+        enabled.Body.Should().Contain("window.__SQL_OS_BASE_PATH__ = \"/sqlos\";");
+        enabled.Body.Should().NotContain("window./sqlos");
     }
 
     [TestMethod]
@@ -203,19 +205,26 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
-    public async Task DashboardPassThrough_RequiresCompleteAdminFamilySegment()
+    public async Task DashboardFgaRoutes_UseUnifiedShell_WhileApiAndAssetsPassThrough()
     {
         using var harness = CreateHarness(options =>
         {
             options.AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly;
-            options.AuthorizationCallback = null;
+            options.AuthorizationCallback = _ => Task.FromResult(true);
         });
 
         var lookalike = await harness.GetAsync("/sqlos/admin/fga-evil", "?embed=1");
-        var realFamily = await harness.GetAsync("/sqlos/admin/fga/resources", "?embed=1");
+        var resources = await harness.GetAsync("/sqlos/admin/fga/resources", "?embed=1");
+        var api = await harness.GetAsync("/sqlos/admin/fga/api/stats");
+        var asset = await harness.GetAsync("/sqlos/admin/fga/app.js");
 
-        lookalike.StatusCode.Should().Be(StatusCodes.Status404NotFound);
-        realFamily.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        lookalike.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        resources.StatusCode.Should().Be(StatusCodes.Status200OK);
+        resources.XFrameOptions.Should().Be("DENY");
+        resources.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
+        resources.Body.Should().Contain("/admin/fga/app.js");
+        api.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
+        asset.StatusCode.Should().Be(StatusCodes.Status418ImATeapot);
     }
 
     [TestMethod]
@@ -246,6 +255,40 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task FgaDashboardMiddleware_ServesOnlyApiAndComponentAssets_NotASecondDashboardDocument()
+    {
+        var services = new ServiceCollection();
+        services.AddDataProtection();
+        services.AddSingleton<SqlOSDashboardSessionService>();
+        await using var provider = services.BuildServiceProvider();
+        var options = new SqlOSDashboardOptions
+        {
+            AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly
+        };
+        var middleware = new SqlOSFgaDashboardMiddleware(
+            _ => Task.CompletedTask,
+            "/sqlos/admin/fga",
+            new TestHostEnvironment { EnvironmentName = Environments.Development },
+            options,
+            provider.GetRequiredService<SqlOSDashboardSessionService>(),
+            Options.Create(new SqlOSOptions()));
+
+        var routeContext = new DefaultHttpContext { RequestServices = provider };
+        routeContext.Request.Path = "/sqlos/admin/fga/resources";
+        await middleware.InvokeAsync(routeContext);
+
+        var assetContext = new DefaultHttpContext { RequestServices = provider };
+        assetContext.Request.Path = "/sqlos/admin/fga/app.js";
+        assetContext.Response.Body = new MemoryStream();
+        await middleware.InvokeAsync(assetContext);
+
+        routeContext.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        assetContext.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
+        assetContext.Response.ContentType.Should().Be("application/javascript");
+        assetContext.Response.Headers.XFrameOptions.ToString().Should().Be("DENY");
+    }
+
+    [TestMethod]
     public async Task DashboardClientReturnPath_UsesExactOrChildSegmentBoundary()
     {
         var files = new ManifestEmbeddedFileProvider(
@@ -258,6 +301,41 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         source.Should().Contain("parsed.pathname === dashboardBasePath");
         source.Should().Contain("parsed.pathname.startsWith(`${dashboardBasePath}/`)");
         source.Should().NotContain("parsed.pathname.startsWith(dashboardBasePath || \"/\")");
+    }
+
+    [TestMethod]
+    public async Task DashboardFgaClient_MountsTheCompleteSharedComponent_WithoutAnIframe()
+    {
+        var files = new ManifestEmbeddedFileProvider(
+            typeof(SqlOSDashboardMiddleware).Assembly,
+            "Dashboard/wwwroot");
+        await using var dashboardStream = files.GetFileInfo("app.js").CreateReadStream();
+        using var dashboardReader = new StreamReader(dashboardStream, Encoding.UTF8);
+        var dashboardSource = await dashboardReader.ReadToEndAsync();
+
+        var fgaFiles = new ManifestEmbeddedFileProvider(
+            typeof(SqlOSFgaDashboardMiddleware).Assembly,
+            "Fga/Dashboard/wwwroot");
+        await using var fgaStream = fgaFiles.GetFileInfo("app.js").CreateReadStream();
+        using var fgaReader = new StreamReader(fgaStream, Encoding.UTF8);
+        var fgaSource = await fgaReader.ReadToEndAsync();
+
+        dashboardSource.Should().Contain("window.SqlOSFgaDashboard.mount");
+        dashboardSource.Should().Contain("initialRoute: route.componentRoute");
+        dashboardSource.Should().NotContain("<iframe");
+        dashboardSource.Should().NotContain("embed=1");
+
+        fgaSource.Should().Contain("window.SqlOSFgaDashboard = Object.freeze({ mount })");
+        fgaSource.Should().Contain("host.attachShadow({ mode: 'open' })");
+        fgaSource.Should().Contain("loadResources()");
+        fgaSource.Should().Contain("loadGrants()");
+        fgaSource.Should().Contain("loadRoles()");
+        fgaSource.Should().Contain("loadPermissions()");
+        fgaSource.Should().Contain("loadUsers()");
+        fgaSource.Should().Contain("loadAgents()");
+        fgaSource.Should().Contain("loadServiceAccounts()");
+        fgaSource.Should().Contain("loadUserGroups()");
+        fgaSource.Should().Contain("loadAccessTester()");
     }
 
     private static DashboardMiddlewareHarness CreateHarness(

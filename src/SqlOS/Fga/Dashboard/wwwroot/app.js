@@ -1,14 +1,45 @@
 (function() {
-    const embedMode = new URLSearchParams(window.location.search).get('embed') === '1';
-    if (embedMode) {
-        document.body.classList.add('embed-mode');
+    const componentMarkup = `
+        <div class="fga-dashboard">
+            <div id="stats" class="stats-bar"></div>
+            <div id="content"></div>
+            <div id="modal-overlay" class="modal-overlay" hidden>
+                <div id="modal" class="modal" role="dialog" aria-modal="true"></div>
+            </div>
+        </div>`;
+
+    function normalizeRoute(value) {
+        const withoutHash = String(value || '/resources').replace(/^#/, '');
+        const withSlash = withoutHash.startsWith('/') ? withoutHash : `/${withoutHash}`;
+        return withSlash.replace(/\/{2,}/g, '/');
     }
 
-    const dashboardBasePath = window.__SQL_OS_BASE_PATH__ || '/sqlos';
-    const basePath = window.location.pathname.replace(/\/$/, '');
+    function mount(options) {
+        if (!options?.host) {
+            throw new Error('SqlOS FGA dashboard requires a host element.');
+        }
+
+        const host = options.host;
+        const basePath = String(options.basePath || '/sqlos/admin/fga').replace(/\/$/, '');
+        const dashboardBasePath = String(options.dashboardBasePath || basePath.replace(/\/admin\/fga$/i, '') || '/sqlos').replace(/\/$/, '');
+        const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
+        root.replaceChildren();
+
+        const stylesheet = document.createElement('link');
+        stylesheet.rel = 'stylesheet';
+        stylesheet.href = `${basePath}/style.css`;
+        root.append(stylesheet);
+
+        const component = document.createElement('div');
+        component.innerHTML = componentMarkup;
+        root.append(component.firstElementChild);
+
+        let currentRoute = normalizeRoute(options.initialRoute);
+        let destroyed = false;
+
     function redirectToLogin() {
         const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
-        window.top.location.href = `${dashboardBasePath}/login?next=${next}`;
+        window.location.href = `${dashboardBasePath}/login?next=${next}`;
     }
     const api = async (endpoint) => {
         const response = await fetch(`${basePath}/api/${endpoint}`, { credentials: 'same-origin' });
@@ -46,22 +77,31 @@
         }
         return response;
     };
-    const $ = (sel) => document.querySelector(sel);
+    const $ = (sel) => root.querySelector(sel);
     const content = $('#content');
 
-    // --- Hash Router ---
+    // --- Component Router ---
 
-    function navigate(hash) {
-        if (hash !== location.hash) location.hash = hash;
-        else handleRoute();
+    function navigate(route) {
+        const nextRoute = normalizeRoute(route);
+        const changed = nextRoute !== currentRoute;
+        currentRoute = nextRoute;
+        if (changed) {
+            options.onNavigate?.(currentRoute);
+        }
+        handleRoute();
     }
 
     function handleRoute() {
+        if (destroyed) {
+            return;
+        }
+
         closeModal();
-        const hash = (location.hash || '#/resources').slice(2);
-        const slashIdx = hash.indexOf('/');
-        const view = slashIdx === -1 ? hash : hash.slice(0, slashIdx);
-        const id = slashIdx === -1 ? null : decodeURIComponent(hash.slice(slashIdx + 1));
+        const route = currentRoute.slice(1);
+        const slashIdx = route.indexOf('/');
+        const view = slashIdx === -1 ? route : route.slice(0, slashIdx);
+        const id = slashIdx === -1 ? null : decodeURIComponent(route.slice(slashIdx + 1));
         updateActiveNav(view);
         content.innerHTML = '<div class="loading">Loading...</div>';
 
@@ -84,22 +124,10 @@
     }
 
     function updateActiveNav(view) {
-        document.querySelectorAll('nav a').forEach(a => {
+        root.querySelectorAll('nav a').forEach(a => {
             a.classList.toggle('active', a.dataset.view === view);
         });
-        $('#sidebar')?.classList.remove('open');
     }
-
-    window.addEventListener('hashchange', handleRoute);
-
-    // --- Mobile sidebar toggle ---
-
-    $('#hamburger')?.addEventListener('click', () => {
-        $('#sidebar')?.classList.add('open');
-    });
-    $('#sidebar-close')?.addEventListener('click', () => {
-        $('#sidebar')?.classList.remove('open');
-    });
 
     // --- Subject type to route mapping ---
 
@@ -148,7 +176,7 @@
     }
 
     function bindPagination(containerSel, callback) {
-        document.querySelectorAll(`${containerSel} .pg-btn:not([disabled])`).forEach(btn => {
+        root.querySelectorAll(`${containerSel} .pg-btn:not([disabled])`).forEach(btn => {
             btn.addEventListener('click', () => callback(parseInt(btn.dataset.page)));
         });
     }
@@ -255,16 +283,16 @@
     }
 
     function bindTreeEvents() {
-        document.querySelectorAll('.toggle[data-id]').forEach(el => {
+        root.querySelectorAll('.toggle[data-id]').forEach(el => {
             el.addEventListener('click', (e) => { e.stopPropagation(); handleToggle(el.dataset.id); });
         });
-        document.querySelectorAll('.tree-resource-name[data-id]').forEach(el => {
+        root.querySelectorAll('.tree-resource-name[data-id]').forEach(el => {
             el.addEventListener('click', (e) => { e.stopPropagation(); navigate('#/resources/' + encodeURIComponent(el.dataset.id)); });
         });
-        document.querySelectorAll('.tree-load-more[data-id]').forEach(el => {
+        root.querySelectorAll('.tree-load-more[data-id]').forEach(el => {
             el.addEventListener('click', () => handleLoadMore(el.dataset.id));
         });
-        document.querySelectorAll('.grants-badge[data-resource-id]').forEach(el => {
+        root.querySelectorAll('.grants-badge[data-resource-id]').forEach(el => {
             el.addEventListener('click', (e) => { e.stopPropagation(); showGrantsPopup(el, el.dataset.resourceId); });
         });
     }
@@ -279,7 +307,7 @@
         }
     }
 
-    document.addEventListener('click', (e) => {
+    root.addEventListener('click', (e) => {
         if (activeGrantsPopup && !activeGrantsPopup.contains(e.target) && !e.target.classList.contains('grants-badge')) {
             closeGrantsPopup();
         }
@@ -518,7 +546,7 @@
             <div id="users-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
         </div>`;
 
-        document.querySelectorAll('.subject-row').forEach(row => {
+        root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/users/' + encodeURIComponent(row.dataset.id)));
         });
         bindPagination('#users-pagination', (p) => loadUsers(p, search));
@@ -550,7 +578,7 @@
             <div id="agents-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
         </div>`;
 
-        document.querySelectorAll('.subject-row').forEach(row => {
+        root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/agents/' + encodeURIComponent(row.dataset.id)));
         });
         bindPagination('#agents-pagination', (p) => loadAgents(p, search));
@@ -582,7 +610,7 @@
             <div id="sa-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
         </div>`;
 
-        document.querySelectorAll('.subject-row').forEach(row => {
+        root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/service-accounts/' + encodeURIComponent(row.dataset.id)));
         });
         bindPagination('#sa-pagination', (p) => loadServiceAccounts(p, search));
@@ -614,7 +642,7 @@
             <div id="groups-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
         </div>`;
 
-        document.querySelectorAll('.subject-row').forEach(row => {
+        root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/user-groups/' + encodeURIComponent(row.dataset.id)));
         });
         bindPagination('#groups-pagination', (p) => loadUserGroups(p, search));
@@ -727,7 +755,7 @@
         backView = backView || 'users';
         $('#back-to-subjects').addEventListener('click', () => navigate('#/' + backView));
         $('#grant-role-btn')?.addEventListener('click', () => openGrantModal(subjectId, null));
-        document.querySelectorAll('.revoke-btn').forEach(btn => {
+        root.querySelectorAll('.revoke-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const grantId = btn.dataset.grantId;
@@ -737,7 +765,7 @@
                     if (!resp.ok) throw new Error('Failed to revoke');
                     loadStats();
                     const r = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=1&pageSize=25`);
-                    const card = document.querySelector('#subject-grants-pagination')?.closest('.card');
+                    const card = root.querySelector('#subject-grants-pagination')?.closest('.card');
                     if (card) card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(r, subjectId);
                     bindSubjectDetailEvents(subjectId, backView);
                 } catch (err) {
@@ -747,22 +775,22 @@
         });
         bindPagination('#subject-grants-pagination', async (page) => {
             const grantsResult = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=${page}&pageSize=25`);
-            const grantsCard = document.querySelector('#subject-grants-pagination').closest('.card');
+            const grantsCard = root.querySelector('#subject-grants-pagination').closest('.card');
             grantsCard.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(grantsResult, subjectId);
             bindSubjectDetailEvents(subjectId, backView);
             bindPagination('#subject-grants-pagination', async (p) => {
                 const r = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=${p}&pageSize=25`);
-                const card = document.querySelector('#subject-grants-pagination').closest('.card');
+                const card = root.querySelector('#subject-grants-pagination').closest('.card');
                 card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(r, subjectId);
                 bindSubjectDetailEvents(subjectId, backView);
             });
         });
         // Click group badges to navigate to that group's detail
-        document.querySelectorAll('[data-group-subject]').forEach(el => {
+        root.querySelectorAll('[data-group-subject]').forEach(el => {
             el.addEventListener('click', () => navigate('#/user-groups/' + encodeURIComponent(el.dataset.groupSubject)));
         });
         // Click member rows to navigate to that member's detail
-        document.querySelectorAll('.member-row').forEach(row => {
+        root.querySelectorAll('.member-row').forEach(row => {
             const route = subjectTypeToRoute(row.dataset.type);
             row.addEventListener('click', () => navigate('#/' + route + '/' + encodeURIComponent(row.dataset.id)));
         });
@@ -793,7 +821,7 @@
         </div>`;
 
         $('#add-grant-btn')?.addEventListener('click', () => openGrantModal(null, null));
-        document.querySelectorAll('.grant-revoke-btn').forEach(btn => {
+        root.querySelectorAll('.grant-revoke-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const grantId = btn.dataset.grantId;
@@ -842,7 +870,7 @@
         </div>`;
 
         $('#create-role-btn')?.addEventListener('click', openCreateRoleModal);
-        document.querySelectorAll('.role-row').forEach(row => {
+        root.querySelectorAll('.role-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/roles/' + encodeURIComponent(row.dataset.id)));
         });
         bindPagination('#roles-pagination', (p) => loadRoles(p, search));
@@ -921,7 +949,7 @@
             }
         });
         $('#add-perm-btn').addEventListener('click', () => openAddPermissionToRoleModal(roleId, perms, allPerms.data));
-        document.querySelectorAll('.remove-perm-btn').forEach(btn => {
+        root.querySelectorAll('.remove-perm-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const permId = btn.dataset.permId;
                 if (!confirm('Remove this permission from the role?')) return;
@@ -1144,7 +1172,7 @@
             <div id="tester-content"></div>
         </div>`;
 
-        document.querySelectorAll('.tester-mode-btn').forEach(btn => {
+        root.querySelectorAll('.tester-mode-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 accessTesterMode = btn.dataset.mode;
                 loadAccessTester();
@@ -1448,4 +1476,15 @@
     // Init
     loadStats();
     handleRoute();
+
+        return {
+            navigate,
+            destroy() {
+                destroyed = true;
+                root.replaceChildren();
+            }
+        };
+    }
+
+    window.SqlOSFgaDashboard = Object.freeze({ mount });
 })();

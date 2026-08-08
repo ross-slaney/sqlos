@@ -72,18 +72,9 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
-        var embedMode = string.Equals(context.Request.Query["embed"], "1", StringComparison.Ordinal);
-
-        if (string.IsNullOrWhiteSpace(relativePath) && !embedMode)
+        if (string.IsNullOrWhiteSpace(relativePath))
         {
             context.Response.Redirect($"{GetDashboardShellPrefix()}admin/fga/resources", permanent: false);
-            return;
-        }
-
-        // Redirect /sqlzibar to /sqlzibar/ so relative paths (style.css, app.js) resolve correctly
-        if (string.IsNullOrEmpty(relativePath) && !path.EndsWith('/'))
-        {
-            context.Response.Redirect($"{_pathPrefix}/", permanent: false);
             return;
         }
 
@@ -1017,22 +1008,7 @@ public class SqlOSFgaDashboardMiddleware
 
     private async Task ServeStaticFile(HttpContext context, string relativePath)
     {
-        var serveShell = false;
-        if (string.IsNullOrEmpty(relativePath) || relativePath == "/")
-        {
-            relativePath = "index.html";
-            serveShell = true;
-        }
-
         var fileInfo = _fileProvider.GetFileInfo(relativePath);
-
-        if (!fileInfo.Exists)
-        {
-            // SPA fallback
-            fileInfo = _fileProvider.GetFileInfo("index.html");
-            serveShell = true;
-        }
-
         if (!fileInfo.Exists)
         {
             context.Response.StatusCode = 404;
@@ -1043,17 +1019,6 @@ public class SqlOSFgaDashboardMiddleware
         context.Response.ContentType = contentType;
 
         await using var stream = fileInfo.CreateReadStream();
-        if (serveShell)
-        {
-            using var reader = new StreamReader(stream);
-            var html = await reader.ReadToEndAsync();
-            html = html.Replace("__SQL_OS_FGA_DASHBOARD_BASE_PATH_JSON__", JsonSerializer.Serialize(GetDashboardShellPrefix().TrimEnd('/')), StringComparison.Ordinal);
-            html = html.Replace("__SQL_OS_BASE_PATH__", GetDashboardShellPrefix().TrimEnd('/'), StringComparison.Ordinal);
-            html = _securityHeaders.PrepareHtml(context, html);
-            await context.Response.WriteAsync(html);
-            return;
-        }
-
         await stream.CopyToAsync(context.Response.Body);
     }
 
