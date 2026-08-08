@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement SqlOS Issue"
+  short_description: "Implement a SqlOS issue through a validated PR"
+  default_prompt: "Use $implement-sqlos-issue to implement this SqlOS issue and return the validated pull request."
