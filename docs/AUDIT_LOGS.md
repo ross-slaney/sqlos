@@ -21,9 +21,10 @@ await auditLogs.RecordAsync(new SqlOSAuditLogRecordRequest(
     {
         ["result"] = "success",
         ["role"] = "viewer"
-    },
-    IdempotencyKey: $"document:{documentId}:shared:{userId}"));
+    }));
 ```
+
+SqlOS generates a unique `EventId` for every recorded event. Ordinary audit writes do not need an idempotency key.
 
 Use dot-delimited, past-tense or outcome-specific action names such as `user.login.succeeded`, `client.disabled`, `retail.inventory_item.updated`, or `document.shared`. Keep names stable because operators will filter and export by action.
 
@@ -47,7 +48,9 @@ Prefer short outcome fields such as:
 
 ## Idempotency
 
-`IdempotencyKey` is hashed before storage as part of a versioned namespace containing the normalized organization id (including an explicit global/null value), resolved application id and key, source, and exact action. If a caller retries the same event with the same key inside that namespace, `RecordAsync` returns the original event and does not insert a duplicate. The same key in another organization, application, source, or action namespace creates an independent event.
+`IdempotencyKey` is optional. Omit it for a normal audit write; SqlOS assigns the event id and records every call as a new event. Supply a key only when the caller may retry the same business operation and needs those delivery attempts to produce one audit event—for example, when publishing from an outbox.
+
+SqlOS cannot generate that retry key because it cannot know whether two calls describe a retry or two legitimate operations. When supplied, the key is hashed before storage as part of a versioned namespace containing the normalized organization id (including an explicit global/null value), resolved application id and key, source, and exact action. A retry with the same key inside that namespace returns the original event and does not insert a duplicate. The same key in another organization, application, source, or action namespace creates an independent event.
 
 Use a stable business-operation identifier such as `share:{shareOperationId}` or an outbox message id. Do not use a fresh request or trace id for each retry. The namespace already supplies the organization, application, source, and action dimensions, so callers do not need to repeat those values in the key. A retry must supply the same scope fields as the original call; this is also what prevents a caller from receiving an event created in another scope.
 
