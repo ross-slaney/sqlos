@@ -203,6 +203,68 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
     }
 
     [TestMethod]
+    public async Task ValidationCache_RotationOnReplicaA_ImmediatelyValidatesConcurrentlyOnReplicaB()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("replica-cache-refresh");
+        var validationContexts = new List<TestSqlOSDbContext>();
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSReplicaKeyCache");
+            connectionString = setupContext.Database.GetConnectionString();
+            var options = CreateOptions("replica-cache", "https://client.example.test/replica-cache/callback");
+            options.AccessTokenValidationSigningKeyCacheTtl = TimeSpan.FromHours(1);
+            var provider = CreateFileSystemProvider(keyRingPath);
+            var replicaA = BuildStack(setupContext, options, provider);
+            var principal = await SeedTokenContextAsync(setupContext, replicaA, "replica-cache");
+            var originalKey = await replicaA.Crypto.EnsureActiveSigningKeyAsync();
+            var replicaBCache = new SqlOSValidationSigningKeyCache();
+
+            await using (var primingContext = CreateContext(connectionString!))
+            {
+                var replicaB = BuildStack(primingContext, options, provider, replicaBCache);
+                var primedKeys = await replicaB.Crypto.GetValidationSigningKeysAsync();
+                primedKeys.Select(key => key.Kid).Should().Equal(originalKey.Kid);
+            }
+
+            var rotatedKey = await replicaA.Crypto.RotateSigningKeyAsync();
+            var token = await replicaA.Crypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                principal.OrganizationId);
+            new JwtSecurityTokenHandler().ReadJwtToken(token).Header.Kid.Should().Be(rotatedKey.Kid);
+
+            validationContexts.AddRange(Enumerable.Range(0, 12).Select(_ => CreateContext(connectionString!)));
+            var validations = validationContexts
+                .Select(context => BuildStack(context, options, provider, replicaBCache).Crypto
+                    .ValidateAccessTokenAsync(token, principal.Client.Audience))
+                .ToArray();
+
+            var validated = await Task.WhenAll(validations);
+            validated.Should().OnlyContain(result => result != null);
+            var replicaBKeys = await BuildStack(validationContexts[0], options, provider, replicaBCache)
+                .Crypto.GetValidationSigningKeysAsync();
+            replicaBKeys.Select(key => key.Kid).Should().BeEquivalentTo([originalKey.Kid, rotatedKey.Kid]);
+        }
+        finally
+        {
+            foreach (var context in validationContexts)
+            {
+                await context.DisposeAsync();
+            }
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
     public async Task StartupSigningKeyGate_ExistingPlaintextSqlRow_IsRejected()
     {
         TestSqlOSDbContext? context = null;
@@ -523,6 +585,22 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
     {
         var options = Options.Create(optionsValue);
         var crypto = new SqlOSCryptoService(context, options, dataProtectionProvider);
+        return BuildStack(context, options, crypto);
+    }
+
+    private static ServiceStack BuildStack(
+        TestSqlOSDbContext context,
+        SqlOSAuthServerOptions optionsValue,
+        IDataProtectionProvider dataProtectionProvider,
+        SqlOSValidationSigningKeyCache validationSigningKeyCache)
+    {
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(
+            context,
+            options,
+            new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider),
+            dataProtectionProvider,
+            validationSigningKeyCache);
         return BuildStack(context, options, crypto);
     }
 

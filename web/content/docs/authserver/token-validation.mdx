@@ -83,6 +83,8 @@ If your app accepts API keys, agent tokens, or another credential type, resolve 
 
 Validation keeps the session check online for every request, so session revocation and absolute expiry take effect immediately. SqlOS reduces database churn by caching public validation keys briefly and by persisting session/client `LastSeenAt` at most once per configured debounce interval. Configure these intervals with `AccessTokenValidationSigningKeyCacheTtl` and `AccessTokenValidationLastSeenDebounceInterval` on `AuthServer`.
 
+When a token names a `kid` missing from a replica's cache, SqlOS performs one authoritative refresh shared by concurrent validations. This lets a token issued immediately after rotation validate on another healthy replica without waiting for the normal cache TTL. If the key remains absent, that `kid` is negatively cached for the rest of the cache entry's lifetime, so repeated attacker-selected values do not repeatedly query SQL. If SQL is unavailable during the refresh, SqlOS keeps the last known public keys, logs the failure, and rejects the unknown key; it never accepts a token without the configured issuer, audience, algorithm, and signature checks.
+
 ## JWKS for external validation
 
 External services can validate SqlOS JWTs without calling the SDK by using the JWKS endpoint:
