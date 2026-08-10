@@ -31,27 +31,27 @@
 :root,
 html[data-theme="violet"] {
   --radius: 0.625rem;
-  --theme-hue: 270;
+  --theme-hue: 244;
 
   --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  --foreground: 0 0% 4%;
   --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
+  --card-foreground: 0 0% 4%;
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 270 74% 42%;
+  --popover-foreground: 0 0% 4%;
+  --primary: 244 76% 59%;
   --primary-foreground: 0 0% 100%;
   --secondary: 225 24% 97%;
   --secondary-foreground: 240 18% 10%;
   --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 270 96% 95%;
-  --accent-foreground: 270 66% 26%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 226 100% 97%;
+  --accent-foreground: 245 58% 51%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 270 82% 50%;
+  --border: 240 6% 91%;
+  --input: 240 6% 91%;
+  --ring: 244 76% 59%;
   --shadow-color: hsl(240 15% 10% / 0.14);
 }
 
@@ -87,19 +87,19 @@ html.dark[data-theme="violet"] {
   --card-foreground: 0 0% 98%;
   --popover: 240 10% 3.9%;
   --popover-foreground: 0 0% 98%;
-  --primary: 270 74% 58%;
+  --primary: 244 80% 68%;
   --primary-foreground: 0 0% 100%;
   --secondary: 240 3.7% 15.9%;
   --secondary-foreground: 0 0% 98%;
   --muted: 240 3.7% 15.9%;
   --muted-foreground: 240 5% 64.9%;
-  --accent: 270 40% 18%;
-  --accent-foreground: 270 80% 88%;
+  --accent: 244 40% 18%;
+  --accent-foreground: 244 80% 88%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
-  --ring: 270 82% 62%;
+  --ring: 244 82% 62%;
   --shadow-color: hsl(0 0% 0% / 0.45);
 }
 
@@ -141,6 +141,8 @@ body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: var(--font-sans), system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  line-height: 1.55;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -231,40 +233,105 @@ pre code {
   }
 }
 
+/* ---- Spacious enterprise docs typography ---- */
 .sqlos-docs-shell .emcydocs-page-header h1 {
-  letter-spacing: -0.04em;
+  font-size: 2.375rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
 }
 
+.sqlos-docs-shell .emcydocs-page-header p,
+.sqlos-docs-shell .emcydocs-te-subtitle {
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: hsl(var(--muted-foreground));
+  max-width: 64ch;
+}
+
+.sqlos-docs-shell .emcydocs-prose h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 2.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.sqlos-docs-shell .emcydocs-prose h3 {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  margin-top: 1.875rem;
+}
+
+.sqlos-docs-shell .emcydocs-prose > p,
+.sqlos-docs-shell .emcydocs-prose > ul,
+.sqlos-docs-shell .emcydocs-prose > ol {
+  max-width: 66ch;
+}
+
+.sqlos-docs-shell .emcydocs-prose p,
+.sqlos-docs-shell .emcydocs-prose li {
+  font-size: 0.96875rem;
+  line-height: 1.6;
+}
+
+.sqlos-docs-shell .emcydocs-sidebar-section-toggle,
+.sqlos-docs-shell .emcydocs-sidebar-section > p {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+.sqlos-docs-shell .emcydocs-sidebar-link {
+  font-size: 0.84375rem;
+  font-weight: 500;
+}
+
+.sqlos-docs-shell .emcydocs-toc-title {
+  font-size: 0.71875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sqlos-docs-shell .emcydocs-toc-link {
+  font-size: 0.8125rem;
+}
+
+/* ---- Dark code blocks to match the marketing design ---- */
 .sqlos-docs-shell .emcydocs-codeblock,
 .sqlos-docs-shell .emcydocs-prose pre {
-  border-color: hsl(222 18% 24%) !important;
-  background: hsl(222 27% 11%) !important;
+  border-color: #16181f !important;
+  background: #0b0d12 !important;
   box-shadow: none !important;
+  border-radius: 12px;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-header {
-  background: hsl(222 23% 14%) !important;
-  border-bottom-color: hsl(222 18% 24%) !important;
+  background: #0b0d12 !important;
+  border-bottom-color: #1b1f2a !important;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-title {
-  color: hsl(214 20% 78%) !important;
+  color: #a1a1aa !important;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-copy {
-  border-color: hsl(217 19% 27%) !important;
-  background: hsl(222 23% 16%) !important;
-  color: hsl(210 20% 92%) !important;
+  border-color: #1b1f2a !important;
+  background: #12141c !important;
+  color: #a1a1aa !important;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-copy:hover {
-  border-color: hsl(215 20% 34%) !important;
-  background: hsl(222 20% 20%) !important;
-  color: hsl(210 20% 96%) !important;
+  border-color: #2a2f3d !important;
+  background: #1b1f2a !important;
+  color: #e5e7eb !important;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-body {
-  color: hsl(210 20% 92%) !important;
+  color: #e5e7eb !important;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-body code,

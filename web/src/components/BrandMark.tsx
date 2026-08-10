@@ -9,36 +9,23 @@ export default function BrandMark({ className }: { className?: string }) {
     >
       <defs>
         <linearGradient
-          id="sqlos-header-gradient"
-          x1="10"
-          y1="6"
-          x2="54"
-          y2="58"
+          id="sqlos-brand-gradient"
+          x1="8"
+          y1="4"
+          x2="56"
+          y2="60"
           gradientUnits="userSpaceOnUse"
         >
-          <stop stopColor="hsl(var(--theme-hue) 88% 72%)" />
-          <stop offset="1" stopColor="hsl(var(--theme-hue) 74% 48%)" />
+          <stop stopColor="#4f46e5" />
+          <stop offset="1" stopColor="#7c69f5" />
         </linearGradient>
       </defs>
-      <rect width="64" height="64" rx="16" fill="url(#sqlos-header-gradient)" />
-      <path
-        d="M14 14C24 8 44 8 52 22C44 18 28 17 18 20C15 18 14 16 14 14Z"
-        fill="#FFFFFF"
-        fillOpacity="0.12"
-      />
-      <text
-        x="50%"
-        y="52%"
-        fill="#FFFFFF"
-        fontFamily="Manrope, 'Helvetica Neue', Arial, sans-serif"
-        fontSize="26"
-        fontWeight="800"
-        letterSpacing="-1.25"
-        textAnchor="middle"
-        dominantBaseline="middle"
-      >
-        SO
-      </text>
+      <rect width="64" height="64" rx="17" fill="url(#sqlos-brand-gradient)" />
+      <g stroke="#FFFFFF" strokeWidth="4.4" strokeLinecap="round">
+        <ellipse cx="32" cy="18" rx="16.5" ry="7" />
+        <path d="M15.5 18v13.5c0 3.9 7.4 7 16.5 7s16.5-3.1 16.5-7V18" />
+        <path d="M15.5 31.5V45c0 3.9 7.4 7 16.5 7s16.5-3.1 16.5-7V31.5" />
+      </g>
     </svg>
   );
 }

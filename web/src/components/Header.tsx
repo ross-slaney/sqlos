@@ -6,21 +6,14 @@ import BrandMark from "@/components/BrandMark";
 import { GitHubIcon } from "@/components/icons";
 
 const navLinks = [
+  { href: "/#features", label: "Product" },
   { href: "/docs", label: "Docs" },
-  { href: "/docs/reference/api-reference", label: "API" },
+  { href: "/docs/reference/api-reference", label: "API Reference" },
   { href: "/blog", label: "Blog" },
 ];
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 10);
-    handleScroll();
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -32,63 +25,62 @@ export default function Header() {
   }, [isMenuOpen]);
 
   return (
-    <header
-      className={[
-        "sticky top-0 z-50 w-full transition-all duration-200",
-        scrolled
-          ? "border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
-          : "bg-transparent",
-      ].join(" ")}
-    >
-      <div className="mx-auto flex h-14 w-full max-w-[1400px] items-center justify-between px-6">
+    <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/80">
+      <div className="mx-auto flex h-[62px] w-full max-w-[1160px] items-center gap-7 px-7">
         <Link
           href="/"
-          className="flex items-center gap-2.5 font-semibold text-foreground"
+          className="flex items-center gap-2.5 text-base font-bold tracking-tight text-foreground"
           onClick={() => setIsMenuOpen(false)}
         >
-          <BrandMark className="h-7 w-7" />
+          <BrandMark className="h-[26px] w-[26px] drop-shadow-[0_2px_6px_rgba(79,70,229,0.35)]" />
           <span>SqlOS</span>
+          <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold tracking-normal text-accent-foreground">
+            v3.24
+          </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-6 md:flex">
           {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
             >
               {link.label}
             </Link>
           ))}
+        </nav>
+
+        <div className="ml-auto hidden items-center gap-4 md:flex">
           <a
             href="https://github.com/ross-slaney/sqlos"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            aria-label="GitHub"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
           >
             <GitHubIcon className="h-4 w-4" />
+            GitHub
           </a>
           <Link
             href="/docs/getting-started"
-            className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_1px_2px_rgba(79,70,229,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] transition-colors hover:bg-[#4338ca]"
           >
             Get started
           </Link>
-        </nav>
+        </div>
 
-        <div className="flex items-center gap-2 md:hidden">
+        <div className="ml-auto flex items-center gap-2 md:hidden">
           <button
             type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border text-foreground"
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             aria-label={isMenuOpen ? "Close menu" : "Open menu"}
           >
             <svg
-              className="h-5 w-5"
+              className="h-[18px] w-[18px]"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.8"
+              strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
               viewBox="0 0 24 24"
@@ -96,7 +88,7 @@ export default function Header() {
               {isMenuOpen ? (
                 <path d="M6 6l12 12M18 6L6 18" />
               ) : (
-                <path d="M4 7h16M4 12h16M4 17h16" />
+                <path d="M3 6h18M3 12h18M3 18h18" />
               )}
             </svg>
           </button>
@@ -126,7 +118,7 @@ export default function Header() {
             </a>
             <Link
               href="/docs/getting-started"
-              className="mt-2 rounded-md bg-primary px-3 py-2 text-center text-sm font-medium text-primary-foreground"
+              className="mt-2 rounded-[9px] bg-primary px-3 py-2 text-center text-sm font-semibold text-primary-foreground"
               onClick={() => setIsMenuOpen(false)}
             >
               Get started

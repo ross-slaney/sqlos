@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Manrope } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "@emcy/docs/styles.css";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 
-const manrope = Manrope({
+const inter = Inter({
   variable: "--font-sans-ui",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
+const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono-ui",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
@@ -28,7 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning data-theme="violet">
-      <body className={`${manrope.variable} ${ibmPlexMono.variable} antialiased`}>
+      <body className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

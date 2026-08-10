@@ -26,20 +26,36 @@ export default function InstallCommand({
       type="button"
       onClick={copy}
       className={[
-        "group inline-flex items-center gap-3 rounded-lg border bg-background/70 px-4 py-2.5 font-mono text-[13px] text-foreground shadow-sm backdrop-blur transition-colors hover:border-primary/40",
+        "inline-flex items-center gap-2.5 rounded-[9px] bg-[#0b0d12] px-3.5 py-2.5 font-mono text-[13.5px] font-medium text-[#e5e7eb] shadow-sm",
         className ?? "",
       ].join(" ")}
       aria-label={`Copy ${command}`}
     >
-      <span className="select-none text-primary">$</span>
+      <span className="select-none text-[#6ee7a8]">$</span>
       <span>{command}</span>
-      <span className="text-muted-foreground transition-colors group-hover:text-foreground">
+      <span className="ml-0.5 text-[#71717a] transition-colors hover:text-[#e5e7eb]">
         {copied ? (
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            className="h-3.5 w-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M20 6L9 17l-5-5" />
           </svg>
         ) : (
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            className="h-3.5 w-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <rect x="9" y="9" width="11" height="11" rx="2" />
             <path d="M5 15V5a2 2 0 0 1 2-2h10" />
           </svg>
