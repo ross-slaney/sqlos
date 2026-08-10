@@ -29,6 +29,7 @@
     let latestScimToken = null;
     let latestMachineClientSecret = null;
     let latestClientSecret = null;
+    let activeFgaDashboard = null;
     const pagerState = new Map();
     let selectedClientId = null;
     let clientDraftState = null;
@@ -296,6 +297,7 @@
         "user-groups": { title: "User Groups", description: "Review groups and inherited access paths.", hash: "/user-groups" },
         "access-tester": { title: "Access Tester", description: "Trace access decisions for a subject, resource, and permission.", hash: "/access-tester" }
     };
+    const fgaDetailViews = new Set(["resources", "roles", "users", "agents", "service-accounts", "user-groups"]);
     const emailViews = {
         templates: { title: "Email Templates", description: "Create, edit, activate, deactivate, and preview transactional email templates." },
         messages: { title: "Email Messages", description: "Review recent transactional email deliveries and provider outcomes." }
@@ -600,11 +602,18 @@
 
         if (segments[1] === "fga") {
             const view = fgaViews[segments[2]] ? segments[2] : "resources";
+            const detailId = fgaDetailViews.has(view) && segments[3]
+                ? decodeRouteSegment(segments[3])
+                : null;
+            const componentRoute = detailId
+                ? `/${view}/${encodeURIComponent(detailId)}`
+                : `/${view}`;
             return {
                 kind: "fga",
                 view,
+                componentRoute,
                 key: `fga-${view}`,
-                canonicalPath: `${fgaDashboardPath}/${view}`
+                canonicalPath: `${fgaDashboardPath}${componentRoute}`
             };
         }
 
@@ -1110,6 +1119,9 @@
         setLoginMode(route.kind === "login");
         updateActiveNav(route.key);
 
+        activeFgaDashboard?.destroy();
+        activeFgaDashboard = null;
+
         try {
             if (route.kind === "login") {
                 await renderLoginRoute();
@@ -1141,7 +1153,7 @@
                 return;
             }
 
-            await renderFgaRoute(route.view);
+            await renderFgaRoute(route);
         } catch (error) {
             content.innerHTML = `${consumeFlashHtml()}<div class="error-banner">${esc(error.message || String(error))}</div>`;
         }
@@ -4944,15 +4956,36 @@
         return String(value || "").replace(/[^A-Za-z0-9_-]/g, "-");
     }
 
-    async function renderFgaRoute(view) {
-        const config = fgaViews[view] || fgaViews.resources;
+    async function renderFgaRoute(route) {
+        const config = fgaViews[route.view] || fgaViews.resources;
         setHeader("Fine-Grained Auth", config.title, config.description);
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="embed-shell">
-                <iframe class="embed-frame" src="${fgaDashboardPath}/?embed=1#${config.hash}" title="${esc(config.title)}"></iframe>
-            </div>
+            <section class="fga-component-shell" aria-label="${esc(config.title)}">
+                <div id="fga-dashboard-host"></div>
+            </section>
         `;
+
+        if (!window.SqlOSFgaDashboard?.mount) {
+            throw new Error("The FGA dashboard component failed to load.");
+        }
+
+        const host = document.getElementById("fga-dashboard-host");
+        activeFgaDashboard = window.SqlOSFgaDashboard.mount({
+            host,
+            basePath: fgaDashboardPath,
+            dashboardBasePath,
+            initialRoute: route.componentRoute || config.hash,
+            onNavigate(componentRoute) {
+                const targetPath = `${fgaDashboardPath}${componentRoute}`;
+                history.pushState({}, "", targetPath);
+
+                const view = componentRoute.split("/").filter(Boolean)[0];
+                const nextConfig = fgaViews[view] || fgaViews.resources;
+                setHeader("Fine-Grained Auth", nextConfig.title, nextConfig.description);
+                updateActiveNav(`fga-${view}`);
+            }
+        });
     }
 
     function bindForm(formId, handler) {

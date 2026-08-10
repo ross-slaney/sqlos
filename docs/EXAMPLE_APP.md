@@ -47,7 +47,7 @@ dotnet run --project examples/SqlOS.Example.AppHost/SqlOS.Example.AppHost.csproj
 
 - dashboard shell: `http://localhost:5062/sqlos/`
 - auth admin: `http://localhost:5062/sqlos/admin/auth/`
-- FGA admin: `http://localhost:5062/sqlos/admin/fga/`
+- FGA admin: `http://localhost:5062/sqlos/admin/fga/resources`
 - API swagger: `http://localhost:5062/swagger`
 - web app: `http://localhost:3010/`
 - host-launched SSO portal demo: `http://localhost:3010/retail/sso`

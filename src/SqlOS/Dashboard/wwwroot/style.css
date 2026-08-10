@@ -954,20 +954,11 @@ nav a.active {
     color: #fff;
 }
 
-.embed-shell {
+.fga-component-shell {
     background: #fff;
     border: 1px solid var(--zinc-200);
     border-radius: 12px;
-    overflow: hidden;
-}
-
-.embed-frame {
-    display: block;
-    width: 100%;
-    height: calc(100vh - 210px);
-    min-height: 880px;
-    border: 0;
-    background: transparent;
+    padding: 20px;
 }
 
 .loading, .empty-state {
@@ -1064,5 +1055,5 @@ body.login-mode .content-area {
     .list-item-header,
     .client-list-header,
     .client-action-row { flex-direction: column; align-items: stretch; }
-    .embed-frame { min-height: 720px; height: calc(100vh - 190px); }
+    .fga-component-shell { padding: 14px; }
 }

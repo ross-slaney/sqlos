@@ -58,15 +58,13 @@ public sealed class SqlOSDashboardMiddleware
         }
 
         var relativePath = path[_pathPrefix.Length..].TrimStart('/');
-        var embedMode = string.Equals(context.Request.Query["embed"], "1", StringComparison.Ordinal);
-
         if (string.IsNullOrEmpty(relativePath) && !path.EndsWith('/'))
         {
             context.Response.Redirect($"{_pathPrefix}/", permanent: false);
             return;
         }
 
-        if (ShouldPassThrough(relativePath, embedMode))
+        if (ShouldPassThrough(relativePath))
         {
             await _next(context);
             return;
@@ -374,11 +372,12 @@ public sealed class SqlOSDashboardMiddleware
     private static bool IsLoginRoute(string relativePath)
         => relativePath.Trim('/').Equals("login", StringComparison.OrdinalIgnoreCase);
 
-    private bool ShouldPassThrough(string relativePath, bool embedMode)
+    private bool ShouldPassThrough(string relativePath)
     {
         if (IsPathOrChild(relativePath, "admin/fga"))
         {
-            return true;
+            return IsPathOrChild(relativePath, "admin/fga/api")
+                   || Path.HasExtension(relativePath);
         }
 
         if (IsPathOrChild(relativePath, "admin/email/api"))
@@ -415,15 +414,6 @@ public sealed class SqlOSDashboardMiddleware
             return true;
         }
 
-        if (embedMode && (IsPathOrChild(relativePath, "admin/auth")
-                          || IsPathOrChild(relativePath, "admin/fga")
-                          || IsPathOrChild(relativePath, "admin/audit")
-                          || IsPathOrChild(relativePath, "admin/email")
-                          || IsPathOrChild(relativePath, "admin/calendar")))
-        {
-            return true;
-        }
-
         return false;
     }
 
@@ -449,6 +439,7 @@ public sealed class SqlOSDashboardMiddleware
         }
 
         if (IsPathOrChild(relativePath, "admin/auth")
+            || IsPathOrChild(relativePath, "admin/fga")
             || IsPathOrChild(relativePath, "admin/audit")
             || IsPathOrChild(relativePath, "admin/email")
             || IsPathOrChild(relativePath, "admin/calendar"))
@@ -502,7 +493,7 @@ public sealed class SqlOSDashboardMiddleware
             "__SQL_OS_DASHBOARD_CAPABILITIES_JSON__",
             JsonSerializer.Serialize(new { scimEnabled = _scimEnabled }),
             StringComparison.Ordinal);
-        html = html.Replace("__SQL_OS_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
+        html = html.Replace("__SQL_OS_ASSET_BASE_PATH__", _pathPrefix, StringComparison.Ordinal);
         html = _securityHeaders.PrepareHtml(context, html);
         await context.Response.WriteAsync(html);
     }
