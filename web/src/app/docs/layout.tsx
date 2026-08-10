@@ -1,6 +1,7 @@
-import { DocsLayout, DocsSearch } from "@emcy/docs";
+import { DocsLayout } from "@emcy/docs";
 import { searchDocsAction } from "@/app/docs/actions";
-import Header from "@/components/Header";
+import DocsSidebarNav from "@/components/docs/DocsSidebarNav";
+import DocsTopBar from "@/components/docs/DocsTopBar";
 import Footer from "@/components/Footer";
 import { docsSource } from "@/lib/docs-source";
 
@@ -9,20 +10,16 @@ export default function DocsRootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const navigation = docsSource.getNavigation();
+
   return (
     <>
-      <Header />
+      <DocsTopBar navigation={navigation} searchAction={searchDocsAction} />
       <DocsLayout
-        navigation={docsSource.getNavigation()}
-        searchAction={searchDocsAction}
+        navigation={navigation}
         variant="embedded"
         className="sqlos-docs-shell"
-        sidebarHeader={
-          <DocsSearch
-            searchAction={searchDocsAction}
-            placeholder="Search docs..."
-          />
-        }
+        sidebar={<DocsSidebarNav navigation={navigation} />}
         theme={{
           color: {
             preset: "neutral",
@@ -34,12 +31,12 @@ export default function DocsRootLayout({
           layout: {
             density: "comfortable",
             layoutWidth: "1440px",
-            contentWidth: "52rem",
+            contentWidth: "56rem",
             sidebarWidth: "264px",
             tocWidth: "220px",
           },
           shape: {
-            radius: "lg",
+            radius: "md",
           },
           tokens: {
             background: "0 0% 100%",
@@ -65,8 +62,8 @@ export default function DocsRootLayout({
             bg: "0 0% 100%",
             codeBg: "240 5% 96%",
             codeBorder: "240 6% 88%",
-            info: "217 90% 56%",
-            infoSoft: "217 92% 92% / 0.65",
+            info: "244 76% 59%",
+            infoSoft: "226 100% 97% / 0.9",
             warning: "38 92% 50%",
             warningSoft: "38 94% 88% / 0.72",
             error: "0 82% 58%",

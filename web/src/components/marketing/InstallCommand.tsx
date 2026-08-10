@@ -26,7 +26,7 @@ export default function InstallCommand({
       type="button"
       onClick={copy}
       className={[
-        "inline-flex items-center gap-2.5 rounded-[9px] bg-[#0b0d12] px-3.5 py-2.5 font-mono text-[13.5px] font-medium text-[#e5e7eb] shadow-sm",
+        "inline-flex items-center gap-2.5 rounded-[6px] bg-[#0b0d12] px-3.5 py-2.5 font-mono text-[13.5px] font-medium text-[#e5e7eb] shadow-sm",
         className ?? "",
       ].join(" ")}
       aria-label={`Copy ${command}`}

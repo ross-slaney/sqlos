@@ -30,7 +30,7 @@
 
 :root,
 html[data-theme="violet"] {
-  --radius: 0.625rem;
+  --radius: 0.375rem;
   --theme-hue: 244;
 
   --background: 0 0% 100%;
@@ -222,46 +222,81 @@ pre code {
   }
 }
 
-/* Docs shell overrides — align sidebar with site header */
+/* ---- Docs shell (custom chrome over @emcy/docs) ---- */
+
+.sqlos-docs-shell {
+  --emcydocs-header-height: 3.75rem; /* matches the custom docs top bar */
+}
+
+/* Custom top bar + sidebar own navigation; hide the shell's mobile chrome */
+.sqlos-docs-shell .emcydocs-embedded-mobile-bar {
+  display: none;
+}
+
+.sqlos-docs-shell .emcydocs-desktop-nav {
+  border-right: 1px solid hsl(var(--border));
+  padding: 26px 18px 60px;
+}
+
 @media (min-width: 1024px) {
   .sqlos-docs-shell .emcydocs-frame {
     padding-left: 0;
-  }
-
-  .sqlos-docs-shell .emcydocs-desktop-nav {
-    padding-left: 1.5rem;
+    padding-right: 0;
   }
 }
 
-/* ---- Spacious enterprise docs typography ---- */
-.sqlos-docs-shell .emcydocs-page-header h1 {
-  font-size: 2.375rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.08;
+/* ---- Header search (design: flat, square-ish, ⌘K) ---- */
+.sqlos-docs-search .emcydocs-search {
+  width: 100%;
+  max-width: 440px;
 }
 
-.sqlos-docs-shell .emcydocs-page-header p,
-.sqlos-docs-shell .emcydocs-te-subtitle {
-  font-size: 1.125rem;
-  line-height: 1.55;
+.sqlos-docs-search .emcydocs-search-input-wrap {
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary));
+  box-shadow: none;
+}
+
+.sqlos-docs-search .emcydocs-search-input {
+  font-size: 13.5px;
+}
+
+.sqlos-docs-search .emcydocs-search-kbd {
+  border-radius: 4px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
   color: hsl(var(--muted-foreground));
-  max-width: 64ch;
+  font-weight: 600;
+}
+
+.sqlos-docs-search .emcydocs-search-panel {
+  border-radius: 8px;
+}
+
+/* ---- Article prose: spacious enterprise typography ---- */
+.sqlos-docs-shell .emcydocs-prose {
+  font-size: 15.5px;
+  line-height: 1.6;
 }
 
 .sqlos-docs-shell .emcydocs-prose h2 {
-  font-size: 1.5rem;
+  font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  margin-top: 2.75rem;
-  padding-bottom: 0.5rem;
+  margin-top: 44px;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
   border-bottom: 1px solid hsl(var(--border));
+  scroll-margin-top: 80px;
 }
 
 .sqlos-docs-shell .emcydocs-prose h3 {
-  font-size: 1.0625rem;
+  font-size: 17px;
   font-weight: 650;
-  margin-top: 1.875rem;
+  margin-top: 30px;
+  margin-bottom: 10px;
+  scroll-margin-top: 80px;
 }
 
 .sqlos-docs-shell .emcydocs-prose > p,
@@ -272,41 +307,98 @@ pre code {
 
 .sqlos-docs-shell .emcydocs-prose p,
 .sqlos-docs-shell .emcydocs-prose li {
-  font-size: 0.96875rem;
+  font-size: 15.5px;
   line-height: 1.6;
+  color: hsl(240 4% 26%);
 }
 
-.sqlos-docs-shell .emcydocs-sidebar-section-toggle,
-.sqlos-docs-shell .emcydocs-sidebar-section > p {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
+.sqlos-docs-shell .emcydocs-prose li {
+  margin-bottom: 8px;
 }
 
-.sqlos-docs-shell .emcydocs-sidebar-link {
-  font-size: 0.84375rem;
+.sqlos-docs-shell .emcydocs-prose a {
+  color: hsl(var(--primary));
   font-weight: 500;
+  text-decoration: none;
 }
 
-.sqlos-docs-shell .emcydocs-toc-title {
-  font-size: 0.71875rem;
-  font-weight: 700;
+.sqlos-docs-shell .emcydocs-prose a:hover {
+  text-decoration: underline;
+}
+
+.sqlos-docs-shell .emcydocs-prose :not(pre) > code {
+  border-radius: 4px;
+  border: none;
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-size: 13px;
+  font-weight: 500;
+  padding: 2px 6px;
+}
+
+/* ---- Tables: design "params" style — hairlines only, no bezels ---- */
+.sqlos-docs-shell .emcydocs-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border: none;
+  border-radius: 0;
+  font-size: 14px;
+}
+
+.sqlos-docs-shell .emcydocs-prose th {
+  font-size: 11.5px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground) / 0.85);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid hsl(var(--borderStrong, var(--border)));
+  padding: 9px 12px;
 }
 
-.sqlos-docs-shell .emcydocs-toc-link {
-  font-size: 0.8125rem;
+.sqlos-docs-shell .emcydocs-prose td {
+  border: none;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 11px 12px;
+  vertical-align: top;
 }
 
-/* ---- Dark code blocks to match the marketing design ---- */
+/* ---- Callouts: flat, 3px accent left edge ---- */
+.sqlos-docs-shell .emcydocs-callout {
+  border-radius: 6px;
+  border: 1px solid hsl(226 87% 92%);
+  border-left: 3px solid hsl(var(--primary));
+  background: hsl(var(--accent));
+  box-shadow: none;
+  max-width: 66ch;
+}
+
+.sqlos-docs-shell .emcydocs-callout-icon {
+  color: hsl(var(--primary));
+}
+
+/* ---- Cards / steps / accordions: minimal rounding ---- */
+.sqlos-docs-shell .emcydocs-card,
+.sqlos-docs-shell .emcydocs-accordion,
+.sqlos-docs-shell .emcydocs-accordion-item,
+.sqlos-docs-shell .emcydocs-tabs,
+.sqlos-docs-shell .emcydocs-banner,
+.sqlos-docs-shell .emcydocs-files {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+/* ---- Dark code blocks matching the marketing design ---- */
 .sqlos-docs-shell .emcydocs-codeblock,
 .sqlos-docs-shell .emcydocs-prose pre {
   border-color: #16181f !important;
   background: #0b0d12 !important;
   box-shadow: none !important;
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-header {
@@ -316,12 +408,15 @@ pre code {
 
 .sqlos-docs-shell .emcydocs-codeblock-title {
   color: #a1a1aa !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-copy {
   border-color: #1b1f2a !important;
   background: #12141c !important;
   color: #a1a1aa !important;
+  border-radius: 4px;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-copy:hover {
@@ -332,6 +427,8 @@ pre code {
 
 .sqlos-docs-shell .emcydocs-codeblock-body {
   color: #e5e7eb !important;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .sqlos-docs-shell .emcydocs-codeblock-body code,
@@ -344,10 +441,4 @@ pre code {
 .sqlos-docs-shell .emcydocs-codeblock-body [data-line],
 .sqlos-docs-shell .emcydocs-prose pre [data-line] {
   min-height: 1.72em;
-}
-
-.sqlos-docs-shell .emcydocs-prose table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
 }

@@ -42,7 +42,7 @@ function Hero() {
       />
       <div className="relative mx-auto grid max-w-[1160px] items-center gap-14 px-7 pb-16 pt-20 lg:grid-cols-[1.05fr_1.15fr]">
         <div>
-          <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-accent px-3 py-1 text-[12.5px] font-semibold text-accent-foreground">
+          <span className="mb-5 inline-flex items-center gap-2 rounded-[5px] border border-primary/20 bg-accent px-3 py-1 text-[12.5px] font-semibold text-accent-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
             Self-hosted · .NET · SQL Server
           </span>
@@ -58,7 +58,7 @@ function Hero() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/docs/getting-started"
-              className="inline-flex items-center gap-2 rounded-[9px] bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_1px_2px_rgba(79,70,229,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] transition-colors hover:bg-[#4338ca]"
+              className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-[#4338ca]"
             >
               Get started
               <svg
@@ -75,7 +75,7 @@ function Hero() {
             </Link>
             <Link
               href="/docs"
-              className="inline-flex items-center rounded-[9px] border bg-background px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
+              className="inline-flex items-center rounded-[6px] border bg-background px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
             >
               Read the docs
             </Link>
@@ -114,7 +114,7 @@ function DashboardWindow() {
   return (
     <div
       aria-hidden="true"
-      className="hidden overflow-hidden rounded-[14px] border bg-background shadow-[0_12px_40px_-12px_rgba(10,10,20,0.18),0_4px_12px_-6px_rgba(10,10,20,0.10)] md:block"
+      className="hidden overflow-hidden rounded-[8px] border bg-background shadow-[0_12px_40px_-12px_rgba(10,10,20,0.18),0_4px_12px_-6px_rgba(10,10,20,0.10)] md:block"
     >
       <div className="flex items-center gap-3.5 border-b bg-secondary/70 px-3.5 py-[11px]">
         <div className="flex gap-[7px]">
@@ -122,7 +122,7 @@ function DashboardWindow() {
           <span className="h-[11px] w-[11px] rounded-full bg-[#febc2e]" />
           <span className="h-[11px] w-[11px] rounded-full bg-[#28c840]" />
         </div>
-        <div className="flex-1 rounded-[7px] border bg-background px-3 py-[5px] text-center font-mono text-xs text-muted-foreground/70">
+        <div className="flex-1 rounded-[5px] border bg-background px-3 py-[5px] text-center font-mono text-xs text-muted-foreground/70">
           app.sqlos.dev/dashboard
         </div>
       </div>
@@ -136,7 +136,7 @@ function DashboardWindow() {
             <span
               key={label}
               className={[
-                "rounded-[7px] px-2 py-[7px] text-xs font-medium",
+                "rounded-[5px] px-2 py-[7px] text-xs font-medium",
                 i === 0 ? "bg-[#1b1f2a] text-white" : "text-[#a1a1aa]",
               ].join(" ")}
             >
@@ -156,7 +156,7 @@ function DashboardWindow() {
             <Stat n="1,284" label="Users" highlight />
             <Stat n="6" label="Providers" />
           </div>
-          <div className="overflow-hidden rounded-[10px] border">
+          <div className="overflow-hidden rounded-[6px] border">
             <div className="grid grid-cols-[1.6fr_1fr_0.8fr] gap-2 bg-secondary/70 px-3 py-[9px] text-[9.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground/70">
               <span>User</span>
               <span>Role</span>
@@ -171,7 +171,7 @@ function DashboardWindow() {
                 <span>
                   <span
                     className={[
-                      "inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                      "inline-block rounded-[4px] px-2 py-0.5 text-[10px] font-semibold",
                       r.admin
                         ? "bg-accent text-accent-foreground"
                         : "bg-emerald-500/10 text-emerald-600",
@@ -200,7 +200,7 @@ function Stat({
   highlight?: boolean;
 }) {
   return (
-    <div className="rounded-[10px] border p-3">
+    <div className="rounded-[6px] border p-3">
       <div
         className={[
           "text-[22px] font-bold tracking-[-0.03em]",
@@ -414,9 +414,9 @@ function Features() {
           {features.map((f) => (
             <div
               key={f.title}
-              className="rounded-[14px] border bg-background p-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm"
+              className="rounded-[8px] border bg-background p-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm"
             >
-              <div className="mb-4 grid h-[38px] w-[38px] place-items-center rounded-[10px] bg-accent text-primary [&_svg]:h-[19px] [&_svg]:w-[19px]">
+              <div className="mb-4 grid h-[38px] w-[38px] place-items-center rounded-[6px] bg-accent text-primary [&_svg]:h-[19px] [&_svg]:w-[19px]">
                 {f.icon}
               </div>
               <h3 className="mb-[7px] text-[16.5px] font-semibold tracking-[-0.02em] text-foreground">
@@ -438,7 +438,7 @@ function Features() {
 function CodeSplit() {
   return (
     <div className="mx-auto max-w-[1160px] px-7">
-      <div className="grid overflow-hidden rounded-[20px] border border-[#16181f] bg-gradient-to-b from-[#0a0c11] to-[#0b0d12] lg:grid-cols-[1fr_1.15fr]">
+      <div className="grid overflow-hidden rounded-[10px] border border-[#16181f] bg-gradient-to-b from-[#0a0c11] to-[#0b0d12] lg:grid-cols-[1fr_1.15fr]">
         <div className="flex flex-col justify-center px-7 py-9 lg:px-11 lg:py-[52px]">
           <div className="mb-3 text-[13px] font-semibold text-[#a5b4fc]">
             Fine-grained authorization
@@ -557,7 +557,7 @@ function ClosingCta() {
   return (
     <div className="py-20 lg:py-24">
       <div className="mx-auto max-w-[1160px] px-7">
-        <div className="relative overflow-hidden rounded-[22px] px-6 py-12 text-center text-white [background:radial-gradient(120%_130%_at_50%_0%,#4f46e5,#312a9c)] lg:px-10 lg:py-[66px]">
+        <div className="relative overflow-hidden rounded-[10px] px-6 py-12 text-center text-white [background:radial-gradient(120%_130%_at_50%_0%,#4f46e5,#312a9c)] lg:px-10 lg:py-[66px]">
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:40px_40px] [mask-image:radial-gradient(70%_70%_at_50%_0%,#000,transparent)]"
@@ -572,13 +572,13 @@ function ClosingCta() {
           <div className="relative flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/docs/getting-started"
-              className="inline-flex items-center rounded-[9px] bg-white px-4 py-2.5 text-sm font-semibold text-[#4338ca] transition-colors hover:bg-[#f1f0ff]"
+              className="inline-flex items-center rounded-[6px] bg-white px-4 py-2.5 text-sm font-semibold text-[#4338ca] transition-colors hover:bg-[#f1f0ff]"
             >
               Get started
             </Link>
             <Link
               href="/docs"
-              className="inline-flex items-center rounded-[9px] border border-white/35 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              className="inline-flex items-center rounded-[6px] border border-white/35 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10"
             >
               Read the docs
             </Link>

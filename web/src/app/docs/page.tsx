@@ -1,4 +1,5 @@
-import { DocsHomePage } from "@emcy/docs";
+import { notFound } from "next/navigation";
+import DocsArticle from "@/components/docs/DocsArticle";
 import { docsSource } from "@/lib/docs-source";
 
 export const metadata = {
@@ -8,10 +9,8 @@ export const metadata = {
 };
 
 export default function DocsPage() {
-  return (
-    <DocsHomePage
-      entry={docsSource.getHomeEntry()}
-      navigation={docsSource.getNavigation()}
-    />
-  );
+  const entry = docsSource.getHomeEntry();
+  if (!entry) notFound();
+
+  return <DocsArticle entry={entry} />;
 }

@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { DocsPage } from "@emcy/docs";
+import DocsArticle from "@/components/docs/DocsArticle";
 import { docsSource } from "@/lib/docs-source";
 
 interface PageProps {
@@ -32,13 +32,16 @@ export default async function DocsRoutePage({ params }: PageProps) {
     notFound();
   }
 
+  const sectionHref = resolved.entry.section
+    ? (docsSource.getSectionLanding(resolved.entry.section)?.href ?? undefined)
+    : undefined;
+
   return (
-    <DocsPage
+    <DocsArticle
       entry={resolved.entry}
       previousEntry={resolved.previousEntry}
       nextEntry={resolved.nextEntry}
-      backHref={docsSource.getHref()}
-      backLabel="Documentation"
+      sectionHref={sectionHref}
     />
   );
 }

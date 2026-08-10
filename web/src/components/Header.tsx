@@ -34,7 +34,7 @@ export default function Header() {
         >
           <BrandMark className="h-[26px] w-[26px] drop-shadow-[0_2px_6px_rgba(79,70,229,0.35)]" />
           <span>SqlOS</span>
-          <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold tracking-normal text-accent-foreground">
+          <span className="rounded-[4px] bg-accent px-2 py-0.5 text-[11px] font-semibold tracking-normal text-accent-foreground">
             v3.24
           </span>
         </Link>
@@ -63,7 +63,7 @@ export default function Header() {
           </a>
           <Link
             href="/docs/getting-started"
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_1px_2px_rgba(79,70,229,0.35),inset_0_1px_0_rgba(255,255,255,0.15)] transition-colors hover:bg-[#4338ca]"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-[6px] bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-[#4338ca]"
           >
             Get started
           </Link>
@@ -118,7 +118,7 @@ export default function Header() {
             </a>
             <Link
               href="/docs/getting-started"
-              className="mt-2 rounded-[9px] bg-primary px-3 py-2 text-center text-sm font-semibold text-primary-foreground"
+              className="mt-2 rounded-[6px] bg-primary px-3 py-2 text-center text-sm font-semibold text-primary-foreground"
               onClick={() => setIsMenuOpen(false)}
             >
               Get started
