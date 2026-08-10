@@ -376,14 +376,21 @@ public sealed class SqlOSCryptoService
         return await _validationSigningKeyCache.GetOrCreateAsync(
             cacheKey,
             _options.AccessTokenValidationSigningKeyCacheTtl,
-            async ct =>
-            {
-                var cutoff = DateTime.UtcNow.Subtract(graceWindow);
-                var keys = await LoadAndValidateSigningKeysAsync(ct);
-                return keys
-                    .Where(key => key.IsActive || key.RetiredAt >= cutoff)
-                    .ToList();
-            },
+            ct => LoadValidationSigningKeysAsync(graceWindow, ct),
+            cancellationToken);
+    }
+
+    private async Task<List<SqlOSSigningKey>> RefreshValidationSigningKeysIfMissingAsync(
+        string kid,
+        CancellationToken cancellationToken)
+    {
+        var graceWindow = await ResolveSigningKeyGraceWindowAsync(cancellationToken);
+        var cacheKey = $"{_options.Schema}|{_options.Issuer}|{graceWindow.Ticks}";
+        return await _validationSigningKeyCache.RefreshIfMissingAsync(
+            cacheKey,
+            kid,
+            _options.AccessTokenValidationSigningKeyCacheTtl,
+            ct => LoadValidationSigningKeysAsync(graceWindow, ct),
             cancellationToken);
     }
 
@@ -596,12 +603,6 @@ public sealed class SqlOSCryptoService
         bool validateAudience,
         CancellationToken cancellationToken)
     {
-        var keys = await GetValidationSigningKeysAsync(cancellationToken: cancellationToken);
-        if (keys.Count == 0)
-        {
-            return null;
-        }
-
         var handler = new JwtSecurityTokenHandler
         {
             MapInboundClaims = false
@@ -617,10 +618,21 @@ public sealed class SqlOSCryptoService
                 return null;
             }
 
+            var keys = await GetValidationSigningKeysAsync(cancellationToken: cancellationToken);
             var matchingKeys = keys
                 .Where(key => string.Equals(key.Kid, jwt.Header.Kid, StringComparison.Ordinal)
                     && string.Equals(key.Algorithm, jwt.Header.Alg, StringComparison.Ordinal))
                 .ToList();
+            if (matchingKeys.Count == 0
+                && _options.AccessTokenValidationSigningKeyCacheTtl > TimeSpan.Zero)
+            {
+                keys = await RefreshValidationSigningKeysIfMissingAsync(jwt.Header.Kid, cancellationToken);
+                matchingKeys = keys
+                    .Where(key => string.Equals(key.Kid, jwt.Header.Kid, StringComparison.Ordinal)
+                        && string.Equals(key.Algorithm, jwt.Header.Alg, StringComparison.Ordinal))
+                    .ToList();
+            }
+
             if (matchingKeys.Count != 1)
             {
                 return null;
@@ -1027,6 +1039,20 @@ public sealed class SqlOSCryptoService
         var keys = await _context.Set<SqlOSSigningKey>().ToListAsync(cancellationToken);
         ValidateStoredSigningKeyRows(keys);
         return keys;
+    }
+
+    private async Task<List<SqlOSSigningKey>> LoadValidationSigningKeysAsync(
+        TimeSpan graceWindow,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = DateTime.UtcNow.Subtract(graceWindow);
+        var keys = await _context.Set<SqlOSSigningKey>()
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        ValidateStoredSigningKeyRows(keys);
+        return keys
+            .Where(key => key.IsActive || key.RetiredAt >= cutoff)
+            .ToList();
     }
 
     private async Task<TimeSpan> ResolveSigningKeyGraceWindowAsync(CancellationToken cancellationToken)

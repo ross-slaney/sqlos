@@ -468,6 +468,9 @@ public sealed class SqlOSCryptoServiceTests
         using var attackerRsa = RSA.Create(2048);
         var attackerToken = CreateForgedToken(attackerRsa, stolenRow.Kid, user.Id, session.Id, client);
         (await service.ValidateAccessTokenAsync(attackerToken, client.Audience)).Should().BeNull();
+        var unknownKidToken = CreateForgedToken(attackerRsa, "attacker-selected-unknown-kid", user.Id, session.Id, client);
+        (await service.ValidateAccessTokenAsync(unknownKidToken, client.Audience)).Should().BeNull();
+        (await service.ValidateAccessTokenAsync(unknownKidToken, client.Audience)).Should().BeNull();
     }
 
     [TestMethod]

@@ -1,11 +1,19 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -14,6 +22,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Extensions;
 using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests;
@@ -190,6 +199,98 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             allKeys.Count(key => key.IsActive).Should().Be(1);
             allKeys.Where(key => !key.IsActive).Should().OnlyContain(key => key.RetiredAt != null);
             allKeys.Should().OnlyContain(key => !key.KeyReference.Contains("PRIVATE KEY", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task HostedValidationReplicas_RotationOnA_ImmediatelyValidatesConcurrentlyOverHttpOnB()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("replica-cache-refresh");
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSReplicaKeyCache");
+            connectionString = setupContext.Database.GetConnectionString();
+            await setupContext.DisposeAsync();
+            setupContext = null;
+            await using var replicaA = await SigningKeyReplicaHost.CreateAsync(connectionString!, keyRingPath, "replica-a");
+            await using var replicaB = await SigningKeyReplicaHost.CreateAsync(connectionString!, keyRingPath, "replica-b");
+            replicaA.Services.Should().NotBeSameAs(replicaB.Services);
+            replicaA.Services.GetRequiredService<SqlOSValidationSigningKeyCache>()
+                .Should().NotBeSameAs(replicaB.Services.GetRequiredService<SqlOSValidationSigningKeyCache>());
+            await using var replicaAScope = replicaA.Services.CreateAsyncScope();
+            var replicaAContext = replicaAScope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            var replicaACrypto = replicaAScope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
+            var replicaAAdmin = replicaAScope.ServiceProvider.GetRequiredService<SqlOSAdminService>();
+            var principal = await SeedTokenContextAsync(
+                replicaAContext,
+                replicaAAdmin,
+                replicaACrypto,
+                "replica-cache");
+            var originalKey = await replicaACrypto.EnsureActiveSigningKeyAsync();
+
+            using (var primeResponse = await replicaB.Client.GetAsync("/sqlos/auth/.well-known/jwks.json"))
+            {
+                primeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+                using var jwks = JsonDocument.Parse(await primeResponse.Content.ReadAsStringAsync());
+                jwks.RootElement.GetProperty("keys")
+                    .EnumerateArray()
+                    .Select(key => key.GetProperty("kid").GetString())
+                    .Should().Equal(originalKey.Kid);
+            }
+
+            var rotatedKey = await replicaACrypto.RotateSigningKeyAsync();
+            var token = await replicaACrypto.CreateAccessTokenAsync(
+                principal.User,
+                principal.Session,
+                principal.Client,
+                principal.OrganizationId);
+            new JwtSecurityTokenHandler().ReadJwtToken(token).Header.Kid.Should().Be(rotatedKey.Kid);
+
+            var validations = Enumerable.Range(0, 12)
+                .Select(_ => replicaB.ValidateAsync(token))
+                .ToArray();
+            var responses = await Task.WhenAll(validations);
+            try
+            {
+                foreach (var response in responses)
+                {
+                    response.StatusCode.Should().Be(
+                        HttpStatusCode.OK,
+                        await response.Content.ReadAsStringAsync());
+                }
+            }
+            finally
+            {
+                foreach (var response in responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            using var attackerRsa = RSA.Create(2048);
+            var unknownKidToken = CreateForgedToken(
+                attackerRsa,
+                "attacker-selected-unknown-kid",
+                replicaA.Options.Issuer,
+                principal.User.Id,
+                principal.Session.Id,
+                principal.Client);
+            using var firstUnknown = await replicaB.ValidateAsync(unknownKidToken);
+            using var repeatedUnknown = await replicaB.ValidateAsync(unknownKidToken);
+            firstUnknown.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            repeatedUnknown.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
         finally
         {
@@ -627,21 +728,28 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         TestSqlOSDbContext context,
         ServiceStack stack,
         string suffix)
+        => await SeedTokenContextAsync(context, stack.Admin, stack.Crypto, suffix);
+
+    private static async Task<TokenPrincipal> SeedTokenContextAsync(
+        TestSqlOSDbContext context,
+        SqlOSAdminService admin,
+        SqlOSCryptoService crypto,
+        string suffix)
     {
-        await stack.Admin.UpsertSeededClientsAsync();
-        var user = await stack.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+        await admin.UpsertSeededClientsAsync();
+        var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
             $"Token User {suffix}",
             $"token-{suffix}-{Guid.NewGuid():N}@example.com",
             "P@ssword123!"));
-        var organization = await stack.Admin.CreateOrganizationAsync(
+        var organization = await admin.CreateOrganizationAsync(
             new SqlOSCreateOrganizationRequest($"Token Org {suffix} {Guid.NewGuid():N}", null));
-        await stack.Admin.CreateMembershipAsync(
+        await admin.CreateMembershipAsync(
             organization.Id,
             new SqlOSCreateMembershipRequest(user.Id, "owner"));
         var client = await context.Set<SqlOSClientApplication>().SingleAsync(app => app.ClientId == suffix);
         var session = new SqlOSSession
         {
-            Id = stack.Crypto.GenerateId("ses"),
+            Id = crypto.GenerateId("ses"),
             UserId = user.Id,
             ClientApplicationId = client.Id,
             OrganizationId = organization.Id,
@@ -724,6 +832,84 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
         {
             await using var cleanup = CreateContext(connectionString);
             await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private sealed class SigningKeyReplicaHost : IAsyncDisposable
+    {
+        private readonly WebApplication _app;
+
+        private SigningKeyReplicaHost(
+            WebApplication app,
+            HttpClient client,
+            SqlOSAuthServerOptions options)
+        {
+            _app = app;
+            Client = client;
+            Options = options;
+        }
+
+        public HttpClient Client { get; }
+        public SqlOSAuthServerOptions Options { get; }
+        public IServiceProvider Services => _app.Services;
+
+        public static async Task<SigningKeyReplicaHost> CreateAsync(
+            string connectionString,
+            string keyRingPath,
+            string replicaName)
+        {
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                EnvironmentName = Environments.Development
+            });
+            builder.WebHost.UseTestServer();
+            builder.Services.AddDbContext<TestSqlOSDbContext>(database =>
+                database.UseSqlServer(connectionString));
+            builder.Services.AddSqlOS<TestSqlOSDbContext>(options =>
+            {
+                options.AuthServer.PublicOrigin = "https://replicas.integration.test";
+                options.AuthServer.Issuer = "https://replicas.integration.test/sqlos/auth";
+                options.AuthServer.BasePath = "/sqlos/auth";
+                options.AuthServer.DefaultAudience = "replica-cache";
+                options.AuthServer.AccessTokenValidationSigningKeyCacheTtl = TimeSpan.FromHours(1);
+                options.AuthServer.SeedBrowserClient(
+                    "replica-cache",
+                    "Replica Cache Client",
+                    "https://client.example.test/replica-cache/callback");
+            });
+            builder.Services.AddDataProtection()
+                .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath))
+                .SetApplicationName("SqlOS.IntegrationTests.SigningKeyCustody");
+
+            var app = builder.Build();
+            app.MapSqlOS();
+            var protectedApi = app.MapGroup("/replica-api")
+                .RequireSqlOSAccessToken("replica-cache");
+            protectedApi.MapGet("/validate", (HttpContext context) => Results.Ok(new
+            {
+                replica = replicaName,
+                subject = context.User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            }));
+            await app.StartAsync();
+
+            var client = app.GetTestClient();
+            client.BaseAddress = new Uri("https://replicas.integration.test");
+            var authOptions = app.Services.GetRequiredService<IOptions<SqlOSAuthServerOptions>>().Value;
+            return new SigningKeyReplicaHost(app, client, authOptions);
+        }
+
+        public async Task<HttpResponseMessage> ValidateAsync(string token)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/replica-api/validate");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return await Client.SendAsync(request);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _app.StopAsync();
+            await _app.DisposeAsync();
         }
     }
 

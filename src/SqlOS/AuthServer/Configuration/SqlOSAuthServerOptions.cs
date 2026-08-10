@@ -16,7 +16,9 @@ public class SqlOSAuthServerOptions
     /// <summary>
     /// How long each SqlOS instance caches public signing keys for access-token validation.
     /// In-process key creation, rotation, replacement, and cleanup clear this cache immediately;
-    /// the TTL bounds stale-key exposure across other instances or out-of-band database changes.
+    /// an unknown key identifier triggers a single-flight authoritative refresh so tokens issued
+    /// after rotation can validate promptly on other instances. Unknown-key refreshes are rate-limited
+    /// across identifiers, and retained negative identifiers are bounded until the entry expires.
     /// Set to zero to disable the validation-key cache.
     /// </summary>
     public TimeSpan AccessTokenValidationSigningKeyCacheTtl { get; set; } = TimeSpan.FromMinutes(5);
