@@ -96,7 +96,7 @@ export default function DocsArticle({
         <HelpfulRow />
       </article>
 
-      <aside className="sticky top-[60px] hidden max-h-[calc(100vh-60px)] overflow-y-auto border-l py-11 pl-6 pr-6 xl:block">
+      <aside className="sticky top-[60px] hidden max-h-[calc(100vh_-_60px)] overflow-y-auto border-l py-11 pl-6 pr-6 xl:block">
         <DocsTocNav headings={entry.headings} />
       </aside>
     </div>
