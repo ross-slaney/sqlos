@@ -61,6 +61,18 @@ public sealed record SqlOSAuditLogRecordResult(
     bool Created,
     SqlOSAuditLogEvent Event);
 
+public sealed class SqlOSAuditLogIdempotencyConflictException : InvalidOperationException
+{
+    public const string ErrorCode = "idempotency_conflict";
+
+    internal SqlOSAuditLogIdempotencyConflictException(Exception innerException)
+        : base("The audit event idempotency namespace conflicts with an existing event.", innerException)
+    {
+    }
+
+    public string Error => ErrorCode;
+}
+
 public sealed record SqlOSAuditLogListRequest(
     int? Page = null,
     int? PageSize = null,

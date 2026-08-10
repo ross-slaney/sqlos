@@ -106,8 +106,7 @@ documentsApi.MapPost("/documents/{id}/share", async (
         {
             ["result"] = "success",
             ["role"] = request.Role
-        },
-        IdempotencyKey: $"document:{id}:shared:{userId}:{httpContext.TraceIdentifier}"),
+        }),
         ct);
 
     return Results.NoContent();
@@ -116,7 +115,7 @@ documentsApi.MapPost("/documents/{id}/share", async (
 public sealed record ShareDocumentRequest(string Role);
 ```
 
-This example assumes the application defines the `document.share` authorization policy. The request DTO contains only the requested business value; document, actor, and tenant details come from trusted server-side state.
+This example assumes the application defines the `document.share` authorization policy. The request DTO contains only the requested business value; document, actor, and tenant details come from trusted server-side state. SqlOS generates the audit event id, so an ordinary write like this does not need an idempotency key.
 
 <Callout type="warning" title="Recording after save is not atomic">
   The straightforward `SaveChangesAsync` then `RecordAsync` sequence can lose the audit event if the process fails between those calls. When an audit event must be guaranteed, either enlist the mutation and audit insert in one application transaction when they share a database context, or write an outbox message in the mutation transaction and have a worker call `RecordAsync` with a stable idempotency key.
@@ -138,7 +137,7 @@ This example assumes the application defines the `document.share` authorization 
 | `Targets` | `IReadOnlyList<SqlOSAuditTarget>?` | Resources affected by the action. |
 | `Context` | `SqlOSAuditContext?` | IP, user agent, session, request, and correlation identifiers. |
 | `Metadata` | `IReadOnlyDictionary<string, object?>?` | Non-sensitive structured details. |
-| `IdempotencyKey` | `string?` | Retry-safe key, hashed before storage. Duplicate keys return the original event. |
+| `IdempotencyKey` | `string?` | Optional stable operation or outbox key for deduplicating retries. Omit it for ordinary writes; SqlOS always generates the event id. |
 | `OccurredAt` | `DateTime?` | Event time. Defaults to current UTC time. |
 
 ## Actor
@@ -174,6 +173,16 @@ Use multiple targets when one operation affects a hierarchy. For example, an inv
 - `X-Correlation-ID` / `X-Correlation-Id`
 
 Create `SqlOSAuditContext` manually for background jobs, service accounts, queues, and scheduled maintenance.
+
+## Idempotency namespace
+
+Every successful write receives a SqlOS-generated `EventId`. `IdempotencyKey` is a separate, optional retry token: omit it for ordinary writes, and every call records a new event. Supply it only when a retrying workflow, such as an outbox worker, needs repeated delivery of one business operation to converge on one audit event. SqlOS cannot generate this token because it cannot distinguish a retry from a second legitimate operation.
+
+When a key is supplied, SqlOS hashes a versioned canonical representation of the normalized organization id (with global/null as a distinct value), resolved application id and key, source, exact action, and supplied key. The same key is independent across any of those scope dimensions. A retry can return only an event whose stored scope exactly matches the request.
+
+Use a stable domain operation or outbox message id, for example `share:{shareOperationId}`. Do not generate a new request or trace id for each retry. Organization, application, source, and action are already in the namespace and do not need to be duplicated in the caller key.
+
+Schema upgrades preserve existing rows and their legacy hashes without recovering raw keys. Legacy retries deduplicate only when every stored scope field matches. New writes use the scoped hash and a unique filtered SQL index. If an index/hash conflict cannot be resolved inside the exact caller scope, `RecordAsync` throws `SqlOSAuditLogIdempotencyConflictException` with `Error == "idempotency_conflict"` instead of returning another scope's event.
 
 ## Metadata safety
 
@@ -233,7 +242,7 @@ public interface ISqlOSAuditLogService
 }
 ```
 
-`RecordAsync` returns `Created = false` when the idempotency key already exists and the original event is returned.
+`RecordAsync` always returns the SqlOS-generated event id. When an optional idempotency key matches an event in the same namespace, it returns `Created = false` and the original event; without a key, each call creates a new event.
 
 ## Dashboard
 

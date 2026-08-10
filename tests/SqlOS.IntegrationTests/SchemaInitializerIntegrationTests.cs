@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 37;
+    private const int CurrentSchemaVersion = 38;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -265,8 +265,10 @@ public sealed class SchemaInitializerIntegrationTests
 
             Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSAuditEvents", "Action"));
             Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSAuditEvents", "IdempotencyKeyHash"));
+            Assert.IsTrue(await ColumnExistsAsync(context, "SqlOSAuditEvents", "IdempotencyScopeHash"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_Action_OccurredAt"));
             Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyKeyHash"));
+            Assert.IsTrue(await IndexExistsAsync(context, "SqlOSAuditEvents", "UX_SqlOSAuditEvents_IdempotencyScopeHash"));
             Assert.AreEqual("user.login", await ScalarStringAsync(context, "SELECT TOP 1 [Action] FROM [dbo].[SqlOSAuditEvents]"));
             Assert.AreEqual(CurrentSchemaVersion, await ScalarIntAsync(context, "SELECT TOP 1 [Version] FROM [dbo].[SqlOSSchema]"));
         }

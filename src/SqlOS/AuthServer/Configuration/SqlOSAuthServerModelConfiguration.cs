@@ -629,6 +629,9 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => x.IdempotencyKeyHash)
                 .IsUnique()
                 .HasFilter("[IdempotencyKeyHash] IS NOT NULL");
+            entity.HasIndex(x => x.IdempotencyScopeHash)
+                .IsUnique()
+                .HasFilter("[IdempotencyScopeHash] IS NOT NULL");
             entity.Property(x => x.EventType).HasMaxLength(160);
             entity.Property(x => x.ApplicationId).HasMaxLength(64);
             entity.Property(x => x.ApplicationKey).HasMaxLength(200);
@@ -644,6 +647,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.RequestId).HasMaxLength(128);
             entity.Property(x => x.CorrelationId).HasMaxLength(128);
             entity.Property(x => x.IdempotencyKeyHash).HasMaxLength(128);
+            entity.Property(x => x.IdempotencyScopeHash).HasMaxLength(128);
         });
 
         modelBuilder.Entity<SqlOSSettings>(entity =>
