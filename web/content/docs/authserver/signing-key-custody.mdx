@@ -78,7 +78,7 @@ Production responsibilities:
 
 SqlOS refuses token issuance when the active signing key cannot be opened. It does not silently create a replacement, because one replica rotating around a missing key can split the deployment and invalidate tokens unpredictably.
 
-Creation and rotation are serialized in SQL Server. SqlOS verifies that protected private material matches the stored public key, keeps retired public keys in JWKS for the configured grace window, and prevents cleanup from deleting material still referenced by an active key. Each replica refreshes its cached validation keys once when it encounters an unknown `kid`; concurrent misses share the refresh, and an unavailable database leaves the unknown token rejected against the last known key set.
+Creation and rotation are serialized in SQL Server. SqlOS verifies that protected private material matches the stored public key, keeps retired public keys in JWKS for the configured grace window, and prevents cleanup from deleting material still referenced by an active key. Each replica performs a single-flight refresh when it encounters an unknown `kid`; refreshes across distinct identifiers are rate-limited and retained negative identifiers are bounded. An unavailable database leaves the unknown token rejected against the last known key set.
 
 Treat the database and the Data Protection key ring as one recovery set. Losing either one is an availability incident. Stealing both is a signing-key compromise.
 

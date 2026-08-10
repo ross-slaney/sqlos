@@ -41,6 +41,78 @@ public sealed class SqlOSValidationSigningKeyCacheTests
     }
 
     [TestMethod]
+    public async Task UnknownKid_DistinctValuesAreRateLimitedWithoutExtendingCacheExpiry()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
+        var cache = new SqlOSValidationSigningKeyCache(timeProvider: time);
+        var ttl = TimeSpan.FromSeconds(5);
+        var original = CreateKey("original");
+        await cache.GetOrCreateAsync("issuer", ttl, _ => Task.FromResult(new List<SqlOSSigningKey> { original }), default);
+        var refreshCount = 0;
+
+        Task<List<SqlOSSigningKey>> Refresh(CancellationToken _)
+        {
+            Interlocked.Increment(ref refreshCount);
+            return Task.FromResult(new List<SqlOSSigningKey> { original });
+        }
+
+        await cache.RefreshIfMissingAsync("issuer", "attacker-kid-1", ttl, Refresh, default);
+        await cache.RefreshIfMissingAsync("issuer", "attacker-kid-2", ttl, Refresh, default);
+        refreshCount.Should().Be(1);
+
+        time.Advance(TimeSpan.FromSeconds(4.5));
+        await cache.RefreshIfMissingAsync("issuer", "attacker-kid-3", ttl, Refresh, default);
+        refreshCount.Should().Be(2);
+
+        time.Advance(TimeSpan.FromSeconds(0.5));
+        var expiryReloadCount = 0;
+        await cache.GetOrCreateAsync(
+            "issuer",
+            ttl,
+            _ =>
+            {
+                Interlocked.Increment(ref expiryReloadCount);
+                return Task.FromResult(new List<SqlOSSigningKey> { original });
+            },
+            default);
+        expiryReloadCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task UnknownKid_NegativeIdentifiersAreStrictlyBounded()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
+        var cache = new SqlOSValidationSigningKeyCache(timeProvider: time);
+        var ttl = TimeSpan.FromHours(1);
+        var original = CreateKey("original");
+        await cache.GetOrCreateAsync("issuer", ttl, _ => Task.FromResult(new List<SqlOSSigningKey> { original }), default);
+        var refreshCount = 0;
+
+        Task<List<SqlOSSigningKey>> Refresh(CancellationToken _)
+        {
+            Interlocked.Increment(ref refreshCount);
+            return Task.FromResult(new List<SqlOSSigningKey> { original });
+        }
+
+        for (var index = 0; index <= SqlOSValidationSigningKeyCache.MaximumNegativeKeyIdentifiers; index++)
+        {
+            await cache.RefreshIfMissingAsync("issuer", $"attacker-kid-{index}", ttl, Refresh, default);
+            time.Advance(SqlOSValidationSigningKeyCache.UnknownKidRefreshCooldown);
+        }
+
+        refreshCount.Should().Be(SqlOSValidationSigningKeyCache.MaximumNegativeKeyIdentifiers + 1);
+        await cache.RefreshIfMissingAsync("issuer", "attacker-kid-0", ttl, Refresh, default);
+        refreshCount.Should().Be(SqlOSValidationSigningKeyCache.MaximumNegativeKeyIdentifiers + 1);
+        await cache.RefreshIfMissingAsync(
+            "issuer",
+            $"attacker-kid-{SqlOSValidationSigningKeyCache.MaximumNegativeKeyIdentifiers}",
+            ttl,
+            Refresh,
+            default);
+        refreshCount.Should().Be(SqlOSValidationSigningKeyCache.MaximumNegativeKeyIdentifiers + 2);
+    }
+
+    [TestMethod]
     public async Task UnknownKid_RefreshFailureKeepsLastKnownKeysAndBoundsRetries()
     {
         var cache = new SqlOSValidationSigningKeyCache();
@@ -106,4 +178,14 @@ public sealed class SqlOSValidationSigningKeyCacheTests
             IsActive = true,
             ActivatedAt = DateTime.UtcNow
         };
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+
+        public void Advance(TimeSpan duration)
+        {
+            utcNow = utcNow.Add(duration);
+        }
+    }
 }
