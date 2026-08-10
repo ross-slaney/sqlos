@@ -235,7 +235,8 @@ pre code {
 
 .sqlos-docs-shell .emcydocs-desktop-nav {
   border-right: 1px solid hsl(var(--border));
-  padding: 26px 18px 60px;
+  padding: 26px 18px 60px !important;
+  overflow-y: auto !important;
 }
 
 @media (min-width: 1024px) {
