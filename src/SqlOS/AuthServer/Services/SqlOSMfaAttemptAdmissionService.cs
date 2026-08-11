@@ -371,6 +371,11 @@ public sealed class SqlOSMfaAttemptAdmissionService
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
         parameter.Value = value;
+        if (value is DateTime)
+        {
+            parameter.DbType = DbType.DateTime2;
+        }
+
         command.Parameters.Add(parameter);
     }
 
