@@ -198,6 +198,21 @@ internal static class SqlOSOptionsValidator
             errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerIp must be at least MaxFailedAttemptsPerChallenge.");
         }
 
+        if (options.Totp.MaxFailedAttemptsPerClient < options.Totp.MaxFailedAttemptsPerChallenge)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerClient must be at least MaxFailedAttemptsPerChallenge.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerDevice < options.Totp.MaxFailedAttemptsPerChallenge)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerDevice must be at least MaxFailedAttemptsPerChallenge.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerAuthorizationRequest < options.Totp.MaxFailedAttemptsPerChallenge)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest must be at least MaxFailedAttemptsPerChallenge.");
+        }
+
         if (options.Totp.FailedAttemptWindow <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.Mfa.Totp.FailedAttemptWindow must be greater than zero.");

@@ -108,6 +108,18 @@ public sealed class SqlOSPasswordLoginBucket
     public SqlOSUser? User { get; set; }
 }
 
+public sealed class SqlOSMfaAttemptBucket
+{
+    public string Id { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string BucketKey { get; set; } = string.Empty;
+    public int AttemptCount { get; set; }
+    public DateTime WindowStartedAt { get; set; }
+    public DateTime LastAttemptAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
 public sealed class SqlOSMembership
 {
     public string OrganizationId { get; set; } = string.Empty;

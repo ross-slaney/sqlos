@@ -226,6 +226,35 @@ public sealed class SqlOSOptionsValidationTests
             .WithMessage("*DefaultSigningKeyRetiredCleanupDays must be at least DefaultSigningKeyGraceWindowDays*");
     }
 
+    [DataTestMethod]
+    [DataRow("client")]
+    [DataRow("device")]
+    [DataRow("authorization-request")]
+    public void AddSqlOS_Throws_WhenSharedMfaAttemptLimitIsBelowChallengeLimit(string scope)
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.Mfa.Totp.MaxFailedAttemptsPerChallenge = 5;
+            if (scope == "client")
+            {
+                options.AuthServer.Mfa.Totp.MaxFailedAttemptsPerClient = 4;
+            }
+            else if (scope == "device")
+            {
+                options.AuthServer.Mfa.Totp.MaxFailedAttemptsPerDevice = 4;
+            }
+            else
+            {
+                options.AuthServer.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 4;
+            }
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*must be at least MaxFailedAttemptsPerChallenge.*");
+    }
+
     [TestMethod]
     public void AddSqlOS_RegistersTransactionalEmailService()
     {

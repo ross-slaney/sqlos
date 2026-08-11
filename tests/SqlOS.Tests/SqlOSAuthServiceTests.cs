@@ -748,6 +748,92 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task HostedMfaChallenges_ShareAuthorizationRequestAttemptBudget()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureRequiredMfa(options);
+            options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 2;
+            options.Mfa.Totp.MaxFailedAttemptsPerUser = 20;
+            options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+            options.Mfa.Totp.MaxFailedAttemptsPerClient = 20;
+            options.Mfa.Totp.MaxFailedAttemptsPerDevice = 20;
+            options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 2;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Hosted attempt budget",
+            $"hosted-attempt-budget-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Hosted attempt budget authenticator"));
+        var enrolled = await harness.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            harness.Totp.GenerateCodeForTesting(enrollment.Secret)));
+        var request = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "hosted-attempt-budget",
+            user.DefaultEmail!);
+        var authentication = await harness.Authorization.AuthenticatePasswordAsync(
+            user.DefaultEmail!,
+            "P@ssword123!",
+            httpContext: CreatePasswordHttpContext("203.0.113.227"),
+            clientKey: "test-client",
+            authorizationRequestId: request.Id,
+            surface: "hosted");
+        var challenges = new List<string>();
+        for (var index = 0; index < 3; index++)
+        {
+            var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+                request,
+                authentication.User,
+                authentication.AuthenticationMethod,
+                CreatePasswordHttpContext("203.0.113.227"));
+            completion.RequiresMfa.Should().BeTrue();
+            challenges.Add(completion.MfaToken!);
+        }
+
+        foreach (var challenge in challenges.Take(2))
+        {
+            var reject = async () => await harness.Authorization.CompleteMfaChallengeAsync(
+                challenge,
+                "wrong",
+                CreatePasswordHttpContext("203.0.113.227"));
+            await reject.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+        }
+
+        var blockedCorrect = async () => await harness.Authorization.CompleteMfaChallengeAsync(
+            challenges[2],
+            enrolled.RecoveryCodes[0],
+            CreatePasswordHttpContext("203.0.113.227"));
+        await blockedCorrect.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+        (await harness.Context.Set<SqlOSRecoveryCode>()
+            .CountAsync(x => x.UserId == user.Id && x.ConsumedAt != null)).Should().Be(0);
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == request.Id)).Should().Be(0);
+
+        var controlRequest = await CreateHeadlessAuthorizationRequestAsync(
+            harness,
+            "hosted-attempt-budget-control",
+            user.DefaultEmail!);
+        var controlCompletion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            controlRequest,
+            authentication.User,
+            authentication.AuthenticationMethod,
+            CreatePasswordHttpContext("203.0.113.227"));
+        var redirect = await harness.Authorization.CompleteMfaChallengeAsync(
+            controlCompletion.MfaToken!,
+            enrolled.RecoveryCodes[0],
+            CreatePasswordHttpContext("203.0.113.227"));
+
+        redirect.Should().Contain("code=");
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == controlRequest.Id)).Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task MfaChallenge_WrongCodesConsumeChallengeAtConfiguredCap()
     {
         var harness = await TestHarness.CreateAsync(configure: options =>

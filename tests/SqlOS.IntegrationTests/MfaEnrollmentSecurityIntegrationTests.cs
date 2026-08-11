@@ -144,6 +144,177 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
     }
 
     [TestMethod]
+    public async Task SqlServer_ActiveChallengesAcrossReplicasShareOneAtomicUserBudget()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaSharedBudget");
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 4;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerUser = 4;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerClient = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerDevice = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 20;
+        var enrolled = await CreateEnrolledUserAsync(fixture, "Shared budget user");
+        var challenges = new List<string>();
+        for (var index = 0; index < 6; index++)
+        {
+            var login = await fixture.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(enrolled.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+                CreateHttpContext($"203.0.113.{10 + index}", $"SqlOSMfaReplica{index}"));
+            challenges.Add(login.MfaToken!);
+        }
+
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+        await using var first = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var second = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var third = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var initialFailures = await Task.WhenAll(
+            CaptureMfaAsync(first.Auth, challenges[0], "wrong", CreateHttpContext("203.0.113.10", "ReplicaA")),
+            CaptureMfaAsync(second.Auth, challenges[1], "wrong", CreateHttpContext("203.0.113.11", "ReplicaB")),
+            CaptureMfaAsync(third.Auth, challenges[2], "wrong", CreateHttpContext("203.0.113.12", "ReplicaC")));
+        initialFailures.Should().OnlyContain(x => !x.Success && x.Error is InvalidOperationException);
+
+        await using var thresholdWrong = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var thresholdCorrect = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var thresholdRace = await Task.WhenAll(
+            CaptureMfaAsync(
+                thresholdWrong.Auth,
+                challenges[3],
+                "wrong",
+                CreateHttpContext("203.0.113.13", "ReplicaD")),
+            CaptureMfaAsync(
+                thresholdCorrect.Auth,
+                challenges[4],
+                enrolled.RecoveryCode,
+                CreateHttpContext("203.0.113.14", "ReplicaE")));
+        thresholdRace.Count(x => x.Success).Should().BeLessThanOrEqualTo(1);
+        thresholdRace.Count(x => x.Error is InvalidOperationException).Should().BeGreaterThanOrEqualTo(1);
+
+        await using var exhausted = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var correctAfterCapacity = await CaptureMfaAsync(
+            exhausted.Auth,
+            challenges[5],
+            exhausted.Totp.GenerateCodeForTesting(
+                enrolled.Secret,
+                DateTimeOffset.UtcNow.AddSeconds(fixture.Options.Mfa.Totp.PeriodSeconds)),
+            CreateHttpContext("203.0.113.15", "ReplicaF"));
+        correctAfterCapacity.Success.Should().BeFalse();
+        correctAfterCapacity.Error.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Be(SqlOSAuthService.MfaChallengeFailureMessage);
+
+        var reissue = async () => await exhausted.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(enrolled.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext("203.0.113.16", "ReplicaG"));
+        await reissue.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
+
+        exhausted.Context.ChangeTracker.Clear();
+        (await exhausted.Context.Set<SqlOSMfaAttemptBucket>()
+            .SingleAsync(x => x.Scope == "user")).AttemptCount.Should().Be(4);
+        (await exhausted.Context.Set<SqlOSSession>()
+            .CountAsync(x => x.UserId == enrolled.User.Id)).Should().BeLessThanOrEqualTo(1);
+        (await exhausted.Context.Set<SqlOSRefreshToken>()
+            .CountAsync(x => x.Session!.UserId == enrolled.User.Id)).Should().BeLessThanOrEqualTo(1);
+        (await exhausted.Context.Set<SqlOSAuthorizationCode>().CountAsync()).Should().Be(0);
+        (await exhausted.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
+            x.Action == "user.mfa.challenge_failed" && x.UserId == enrolled.User.Id))
+            .Should().BeInRange(3, 4);
+    }
+
+    [TestMethod]
+    public async Task SqlServer_ClientAndIpBudgetsSpanUsersWithoutCrossingOtherScopes()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaScopeBudget");
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 2;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerUser = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerClient = 2;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerDevice = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 20;
+        var clientUsers = new[]
+        {
+            await CreateEnrolledUserAsync(fixture, "Client scope A"),
+            await CreateEnrolledUserAsync(fixture, "Client scope B"),
+            await CreateEnrolledUserAsync(fixture, "Client scope blocked"),
+            await CreateEnrolledUserAsync(fixture, "Client scope control")
+        };
+        var clientChallenges = new List<string>();
+        for (var index = 0; index < clientUsers.Length; index++)
+        {
+            var clientId = index == clientUsers.Length - 1 ? "alternate-client" : "test-client";
+            var login = await fixture.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(clientUsers[index].User.DefaultEmail!, "P@ssword123!", clientId, null),
+                CreateHttpContext($"198.51.100.{20 + index}", $"ClientDevice{index}"));
+            clientChallenges.Add(login.MfaToken!);
+        }
+
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+        await using var clientA = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var clientB = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var clientFailures = await Task.WhenAll(
+            CaptureMfaAsync(clientA.Auth, clientChallenges[0], "wrong", CreateHttpContext("198.51.100.20", "ClientDevice0")),
+            CaptureMfaAsync(clientB.Auth, clientChallenges[1], "wrong", CreateHttpContext("198.51.100.21", "ClientDevice1")));
+        clientFailures.Should().OnlyContain(x => !x.Success);
+
+        await using var clientBlocked = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var blockedByClient = await CaptureMfaAsync(
+            clientBlocked.Auth,
+            clientChallenges[2],
+            clientUsers[2].RecoveryCode,
+            CreateHttpContext("198.51.100.22", "ClientDevice2"));
+        blockedByClient.Success.Should().BeFalse();
+
+        await using var clientControl = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var allowedOtherClient = await CaptureMfaAsync(
+            clientControl.Auth,
+            clientChallenges[3],
+            clientUsers[3].RecoveryCode,
+            CreateHttpContext("198.51.100.23", "ClientDevice3"));
+        allowedOtherClient.Success.Should().BeTrue();
+
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerClient = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerIp = 2;
+        var ipUsers = new[]
+        {
+            await CreateEnrolledUserAsync(fixture, "IP scope A"),
+            await CreateEnrolledUserAsync(fixture, "IP scope B"),
+            await CreateEnrolledUserAsync(fixture, "IP scope blocked"),
+            await CreateEnrolledUserAsync(fixture, "IP scope control")
+        };
+        var ipChallenges = new List<string>();
+        for (var index = 0; index < ipUsers.Length; index++)
+        {
+            var login = await fixture.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(
+                    ipUsers[index].User.DefaultEmail!,
+                    "P@ssword123!",
+                    index % 2 == 0 ? "test-client" : "alternate-client",
+                    null),
+                CreateHttpContext(index == 3 ? "192.0.2.41" : "192.0.2.40", $"IpDevice{index}"));
+            ipChallenges.Add(login.MfaToken!);
+        }
+
+        await using var ipA = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var ipB = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var ipFailures = await Task.WhenAll(
+            CaptureMfaAsync(ipA.Auth, ipChallenges[0], "wrong", CreateHttpContext("192.0.2.40", "IpDevice0")),
+            CaptureMfaAsync(ipB.Auth, ipChallenges[1], "wrong", CreateHttpContext("192.0.2.40", "IpDevice1")));
+        ipFailures.Should().OnlyContain(x => !x.Success);
+
+        await using var ipBlocked = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        (await CaptureMfaAsync(
+            ipBlocked.Auth,
+            ipChallenges[2],
+            ipUsers[2].RecoveryCode,
+            CreateHttpContext("192.0.2.40", "IpDevice2"))).Success.Should().BeFalse();
+        await using var ipControl = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        (await CaptureMfaAsync(
+            ipControl.Auth,
+            ipChallenges[3],
+            ipUsers[3].RecoveryCode,
+            CreateHttpContext("192.0.2.41", "IpDevice3"))).Success.Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task RealEndpoints_PublicHeadlessAndHostedRejectChallengeSubstitution()
     {
         await using var server = await MfaEndpointServer.CreateAsync();
@@ -532,15 +703,52 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         }
     }
 
-    private static DefaultHttpContext CreateHttpContext()
+    private static async Task<VerificationOutcome> CaptureMfaAsync(
+        SqlOSAuthService auth,
+        string mfaToken,
+        string code,
+        HttpContext context)
+    {
+        try
+        {
+            await auth.VerifyMfaChallengeAsync(new SqlOSMfaChallengeVerifyRequest(mfaToken, code), context);
+            return new VerificationOutcome(true, null);
+        }
+        catch (Exception ex)
+        {
+            return new VerificationOutcome(false, ex);
+        }
+    }
+
+    private static async Task<EnrolledMfaUser> CreateEnrolledUserAsync(
+        SqlMfaFixture fixture,
+        string displayName)
+    {
+        var user = await fixture.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            displayName,
+            $"{displayName.Replace(" ", "-", StringComparison.Ordinal).ToLowerInvariant()}-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await fixture.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest($"{displayName} authenticator"));
+        var verified = await fixture.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            fixture.Totp.GenerateCodeForTesting(enrollment.Secret)));
+        return new EnrolledMfaUser(user, enrollment.Secret, verified.RecoveryCodes[0]);
+    }
+
+    private static DefaultHttpContext CreateHttpContext(
+        string ipAddress = "203.0.113.230",
+        string userAgent = "SqlOSMfaIntegrationTest")
     {
         var context = new DefaultHttpContext();
-        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.230");
-        context.Request.Headers.UserAgent = "SqlOSMfaIntegrationTest";
+        context.Connection.RemoteIpAddress = IPAddress.Parse(ipAddress);
+        context.Request.Headers.UserAgent = userAgent;
         return context;
     }
 
     private sealed record VerificationOutcome(bool Success, Exception? Error);
+    private sealed record EnrolledMfaUser(SqlOSUser User, string Secret, string RecoveryCode);
 
     private sealed class SqlMfaFixture : IAsyncDisposable
     {
@@ -632,6 +840,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
                 BasePath = "/sqlos/auth"
             };
             options.SeedBrowserClient("test-client", "Test Client", "https://client.example.test/callback");
+            options.SeedBrowserClient("alternate-client", "Alternate Client", "https://alternate.example.test/callback");
             options.Mfa.Enabled = true;
             options.Mfa.RequireForAllUsersByDefault = true;
             options.Mfa.AllowUserSelfEnrollmentByDefault = true;

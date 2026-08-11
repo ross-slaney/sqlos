@@ -94,6 +94,15 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSMfaAttemptBucket>(entity =>
+        {
+            entity.ToTable("SqlOSMfaAttemptBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Scope, x.BucketKey }).IsUnique();
+            entity.Property(x => x.Scope).HasMaxLength(40);
+            entity.Property(x => x.BucketKey).HasMaxLength(128);
+        });
+
         modelBuilder.Entity<SqlOSMembership>(entity =>
         {
             entity.ToTable("SqlOSMemberships", schema, t => t.ExcludeFromMigrations());

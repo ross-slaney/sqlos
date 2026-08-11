@@ -23,9 +23,24 @@ builder.AddSqlOS<AppDbContext>(options =>
         mfa.AllowUserSelfEnrollmentByDefault = true;
         mfa.RecoveryCodesEnabledByDefault = true;
         mfa.Totp.Issuer = "Contoso";
+        mfa.Totp.MaxFailedAttemptsPerChallenge = 5;
+        mfa.Totp.MaxFailedAttemptsPerUser = 10;
+        mfa.Totp.MaxFailedAttemptsPerIp = 25;
+        mfa.Totp.MaxFailedAttemptsPerClient = 25;
+        mfa.Totp.MaxFailedAttemptsPerDevice = 10;
+        mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 10;
+        mfa.Totp.FailedAttemptWindow = TimeSpan.FromMinutes(10);
     });
 });
 ```
+
+MFA verification reserves capacity before comparing either a TOTP or recovery
+code. Challenge, user, IP, client, device, and hosted authorization-request
+budgets are persisted in SQL and shared by all application replicas, so issuing
+another challenge cannot create more guesses. Once any applicable budget is
+exhausted, SqlOS rejects the attempt with the same public invalid-code error and
+does not compare the submitted code or reveal the limiting scope. Audit events
+record the outcome but are not used as the security counter.
 
 Startup defaults create the persisted MFA settings row on first boot. To
 reapply settings on each boot, use `SeedMfaPolicy`, matching the existing auth
