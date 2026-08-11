@@ -50,12 +50,36 @@ public sealed partial class SqlOSAdminService
         _context.Set<SqlOSTemporaryToken>().RemoveRange(expired);
 
         var staleMfaAttemptCutoff = now.Subtract(_options.Mfa.Totp.FailedAttemptWindow);
-        var staleMfaAttemptBuckets = await _context.Set<SqlOSMfaAttemptBucket>()
-            .Where(x => x.LastAttemptAt < staleMfaAttemptCutoff)
-            .ToListAsync(cancellationToken);
-        _context.Set<SqlOSMfaAttemptBucket>().RemoveRange(staleMfaAttemptBuckets);
+        var removedMfaAttemptState = 0;
+        if (_context.Database.IsSqlServer())
+        {
+            var schema = _options.Schema.Replace("]", "]]", StringComparison.Ordinal);
+            var sql = $$"""
+                DELETE FROM [{{schema}}].[SqlOSMfaAttemptReservations]
+                WHERE [CreatedAt] < {0};
 
-        if (expired.Count == 0 && staleMfaAttemptBuckets.Count == 0)
+                DELETE FROM [{{schema}}].[SqlOSMfaAttemptBuckets]
+                WHERE [LastAttemptAt] < {0};
+                """;
+            removedMfaAttemptState = await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                [staleMfaAttemptCutoff],
+                cancellationToken);
+        }
+        else
+        {
+            var staleMfaAttemptReservations = await _context.Set<SqlOSMfaAttemptReservation>()
+                .Where(x => x.CreatedAt < staleMfaAttemptCutoff)
+                .ToListAsync(cancellationToken);
+            var staleMfaAttemptBuckets = await _context.Set<SqlOSMfaAttemptBucket>()
+                .Where(x => x.LastAttemptAt < staleMfaAttemptCutoff)
+                .ToListAsync(cancellationToken);
+            _context.Set<SqlOSMfaAttemptReservation>().RemoveRange(staleMfaAttemptReservations);
+            _context.Set<SqlOSMfaAttemptBucket>().RemoveRange(staleMfaAttemptBuckets);
+            removedMfaAttemptState = staleMfaAttemptReservations.Count + staleMfaAttemptBuckets.Count;
+        }
+
+        if (expired.Count == 0 && removedMfaAttemptState == 0)
         {
             return;
         }

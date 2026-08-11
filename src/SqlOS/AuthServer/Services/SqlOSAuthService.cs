@@ -1956,7 +1956,7 @@ public sealed class SqlOSAuthService
             throw;
         }
 
-        await _mfaAttemptAdmissionService.ReleaseAsync(admission.Reservation!, cancellationToken);
+        await _mfaAttemptAdmissionService.ReleaseAsync(admission.Reservation!, CancellationToken.None);
         return factorMethod;
     }
 

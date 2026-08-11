@@ -120,6 +120,17 @@ public sealed class SqlOSMfaAttemptBucket
     public DateTime UpdatedAt { get; set; }
 }
 
+public sealed class SqlOSMfaAttemptReservation
+{
+    public string Id { get; set; } = string.Empty;
+    public string OperationId { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string BucketKey { get; set; } = string.Empty;
+    public DateTime WindowStartedAt { get; set; }
+    public DateTime? ReleasedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
 public sealed class SqlOSMembership
 {
     public string OrganizationId { get; set; } = string.Empty;

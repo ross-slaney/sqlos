@@ -39,7 +39,9 @@ code, then releases that reservation after a successful comparison so only
 failed checks consume the configured failure budgets. Challenge, user, IP,
 client, account-and-client-bound browser fingerprint, and hosted
 authorization-request budgets are persisted in SQL and shared by all application
-replicas, so issuing another challenge cannot create more guesses. Once any
+replicas. Reservation operation IDs make SQL retry replays idempotent, and a
+successful release removes an empty bucket so the next failure starts a fresh
+window. Issuing another challenge therefore cannot create more guesses. Once any
 applicable budget is exhausted, SqlOS rejects the attempt with the same public
 invalid-code error and does not compare the submitted code or reveal the limiting
 scope. Audit events record the outcome but are not used as the security counter.

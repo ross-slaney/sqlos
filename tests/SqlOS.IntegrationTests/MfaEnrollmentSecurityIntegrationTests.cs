@@ -269,7 +269,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             CreateHttpContext("198.51.100.61", commonUserAgent))).Success.Should().BeTrue();
         victimReplica.Context.ChangeTracker.Clear();
         (await victimReplica.Context.Set<SqlOSMfaAttemptBucket>()
-            .CountAsync(x => x.Scope == "device" && x.AttemptCount == 0)).Should().Be(1);
+            .CountAsync(x => x.Scope == "device")).Should().Be(1);
 
         var secondVictimLogin = await victimReplica.Auth.LoginWithPasswordAsync(
             new SqlOSPasswordLoginRequest(victim.User.DefaultEmail!, "P@ssword123!", "test-client", null),
@@ -279,6 +279,110 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             secondVictimLogin.MfaToken!,
             victim.SecondRecoveryCode,
             CreateHttpContext("198.51.100.61", commonUserAgent))).Success.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task SqlServer_ReservationAndReleaseReplaysAreIdempotent()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaReservationReplay");
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 4;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerUser = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerClient = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerDevice = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 20;
+        var enrolled = await CreateEnrolledUserAsync(fixture, "Reservation replay user");
+        var httpContext = CreateHttpContext("198.51.100.70", "ReservationReplayDevice");
+        var login = await fixture.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(enrolled.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+            httpContext);
+
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+        await using var replica = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var token = await replica.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.TokenHash == replica.Crypto.HashToken(login.MfaToken!));
+        var payload = replica.Crypto.DeserializePayload<SqlOSMfaChallengePayload>(token)!;
+        var admission = new SqlOSMfaAttemptAdmissionService(
+            replica.Context,
+            Microsoft.Extensions.Options.Options.Create(fixture.Options));
+
+        var first = await admission.TryReserveAsync(
+            token,
+            payload,
+            httpContext,
+            operationId: "mfaop_replay_first");
+        var second = await admission.TryReserveAsync(
+            token,
+            payload,
+            httpContext,
+            operationId: "mfaop_replay_second");
+        var replayedFirst = await admission.TryReserveAsync(
+            token,
+            payload,
+            httpContext,
+            operationId: "mfaop_replay_first");
+
+        first.Admitted.Should().BeTrue();
+        second.Admitted.Should().BeTrue();
+        replayedFirst.Admitted.Should().BeTrue();
+        (await replica.Context.Set<SqlOSMfaAttemptBucket>().ToArrayAsync())
+            .Should().OnlyContain(x => x.AttemptCount == 2);
+
+        await admission.ReleaseAsync(first.Reservation!);
+        await admission.ReleaseAsync(first.Reservation!);
+        replica.Context.ChangeTracker.Clear();
+        (await replica.Context.Set<SqlOSMfaAttemptBucket>().ToArrayAsync())
+            .Should().OnlyContain(x => x.AttemptCount == 1);
+
+        await admission.ReleaseAsync(second.Reservation!);
+        replica.Context.ChangeTracker.Clear();
+        (await replica.Context.Set<SqlOSMfaAttemptBucket>().CountAsync()).Should().Be(0);
+        (await replica.Context.Set<SqlOSMfaAttemptReservation>()
+            .CountAsync(x => x.ReleasedAt == null)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SqlServer_CleanupDoesNotDeleteConcurrentlyReactivatedAttemptBucket()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaCleanupRace");
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+        var staleAt = DateTime.UtcNow.Subtract(fixture.Options.Mfa.Totp.FailedAttemptWindow).AddMinutes(-1);
+        var bucket = new SqlOSMfaAttemptBucket
+        {
+            Id = $"mab_{Guid.NewGuid():N}",
+            Scope = "user",
+            BucketKey = "cleanup-race",
+            AttemptCount = 1,
+            WindowStartedAt = staleAt,
+            LastAttemptAt = staleAt,
+            CreatedAt = staleAt,
+            UpdatedAt = staleAt
+        };
+        fixture.Context.Add(bucket);
+        await fixture.Context.SaveChangesAsync();
+
+        await using var reactivating = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        await using var transaction = await reactivating.Context.Database.BeginTransactionAsync();
+        var lockedBucket = await reactivating.Context.Set<SqlOSMfaAttemptBucket>()
+            .SingleAsync(x => x.Id == bucket.Id);
+        lockedBucket.AttemptCount = 1;
+        lockedBucket.WindowStartedAt = DateTime.UtcNow;
+        lockedBucket.LastAttemptAt = DateTime.UtcNow;
+        lockedBucket.UpdatedAt = DateTime.UtcNow;
+        await reactivating.Context.SaveChangesAsync();
+
+        await using var cleanup = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var cleanupTask = cleanup.Admin.CleanupExpiredTemporaryTokensAsync();
+        await Task.Delay(250);
+        cleanupTask.IsCompleted.Should().BeFalse();
+        await transaction.CommitAsync();
+        await cleanupTask;
+
+        await using var verify = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        var preserved = await verify.Context.Set<SqlOSMfaAttemptBucket>()
+            .SingleAsync(x => x.Id == bucket.Id);
+        preserved.LastAttemptAt.Should().BeAfter(staleAt);
+        preserved.AttemptCount.Should().Be(1);
     }
 
     [TestMethod]

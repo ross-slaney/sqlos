@@ -35,6 +35,7 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSCredentials",
                      "SqlOSPasswordLoginBuckets",
                      "SqlOSMfaAttemptBuckets",
+                     "SqlOSMfaAttemptReservations",
                      "SqlOSMemberships",
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",

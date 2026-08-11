@@ -104,6 +104,17 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.BucketKey).HasMaxLength(128);
         });
 
+        modelBuilder.Entity<SqlOSMfaAttemptReservation>(entity =>
+        {
+            entity.ToTable("SqlOSMfaAttemptReservations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.OperationId, x.Scope, x.BucketKey }).IsUnique();
+            entity.HasIndex(x => x.CreatedAt);
+            entity.Property(x => x.OperationId).HasMaxLength(64);
+            entity.Property(x => x.Scope).HasMaxLength(40);
+            entity.Property(x => x.BucketKey).HasMaxLength(128);
+        });
+
         modelBuilder.Entity<SqlOSMembership>(entity =>
         {
             entity.ToTable("SqlOSMemberships", schema, t => t.ExcludeFromMigrations());

@@ -874,9 +874,8 @@ public sealed class SqlOSAuthServiceTests
             result.Tokens.Should().NotBeNull();
         }
 
-        var userBucket = await harness.Context.Set<SqlOSMfaAttemptBucket>()
-            .SingleAsync(x => x.Scope == "user");
-        userBucket.AttemptCount.Should().Be(0);
+        (await harness.Context.Set<SqlOSMfaAttemptBucket>()
+            .CountAsync(x => x.Scope == "user")).Should().Be(0);
     }
 
     [TestMethod]
@@ -906,13 +905,33 @@ public sealed class SqlOSAuthServiceTests
             CreatedAt = now,
             UpdatedAt = now
         };
-        harness.Context.AddRange(stale, active);
+        var staleReservation = new SqlOSMfaAttemptReservation
+        {
+            Id = $"mar_{Guid.NewGuid():N}",
+            OperationId = "mfaop_stale",
+            Scope = "challenge",
+            BucketKey = "stale",
+            WindowStartedAt = stale.WindowStartedAt,
+            CreatedAt = stale.CreatedAt
+        };
+        var activeReservation = new SqlOSMfaAttemptReservation
+        {
+            Id = $"mar_{Guid.NewGuid():N}",
+            OperationId = "mfaop_active",
+            Scope = "challenge",
+            BucketKey = "active",
+            WindowStartedAt = active.WindowStartedAt,
+            CreatedAt = active.CreatedAt
+        };
+        harness.Context.AddRange(stale, active, staleReservation, activeReservation);
         await harness.Context.SaveChangesAsync();
 
         await harness.Admin.CleanupExpiredTemporaryTokensAsync();
 
         (await harness.Context.Set<SqlOSMfaAttemptBucket>().Select(x => x.Id).ToArrayAsync())
             .Should().Equal(active.Id);
+        (await harness.Context.Set<SqlOSMfaAttemptReservation>().Select(x => x.Id).ToArrayAsync())
+            .Should().Equal(activeReservation.Id);
     }
 
     [TestMethod]
