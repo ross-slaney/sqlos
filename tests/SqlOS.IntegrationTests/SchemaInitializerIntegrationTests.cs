@@ -74,6 +74,9 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync(
             "SqlOSAuthOidcConnections",
             "AcceptedAcrValuesJson"));
+        Assert.IsTrue(await ColumnExistsAsync(
+            "SqlOSPasswordLoginBuckets",
+            "ReservationsRebasedAt"));
         foreach (var table in new[] { "SqlOSClientApplications", "SqlOSAuthOidcConnections", "SqlOSScimConnections", "SqlOSMfaSettings" })
         {
             foreach (var column in new[] { "ConfigurationOwner", "ConfigurationSourceKey", "ConfigurationFingerprint", "LastReconciledAt", "ConfigurationOrphanedAt" })

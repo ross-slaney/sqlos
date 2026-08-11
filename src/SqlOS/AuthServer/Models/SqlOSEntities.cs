@@ -102,6 +102,7 @@ public sealed class SqlOSPasswordLoginBucket
     public DateTime? LastSuccessAt { get; set; }
     public DateTime? LockedUntil { get; set; }
     public string? LockoutReason { get; set; }
+    public DateTime? ReservationsRebasedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

@@ -14,6 +14,8 @@ public sealed class SqlOSPasswordLoginAbuseService
 {
     public const string PublicFailureMessage = "Invalid email or password.";
     private const int ExpiredReservationCleanupBatchSize = 100;
+    private const int MaximumBucketKeyLength = 512;
+    private const string ThresholdLockoutReason = "failed_attempt_threshold";
     private static readonly TimeSpan MaximumReservationLifetime = TimeSpan.FromMinutes(2);
 
     private readonly ISqlOSAuthServerDbContext _context;
@@ -81,7 +83,7 @@ public sealed class SqlOSPasswordLoginAbuseService
                 scope = outcome.Rejection.Scope,
                 retryAfter = outcome.Rejection.LockedUntil,
                 failureCount = outcome.Rejection.FailureCount,
-                reason = outcome.Rejection.LockoutReason ?? "active_lockout"
+                reason = GetPublicLockoutReason(outcome.Rejection.LockoutReason) ?? "active_lockout"
             },
             cancellationToken);
         throw new InvalidOperationException(PublicFailureMessage);
@@ -221,7 +223,7 @@ public sealed class SqlOSPasswordLoginAbuseService
             if (bucket.FailureCount >= identity.Threshold && bucket.LockedUntil == null)
             {
                 bucket.LockedUntil = now.Add(_options.LockoutDuration);
-                bucket.LockoutReason = "failed_attempt_threshold";
+                bucket.LockoutReason = CreateThresholdLockoutReason(reservation.Id);
             }
 
             reservation.Buckets.Add(new SqlOSPasswordLoginReservationBucket
@@ -258,7 +260,9 @@ public sealed class SqlOSPasswordLoginAbuseService
             var bucket = link.Bucket!;
             bucket.LastFailureAt = now;
             bucket.UpdatedAt = now;
-            if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
+            if (bucket.LockedUntil is { } lockedUntil
+                && lockedUntil > now
+                && IsThresholdLockoutCausedBy(bucket, reservation.Id))
             {
                 locked.Add(new LockedBucket(bucket.Scope, bucket.FailureCount, lockedUntil));
             }
@@ -283,6 +287,10 @@ public sealed class SqlOSPasswordLoginAbuseService
         {
             throw new InvalidOperationException("The password comparison reservation is no longer active.");
         }
+        if (reservation.Buckets.Count == 0)
+        {
+            return [];
+        }
 
         var resetScopes = new List<string>();
         foreach (var link in reservation.Buckets)
@@ -306,7 +314,10 @@ public sealed class SqlOSPasswordLoginAbuseService
             bucket.UpdatedAt = now;
         }
 
-        _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
+        var completedLinks = reservation.Buckets.ToArray();
+        _context.Set<SqlOSPasswordLoginReservationBucket>().RemoveRange(completedLinks);
+        reservation.Buckets.Clear();
+        reservation.ExpiresAt = now.Add(MaximumReservationLifetime);
         await _context.SaveChangesAsync(cancellationToken);
         return resetScopes;
     }
@@ -325,7 +336,12 @@ public sealed class SqlOSPasswordLoginAbuseService
         {
             foreach (var link in reservation.Buckets)
             {
-                ReleaseReservationFromBucket(link.Bucket!, now);
+                var bucket = link.Bucket!;
+                if (bucket.ReservationsRebasedAt is not { } rebasedAt
+                    || rebasedAt < reservation.ExpiresAt)
+                {
+                    ReleaseReservationFromBucket(bucket, now);
+                }
             }
 
             _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
@@ -349,7 +365,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         if (bucket.FailureCount >= threshold)
         {
             bucket.LockedUntil ??= now.Add(_options.LockoutDuration);
-            bucket.LockoutReason ??= "failed_attempt_threshold";
+            bucket.LockoutReason ??= ThresholdLockoutReason;
             return;
         }
 
@@ -462,7 +478,10 @@ public sealed class SqlOSPasswordLoginAbuseService
 
         if (!string.IsNullOrWhiteSpace(attempt.ClientKey) && _options.MaxFailedAttemptsPerClient > 0)
         {
-            yield return new PasswordBucketIdentity("client", attempt.ClientKey, _options.MaxFailedAttemptsPerClient);
+            yield return new PasswordBucketIdentity(
+                "client",
+                GetBoundedClientBucketKey(attempt.ClientKey),
+                _options.MaxFailedAttemptsPerClient);
         }
 
         if (!string.IsNullOrWhiteSpace(attempt.UserAgentHash) && _options.MaxFailedAttemptsPerDevice > 0)
@@ -524,6 +543,7 @@ public sealed class SqlOSPasswordLoginAbuseService
                 cancellationToken);
         bucket.FailureCount = activeReservations;
         bucket.WindowStartedAt = activeReservations == 0 ? null : now;
+        bucket.ReservationsRebasedAt = now;
         bucket.LockedUntil = null;
         bucket.LockoutReason = null;
         ApplyLockState(bucket, threshold, now);
@@ -569,6 +589,27 @@ public sealed class SqlOSPasswordLoginAbuseService
 
     private static string? NormalizeClientKey(string? clientKey)
         => string.IsNullOrWhiteSpace(clientKey) ? null : clientKey.Trim();
+
+    private static string GetBoundedClientBucketKey(string clientKey)
+        => clientKey.Length <= MaximumBucketKeyLength
+            ? clientKey
+            : $"sha256:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(clientKey)))}";
+
+    private static string CreateThresholdLockoutReason(string reservationId)
+        => $"{ThresholdLockoutReason}:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(reservationId)))}";
+
+    private static bool IsThresholdLockoutCausedBy(
+        SqlOSPasswordLoginBucket bucket,
+        string reservationId)
+        => string.Equals(
+            bucket.LockoutReason,
+            CreateThresholdLockoutReason(reservationId),
+            StringComparison.Ordinal);
+
+    private static string? GetPublicLockoutReason(string? lockoutReason)
+        => lockoutReason?.StartsWith($"{ThresholdLockoutReason}:", StringComparison.Ordinal) == true
+            ? ThresholdLockoutReason
+            : lockoutReason;
 
     private static string? HashUserAgent(string? userAgent)
     {

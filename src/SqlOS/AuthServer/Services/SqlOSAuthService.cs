@@ -113,6 +113,7 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Local password authentication is disabled.");
         }
 
+        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var attempt = _passwordLoginAbuseService.CreateAttempt(
             normalizedEmail,
@@ -151,7 +152,6 @@ public sealed class SqlOSAuthService
         }
 
         var user = await _context.Set<SqlOSUser>().AsNoTracking().FirstAsync(x => x.Id == email!.UserId, cancellationToken);
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
         await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
         var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
         storedCredential.LastUsedAt = DateTime.UtcNow;

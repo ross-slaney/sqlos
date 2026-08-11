@@ -53,6 +53,8 @@ public sealed class PasswordLoginAdmissionIntegrationTests
             .ToListAsync();
         auditTypes.Count(x => x == "password.login.failed").Should().Be(3);
         auditTypes.Count(x => x == "password.login.rate_limit_rejected").Should().Be(7);
+        auditTypes.Count(x => x == "password.login.locked").Should().Be(2,
+            "the threshold-causing reservation emits one transition for each account bucket");
         (await database.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == user.Id)).Should().Be(0);
     }
 
@@ -337,11 +339,134 @@ public sealed class PasswordLoginAdmissionIntegrationTests
         await actor.Abuse.ReserveAsync(attempt);
         await Task.Delay(20);
         await actor.Abuse.RecordSuccessAsync(attempt);
+        await actor.Abuse.RecordSuccessAsync(attempt);
 
         database.Context.ChangeTracker.Clear();
         (await database.Context.Set<SqlOSPasswordLoginReservation>()
                 .CountAsync(x => x.Id == attempt.ReservationId))
+            .Should().Be(1);
+        (await database.Context.Set<SqlOSPasswordLoginReservationBucket>()
+                .CountAsync(x => x.ReservationId == attempt.ReservationId))
             .Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task LongValidClientId_UsesBoundedBucketKeyAndRetainsFullClientIdentity()
+    {
+        var clientId = $"long-{new string('c', 600)}";
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 5;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        await database.Admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            clientId,
+            "Long Client",
+            "long-client-api",
+            ["https://long-client.example.test/callback"],
+            IsFirstParty: true,
+            AllowNativeHeadlessAuth: true));
+        var user = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Long Client User",
+            $"long-client-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        await using var actor = database.CreateActor();
+        var result = await actor.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", clientId, null),
+            CreateHttpContext("203.0.113.194", "long-client"));
+
+        result.Tokens.Should().NotBeNull();
+        database.Context.ChangeTracker.Clear();
+        var bucket = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "client" && x.ClientKey == clientId);
+        bucket.BucketKey.Should().StartWith("sha256:");
+        bucket.BucketKey.Length.Should().BeLessThanOrEqualTo(512);
+        bucket.ClientKey.Should().Be(clientId);
+    }
+
+    [TestMethod]
+    public async Task InvalidClient_IsRejectedBeforePasswordReservation()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(_ => { });
+        var user = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Invalid Client User",
+            $"invalid-client-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        await using var actor = database.CreateActor();
+        var act = async () => await actor.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "missing-client", null),
+            CreateHttpContext("203.0.113.195", "invalid-client"));
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSPasswordLoginReservation>().CountAsync()).Should().Be(0);
+        (await database.Context.Set<SqlOSPasswordLoginBucket>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task RebasedBucket_IsNotDecrementedByLaterExpiredCleanupBatch()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        var email = SqlOSAdminService.NormalizeEmail("cleanup-batch@example.com");
+        await using var activeActor = database.CreateActor();
+        var active = activeActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext("203.0.113.196", "active-cleanup"),
+            surface: "api");
+        await activeActor.Abuse.ReserveAsync(active);
+
+        database.Context.ChangeTracker.Clear();
+        var bucket = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "email" && x.BucketKey == email);
+        var expiredAt = DateTime.UtcNow.AddSeconds(-1);
+        bucket.FailureCount = 102;
+        bucket.WindowStartedAt = expiredAt.AddMinutes(-5);
+        bucket.LockedUntil = expiredAt;
+        for (var index = 0; index < 101; index++)
+        {
+            var reservation = new SqlOSPasswordLoginReservation
+            {
+                Id = $"pla_expired_{index:D3}_{Guid.NewGuid():N}"[..28],
+                CreatedAt = expiredAt.AddMinutes(-3),
+                ExpiresAt = expiredAt
+            };
+            reservation.Buckets.Add(new SqlOSPasswordLoginReservationBucket
+            {
+                Reservation = reservation,
+                ReservationId = reservation.Id,
+                BucketId = bucket.Id
+            });
+            database.Context.Add(reservation);
+        }
+        await database.Context.SaveChangesAsync();
+
+        for (var index = 0; index < 2; index++)
+        {
+            await using var replacementActor = database.CreateActor();
+            var replacement = replacementActor.Abuse.CreateAttempt(
+                email,
+                CreateHttpContext($"203.0.113.{197 + index}", $"replacement-{index}"),
+                surface: "api");
+            var act = async () => await replacementActor.Abuse.ReserveAsync(replacement);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        database.Context.ChangeTracker.Clear();
+        var preserved = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Id == bucket.Id);
+        preserved.FailureCount.Should().Be(1);
+        preserved.LockedUntil.Should().BeAfter(DateTime.UtcNow);
     }
 
     private static DefaultHttpContext CreateHttpContext(string ipAddress, string userAgent)

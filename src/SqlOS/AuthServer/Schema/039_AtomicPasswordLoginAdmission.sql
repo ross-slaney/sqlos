@@ -19,6 +19,7 @@ BEGIN
         [LastSuccessAt] DATETIME2 NULL,
         [LockedUntil] DATETIME2 NULL,
         [LockoutReason] NVARCHAR(120) NULL,
+        [ReservationsRebasedAt] DATETIME2 NULL,
         [CreatedAt] DATETIME2 NOT NULL,
         [UpdatedAt] DATETIME2 NOT NULL
     );
@@ -39,6 +40,13 @@ BEGIN
     ALTER TABLE [{Schema}].[SqlOSPasswordLoginBuckets]
         ADD CONSTRAINT [FK_SqlOSPasswordLoginBuckets_Users_UserId]
             FOREIGN KEY ([UserId]) REFERENCES [{Schema}].[SqlOSUsers]([Id]);
+END
+
+IF OBJECT_ID('[{Schema}].[SqlOSPasswordLoginBuckets]', 'U') IS NOT NULL
+   AND COL_LENGTH('[{Schema}].[SqlOSPasswordLoginBuckets]', 'ReservationsRebasedAt') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSPasswordLoginBuckets]
+        ADD [ReservationsRebasedAt] DATETIME2 NULL;
 END
 
 IF OBJECT_ID('[{Schema}].[SqlOSPasswordLoginBuckets]', 'U') IS NOT NULL
