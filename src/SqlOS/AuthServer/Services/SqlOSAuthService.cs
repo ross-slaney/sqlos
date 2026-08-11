@@ -1918,9 +1918,11 @@ public sealed class SqlOSAuthService
             await RejectMfaAttemptAsync(token, httpContext, admission.RejectedScope!, cancellationToken);
         }
 
+        string factorMethod;
         try
         {
-            return await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
+            factorMethod = await RequireTotpMfaService()
+                .VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
         }
         catch (InvalidOperationException)
         {
@@ -1937,6 +1939,25 @@ public sealed class SqlOSAuthService
                 cancellationToken);
             throw new InvalidOperationException(MfaChallengeFailureMessage);
         }
+        catch
+        {
+            try
+            {
+                await _mfaAttemptAdmissionService.ReleaseAsync(
+                    admission.Reservation!,
+                    CancellationToken.None);
+            }
+            catch
+            {
+                // Preserve the original verification failure. A stranded
+                // reservation expires with its bounded attempt window.
+            }
+
+            throw;
+        }
+
+        await _mfaAttemptAdmissionService.ReleaseAsync(admission.Reservation!, cancellationToken);
+        return factorMethod;
     }
 
     internal async Task<string> CreateMfaChallengeAsync(
@@ -1986,16 +2007,6 @@ public sealed class SqlOSAuthService
         string rejectedScope,
         CancellationToken cancellationToken)
     {
-        token.ConsumedAt = DateTime.UtcNow;
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Another request has already consumed or updated this challenge.
-        }
-
         await TryRecordMfaChallengeAuditAsync(
             "user.mfa.challenge_rate_limited",
             token,

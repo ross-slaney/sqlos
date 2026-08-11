@@ -43,15 +43,23 @@ public sealed partial class SqlOSAdminService
 
     public async Task CleanupExpiredTemporaryTokensAsync(CancellationToken cancellationToken = default)
     {
+        var now = DateTime.UtcNow;
         var expired = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.ExpiresAt < DateTime.UtcNow || x.ConsumedAt != null)
+            .Where(x => x.ExpiresAt < now || x.ConsumedAt != null)
             .ToListAsync(cancellationToken);
-        if (expired.Count == 0)
+        _context.Set<SqlOSTemporaryToken>().RemoveRange(expired);
+
+        var staleMfaAttemptCutoff = now.Subtract(_options.Mfa.Totp.FailedAttemptWindow);
+        var staleMfaAttemptBuckets = await _context.Set<SqlOSMfaAttemptBucket>()
+            .Where(x => x.LastAttemptAt < staleMfaAttemptCutoff)
+            .ToListAsync(cancellationToken);
+        _context.Set<SqlOSMfaAttemptBucket>().RemoveRange(staleMfaAttemptBuckets);
+
+        if (expired.Count == 0 && staleMfaAttemptBuckets.Count == 0)
         {
             return;
         }
 
-        _context.Set<SqlOSTemporaryToken>().RemoveRange(expired);
         await _context.SaveChangesAsync(cancellationToken);
     }
 

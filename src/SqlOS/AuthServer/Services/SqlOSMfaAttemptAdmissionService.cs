@@ -44,6 +44,19 @@ public sealed class SqlOSMfaAttemptAdmissionService
         return await ReserveProviderFallbackAsync(identities, cancellationToken);
     }
 
+    internal async Task ReleaseAsync(
+        SqlOSMfaAttemptReservation reservation,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsSqlServer())
+        {
+            await ReleaseSqlServerAsync(reservation.Buckets, cancellationToken);
+            return;
+        }
+
+        await ReleaseProviderFallbackAsync(reservation.Buckets, cancellationToken);
+    }
+
     internal async Task<bool> IsUserCapacityExhaustedAsync(
         string userId,
         CancellationToken cancellationToken = default)
@@ -74,6 +87,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
                 cancellationToken);
             var connection = _context.Database.GetDbConnection();
             var schema = EscapeIdentifier(_options.Schema);
+            var reservations = new List<MfaBucketReservation>(identities.Count);
 
             foreach (var identity in identities)
             {
@@ -88,8 +102,13 @@ public sealed class SqlOSMfaAttemptAdmissionService
                     && current.AttemptCount >= identity.Threshold)
                 {
                     await transaction.RollbackAsync(cancellationToken);
-                    return new SqlOSMfaAttemptAdmissionResult(false, identity.Scope);
+                    return new SqlOSMfaAttemptAdmissionResult(false, identity.Scope, null);
                 }
+
+                var windowStartedAt = current is { WindowStartedAt: var activeWindowStartedAt }
+                    && activeWindowStartedAt >= cutoff
+                    ? activeWindowStartedAt
+                    : now;
 
                 await UpsertReservationAsync(
                     connection,
@@ -100,10 +119,14 @@ public sealed class SqlOSMfaAttemptAdmissionService
                     now,
                     cutoff,
                     cancellationToken);
+                reservations.Add(new MfaBucketReservation(identity, windowStartedAt));
             }
 
             await transaction.CommitAsync(cancellationToken);
-            return new SqlOSMfaAttemptAdmissionResult(true, null);
+            return new SqlOSMfaAttemptAdmissionResult(
+                true,
+                null,
+                new SqlOSMfaAttemptReservation(reservations));
         });
     }
 
@@ -124,7 +147,7 @@ public sealed class SqlOSMfaAttemptAdmissionService
                 && startedAt >= cutoff
                 && bucket.AttemptCount >= identity.Threshold)
             {
-                return new SqlOSMfaAttemptAdmissionResult(false, identity.Scope);
+                return new SqlOSMfaAttemptAdmissionResult(false, identity.Scope, null);
             }
 
             pending.Add((identity, bucket));
@@ -163,7 +186,73 @@ public sealed class SqlOSMfaAttemptAdmissionService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
-        return new SqlOSMfaAttemptAdmissionResult(true, null);
+        return new SqlOSMfaAttemptAdmissionResult(
+            true,
+            null,
+            new SqlOSMfaAttemptReservation(pending.Select(x => new MfaBucketReservation(
+                x.Identity,
+                x.Bucket is { WindowStartedAt: var startedAt } && startedAt >= cutoff ? startedAt : now)).ToArray()));
+    }
+
+    private async Task ReleaseSqlServerAsync(
+        IReadOnlyList<MfaBucketReservation> reservations,
+        CancellationToken cancellationToken)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var connection = _context.Database.GetDbConnection();
+            var schema = EscapeIdentifier(_options.Schema);
+            foreach (var reservation in reservations)
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction.GetDbTransaction();
+                command.CommandText = $"""
+                    UPDATE [{schema}].[SqlOSMfaAttemptBuckets] WITH (UPDLOCK, HOLDLOCK)
+                    SET [AttemptCount] = [AttemptCount] - 1,
+                        [UpdatedAt] = @now
+                    WHERE [Scope] = @scope
+                      AND [BucketKey] = @bucketKey
+                      AND [WindowStartedAt] = @windowStartedAt
+                      AND [AttemptCount] > 0;
+                    """;
+                AddParameter(command, "@scope", reservation.Identity.Scope);
+                AddParameter(command, "@bucketKey", reservation.Identity.BucketKey);
+                AddParameter(command, "@windowStartedAt", reservation.WindowStartedAt);
+                AddParameter(command, "@now", DateTime.UtcNow);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
+
+    private async Task ReleaseProviderFallbackAsync(
+        IReadOnlyList<MfaBucketReservation> reservations,
+        CancellationToken cancellationToken)
+    {
+        foreach (var reservation in reservations)
+        {
+            var bucket = await _context.Set<SqlOSMfaAttemptBucket>()
+                .FirstOrDefaultAsync(
+                    x => x.Scope == reservation.Identity.Scope
+                        && x.BucketKey == reservation.Identity.BucketKey,
+                    cancellationToken);
+            if (bucket == null
+                || bucket.WindowStartedAt != reservation.WindowStartedAt
+                || bucket.AttemptCount <= 0)
+            {
+                continue;
+            }
+
+            bucket.AttemptCount--;
+            bucket.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private IEnumerable<MfaBucketIdentity> CreateBucketIdentities(
@@ -185,7 +274,13 @@ public sealed class SqlOSMfaAttemptAdmissionService
         var userAgent = httpContext?.Request.Headers.UserAgent.ToString();
         if (!string.IsNullOrWhiteSpace(userAgent))
         {
-            yield return CreateIdentity("device", userAgent.Trim(), totp.MaxFailedAttemptsPerDevice);
+            // User-Agent is only a coarse client fingerprint. Bind it to the
+            // authenticated user and client so a common or spoofed header
+            // cannot create a global cross-account denial-of-service bucket.
+            yield return CreateIdentity(
+                "device",
+                $"{challenge.UserId}\0{challenge.ClientApplicationId}\0{userAgent.Trim()}",
+                totp.MaxFailedAttemptsPerDevice);
         }
 
         if (!string.IsNullOrWhiteSpace(payload.AuthorizationRequestId))
@@ -281,8 +376,15 @@ public sealed class SqlOSMfaAttemptAdmissionService
 
     private static string EscapeIdentifier(string value) => value.Replace("]", "]]", StringComparison.Ordinal);
 
-    private sealed record MfaBucketIdentity(string Scope, string BucketKey, int Threshold);
+    internal sealed record MfaBucketIdentity(string Scope, string BucketKey, int Threshold);
+    internal sealed record MfaBucketReservation(MfaBucketIdentity Identity, DateTime WindowStartedAt);
     private sealed record BucketState(int AttemptCount, DateTime WindowStartedAt);
 }
 
-internal sealed record SqlOSMfaAttemptAdmissionResult(bool Admitted, string? RejectedScope);
+internal sealed record SqlOSMfaAttemptAdmissionResult(
+    bool Admitted,
+    string? RejectedScope,
+    SqlOSMfaAttemptReservation? Reservation);
+
+internal sealed record SqlOSMfaAttemptReservation(
+    IReadOnlyList<SqlOSMfaAttemptAdmissionService.MfaBucketReservation> Buckets);

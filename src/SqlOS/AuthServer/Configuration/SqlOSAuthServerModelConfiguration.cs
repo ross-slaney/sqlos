@@ -99,6 +99,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.ToTable("SqlOSMfaAttemptBuckets", schema, t => t.ExcludeFromMigrations());
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Scope, x.BucketKey }).IsUnique();
+            entity.HasIndex(x => x.LastAttemptAt);
             entity.Property(x => x.Scope).HasMaxLength(40);
             entity.Property(x => x.BucketKey).HasMaxLength(128);
         });

@@ -813,6 +813,11 @@ public sealed class SqlOSAuthServiceTests
             .CountAsync(x => x.UserId == user.Id && x.ConsumedAt != null)).Should().Be(0);
         (await harness.Context.Set<SqlOSAuthorizationCode>()
             .CountAsync(x => x.AuthorizationRequestId == request.Id)).Should().Be(0);
+        var rejectedChallenge = await harness.Crypto.FindTemporaryTokenAsync(
+            SqlOSAuthService.MfaChallengePurpose,
+            challenges[2]);
+        rejectedChallenge.Should().NotBeNull();
+        rejectedChallenge!.ConsumedAt.Should().BeNull();
 
         var controlRequest = await CreateHeadlessAuthorizationRequestAsync(
             harness,
@@ -831,6 +836,83 @@ public sealed class SqlOSAuthServiceTests
         redirect.Should().Contain("code=");
         (await harness.Context.Set<SqlOSAuthorizationCode>()
             .CountAsync(x => x.AuthorizationRequestId == controlRequest.Id)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task SuccessfulMfaChecks_ReleaseEveryFailureBudgetReservation()
+    {
+        var harness = await TestHarness.CreateAsync(configure: options =>
+        {
+            ConfigureRequiredMfa(options);
+            options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 1;
+            options.Mfa.Totp.MaxFailedAttemptsPerUser = 1;
+            options.Mfa.Totp.MaxFailedAttemptsPerIp = 2;
+            options.Mfa.Totp.MaxFailedAttemptsPerClient = 2;
+            options.Mfa.Totp.MaxFailedAttemptsPerDevice = 2;
+            options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 2;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Successful MFA budget",
+            $"successful-mfa-budget-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+        var enrollment = await harness.Auth.StartTotpEnrollmentAsync(
+            user.Id,
+            new SqlOSTotpEnrollmentStartRequest("Successful MFA budget authenticator"));
+        var enrolled = await harness.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
+            enrollment.EnrollmentToken,
+            harness.Totp.GenerateCodeForTesting(enrollment.Secret)));
+
+        for (var index = 0; index < 2; index++)
+        {
+            var context = CreatePasswordHttpContext($"203.0.113.{235 + index}");
+            var login = await harness.Auth.LoginWithPasswordAsync(
+                new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+                context);
+            var result = await harness.Auth.VerifyMfaChallengeAsync(
+                new SqlOSMfaChallengeVerifyRequest(login.MfaToken!, enrolled.RecoveryCodes[index]),
+                context);
+            result.Tokens.Should().NotBeNull();
+        }
+
+        var userBucket = await harness.Context.Set<SqlOSMfaAttemptBucket>()
+            .SingleAsync(x => x.Scope == "user");
+        userBucket.AttemptCount.Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task TemporaryTokenCleanup_RemovesOnlyExpiredMfaAttemptWindows()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var now = DateTime.UtcNow;
+        var stale = new SqlOSMfaAttemptBucket
+        {
+            Id = $"mab_{Guid.NewGuid():N}",
+            Scope = "challenge",
+            BucketKey = "stale",
+            AttemptCount = 1,
+            WindowStartedAt = now.Subtract(harness.Options.Mfa.Totp.FailedAttemptWindow).AddMinutes(-1),
+            LastAttemptAt = now.Subtract(harness.Options.Mfa.Totp.FailedAttemptWindow).AddMinutes(-1),
+            CreatedAt = now.AddHours(-1),
+            UpdatedAt = now.AddHours(-1)
+        };
+        var active = new SqlOSMfaAttemptBucket
+        {
+            Id = $"mab_{Guid.NewGuid():N}",
+            Scope = "challenge",
+            BucketKey = "active",
+            AttemptCount = 1,
+            WindowStartedAt = now,
+            LastAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        harness.Context.AddRange(stale, active);
+        await harness.Context.SaveChangesAsync();
+
+        await harness.Admin.CleanupExpiredTemporaryTokensAsync();
+
+        (await harness.Context.Set<SqlOSMfaAttemptBucket>().Select(x => x.Id).ToArrayAsync())
+            .Should().Equal(active.Id);
     }
 
     [TestMethod]
@@ -996,7 +1078,7 @@ public sealed class SqlOSAuthServiceTests
 
         var blockedChallenge = await harness.Context.Set<SqlOSTemporaryToken>()
             .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(blockedLogin.MfaToken!));
-        blockedChallenge.ConsumedAt.Should().NotBeNull();
+        blockedChallenge.ConsumedAt.Should().BeNull();
         (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
             x.Action == "user.mfa.challenge_failed" && x.IpAddress == sharedIp)).Should().Be(2);
         (await harness.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == blocked.User.Id)).Should().Be(0);

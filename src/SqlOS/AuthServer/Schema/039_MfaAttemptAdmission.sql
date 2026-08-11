@@ -14,6 +14,9 @@ BEGIN
     CREATE UNIQUE INDEX [IX_SqlOSMfaAttemptBuckets_Scope_BucketKey]
         ON [{Schema}].[SqlOSMfaAttemptBuckets]([Scope], [BucketKey]);
 
+    CREATE INDEX [IX_SqlOSMfaAttemptBuckets_LastAttemptAt]
+        ON [{Schema}].[SqlOSMfaAttemptBuckets]([LastAttemptAt]);
+
 END
 
 GO

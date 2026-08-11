@@ -189,21 +189,34 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         thresholdRace.Count(x => x.Success).Should().BeLessThanOrEqualTo(1);
         thresholdRace.Count(x => x.Error is InvalidOperationException).Should().BeGreaterThanOrEqualTo(1);
 
+        var challengeForBlockedCorrect = challenges[4];
+        if (thresholdRace.Any(x => x.Success))
+        {
+            await using var fillCapacity = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+            var finalFailure = await CaptureMfaAsync(
+                fillCapacity.Auth,
+                challenges[5],
+                "wrong",
+                CreateHttpContext("203.0.113.15", "ReplicaF"));
+            finalFailure.Success.Should().BeFalse();
+            challengeForBlockedCorrect = challenges[3];
+        }
+
         await using var exhausted = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
         var correctAfterCapacity = await CaptureMfaAsync(
             exhausted.Auth,
-            challenges[5],
+            challengeForBlockedCorrect,
             exhausted.Totp.GenerateCodeForTesting(
                 enrolled.Secret,
                 DateTimeOffset.UtcNow.AddSeconds(fixture.Options.Mfa.Totp.PeriodSeconds)),
-            CreateHttpContext("203.0.113.15", "ReplicaF"));
+            CreateHttpContext("203.0.113.16", "ReplicaG"));
         correctAfterCapacity.Success.Should().BeFalse();
         correctAfterCapacity.Error.Should().BeOfType<InvalidOperationException>()
             .Which.Message.Should().Be(SqlOSAuthService.MfaChallengeFailureMessage);
 
         var reissue = async () => await exhausted.Auth.LoginWithPasswordAsync(
             new SqlOSPasswordLoginRequest(enrolled.User.DefaultEmail!, "P@ssword123!", "test-client", null),
-            CreateHttpContext("203.0.113.16", "ReplicaG"));
+            CreateHttpContext("203.0.113.17", "ReplicaH"));
         await reissue.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage(SqlOSAuthService.MfaChallengeFailureMessage);
 
@@ -217,7 +230,55 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         (await exhausted.Context.Set<SqlOSAuthorizationCode>().CountAsync()).Should().Be(0);
         (await exhausted.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
             x.Action == "user.mfa.challenge_failed" && x.UserId == enrolled.User.Id))
-            .Should().BeInRange(3, 4);
+            .Should().Be(4);
+    }
+
+    [TestMethod]
+    public async Task SqlServer_CommonUserAgentDoesNotShareDeviceBudgetAcrossAccounts()
+    {
+        await using var fixture = await SqlMfaFixture.CreateAsync("MfaDeviceBoundary");
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerChallenge = 1;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerUser = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerIp = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerClient = 20;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerDevice = 1;
+        fixture.Options.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 20;
+        var attacker = await CreateEnrolledUserAsync(fixture, "Shared browser attacker");
+        var victim = await CreateEnrolledUserAsync(fixture, "Shared browser victim");
+        const string commonUserAgent = "Mozilla/5.0 Common Browser";
+        var attackerLogin = await fixture.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(attacker.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext("198.51.100.60", commonUserAgent));
+        var victimLogin = await fixture.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(victim.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext("198.51.100.61", commonUserAgent));
+
+        var connectionString = fixture.Context.Database.GetConnectionString()!;
+        await using var attackerReplica = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        (await CaptureMfaAsync(
+            attackerReplica.Auth,
+            attackerLogin.MfaToken!,
+            "wrong",
+            CreateHttpContext("198.51.100.60", commonUserAgent))).Success.Should().BeFalse();
+
+        await using var victimReplica = SqlMfaFixture.CreateForExistingDatabase(connectionString, fixture.Options);
+        (await CaptureMfaAsync(
+            victimReplica.Auth,
+            victimLogin.MfaToken!,
+            victim.RecoveryCode,
+            CreateHttpContext("198.51.100.61", commonUserAgent))).Success.Should().BeTrue();
+        victimReplica.Context.ChangeTracker.Clear();
+        (await victimReplica.Context.Set<SqlOSMfaAttemptBucket>()
+            .CountAsync(x => x.Scope == "device" && x.AttemptCount == 0)).Should().Be(1);
+
+        var secondVictimLogin = await victimReplica.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(victim.User.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext("198.51.100.61", commonUserAgent));
+        (await CaptureMfaAsync(
+            victimReplica.Auth,
+            secondVictimLogin.MfaToken!,
+            victim.SecondRecoveryCode,
+            CreateHttpContext("198.51.100.61", commonUserAgent))).Success.Should().BeTrue();
     }
 
     [TestMethod]
@@ -734,7 +795,11 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         var verified = await fixture.Auth.VerifyTotpEnrollmentAsync(new SqlOSTotpEnrollmentVerifyRequest(
             enrollment.EnrollmentToken,
             fixture.Totp.GenerateCodeForTesting(enrollment.Secret)));
-        return new EnrolledMfaUser(user, enrollment.Secret, verified.RecoveryCodes[0]);
+        return new EnrolledMfaUser(
+            user,
+            enrollment.Secret,
+            verified.RecoveryCodes[0],
+            verified.RecoveryCodes[1]);
     }
 
     private static DefaultHttpContext CreateHttpContext(
@@ -748,7 +813,11 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
     }
 
     private sealed record VerificationOutcome(bool Success, Exception? Error);
-    private sealed record EnrolledMfaUser(SqlOSUser User, string Secret, string RecoveryCode);
+    private sealed record EnrolledMfaUser(
+        SqlOSUser User,
+        string Secret,
+        string RecoveryCode,
+        string SecondRecoveryCode);
 
     private sealed class SqlMfaFixture : IAsyncDisposable
     {
