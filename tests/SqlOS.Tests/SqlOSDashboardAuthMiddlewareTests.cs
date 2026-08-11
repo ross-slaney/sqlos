@@ -82,6 +82,22 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task DashboardLogin_ParallelPasswords_AdmitOnlyConfiguredComparisons()
+    {
+        using var harness = CreateHarness(options =>
+        {
+            options.LoginThrottling.MaxFailuresPerIp = 2;
+            options.LoginThrottling.MaxGlobalFailures = 20;
+        });
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 10)
+            .Select(_ => harness.PostLoginAsync("wrong-password", "203.0.113.15")));
+
+        responses.Count(x => x.StatusCode == StatusCodes.Status401Unauthorized).Should().Be(2);
+        responses.Count(x => x.StatusCode == StatusCodes.Status429TooManyRequests).Should().Be(8);
+    }
+
+    [TestMethod]
     public async Task DashboardLogin_Success_WritesAuditEvent_AndCreatesSessionCookie()
     {
         using var harness = CreateHarness();

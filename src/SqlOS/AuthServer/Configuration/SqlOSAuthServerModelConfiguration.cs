@@ -94,6 +94,27 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SqlOSPasswordLoginReservation>(entity =>
+        {
+            entity.ToTable("SqlOSPasswordLoginReservations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+
+        modelBuilder.Entity<SqlOSPasswordLoginReservationBucket>(entity =>
+        {
+            entity.ToTable("SqlOSPasswordLoginReservationBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => new { x.ReservationId, x.BucketId });
+            entity.HasOne(x => x.Reservation)
+                .WithMany(x => x.Buckets)
+                .HasForeignKey(x => x.ReservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Bucket)
+                .WithMany(x => x.Reservations)
+                .HasForeignKey(x => x.BucketId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<SqlOSMembership>(entity =>
         {
             entity.ToTable("SqlOSMemberships", schema, t => t.ExcludeFromMigrations());

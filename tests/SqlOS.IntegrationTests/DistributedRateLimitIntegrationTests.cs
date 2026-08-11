@@ -128,6 +128,43 @@ public class DistributedRateLimitIntegrationTests
         }
     }
 
+    [TestMethod]
+    public async Task DashboardPasswordReservations_AdmitExactCapAcrossApplicationInstances()
+    {
+        var connectionString = GetConnectionString();
+        var authOptions = Options.Create(new SqlOSAuthServerOptions());
+        var options = new SqlOSDashboardLoginThrottlingOptions
+        {
+            MaxFailuresPerIp = 2,
+            MaxGlobalFailures = 20,
+            Window = TimeSpan.FromMinutes(5),
+            LockoutDuration = TimeSpan.FromMinutes(10)
+        };
+        var ip = $"ip-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var attempts = Enumerable.Range(0, 10).Select(async _ =>
+        {
+            await using var context = CreateContext(connectionString);
+            var service = new SqlOSDashboardLoginThrottlingService(
+                new SqlOSDistributedRateLimitStore(context, authOptions));
+            await start.Task;
+            return await service.ReserveAsync(ip, options, now);
+        }).ToArray();
+
+        start.SetResult();
+        var results = await Task.WhenAll(attempts);
+
+        results.Count(x => x.Reservation != null).Should().Be(2);
+        results.Count(x => x.Rejection?.Scope == "ip").Should().Be(8);
+
+        await using var cleanupContext = CreateContext(connectionString);
+        var cleanup = new SqlOSDistributedRateLimitStore(cleanupContext, authOptions);
+        await cleanup.DeleteAsync("dashboard-ip", ip);
+        await cleanup.DeleteAsync("dashboard-global", "all");
+    }
+
     private static string GetConnectionString()
         => AspireFixture.SharedContext?.Database.GetConnectionString()
            ?? throw new InvalidOperationException("The integration database has no connection string.");

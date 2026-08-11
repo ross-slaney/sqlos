@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Http;
@@ -12,6 +13,8 @@ namespace SqlOS.AuthServer.Services;
 public sealed class SqlOSPasswordLoginAbuseService
 {
     public const string PublicFailureMessage = "Invalid email or password.";
+    private const int ExpiredReservationCleanupBatchSize = 100;
+    private static readonly TimeSpan MaximumReservationLifetime = TimeSpan.FromMinutes(2);
 
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
@@ -46,46 +49,42 @@ public sealed class SqlOSPasswordLoginAbuseService
             authorizationRequestId,
             string.IsNullOrWhiteSpace(surface) ? "unknown" : surface.Trim(),
             NormalizeIpAddress(httpContext),
-            HashUserAgent(userAgent));
+            HashUserAgent(userAgent))
+        {
+            ReservationId = _cryptoService.GenerateId("pla")
+        };
     }
 
-    public async Task EnsureAllowedAsync(SqlOSPasswordLoginAttempt attempt, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Atomically reserves capacity in every applicable bucket before a password hash comparison.
+    /// The SQL transaction is deliberately completed before hashing begins. A reservation that is
+    /// not finalized is treated as fail-closed capacity until it expires (at most two minutes).
+    /// </summary>
+    public async Task ReserveAsync(SqlOSPasswordLoginAttempt attempt, CancellationToken cancellationToken = default)
     {
         if (!_options.Enabled)
         {
             return;
         }
 
-        var now = DateTime.UtcNow;
-        foreach (var identity in GetBucketIdentities(attempt, includeUserBucket: true))
+        var outcome = await ExecuteAtomicAsync(() => ReserveCoreAsync(attempt, cancellationToken), cancellationToken);
+        if (outcome.Rejection == null)
         {
-            var bucket = await FindBucketAsync(identity, cancellationToken);
-            if (bucket == null)
-            {
-                continue;
-            }
-
-            if (ResetExpired(bucket, now))
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
-            if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
-            {
-                await RecordPasswordAuditAsync(
-                    "password.login.rate_limit_rejected",
-                    attempt,
-                    data: new
-                    {
-                        scope = bucket.Scope,
-                        retryAfter = lockedUntil,
-                        failureCount = bucket.FailureCount,
-                        reason = bucket.LockoutReason ?? "active_lockout"
-                    },
-                    cancellationToken);
-                throw new InvalidOperationException(PublicFailureMessage);
-            }
+            return;
         }
+
+        await RecordPasswordAuditAsync(
+            "password.login.rate_limit_rejected",
+            attempt,
+            data: new
+            {
+                scope = outcome.Rejection.Scope,
+                retryAfter = outcome.Rejection.LockedUntil,
+                failureCount = outcome.Rejection.FailureCount,
+                reason = outcome.Rejection.LockoutReason ?? "active_lockout"
+            },
+            cancellationToken);
+        throw new InvalidOperationException(PublicFailureMessage);
     }
 
     public async Task RecordFailureAsync(
@@ -103,121 +102,326 @@ public sealed class SqlOSPasswordLoginAbuseService
             return;
         }
 
-        var now = DateTime.UtcNow;
-        var newlyLocked = new List<SqlOSPasswordLoginBucket>();
-
-        foreach (var identity in GetBucketIdentities(attempt, includeUserBucket: true))
-        {
-            var bucket = await GetOrCreateBucketAsync(identity, attempt, now, cancellationToken);
-            ResetExpired(bucket, now);
-
-            bucket.FailureCount++;
-            bucket.WindowStartedAt ??= now;
-            bucket.LastFailureAt = now;
-            bucket.UpdatedAt = now;
-            bucket.NormalizedEmail ??= attempt.NormalizedEmail;
-            bucket.UserId ??= attempt.UserId;
-            bucket.ClientKey ??= attempt.ClientKey;
-            bucket.IpAddress ??= attempt.IpAddress;
-            bucket.UserAgentHash ??= attempt.UserAgentHash;
-
-            if (bucket.FailureCount >= identity.Threshold && bucket.LockedUntil == null)
-            {
-                bucket.LockedUntil = now.Add(_options.LockoutDuration);
-                bucket.LockoutReason = "failed_attempt_threshold";
-                newlyLocked.Add(bucket);
-            }
-        }
-
+        var locked = await ExecuteAtomicAsync(() => RecordFailureCoreAsync(attempt, cancellationToken), cancellationToken);
         await RecordPasswordAuditAsync(
             "password.login.failed",
             attempt,
             data: new
             {
                 failureReason,
-                lockedScopes = newlyLocked.Select(static x => x.Scope).ToArray()
+                lockedScopes = locked.Select(static x => x.Scope).ToArray()
             },
             cancellationToken);
 
-        foreach (var bucket in newlyLocked.Where(static x => x.Scope is "email" or "user"))
+        foreach (var bucket in locked.Where(static x => x.Scope is "email" or "user"))
         {
             await RecordPasswordAuditAsync(
                 "password.login.locked",
                 attempt,
-                data: new
-                {
-                    scope = bucket.Scope,
-                    retryAfter = bucket.LockedUntil,
-                    failureCount = bucket.FailureCount
-                },
+                data: new { scope = bucket.Scope, retryAfter = bucket.LockedUntil, failureCount = bucket.FailureCount },
                 cancellationToken);
         }
 
-        foreach (var bucket in newlyLocked.Where(static x => x.Scope is "ip" or "client" or "device"))
+        foreach (var bucket in locked.Where(static x => x.Scope is "ip" or "client" or "device"))
         {
             await RecordPasswordAuditAsync(
                 "password.login.suspicious_pattern",
                 attempt,
-                data: new
-                {
-                    scope = bucket.Scope,
-                    retryAfter = bucket.LockedUntil,
-                    failureCount = bucket.FailureCount
-                },
+                data: new { scope = bucket.Scope, retryAfter = bucket.LockedUntil, failureCount = bucket.FailureCount },
                 cancellationToken);
         }
     }
 
+    /// <summary>
+    /// A successful comparison clears historical account failures while preserving other in-flight
+    /// account reservations. Shared IP, client, and device buckets release only this comparison.
+    /// </summary>
     public async Task RecordSuccessAsync(SqlOSPasswordLoginAttempt attempt, CancellationToken cancellationToken = default)
     {
+        IReadOnlyList<string> resetScopes = [];
         if (_options.Enabled)
         {
-            var now = DateTime.UtcNow;
-            foreach (var identity in GetAccountBucketIdentities(attempt))
-            {
-                var bucket = await FindBucketAsync(identity, cancellationToken);
-                if (bucket == null)
-                {
-                    continue;
-                }
-
-                bucket.FailureCount = 0;
-                bucket.WindowStartedAt = null;
-                bucket.LockedUntil = null;
-                bucket.LockoutReason = null;
-                bucket.LastSuccessAt = now;
-                bucket.UpdatedAt = now;
-            }
+            resetScopes = await ExecuteAtomicAsync(() => RecordSuccessCoreAsync(attempt, cancellationToken), cancellationToken);
         }
 
         await RecordPasswordAuditAsync(
             "password.login.succeeded",
             attempt,
-            data: new { resetScopes = GetAccountBucketIdentities(attempt).Select(static x => x.Scope).ToArray() },
+            data: new { resetScopes },
             cancellationToken);
+    }
+
+    private async Task<ReservationOutcome> ReserveCoreAsync(
+        SqlOSPasswordLoginAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await CleanupExpiredReservationsAsync(now, cancellationToken);
+
+        var priorReservation = await _context.Set<SqlOSPasswordLoginReservation>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == attempt.ReservationId, cancellationToken);
+        if (priorReservation)
+        {
+            return ReservationOutcome.Admitted;
+        }
+
+        var identities = GetBucketIdentities(attempt, includeUserBucket: true).ToArray();
+        var buckets = new List<(PasswordBucketIdentity Identity, SqlOSPasswordLoginBucket Bucket)>();
+        foreach (var identity in identities)
+        {
+            var bucket = await FindBucketAsync(identity, cancellationToken);
+            if (bucket != null)
+            {
+                ResetExpired(bucket, now);
+                if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
+                {
+                    await _context.SaveChangesAsync(cancellationToken);
+                    return new ReservationOutcome(new RejectedBucket(
+                        bucket.Scope,
+                        bucket.FailureCount,
+                        lockedUntil,
+                        bucket.LockoutReason));
+                }
+            }
+            else
+            {
+                bucket = CreateBucket(identity, attempt, now);
+            }
+
+            buckets.Add((identity, bucket));
+        }
+
+        var reservation = new SqlOSPasswordLoginReservation
+        {
+            Id = attempt.ReservationId,
+            CreatedAt = now,
+            ExpiresAt = now.Add(GetReservationLifetime())
+        };
+        _context.Set<SqlOSPasswordLoginReservation>().Add(reservation);
+
+        foreach (var (identity, bucket) in buckets)
+        {
+            bucket.FailureCount++;
+            bucket.WindowStartedAt ??= now;
+            bucket.UpdatedAt = now;
+            bucket.NormalizedEmail ??= attempt.NormalizedEmail;
+            bucket.UserId ??= attempt.UserId;
+            bucket.ClientKey ??= attempt.ClientKey;
+            bucket.IpAddress ??= attempt.IpAddress;
+            bucket.UserAgentHash ??= attempt.UserAgentHash;
+            if (bucket.FailureCount >= identity.Threshold && bucket.LockedUntil == null)
+            {
+                bucket.LockedUntil = now.Add(_options.LockoutDuration);
+                bucket.LockoutReason = "failed_attempt_threshold";
+            }
+
+            reservation.Buckets.Add(new SqlOSPasswordLoginReservationBucket
+            {
+                ReservationId = reservation.Id,
+                BucketId = bucket.Id,
+                Reservation = reservation,
+                Bucket = bucket
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return ReservationOutcome.Admitted;
+    }
+
+    private async Task<IReadOnlyList<LockedBucket>> RecordFailureCoreAsync(
+        SqlOSPasswordLoginAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await CleanupExpiredReservationsAsync(now, cancellationToken);
+        var reservation = await _context.Set<SqlOSPasswordLoginReservation>()
+            .Include(x => x.Buckets)
+            .ThenInclude(x => x.Bucket)
+            .SingleOrDefaultAsync(x => x.Id == attempt.ReservationId, cancellationToken);
+        if (reservation == null)
+        {
+            return [];
+        }
+
+        var locked = new List<LockedBucket>();
+        foreach (var link in reservation.Buckets)
+        {
+            var bucket = link.Bucket!;
+            bucket.LastFailureAt = now;
+            bucket.UpdatedAt = now;
+            if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
+            {
+                locked.Add(new LockedBucket(bucket.Scope, bucket.FailureCount, lockedUntil));
+            }
+        }
+
+        _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
+        await _context.SaveChangesAsync(cancellationToken);
+        return locked;
+    }
+
+    private async Task<IReadOnlyList<string>> RecordSuccessCoreAsync(
+        SqlOSPasswordLoginAttempt attempt,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await CleanupExpiredReservationsAsync(now, cancellationToken);
+        var reservation = await _context.Set<SqlOSPasswordLoginReservation>()
+            .Include(x => x.Buckets)
+            .ThenInclude(x => x.Bucket)
+            .SingleOrDefaultAsync(x => x.Id == attempt.ReservationId, cancellationToken);
+        if (reservation == null)
+        {
+            throw new InvalidOperationException("The password comparison reservation is no longer active.");
+        }
+
+        var resetScopes = new List<string>();
+        foreach (var link in reservation.Buckets)
+        {
+            var bucket = link.Bucket!;
+            if (bucket.Scope is "email" or "user")
+            {
+                var pendingCount = await _context.Set<SqlOSPasswordLoginReservationBucket>()
+                    .CountAsync(x => x.BucketId == bucket.Id && x.ReservationId != reservation.Id, cancellationToken);
+                bucket.FailureCount = pendingCount;
+                bucket.WindowStartedAt = pendingCount == 0 ? null : bucket.WindowStartedAt ?? now;
+                ApplyLockState(bucket, GetThreshold(bucket.Scope), now);
+                resetScopes.Add(bucket.Scope);
+            }
+            else
+            {
+                ReleaseReservationFromBucket(bucket, now);
+            }
+
+            bucket.LastSuccessAt = now;
+            bucket.UpdatedAt = now;
+        }
+
+        _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
+        await _context.SaveChangesAsync(cancellationToken);
+        return resetScopes;
+    }
+
+    private async Task CleanupExpiredReservationsAsync(DateTime now, CancellationToken cancellationToken)
+    {
+        var expired = await _context.Set<SqlOSPasswordLoginReservation>()
+            .Where(x => x.ExpiresAt <= now)
+            .OrderBy(x => x.ExpiresAt)
+            .Take(ExpiredReservationCleanupBatchSize)
+            .Include(x => x.Buckets)
+            .ThenInclude(x => x.Bucket)
+            .ToListAsync(cancellationToken);
+
+        foreach (var reservation in expired)
+        {
+            foreach (var link in reservation.Buckets)
+            {
+                ReleaseReservationFromBucket(link.Bucket!, now);
+            }
+
+            _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
+        }
+    }
+
+    private void ReleaseReservationFromBucket(SqlOSPasswordLoginBucket bucket, DateTime now)
+    {
+        bucket.FailureCount = Math.Max(0, bucket.FailureCount - 1);
+        if (bucket.FailureCount == 0)
+        {
+            bucket.WindowStartedAt = null;
+        }
+
+        ApplyLockState(bucket, GetThreshold(bucket.Scope), now);
+        bucket.UpdatedAt = now;
+    }
+
+    private void ApplyLockState(SqlOSPasswordLoginBucket bucket, int threshold, DateTime now)
+    {
+        if (bucket.FailureCount >= threshold)
+        {
+            bucket.LockedUntil ??= now.Add(_options.LockoutDuration);
+            bucket.LockoutReason ??= "failed_attempt_threshold";
+            return;
+        }
+
+        bucket.LockedUntil = null;
+        bucket.LockoutReason = null;
+    }
+
+    private async Task<T> ExecuteAtomicAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    {
+        if (!_context.Database.IsRelational())
+        {
+            ClearTrackedAbuseState();
+            return await operation();
+        }
+
+        if (_context.Database.CurrentTransaction != null)
+        {
+            ClearTrackedAbuseState();
+            await AcquireAdmissionLockAsync(cancellationToken);
+            return await operation();
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            ClearTrackedAbuseState();
+            await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            await AcquireAdmissionLockAsync(cancellationToken);
+            var result = await operation();
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        });
+    }
+
+    private Task AcquireAdmissionLockAsync(CancellationToken cancellationToken)
+    {
+        if (!string.Equals(_context.Database.ProviderName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        return _context.Database.ExecuteSqlRawAsync("""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = N'SqlOS:PasswordLoginAdmission',
+                @LockMode = N'Exclusive',
+                @LockOwner = N'Transaction',
+                @LockTimeout = 10000;
+            IF @result < 0 THROW 51000, 'Could not acquire the SqlOS password-login admission lock.', 1;
+            """, cancellationToken);
+    }
+
+    private void ClearTrackedAbuseState()
+    {
+        if (_context is not DbContext dbContext)
+        {
+            return;
+        }
+
+        foreach (var entry in dbContext.ChangeTracker.Entries().Where(x =>
+                     x.Entity is SqlOSPasswordLoginBucket
+                         or SqlOSPasswordLoginReservation
+                         or SqlOSPasswordLoginReservationBucket).ToArray())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     private async Task<SqlOSPasswordLoginBucket?> FindBucketAsync(
         PasswordBucketIdentity identity,
         CancellationToken cancellationToken)
         => await _context.Set<SqlOSPasswordLoginBucket>()
-            .FirstOrDefaultAsync(
-                x => x.Scope == identity.Scope && x.BucketKey == identity.Key,
-                cancellationToken);
+            .SingleOrDefaultAsync(x => x.Scope == identity.Scope && x.BucketKey == identity.Key, cancellationToken);
 
-    private async Task<SqlOSPasswordLoginBucket> GetOrCreateBucketAsync(
+    private SqlOSPasswordLoginBucket CreateBucket(
         PasswordBucketIdentity identity,
         SqlOSPasswordLoginAttempt attempt,
-        DateTime now,
-        CancellationToken cancellationToken)
+        DateTime now)
     {
-        var bucket = await FindBucketAsync(identity, cancellationToken);
-        if (bucket != null)
-        {
-            return bucket;
-        }
-
-        bucket = new SqlOSPasswordLoginBucket
+        var bucket = new SqlOSPasswordLoginBucket
         {
             Id = _cryptoService.GenerateId("plb"),
             Scope = identity.Scope,
@@ -305,6 +509,20 @@ public sealed class SqlOSPasswordLoginAbuseService
         bucket.UpdatedAt = now;
     }
 
+    private int GetThreshold(string scope) => scope switch
+    {
+        "email" or "user" => _options.MaxFailedAttemptsPerAccount,
+        "ip" => _options.MaxFailedAttemptsPerIp,
+        "client" => _options.MaxFailedAttemptsPerClient,
+        "device" => _options.MaxFailedAttemptsPerDevice,
+        _ => int.MaxValue
+    };
+
+    private TimeSpan GetReservationLifetime()
+        => _options.FailureWindow < MaximumReservationLifetime
+            ? _options.FailureWindow
+            : MaximumReservationLifetime;
+
     private async Task RecordPasswordAuditAsync(
         string eventType,
         SqlOSPasswordLoginAttempt attempt,
@@ -359,6 +577,12 @@ public sealed class SqlOSPasswordLoginAbuseService
     }
 
     private sealed record PasswordBucketIdentity(string Scope, string Key, int Threshold);
+    private sealed record RejectedBucket(string Scope, int FailureCount, DateTime LockedUntil, string? LockoutReason);
+    private sealed record LockedBucket(string Scope, int FailureCount, DateTime LockedUntil);
+    private sealed record ReservationOutcome(RejectedBucket? Rejection)
+    {
+        public static ReservationOutcome Admitted { get; } = new((RejectedBucket?)null);
+    }
 }
 
 public sealed record SqlOSPasswordLoginAttempt(
@@ -368,4 +592,7 @@ public sealed record SqlOSPasswordLoginAttempt(
     string? AuthorizationRequestId,
     string Surface,
     string? IpAddress,
-    string? UserAgentHash);
+    string? UserAgentHash)
+{
+    public string ReservationId { get; init; } = $"pla_{Guid.NewGuid():N}"[..28];
+}

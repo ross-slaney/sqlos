@@ -36,6 +36,8 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             SET NOCOUNT ON;
             BEGIN TRANSACTION;
 
+            DECLARE @admitted BIT = 0;
+
             DECLARE @applicationLockResult INT;
             DECLARE @applicationLockResource NVARCHAR(255) =
                 N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope + N':' + @key), 2);
@@ -58,6 +60,14 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
                 FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
                 WHERE [Scope] = @scope AND [BucketKey] = @key)
             BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM [{_schema}].[SqlOSRateLimitBuckets]
+                    WHERE [Scope] = @scope
+                      AND [BucketKey] = @key
+                      AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now))
+                    SET @admitted = 1;
+
                 UPDATE [{_schema}].[SqlOSRateLimitBuckets]
                 SET
                     [Count] = CASE WHEN [LockedUntil] IS NOT NULL AND [LockedUntil] > @now
@@ -73,6 +83,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             END
             ELSE
             BEGIN
+                SET @admitted = 1;
                 INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
                     ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
                 VALUES
@@ -95,7 +106,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
               AND [UpdatedAt] < @staleBefore
               AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now);
 
-            SELECT [Count], [LockedUntil]
+            SELECT [Count], [LockedUntil], @admitted
             FROM [{_schema}].[SqlOSRateLimitBuckets]
             WHERE [Scope] = @scope AND [BucketKey] = @key;
 
@@ -180,12 +191,53 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             now,
             cancellationToken);
 
+    public Task ReleaseAsync(
+        string scope,
+        string key,
+        int lockThreshold,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+        => ExecuteNonQueryAsync(
+            $"""
+            SET XACT_ABORT ON;
+            SET NOCOUNT ON;
+            BEGIN TRANSACTION;
+
+            DECLARE @applicationLockResult INT;
+            DECLARE @applicationLockResource NVARCHAR(255) =
+                N'SqlOS:rate-limit:' + CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', @scope + N':' + @key), 2);
+            EXEC @applicationLockResult = sys.sp_getapplock
+                @Resource = @applicationLockResource,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 10000;
+            IF @applicationLockResult < 0
+                THROW 51000, 'Unable to acquire the SqlOS rate-limit lock.', 1;
+
+            UPDATE [{_schema}].[SqlOSRateLimitBuckets]
+            SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 END,
+                [LockedUntil] = CASE WHEN [Count] - 1 < @lockThreshold THEN NULL ELSE [LockedUntil] END,
+                [UpdatedAt] = @now
+            WHERE [Scope] = @scope AND [BucketKey] = @key;
+
+            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
+            WHERE [Scope] = @scope AND [BucketKey] = @key AND [Count] = 0;
+
+            COMMIT TRANSACTION;
+            """,
+            scope,
+            key,
+            now,
+            cancellationToken,
+            lockThreshold);
+
     private async Task ExecuteNonQueryAsync(
         string sql,
         string scope,
         string key,
         DateTimeOffset? now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? lockThreshold = null)
     {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == ConnectionState.Open;
@@ -203,6 +255,10 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             if (now.HasValue)
             {
                 AddParameter(command, "@now", now.Value.UtcDateTime);
+            }
+            if (lockThreshold.HasValue)
+            {
+                AddParameter(command, "@lockThreshold", lockThreshold.Value);
             }
 
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -262,7 +318,8 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
                 reader.GetInt32(0),
                 reader.IsDBNull(1)
                     ? null
-                    : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)));
+                    : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
+                reader.FieldCount < 3 || reader.GetBoolean(2));
         }
         finally
         {

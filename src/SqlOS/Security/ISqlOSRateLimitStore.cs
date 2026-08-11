@@ -28,6 +28,16 @@ internal interface ISqlOSRateLimitStore
         string key,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
+
+    Task ReleaseAsync(
+        string scope,
+        string key,
+        int lockThreshold,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }
 
-internal sealed record SqlOSRateLimitBucketState(int Count, DateTimeOffset? LockedUntil);
+internal sealed record SqlOSRateLimitBucketState(
+    int Count,
+    DateTimeOffset? LockedUntil,
+    bool Admitted = true);

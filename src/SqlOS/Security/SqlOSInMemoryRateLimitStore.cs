@@ -26,7 +26,8 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
                 {
                     return Task.FromResult(new SqlOSRateLimitBucketState(
                         lockThreshold,
-                        now.Add(lockoutDuration)));
+                        now.Add(lockoutDuration),
+                        Admitted: false));
                 }
 
                 bucket = new Bucket(now);
@@ -38,7 +39,8 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
                 _buckets[bucketKey] = bucket;
             }
 
-            if (bucket.LockedUntil is null || bucket.LockedUntil <= now)
+            var admitted = bucket.LockedUntil is null || bucket.LockedUntil <= now;
+            if (admitted)
             {
                 bucket.Count++;
                 bucket.LockedUntil = bucket.Count >= lockThreshold
@@ -47,7 +49,7 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
             }
 
             bucket.UpdatedAt = now;
-            return Task.FromResult(new SqlOSRateLimitBucketState(bucket.Count, bucket.LockedUntil));
+            return Task.FromResult(new SqlOSRateLimitBucketState(bucket.Count, bucket.LockedUntil, admitted));
         }
     }
 
@@ -104,6 +106,31 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
                 && (bucket.LockedUntil is null || bucket.LockedUntil <= now))
             {
                 bucket.Count = Math.Max(0, bucket.Count - 1);
+                bucket.UpdatedAt = now;
+                if (bucket.Count == 0)
+                {
+                    _buckets.Remove((scope, key));
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task ReleaseAsync(
+        string scope,
+        string key,
+        int lockThreshold,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (_buckets.TryGetValue((scope, key), out var bucket))
+            {
+                bucket.Count = Math.Max(0, bucket.Count - 1);
+                bucket.LockedUntil = bucket.Count >= lockThreshold ? bucket.LockedUntil : null;
                 bucket.UpdatedAt = now;
                 if (bucket.Count == 0)
                 {

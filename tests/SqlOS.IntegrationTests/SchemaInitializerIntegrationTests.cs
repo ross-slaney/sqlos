@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 38;
+    private const int CurrentSchemaVersion = 39;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -34,6 +34,8 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSUserPhoneNumbers",
                      "SqlOSCredentials",
                      "SqlOSPasswordLoginBuckets",
+                     "SqlOSPasswordLoginReservations",
+                     "SqlOSPasswordLoginReservationBuckets",
                      "SqlOSMemberships",
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
@@ -112,6 +114,8 @@ public sealed class SchemaInitializerIntegrationTests
             await context.Database.ExecuteSqlRawAsync("""
                 DROP TABLE [dbo].[SqlOSEmailDeliveries];
                 DROP TABLE [dbo].[SqlOSEmailTemplates];
+                DROP TABLE [dbo].[SqlOSPasswordLoginReservationBuckets];
+                DROP TABLE [dbo].[SqlOSPasswordLoginReservations];
                 DROP TABLE [dbo].[SqlOSPasswordLoginBuckets];
                 DELETE FROM [dbo].[SqlOSAppliedMigrations]
                 WHERE [ScriptName] IN (
