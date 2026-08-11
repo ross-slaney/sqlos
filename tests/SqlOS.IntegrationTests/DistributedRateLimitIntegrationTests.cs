@@ -165,6 +165,43 @@ public class DistributedRateLimitIntegrationTests
         await cleanup.DeleteAsync("dashboard-global", "all");
     }
 
+    [TestMethod]
+    public async Task DashboardPasswordReservation_OldSuccessDoesNotReleaseReplacementSqlGeneration()
+    {
+        var connectionString = GetConnectionString();
+        await using var context = CreateContext(connectionString);
+        var store = new SqlOSDistributedRateLimitStore(context, Options.Create(new SqlOSAuthServerOptions()));
+        var service = new SqlOSDashboardLoginThrottlingService(store);
+        var options = new SqlOSDashboardLoginThrottlingOptions
+        {
+            MaxFailuresPerIp = 1,
+            MaxGlobalFailures = 10,
+            Window = TimeSpan.FromSeconds(1),
+            LockoutDuration = TimeSpan.FromSeconds(1)
+        };
+        var ip = $"ip-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        try
+        {
+            var first = (await service.ReserveAsync(ip, options, now)).Reservation!;
+            var replacementTime = now.AddSeconds(2);
+            (await service.ReserveAsync(ip, options, replacementTime)).Reservation.Should().NotBeNull();
+
+            await service.RecordSuccessAsync(first, options, replacementTime.AddMilliseconds(1));
+
+            var rejection = await service.GetRejectionAsync(
+                ip, options, replacementTime.AddMilliseconds(2));
+            rejection.Should().NotBeNull();
+            rejection!.Scope.Should().Be("ip");
+        }
+        finally
+        {
+            await store.DeleteAsync("dashboard-ip", ip);
+            await store.DeleteAsync("dashboard-global", "all");
+        }
+    }
+
     private static string GetConnectionString()
         => AspireFixture.SharedContext?.Database.GetConnectionString()
            ?? throw new InvalidOperationException("The integration database has no connection string.");

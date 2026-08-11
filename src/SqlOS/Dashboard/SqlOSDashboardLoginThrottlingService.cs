@@ -39,57 +39,31 @@ public sealed class SqlOSDashboardLoginThrottlingService
                 null);
         }
 
-        var globalState = await _store.IncrementAsync(
-            GlobalScope,
-            GlobalKey,
-            options.MaxGlobalFailures,
-            options.Window,
-            options.LockoutDuration,
+        var state = await _store.ReservePairAsync(
+            new SqlOSRateLimitBucketRequest(
+                GlobalScope, GlobalKey, options.MaxGlobalFailures, options.Window, options.LockoutDuration),
+            new SqlOSRateLimitBucketRequest(
+                IpScope, normalizedIp, options.MaxFailuresPerIp, options.Window, options.LockoutDuration),
             now,
             cancellationToken);
-        if (!globalState.Admitted)
+        if (!state.Admitted)
         {
             return new SqlOSDashboardLoginReservationResult(
                 null,
-                new SqlOSDashboardLoginThrottleRejection("global", globalState.LockedUntil!.Value));
+                new SqlOSDashboardLoginThrottleRejection(
+                    state.RejectedIndex == 0 ? "global" : "ip",
+                    state.RejectedLockedUntil!.Value));
         }
 
-        SqlOSRateLimitBucketState ipState;
-        try
-        {
-            ipState = await _store.IncrementAsync(
-                IpScope,
-                normalizedIp,
-                options.MaxFailuresPerIp,
-                options.Window,
-                options.LockoutDuration,
-                now,
-                cancellationToken);
-        }
-        catch
-        {
-            await TryReleaseAsync(GlobalScope, GlobalKey, options.MaxGlobalFailures, now);
-            throw;
-        }
-
-        if (!ipState.Admitted)
-        {
-            await _store.ReleaseAsync(
-                GlobalScope,
-                GlobalKey,
-                options.MaxGlobalFailures,
-                now,
-                cancellationToken);
-            return new SqlOSDashboardLoginReservationResult(
-                null,
-                new SqlOSDashboardLoginThrottleRejection("ip", ipState.LockedUntil!.Value));
-        }
-
+        var globalState = state.First!;
+        var ipState = state.Second!;
         return new SqlOSDashboardLoginReservationResult(
             new SqlOSDashboardLoginReservation(
                 normalizedIp,
                 ipState.LockedUntil,
-                globalState.LockedUntil),
+                globalState.LockedUntil,
+                ipState.WindowStartedAt!.Value,
+                globalState.WindowStartedAt!.Value),
             null);
     }
 
@@ -172,27 +146,16 @@ public sealed class SqlOSDashboardLoginThrottlingService
             IpScope,
             reservation.ClientIp,
             options.MaxFailuresPerIp,
+            reservation.PerIpWindowStartedAt,
             now,
             cancellationToken);
         await _store.ReleaseAsync(
             GlobalScope,
             GlobalKey,
             options.MaxGlobalFailures,
+            reservation.GlobalWindowStartedAt,
             now,
             cancellationToken);
-    }
-
-    private async Task TryReleaseAsync(string scope, string key, int threshold, DateTimeOffset now)
-    {
-        try
-        {
-            await _store.ReleaseAsync(scope, key, threshold, now, CancellationToken.None);
-        }
-        catch
-        {
-            // The original infrastructure failure remains authoritative. Leaving capacity reserved
-            // is fail-closed and the normal window/lockout expiry repairs it without admitting a hash.
-        }
     }
 
     private static string NormalizeClientIp(string? clientIp)
@@ -204,7 +167,9 @@ public sealed record SqlOSDashboardLoginThrottleRejection(string Scope, DateTime
 public sealed record SqlOSDashboardLoginReservation(
     string ClientIp,
     DateTimeOffset? PerIpLockedUntil,
-    DateTimeOffset? GlobalLockedUntil);
+    DateTimeOffset? GlobalLockedUntil,
+    DateTimeOffset PerIpWindowStartedAt = default,
+    DateTimeOffset GlobalWindowStartedAt = default);
 
 public sealed record SqlOSDashboardLoginReservationResult(
     SqlOSDashboardLoginReservation? Reservation,

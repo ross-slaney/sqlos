@@ -28,7 +28,7 @@ The password can come from user secrets, an environment variable, or another con
 
 `/sqlos` and `/sqlos/admin` are administrative endpoints for users, organizations, memberships, clients, OIDC/SAML connections, security settings, sessions, audit events, and FGA data. In production, keep them on a trusted network or place them behind HTTPS, reverse-proxy or edge rate limiting, and an admin access layer such as VPN, identity-aware proxy, SSO, or MFA.
 
-Password mode includes dashboard-specific per-IP throttling, global backoff for distributed failures, temporary lockout, and audit events for login success, login failure, rate-limit rejection, lockout, and logout. Dashboard password comparisons reserve distributed per-IP and global capacity before hashing, and successful comparisons release their reservations. Infrastructure failures remain fail-closed and never create a dashboard session. Treat those built-in controls as a baseline, not as the only protection for a publicly reachable admin surface.
+Password mode includes dashboard-specific per-IP throttling, global backoff for distributed failures, temporary lockout, and audit events for login success, login failure, rate-limit rejection, lockout, and logout. Dashboard password comparisons reserve distributed per-IP and global capacity together before hashing. Successful comparisons release only the exact bucket generation they reserved, so an older comparison cannot erase newer capacity after a window rolls over. Infrastructure failures remain fail-closed and never create a dashboard session. Treat those built-in controls as a baseline, not as the only protection for a publicly reachable admin surface.
 
 ## Authenticate operator API calls
 

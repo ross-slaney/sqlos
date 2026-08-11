@@ -49,7 +49,49 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
             }
 
             bucket.UpdatedAt = now;
-            return Task.FromResult(new SqlOSRateLimitBucketState(bucket.Count, bucket.LockedUntil, admitted));
+            return Task.FromResult(new SqlOSRateLimitBucketState(
+                bucket.Count, bucket.LockedUntil, admitted, bucket.WindowStartedAt));
+        }
+    }
+
+    public Task<SqlOSRateLimitPairReservationState> ReservePairAsync(
+        SqlOSRateLimitBucketRequest first,
+        SqlOSRateLimitBucketRequest second,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            EvictExpired(now);
+            var firstBucket = GetActiveBucket(first, now);
+            if (firstBucket?.LockedUntil is { } firstLockedUntil && firstLockedUntil > now)
+            {
+                return Task.FromResult(new SqlOSRateLimitPairReservationState(
+                    null, null, 0, firstLockedUntil));
+            }
+
+            var secondBucket = GetActiveBucket(second, now);
+            if (secondBucket?.LockedUntil is { } secondLockedUntil && secondLockedUntil > now)
+            {
+                return Task.FromResult(new SqlOSRateLimitPairReservationState(
+                    null, null, 1, secondLockedUntil));
+            }
+
+            var requiredCapacity = (firstBucket == null ? 1 : 0) + (secondBucket == null ? 1 : 0);
+            if (!EnsurePairCapacity(first, second, requiredCapacity, now))
+            {
+                return Task.FromResult(new SqlOSRateLimitPairReservationState(
+                    null, null, 0, now.Add(first.LockoutDuration)));
+            }
+
+            firstBucket ??= AddBucket(first.Scope, first.Key, now);
+            secondBucket ??= AddBucket(second.Scope, second.Key, now);
+
+            IncrementBucket(firstBucket, first.LockThreshold, first.LockoutDuration, now);
+            IncrementBucket(secondBucket, second.LockThreshold, second.LockoutDuration, now);
+            return Task.FromResult(new SqlOSRateLimitPairReservationState(
+                ToState(firstBucket), ToState(secondBucket), null, null));
         }
     }
 
@@ -75,7 +117,8 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
             }
 
             return Task.FromResult<SqlOSRateLimitBucketState?>(
-                new SqlOSRateLimitBucketState(bucket.Count, bucket.LockedUntil));
+                new SqlOSRateLimitBucketState(
+                    bucket.Count, bucket.LockedUntil, WindowStartedAt: bucket.WindowStartedAt));
         }
     }
 
@@ -121,13 +164,15 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
         string scope,
         string key,
         int lockThreshold,
+        DateTimeOffset windowStartedAt,
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
-            if (_buckets.TryGetValue((scope, key), out var bucket))
+            if (_buckets.TryGetValue((scope, key), out var bucket)
+                && bucket.WindowStartedAt == windowStartedAt)
             {
                 bucket.Count = Math.Max(0, bucket.Count - 1);
                 bucket.LockedUntil = bucket.Count >= lockThreshold ? bucket.LockedUntil : null;
@@ -171,6 +216,66 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
         _buckets.Remove(oldest.Key);
         return true;
     }
+
+    private Bucket? GetActiveBucket(SqlOSRateLimitBucketRequest request, DateTimeOffset now)
+    {
+        if (!_buckets.TryGetValue((request.Scope, request.Key), out var bucket))
+        {
+            return null;
+        }
+        if (!IsExpired(bucket, now, request.Window))
+        {
+            return bucket;
+        }
+
+        _buckets.Remove((request.Scope, request.Key));
+        return null;
+    }
+
+    private Bucket AddBucket(string scope, string key, DateTimeOffset now)
+    {
+        var bucket = new Bucket(now);
+        _buckets[(scope, key)] = bucket;
+        return bucket;
+    }
+
+    private bool EnsurePairCapacity(
+        SqlOSRateLimitBucketRequest first,
+        SqlOSRateLimitBucketRequest second,
+        int requiredCapacity,
+        DateTimeOffset now)
+    {
+        while (_buckets.Count + requiredCapacity > MaximumBuckets)
+        {
+            var oldest = _buckets
+                .Where(entry => entry.Key != (first.Scope, first.Key)
+                                && entry.Key != (second.Scope, second.Key)
+                                && (entry.Value.LockedUntil is null || entry.Value.LockedUntil <= now))
+                .MinBy(entry => entry.Value.UpdatedAt);
+            if (oldest.Value == null)
+            {
+                return false;
+            }
+
+            _buckets.Remove(oldest.Key);
+        }
+
+        return true;
+    }
+
+    private static void IncrementBucket(
+        Bucket bucket,
+        int lockThreshold,
+        TimeSpan lockoutDuration,
+        DateTimeOffset now)
+    {
+        bucket.Count++;
+        bucket.LockedUntil = bucket.Count >= lockThreshold ? now.Add(lockoutDuration) : null;
+        bucket.UpdatedAt = now;
+    }
+
+    private static SqlOSRateLimitBucketState ToState(Bucket bucket)
+        => new(bucket.Count, bucket.LockedUntil, WindowStartedAt: bucket.WindowStartedAt);
 
     private void EvictExpired(DateTimeOffset now)
     {

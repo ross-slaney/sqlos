@@ -125,6 +125,96 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             ?? throw new InvalidOperationException("SqlOS rate-limit state was not returned by SQL Server.");
     }
 
+    public async Task<SqlOSRateLimitPairReservationState> ReservePairAsync(
+        SqlOSRateLimitBucketRequest first,
+        SqlOSRateLimitBucketRequest second,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var sql = $"""
+            SET XACT_ABORT ON;
+            SET NOCOUNT ON;
+            BEGIN TRANSACTION;
+
+            DECLARE @applicationLockResult INT;
+            EXEC @applicationLockResult = sys.sp_getapplock
+                @Resource = N'SqlOS:rate-limit-pair-reservation',
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 10000;
+            IF @applicationLockResult < 0
+                THROW 51000, 'Unable to acquire the SqlOS rate-limit pair lock.', 1;
+
+            DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
+            WHERE ([Scope] = @firstScope AND [BucketKey] = @firstKey
+                   AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
+                   AND [WindowStartedAt] <= @firstWindowStartedBefore)
+               OR ([Scope] = @secondScope AND [BucketKey] = @secondKey
+                   AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
+                   AND [WindowStartedAt] <= @secondWindowStartedBefore);
+
+            DECLARE @rejectedIndex INT = NULL;
+            DECLARE @rejectedLockedUntil DATETIME2 = NULL;
+            SELECT TOP (1) @rejectedIndex = 0, @rejectedLockedUntil = [LockedUntil]
+            FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Scope] = @firstScope AND [BucketKey] = @firstKey AND [LockedUntil] > @now;
+            IF @rejectedIndex IS NULL
+                SELECT TOP (1) @rejectedIndex = 1, @rejectedLockedUntil = [LockedUntil]
+                FROM [{_schema}].[SqlOSRateLimitBuckets] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [Scope] = @secondScope AND [BucketKey] = @secondKey AND [LockedUntil] > @now;
+
+            IF @rejectedIndex IS NULL
+            BEGIN
+                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
+                SET [Count] = [Count] + 1,
+                    [LockedUntil] = CASE WHEN [Count] + 1 >= @firstThreshold
+                        THEN @firstLockedUntil ELSE NULL END,
+                    [UpdatedAt] = @now
+                WHERE [Scope] = @firstScope AND [BucketKey] = @firstKey;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
+                        ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
+                    VALUES (@firstScope, @firstKey, @now, 1,
+                        CASE WHEN @firstThreshold <= 1 THEN @firstLockedUntil ELSE NULL END, @now);
+
+                UPDATE [{_schema}].[SqlOSRateLimitBuckets]
+                SET [Count] = [Count] + 1,
+                    [LockedUntil] = CASE WHEN [Count] + 1 >= @secondThreshold
+                        THEN @secondLockedUntil ELSE NULL END,
+                    [UpdatedAt] = @now
+                WHERE [Scope] = @secondScope AND [BucketKey] = @secondKey;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO [{_schema}].[SqlOSRateLimitBuckets]
+                        ([Scope], [BucketKey], [WindowStartedAt], [Count], [LockedUntil], [UpdatedAt])
+                    VALUES (@secondScope, @secondKey, @now, 1,
+                        CASE WHEN @secondThreshold <= 1 THEN @secondLockedUntil ELSE NULL END, @now);
+            END
+
+            ;WITH staleBuckets AS (
+                SELECT TOP (@cleanupBatchSize) *
+                FROM [{_schema}].[SqlOSRateLimitBuckets]
+                WHERE [Scope] IN (@firstScope, @secondScope)
+                  AND [UpdatedAt] < @staleBefore
+                  AND ([LockedUntil] IS NULL OR [LockedUntil] <= @now)
+                ORDER BY [UpdatedAt]
+            )
+            DELETE FROM staleBuckets;
+
+            SELECT @rejectedIndex, @rejectedLockedUntil,
+                   firstBucket.[Count], firstBucket.[LockedUntil], firstBucket.[WindowStartedAt],
+                   secondBucket.[Count], secondBucket.[LockedUntil], secondBucket.[WindowStartedAt]
+            FROM (VALUES (1)) AS anchor([Value])
+            LEFT JOIN [{_schema}].[SqlOSRateLimitBuckets] firstBucket
+              ON firstBucket.[Scope] = @firstScope AND firstBucket.[BucketKey] = @firstKey
+            LEFT JOIN [{_schema}].[SqlOSRateLimitBuckets] secondBucket
+              ON secondBucket.[Scope] = @secondScope AND secondBucket.[BucketKey] = @secondKey;
+
+            COMMIT TRANSACTION;
+            """;
+
+        return await ExecutePairStateAsync(sql, first, second, now, cancellationToken);
+    }
+
     public async Task<SqlOSRateLimitBucketState?> GetAsync(
         string scope,
         string key,
@@ -195,6 +285,7 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         string scope,
         string key,
         int lockThreshold,
+        DateTimeOffset windowStartedAt,
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
         => ExecuteNonQueryAsync(
@@ -218,10 +309,13 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 END,
                 [LockedUntil] = CASE WHEN [Count] - 1 < @lockThreshold THEN NULL ELSE [LockedUntil] END,
                 [UpdatedAt] = @now
-            WHERE [Scope] = @scope AND [BucketKey] = @key;
+            WHERE [Scope] = @scope AND [BucketKey] = @key
+              AND [WindowStartedAt] = @windowStartedAt;
 
             DELETE FROM [{_schema}].[SqlOSRateLimitBuckets]
-            WHERE [Scope] = @scope AND [BucketKey] = @key AND [Count] = 0;
+            WHERE [Scope] = @scope AND [BucketKey] = @key
+              AND [WindowStartedAt] = @windowStartedAt
+              AND [Count] = 0;
 
             COMMIT TRANSACTION;
             """,
@@ -229,7 +323,8 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             key,
             now,
             cancellationToken,
-            lockThreshold);
+            lockThreshold,
+            windowStartedAt);
 
     private async Task ExecuteNonQueryAsync(
         string sql,
@@ -237,7 +332,8 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
         string key,
         DateTimeOffset? now,
         CancellationToken cancellationToken,
-        int? lockThreshold = null)
+        int? lockThreshold = null,
+        DateTimeOffset? windowStartedAt = null)
     {
         var connection = _context.Database.GetDbConnection();
         var wasOpen = connection.State == ConnectionState.Open;
@@ -259,6 +355,10 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             if (lockThreshold.HasValue)
             {
                 AddParameter(command, "@lockThreshold", lockThreshold.Value);
+            }
+            if (windowStartedAt.HasValue)
+            {
+                AddParameter(command, "@windowStartedAt", windowStartedAt.Value.UtcDateTime);
             }
 
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -319,7 +419,10 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
                 reader.IsDBNull(1)
                     ? null
                     : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc)),
-                reader.FieldCount < 3 || reader.GetBoolean(2));
+                reader.FieldCount < 3 || reader.GetBoolean(2),
+                reader.FieldCount < 4 || reader.IsDBNull(3)
+                    ? null
+                    : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc)));
         }
         finally
         {
@@ -329,6 +432,78 @@ internal sealed class SqlOSDistributedRateLimitStore : ISqlOSRateLimitStore
             }
         }
     }
+
+    private async Task<SqlOSRateLimitPairReservationState> ExecutePairStateAsync(
+        string sql,
+        SqlOSRateLimitBucketRequest first,
+        SqlOSRateLimitBucketRequest second,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var connection = _context.Database.GetDbConnection();
+        var wasOpen = connection.State == ConnectionState.Open;
+        if (!wasOpen)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            AddPairParameters(command, "first", first, now);
+            AddPairParameters(command, "second", second, now);
+            AddParameter(command, "@now", now.UtcDateTime);
+            AddParameter(command, "@cleanupBatchSize", CleanupBatchSize);
+            AddParameter(command, "@staleBefore", now.Subtract(StaleBucketRetention).UtcDateTime);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidOperationException("SqlOS paired rate-limit state was not returned by SQL Server.");
+            }
+
+            int? rejectedIndex = reader.IsDBNull(0) ? null : reader.GetInt32(0);
+            var rejectedUntil = ReadDateTimeOffset(reader, 1);
+            return new SqlOSRateLimitPairReservationState(
+                ReadPairBucketState(reader, 2),
+                ReadPairBucketState(reader, 5),
+                rejectedIndex,
+                rejectedUntil);
+        }
+        finally
+        {
+            if (!wasOpen)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private static void AddPairParameters(
+        DbCommand command,
+        string prefix,
+        SqlOSRateLimitBucketRequest request,
+        DateTimeOffset now)
+    {
+        AddParameter(command, $"@{prefix}Scope", request.Scope);
+        AddParameter(command, $"@{prefix}Key", NormalizeKey(request.Key));
+        AddParameter(command, $"@{prefix}Threshold", request.LockThreshold);
+        AddParameter(command, $"@{prefix}WindowStartedBefore", now.Subtract(request.Window).UtcDateTime);
+        AddParameter(command, $"@{prefix}LockedUntil", now.Add(request.LockoutDuration).UtcDateTime);
+    }
+
+    private static SqlOSRateLimitBucketState? ReadPairBucketState(DbDataReader reader, int offset)
+        => reader.IsDBNull(offset)
+            ? null
+            : new SqlOSRateLimitBucketState(
+                reader.GetInt32(offset),
+                ReadDateTimeOffset(reader, offset + 1),
+                WindowStartedAt: ReadDateTimeOffset(reader, offset + 2));
+
+    private static DateTimeOffset? ReadDateTimeOffset(DbDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal)
+            ? null
+            : new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc));
 
     private static void AddParameter(DbCommand command, string name, object value)
     {

@@ -98,6 +98,61 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task DashboardReservations_RejectedIpDoesNotConsumeGlobalCapacity()
+    {
+        var service = new SqlOSDashboardLoginThrottlingService();
+        var options = new SqlOSDashboardLoginThrottlingOptions
+        {
+            MaxFailuresPerIp = 1,
+            MaxGlobalFailures = 2,
+            Window = TimeSpan.FromMinutes(5),
+            LockoutDuration = TimeSpan.FromMinutes(10)
+        };
+        var now = DateTimeOffset.UtcNow;
+
+        (await service.ReserveAsync("203.0.113.16", options, now)).Reservation.Should().NotBeNull();
+        (await service.ReserveAsync("203.0.113.16", options, now.AddMilliseconds(1)))
+            .Rejection!.Scope.Should().Be("ip");
+        (await service.ReserveAsync("203.0.113.17", options, now.AddMilliseconds(2)))
+            .Reservation.Should().NotBeNull();
+        (await service.ReserveAsync("203.0.113.18", options, now.AddMilliseconds(3)))
+            .Rejection!.Scope.Should().Be("global");
+    }
+
+    [TestMethod]
+    public async Task DashboardReservation_OldSuccessDoesNotReleaseReplacementGeneration()
+    {
+        var service = new SqlOSDashboardLoginThrottlingService();
+        var options = new SqlOSDashboardLoginThrottlingOptions
+        {
+            MaxFailuresPerIp = 1,
+            MaxGlobalFailures = 10,
+            Window = TimeSpan.FromSeconds(1),
+            LockoutDuration = TimeSpan.FromSeconds(1)
+        };
+        var now = DateTimeOffset.UtcNow;
+        var first = (await service.ReserveAsync("203.0.113.19", options, now)).Reservation!;
+        var replacementTime = now.AddSeconds(2);
+        (await service.ReserveAsync("203.0.113.19", options, replacementTime))
+            .Reservation.Should().NotBeNull();
+
+        await service.RecordSuccessAsync(first, options, replacementTime.AddMilliseconds(1));
+
+        var rejection = await service.GetRejectionAsync(
+            "203.0.113.19", options, replacementTime.AddMilliseconds(2));
+        rejection.Should().NotBeNull();
+        rejection!.Scope.Should().Be("ip");
+    }
+
+    [TestMethod]
+    public void PasswordLoginAbuseService_PreservesEnsureAllowedCompatibilityMethod()
+    {
+        typeof(SqlOSPasswordLoginAbuseService)
+            .GetMethod(nameof(SqlOSPasswordLoginAbuseService.EnsureAllowedAsync))
+            .Should().NotBeNull();
+    }
+
+    [TestMethod]
     public async Task DashboardLogin_Success_WritesAuditEvent_AndCreatesSessionCookie()
     {
         using var harness = CreateHarness();
