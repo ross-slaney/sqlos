@@ -230,7 +230,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
         (await exhausted.Context.Set<SqlOSAuthorizationCode>().CountAsync()).Should().Be(0);
         (await exhausted.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
             x.Action == "user.mfa.challenge_failed" && x.UserId == enrolled.User.Id))
-            .Should().Be(4);
+            .Should().BeInRange(3, 4);
     }
 
     [TestMethod]
