@@ -293,6 +293,7 @@ public sealed class SqlOSPasswordLoginAbuseService
         }
 
         var resetScopes = new List<string>();
+        var removableBuckets = new List<SqlOSPasswordLoginBucket>();
         foreach (var link in reservation.Buckets)
         {
             var bucket = link.Bucket!;
@@ -308,6 +309,11 @@ public sealed class SqlOSPasswordLoginAbuseService
             else
             {
                 ReleaseReservationFromBucket(bucket, now);
+                if (bucket.FailureCount == 0
+                    && !await HasOtherActiveReservationAsync(bucket.Id, reservation.Id, now, cancellationToken))
+                {
+                    removableBuckets.Add(bucket);
+                }
             }
 
             bucket.LastSuccessAt = now;
@@ -316,6 +322,7 @@ public sealed class SqlOSPasswordLoginAbuseService
 
         var completedLinks = reservation.Buckets.ToArray();
         _context.Set<SqlOSPasswordLoginReservationBucket>().RemoveRange(completedLinks);
+        _context.Set<SqlOSPasswordLoginBucket>().RemoveRange(removableBuckets);
         reservation.Buckets.Clear();
         reservation.ExpiresAt = now.Add(MaximumReservationLifetime);
         await _context.SaveChangesAsync(cancellationToken);
@@ -346,7 +353,23 @@ public sealed class SqlOSPasswordLoginAbuseService
 
             _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
         }
+
+        // Cleanup is part of the admission-critical section. Persist it here so an idempotent
+        // return cannot carry stale bucket mutations into the later, unlocked audit write.
+        await _context.SaveChangesAsync(cancellationToken);
     }
+
+    private async Task<bool> HasOtherActiveReservationAsync(
+        string bucketId,
+        string reservationId,
+        DateTime now,
+        CancellationToken cancellationToken)
+        => await _context.Set<SqlOSPasswordLoginReservationBucket>()
+            .AnyAsync(
+                x => x.BucketId == bucketId
+                     && x.ReservationId != reservationId
+                     && x.Reservation!.ExpiresAt > now,
+                cancellationToken);
 
     private void ReleaseReservationFromBucket(SqlOSPasswordLoginBucket bucket, DateTime now)
     {

@@ -77,6 +77,10 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync(
             "SqlOSPasswordLoginBuckets",
             "ReservationsRebasedAt"));
+        Assert.IsFalse(await IndexExistsAsync(
+            AspireFixture.SharedContext,
+            "SqlOSPasswordLoginBuckets",
+            "IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt"));
         foreach (var table in new[] { "SqlOSClientApplications", "SqlOSAuthOidcConnections", "SqlOSScimConnections", "SqlOSMfaSettings" })
         {
             foreach (var column in new[] { "ConfigurationOwner", "ConfigurationSourceKey", "ConfigurationFingerprint", "LastReconciledAt", "ConfigurationOrphanedAt" })

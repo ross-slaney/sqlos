@@ -78,7 +78,6 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => new { x.NormalizedEmail, x.UpdatedAt });
             entity.HasIndex(x => new { x.UserId, x.UpdatedAt });
             entity.HasIndex(x => new { x.IpAddress, x.UpdatedAt });
-            entity.HasIndex(x => new { x.ClientKey, x.UpdatedAt });
             entity.HasIndex(x => x.LockedUntil);
             entity.Property(x => x.Scope).HasMaxLength(40);
             entity.Property(x => x.BucketKey).HasMaxLength(512);

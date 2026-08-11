@@ -1,6 +1,7 @@
 using System.Net;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -351,9 +352,9 @@ public sealed class PasswordLoginAdmissionIntegrationTests
     }
 
     [TestMethod]
-    public async Task LongValidClientId_UsesBoundedBucketKeyAndRetainsFullClientIdentity()
+    public async Task MaximumLengthClientId_UsesBoundedBucketKeyAndRetainsFullClientIdentity()
     {
-        var clientId = $"long-{new string('c', 600)}";
+        var clientId = new string('c', 850);
         await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
         {
             options.PasswordLogin.MaxFailedAttemptsPerAccount = 5;
@@ -374,6 +375,12 @@ public sealed class PasswordLoginAdmissionIntegrationTests
             "P@ssword123!"));
 
         await using var actor = database.CreateActor();
+        var failed = async () => await actor.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "wrong-password", clientId, null),
+            CreateHttpContext("203.0.113.194", "long-client"));
+        await failed.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+
         var result = await actor.Auth.LoginWithPasswordAsync(
             new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", clientId, null),
             CreateHttpContext("203.0.113.194", "long-client"));
@@ -385,6 +392,132 @@ public sealed class PasswordLoginAdmissionIntegrationTests
         bucket.BucketKey.Should().StartWith("sha256:");
         bucket.BucketKey.Length.Should().BeLessThanOrEqualTo(512);
         bucket.ClientKey.Should().Be(clientId);
+    }
+
+    [TestMethod]
+    public async Task IdempotentSuccess_CommitsExpiredCleanupBeforeUnlockedAuditWrite()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 10;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        var email = SqlOSAdminService.NormalizeEmail("cleanup-before-audit@example.com");
+        const string ipAddress = "203.0.113.199";
+
+        await using var completedActor = database.CreateActor();
+        var completed = completedActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext(ipAddress, "completed"),
+            "test-client",
+            surface: "api");
+        await completedActor.Abuse.ReserveAsync(completed);
+        await completedActor.Abuse.RecordSuccessAsync(completed);
+
+        await using var expiredActor = database.CreateActor();
+        var expired = expiredActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext(ipAddress, "expired"),
+            "test-client",
+            surface: "api");
+        await expiredActor.Abuse.ReserveAsync(expired);
+        database.Context.ChangeTracker.Clear();
+        var expiredReservation = await database.Context.Set<SqlOSPasswordLoginReservation>()
+            .SingleAsync(x => x.Id == expired.ReservationId);
+        expiredReservation.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        await database.Context.SaveChangesAsync();
+
+        await using var auditBlocker = new SqlConnection(database.ConnectionString);
+        await auditBlocker.OpenAsync();
+        await using var auditTransaction = await auditBlocker.BeginTransactionAsync();
+        await using (var lockCommand = auditBlocker.CreateCommand())
+        {
+            lockCommand.Transaction = (SqlTransaction)auditTransaction;
+            lockCommand.CommandText =
+                "SELECT COUNT_BIG(*) FROM [dbo].[SqlOSAuditEvents] WITH (TABLOCKX, HOLDLOCK);";
+            _ = await lockCommand.ExecuteScalarAsync();
+        }
+
+        await using var retryActor = database.CreateActor();
+        var retry = retryActor.Abuse.RecordSuccessAsync(completed);
+        var cleanupCommitted = false;
+        for (var poll = 0; poll < 50 && !cleanupCommitted; poll++)
+        {
+            await Task.Delay(50);
+            database.Context.ChangeTracker.Clear();
+            cleanupCommitted = !await database.Context.Set<SqlOSPasswordLoginReservation>()
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == expired.ReservationId);
+        }
+
+        SqlOSPasswordLoginAttempt? replacement = null;
+        if (cleanupCommitted)
+        {
+            await using var replacementActor = database.CreateActor();
+            replacement = replacementActor.Abuse.CreateAttempt(
+                email,
+                CreateHttpContext(ipAddress, "replacement"),
+                "test-client",
+                surface: "api");
+            await replacementActor.Abuse.ReserveAsync(replacement);
+        }
+
+        await auditTransaction.CommitAsync();
+        await retry;
+
+        cleanupCommitted.Should().BeTrue("cleanup must commit while the later audit insert is blocked");
+        replacement.Should().NotBeNull();
+        database.Context.ChangeTracker.Clear();
+        var replacementBuckets = await database.Context.Set<SqlOSPasswordLoginReservationBucket>()
+            .Where(x => x.ReservationId == replacement!.ReservationId)
+            .Select(x => x.Bucket!.FailureCount)
+            .ToListAsync();
+        replacementBuckets.Should().NotBeEmpty().And.OnlyContain(x => x == 1);
+    }
+
+    [TestMethod]
+    public async Task SuccessfulFinalization_RemovesOnlyUnreferencedZeroCountSharedBuckets()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 10;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        const string ipAddress = "203.0.113.200";
+        const string userAgent = "shared-success-device";
+        await using var firstActor = database.CreateActor();
+        await using var secondActor = database.CreateActor();
+        var first = firstActor.Abuse.CreateAttempt(
+            SqlOSAdminService.NormalizeEmail("shared-success-1@example.com"),
+            CreateHttpContext(ipAddress, userAgent),
+            "test-client",
+            surface: "api");
+        var second = secondActor.Abuse.CreateAttempt(
+            SqlOSAdminService.NormalizeEmail("shared-success-2@example.com"),
+            CreateHttpContext(ipAddress, userAgent),
+            "test-client",
+            surface: "api");
+        await firstActor.Abuse.ReserveAsync(first);
+        await secondActor.Abuse.ReserveAsync(second);
+
+        await firstActor.Abuse.RecordSuccessAsync(first);
+
+        database.Context.ChangeTracker.Clear();
+        var sharedAfterFirst = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .Where(x => x.Scope == "ip" || x.Scope == "client" || x.Scope == "device")
+            .ToListAsync();
+        sharedAfterFirst.Should().HaveCount(3).And.OnlyContain(x => x.FailureCount == 1);
+
+        await secondActor.Abuse.RecordSuccessAsync(second);
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSPasswordLoginBucket>()
+                .CountAsync(x => x.Scope == "ip" || x.Scope == "client" || x.Scope == "device"))
+            .Should().Be(0);
     }
 
     [TestMethod]
@@ -496,6 +629,7 @@ public sealed class PasswordLoginAdmissionIntegrationTests
 
         public TestSqlOSDbContext Context { get; }
         public SqlOSAdminService Admin { get; }
+        public string ConnectionString => _connectionString;
 
         public static async Task<PasswordAdmissionDatabase> CreateAsync(
             Action<SqlOSAuthServerOptions> configure)

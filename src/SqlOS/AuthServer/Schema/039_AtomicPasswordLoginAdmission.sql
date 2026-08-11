@@ -32,8 +32,6 @@ BEGIN
         ON [{Schema}].[SqlOSPasswordLoginBuckets]([UserId], [UpdatedAt]);
     CREATE INDEX [IX_SqlOSPasswordLoginBuckets_IpAddress_UpdatedAt]
         ON [{Schema}].[SqlOSPasswordLoginBuckets]([IpAddress], [UpdatedAt]);
-    CREATE INDEX [IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt]
-        ON [{Schema}].[SqlOSPasswordLoginBuckets]([ClientKey], [UpdatedAt]);
     CREATE INDEX [IX_SqlOSPasswordLoginBuckets_LockedUntil]
         ON [{Schema}].[SqlOSPasswordLoginBuckets]([LockedUntil]);
 
@@ -77,6 +75,17 @@ BEGIN
 
     CREATE INDEX [IX_SqlOSPasswordLoginReservationBuckets_BucketId]
         ON [{Schema}].[SqlOSPasswordLoginReservationBuckets]([BucketId]);
+END
+
+-- Client identifiers may use the full 850-character registration limit. Keeping that
+-- diagnostic value in a composite SQL Server index can exceed the 1,700-byte key limit.
+IF EXISTS (
+    SELECT * FROM sys.indexes
+    WHERE [name] = 'IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt'
+      AND [object_id] = OBJECT_ID('[{Schema}].[SqlOSPasswordLoginBuckets]'))
+BEGIN
+    DROP INDEX [IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt]
+        ON [{Schema}].[SqlOSPasswordLoginBuckets];
 END
 
 GO
