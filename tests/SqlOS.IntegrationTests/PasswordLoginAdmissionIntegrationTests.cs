@@ -1,8 +1,11 @@
 using System.Net;
+using System.Data.Common;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
@@ -602,6 +605,138 @@ public sealed class PasswordLoginAdmissionIntegrationTests
         preserved.LockedUntil.Should().BeAfter(DateTime.UtcNow);
     }
 
+    [TestMethod]
+    public async Task TargetBucketExpiry_IsCleanedBehindGlobalBatchBeforeLockRejection()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        var email = SqlOSAdminService.NormalizeEmail("target-behind-backlog@example.com");
+        await using var targetActor = database.CreateActor();
+        var abandoned = targetActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext("203.0.113.210", "abandoned-target"),
+            surface: "api");
+        await targetActor.Abuse.ReserveAsync(abandoned);
+
+        database.Context.ChangeTracker.Clear();
+        var abandonedReservation = await database.Context.Set<SqlOSPasswordLoginReservation>()
+            .SingleAsync(x => x.Id == abandoned.ReservationId);
+        var now = DateTime.UtcNow;
+        abandonedReservation.ExpiresAt = now.AddSeconds(-1);
+        for (var index = 0; index < 101; index++)
+        {
+            database.Context.Add(new SqlOSPasswordLoginReservation
+            {
+                Id = $"pla_backlog_{index:D3}_{Guid.NewGuid():N}"[..28],
+                CreatedAt = now.AddMinutes(-5),
+                ExpiresAt = now.AddSeconds(-2)
+            });
+        }
+        await database.Context.SaveChangesAsync();
+
+        await using var replacementActor = database.CreateActor();
+        var replacement = replacementActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext("203.0.113.211", "replacement-target"),
+            surface: "api");
+        await replacementActor.Abuse.ReserveAsync(replacement);
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSPasswordLoginReservation>()
+                .AnyAsync(x => x.Id == abandoned.ReservationId))
+            .Should().BeFalse();
+        var bucket = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "email" && x.BucketKey == email);
+        bucket.FailureCount.Should().Be(1);
+        (await database.Context.Set<SqlOSPasswordLoginReservationBucket>()
+                .AnyAsync(x => x.ReservationId == replacement.ReservationId && x.BucketId == bucket.Id))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task RebasedActiveLock_PreservesTransitionOwnerUntilFailureFinalizes()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+            options.PasswordLogin.LockoutDuration = TimeSpan.FromMinutes(1);
+        });
+        var email = SqlOSAdminService.NormalizeEmail("rebase-owner@example.com");
+        await using var ownerActor = database.CreateActor();
+        var owner = ownerActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext("203.0.113.212", "owner"),
+            surface: "api");
+        await ownerActor.Abuse.ReserveAsync(owner);
+        database.Context.ChangeTracker.Clear();
+        var expiredLock = await database.Context.Set<SqlOSPasswordLoginBucket>()
+            .SingleAsync(x => x.Scope == "email" && x.BucketKey == email);
+        expiredLock.LockedUntil = DateTime.UtcNow.AddSeconds(-1);
+        await database.Context.SaveChangesAsync();
+
+        await using (var rejectedActor = database.CreateActor())
+        {
+            var rejected = rejectedActor.Abuse.CreateAttempt(
+                email,
+                CreateHttpContext("203.0.113.213", "rebase-trigger"),
+                surface: "api");
+            var act = async () => await rejectedActor.Abuse.ReserveAsync(rejected);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        await ownerActor.Abuse.RecordFailureAsync(owner, "invalid_password");
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(x => x.EventType == "password.login.locked"
+                                 && x.DataJson != null
+                                 && x.DataJson.Contains(email)))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task FailureFinalization_UnknownCommitUsesVerificationWithoutLosingLockoutResult()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        var email = SqlOSAdminService.NormalizeEmail("failure-unknown-commit@example.com");
+        await using var reservationActor = database.CreateActor();
+        var attempt = reservationActor.Abuse.CreateAttempt(
+            email,
+            CreateHttpContext("203.0.113.214", "unknown-commit"),
+            surface: "api");
+        await reservationActor.Abuse.ReserveAsync(attempt);
+
+        var interceptor = new ThrowOnceAfterCommitInterceptor();
+        await using var failureActor = database.CreateActor(interceptor, retryUnknownCommit: true);
+        await failureActor.Abuse.RecordFailureAsync(attempt, "invalid_password");
+
+        interceptor.ThrowCount.Should().Be(1);
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSPasswordLoginReservation>()
+                .AnyAsync(x => x.Id == attempt.ReservationId))
+            .Should().BeFalse();
+        (await database.Context.Set<SqlOSAuditEvent>()
+                .CountAsync(x => x.EventType == "password.login.locked"
+                                 && x.DataJson != null
+                                 && x.DataJson.Contains(email)))
+            .Should().Be(1);
+    }
+
     private static DefaultHttpContext CreateHttpContext(string ipAddress, string userAgent)
     {
         var context = new DefaultHttpContext();
@@ -651,12 +786,24 @@ public sealed class PasswordLoginAdmissionIntegrationTests
             return new PasswordAdmissionDatabase(context, connectionString, options, actor.Admin);
         }
 
-        public PasswordAdmissionActor CreateActor()
+        public PasswordAdmissionActor CreateActor(
+            IInterceptor? interceptor = null,
+            bool retryUnknownCommit = false)
         {
-            var context = new TestSqlOSDbContext(
-                new DbContextOptionsBuilder<TestSqlOSDbContext>()
-                    .UseSqlServer(_connectionString)
-                    .Options);
+            var builder = new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                .UseSqlServer(_connectionString, sqlServer =>
+                {
+                    if (retryUnknownCommit)
+                    {
+                        sqlServer.ExecutionStrategy(
+                            dependencies => new UnknownCommitExecutionStrategy(dependencies));
+                    }
+                });
+            if (interceptor != null)
+            {
+                builder.AddInterceptors(interceptor);
+            }
+            var context = new TestSqlOSDbContext(builder.Options);
             return BuildActor(context, _options, ownsContext: true);
         }
 
@@ -689,6 +836,36 @@ public sealed class PasswordLoginAdmissionIntegrationTests
             await Context.DisposeAsync();
         }
     }
+
+    private sealed class UnknownCommitExecutionStrategy(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, maxRetryCount: 2, maxRetryDelay: TimeSpan.Zero)
+    {
+        protected override bool ShouldRetryOn(Exception exception)
+            => exception is SimulatedUnknownCommitException;
+    }
+
+    private sealed class ThrowOnceAfterCommitInterceptor : DbTransactionInterceptor
+    {
+        private int _shouldThrow = 1;
+
+        public int ThrowCount { get; private set; }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction,
+            TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _shouldThrow, 0) == 1)
+            {
+                ThrowCount++;
+                throw new SimulatedUnknownCommitException();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SimulatedUnknownCommitException : Exception;
 
     private sealed class PasswordAdmissionActor(
         TestSqlOSDbContext context,

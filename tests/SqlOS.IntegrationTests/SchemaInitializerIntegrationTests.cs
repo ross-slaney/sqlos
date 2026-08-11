@@ -127,7 +127,8 @@ public sealed class SchemaInitializerIntegrationTests
                 DELETE FROM [dbo].[SqlOSAppliedMigrations]
                 WHERE [ScriptName] IN (
                     'SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql',
-                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql');
+                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql',
+                    'SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql');
                 UPDATE [dbo].[SqlOSSchema] SET [Version] = 17;
                 """);
 
@@ -137,6 +138,13 @@ public sealed class SchemaInitializerIntegrationTests
                 "SELECT COUNT(*) FROM [dbo].[SqlOSAppliedMigrations] WHERE [Version] = 17"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginBuckets'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservations'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservationBuckets'"));
+            Assert.IsTrue(await ColumnExistsAsync(context,
+                "SqlOSPasswordLoginBuckets",
+                "ReservationsRebasedAt"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailTemplates'"));
             Assert.AreEqual(1, await ScalarIntAsync(context,

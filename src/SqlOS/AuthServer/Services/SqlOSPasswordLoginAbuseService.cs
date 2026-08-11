@@ -69,7 +69,10 @@ public sealed class SqlOSPasswordLoginAbuseService
             return;
         }
 
-        var outcome = await ExecuteAtomicAsync(() => ReserveCoreAsync(attempt, cancellationToken), cancellationToken);
+        var outcome = await ExecuteAtomicAsync(
+            () => ReserveCoreAsync(attempt, cancellationToken),
+            verifySucceeded: static () => Task.FromResult(false),
+            cancellationToken: cancellationToken);
         if (outcome.Rejection == null)
         {
             return;
@@ -110,7 +113,10 @@ public sealed class SqlOSPasswordLoginAbuseService
             return;
         }
 
-        var locked = await ExecuteAtomicAsync(() => RecordFailureCoreAsync(attempt, cancellationToken), cancellationToken);
+        var locked = await ExecuteAtomicAsync(
+            () => RecordFailureCoreAsync(attempt, cancellationToken),
+            () => IsReservationMissingAsync(attempt.ReservationId, cancellationToken),
+            cancellationToken);
         await RecordPasswordAuditAsync(
             "password.login.failed",
             attempt,
@@ -149,7 +155,10 @@ public sealed class SqlOSPasswordLoginAbuseService
         IReadOnlyList<string> resetScopes = [];
         if (_options.Enabled)
         {
-            resetScopes = await ExecuteAtomicAsync(() => RecordSuccessCoreAsync(attempt, cancellationToken), cancellationToken);
+            resetScopes = await ExecuteAtomicAsync(
+                () => RecordSuccessCoreAsync(attempt, cancellationToken),
+                () => IsReservationFinalizedAsync(attempt.ReservationId, cancellationToken),
+                cancellationToken);
         }
 
         await RecordPasswordAuditAsync(
@@ -181,6 +190,7 @@ public sealed class SqlOSPasswordLoginAbuseService
             var bucket = await FindBucketAsync(identity, cancellationToken);
             if (bucket != null)
             {
+                await CleanupExpiredReservationsForBucketAsync(bucket.Id, now, cancellationToken);
                 await ResetExpiredAsync(bucket, identity.Threshold, now, cancellationToken);
                 if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
                 {
@@ -359,6 +369,44 @@ public sealed class SqlOSPasswordLoginAbuseService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task CleanupExpiredReservationsForBucketAsync(
+        string bucketId,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var expired = await _context.Set<SqlOSPasswordLoginReservation>()
+                .Where(x => x.ExpiresAt <= now && x.Buckets.Any(link => link.BucketId == bucketId))
+                .OrderBy(x => x.ExpiresAt)
+                .Take(ExpiredReservationCleanupBatchSize)
+                .Include(x => x.Buckets)
+                .ThenInclude(x => x.Bucket)
+                .ToListAsync(cancellationToken);
+            if (expired.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var reservation in expired)
+            {
+                foreach (var link in reservation.Buckets)
+                {
+                    var linkedBucket = link.Bucket!;
+                    if (linkedBucket.ReservationsRebasedAt is not { } rebasedAt
+                        || rebasedAt < reservation.ExpiresAt)
+                    {
+                        ReleaseReservationFromBucket(linkedBucket, now);
+                    }
+                }
+
+                _context.Set<SqlOSPasswordLoginReservation>().Remove(reservation);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+    }
+
     private async Task<bool> HasOtherActiveReservationAsync(
         string bucketId,
         string reservationId,
@@ -396,7 +444,10 @@ public sealed class SqlOSPasswordLoginAbuseService
         bucket.LockoutReason = null;
     }
 
-    private async Task<T> ExecuteAtomicAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    private async Task<T> ExecuteAtomicAsync<T>(
+        Func<Task<T>> operation,
+        Func<Task<bool>> verifySucceeded,
+        CancellationToken cancellationToken)
     {
         if (!_context.Database.IsRelational())
         {
@@ -412,16 +463,33 @@ public sealed class SqlOSPasswordLoginAbuseService
         }
 
         var strategy = _context.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async () =>
-        {
-            ClearTrackedAbuseState();
-            await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-            await AcquireAdmissionLockAsync(cancellationToken);
-            var result = await operation();
-            await transaction.CommitAsync(cancellationToken);
-            return result;
-        });
+        return await Microsoft.EntityFrameworkCore.Storage.RelationalExecutionStrategyExtensions
+            .ExecuteInTransactionAsync<T>(
+            strategy,
+            async _ =>
+            {
+                ClearTrackedAbuseState();
+                await AcquireAdmissionLockAsync(cancellationToken);
+                return await operation();
+            },
+            async _ =>
+            {
+                ClearTrackedAbuseState();
+                return await verifySucceeded();
+            },
+            IsolationLevel.Serializable,
+            cancellationToken);
     }
+
+    private async Task<bool> IsReservationMissingAsync(string reservationId, CancellationToken cancellationToken)
+        => !await _context.Set<SqlOSPasswordLoginReservation>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == reservationId, cancellationToken);
+
+    private async Task<bool> IsReservationFinalizedAsync(string reservationId, CancellationToken cancellationToken)
+        => await _context.Set<SqlOSPasswordLoginReservation>()
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == reservationId && !x.Buckets.Any(), cancellationToken);
 
     private Task AcquireAdmissionLockAsync(CancellationToken cancellationToken)
     {
@@ -560,16 +628,23 @@ public sealed class SqlOSPasswordLoginAbuseService
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var activeReservations = await _context.Set<SqlOSPasswordLoginReservationBucket>()
-            .CountAsync(
-                x => x.BucketId == bucket.Id && x.Reservation!.ExpiresAt > now,
-                cancellationToken);
-        bucket.FailureCount = activeReservations;
-        bucket.WindowStartedAt = activeReservations == 0 ? null : now;
+        var activeReservationIds = await _context.Set<SqlOSPasswordLoginReservationBucket>()
+            .Where(x => x.BucketId == bucket.Id && x.Reservation!.ExpiresAt > now)
+            .Select(x => x.ReservationId)
+            .ToListAsync(cancellationToken);
+        var thresholdOwner = activeReservationIds.Any(id => IsThresholdLockoutCausedBy(bucket, id))
+            ? bucket.LockoutReason
+            : null;
+        bucket.FailureCount = activeReservationIds.Count;
+        bucket.WindowStartedAt = activeReservationIds.Count == 0 ? null : now;
         bucket.ReservationsRebasedAt = now;
         bucket.LockedUntil = null;
         bucket.LockoutReason = null;
         ApplyLockState(bucket, threshold, now);
+        if (thresholdOwner != null && bucket.FailureCount >= threshold)
+        {
+            bucket.LockoutReason = thresholdOwner;
+        }
         bucket.UpdatedAt = now;
     }
 
