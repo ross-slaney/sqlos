@@ -106,6 +106,25 @@ public sealed class SqlOSPasswordLoginBucket
     public DateTime UpdatedAt { get; set; }
 
     public SqlOSUser? User { get; set; }
+    public ICollection<SqlOSPasswordLoginReservationBucket> Reservations { get; set; } = [];
+}
+
+public sealed class SqlOSPasswordLoginReservation
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+
+    public ICollection<SqlOSPasswordLoginReservationBucket> Buckets { get; set; } = [];
+}
+
+public sealed class SqlOSPasswordLoginReservationBucket
+{
+    public string ReservationId { get; set; } = string.Empty;
+    public string BucketId { get; set; } = string.Empty;
+
+    public SqlOSPasswordLoginReservation? Reservation { get; set; }
+    public SqlOSPasswordLoginBucket? Bucket { get; set; }
 }
 
 public sealed class SqlOSMembership

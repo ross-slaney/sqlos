@@ -302,49 +302,52 @@ public sealed class SqlOSAuthorizationServerService
             clientKey,
             authorizationRequestId,
             surface ?? "authorization");
-        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
-        if (emailRecord == null)
-        {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "unknown_email", cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
+        attempt = attempt with { UserId = emailRecord?.UserId };
 
-        attempt = attempt with { UserId = emailRecord.UserId };
-        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
-
-        if (_options.RequireVerifiedEmailForPasswordLogin && !emailRecord.IsVerified && !allowUnverifiedEmailForInvitation)
+        if (emailRecord != null
+            && _options.RequireVerifiedEmailForPasswordLogin
+            && !emailRecord.IsVerified
+            && !allowUnverifiedEmailForInvitation)
         {
             throw new InvalidOperationException("Email must be verified before password login.");
         }
 
-        var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        if (credential == null)
+        var credential = emailRecord == null
+            ? null
+            : await _context.Set<SqlOSCredential>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.UserId == emailRecord.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        await _passwordLoginAbuseService.ReserveAsync(attempt, cancellationToken);
+        var passwordMatches = _cryptoService.VerifyPassword(
+            credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
+            password);
+        if (credential == null || !passwordMatches)
         {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "missing_password_credential", cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
-
-        if (!_cryptoService.VerifyPassword(credential.SecretHash, password))
-        {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "invalid_password", cancellationToken);
+            var failureReason = emailRecord == null
+                ? "unknown_email"
+                : credential == null
+                    ? "missing_password_credential"
+                    : "invalid_password";
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, failureReason, cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
         var user = await _context.Set<SqlOSUser>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == emailRecord.UserId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == emailRecord!.UserId, cancellationToken);
         if (user == null || !user.IsActive)
         {
             await _passwordLoginAbuseService.RecordFailureAsync(attempt, "inactive_user", cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
-        credential.LastUsedAt = DateTime.UtcNow;
         await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
+        var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
+        storedCredential.LastUsedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);

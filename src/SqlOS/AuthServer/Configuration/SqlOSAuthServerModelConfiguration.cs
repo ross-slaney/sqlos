@@ -78,7 +78,6 @@ public static class SqlOSAuthServerModelConfiguration
             entity.HasIndex(x => new { x.NormalizedEmail, x.UpdatedAt });
             entity.HasIndex(x => new { x.UserId, x.UpdatedAt });
             entity.HasIndex(x => new { x.IpAddress, x.UpdatedAt });
-            entity.HasIndex(x => new { x.ClientKey, x.UpdatedAt });
             entity.HasIndex(x => x.LockedUntil);
             entity.Property(x => x.Scope).HasMaxLength(40);
             entity.Property(x => x.BucketKey).HasMaxLength(512);
@@ -92,6 +91,27 @@ public static class SqlOSAuthServerModelConfiguration
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSPasswordLoginReservation>(entity =>
+        {
+            entity.ToTable("SqlOSPasswordLoginReservations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+
+        modelBuilder.Entity<SqlOSPasswordLoginReservationBucket>(entity =>
+        {
+            entity.ToTable("SqlOSPasswordLoginReservationBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => new { x.ReservationId, x.BucketId });
+            entity.HasOne(x => x.Reservation)
+                .WithMany(x => x.Buckets)
+                .HasForeignKey(x => x.ReservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Bucket)
+                .WithMany(x => x.Reservations)
+                .HasForeignKey(x => x.BucketId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SqlOSMembership>(entity =>

@@ -196,12 +196,12 @@ public sealed class SqlOSDashboardMiddleware
 
             var clientIp = GetClientIpAddress(context);
             var now = DateTimeOffset.UtcNow;
-            var rejection = await loginThrottlingService.GetRejectionAsync(
+            var reservationResult = await loginThrottlingService.ReserveAsync(
                 clientIp,
                 _options.LoginThrottling,
                 now,
                 context.RequestAborted);
-            if (rejection != null)
+            if (reservationResult.Rejection is { } rejection)
             {
                 await RecordDashboardAuditAsync(
                     context,
@@ -224,11 +224,10 @@ public sealed class SqlOSDashboardMiddleware
                     clientIp,
                     new { reason = "invalid_password" });
 
-                var lockout = await loginThrottlingService.RecordFailureAsync(
-                    clientIp,
-                    _options.LoginThrottling,
-                    now,
-                    context.RequestAborted);
+                var reservation = reservationResult.Reservation!;
+                var lockout = new SqlOSDashboardLoginLockoutResult(
+                    reservation.PerIpLockedUntil,
+                    reservation.GlobalLockedUntil);
                 if (lockout.PerIpLockedUntil is { } perIpLockedUntil)
                 {
                     await RecordDashboardAuditAsync(
@@ -262,7 +261,7 @@ public sealed class SqlOSDashboardMiddleware
             }
 
             await loginThrottlingService.RecordSuccessAsync(
-                clientIp,
+                reservationResult.Reservation!,
                 _options.LoginThrottling,
                 now,
                 context.RequestAborted);

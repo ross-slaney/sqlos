@@ -113,49 +113,48 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Local password authentication is disabled.");
         }
 
+        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
         var normalizedEmail = SqlOSAdminService.NormalizeEmail(request.Email);
         var attempt = _passwordLoginAbuseService.CreateAttempt(
             normalizedEmail,
             httpContext,
             clientKey: request.ClientId,
             surface: "api");
-        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
 
         var email = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
-        if (email == null)
-        {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "unknown_email", cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
+        attempt = attempt with { UserId = email?.UserId };
 
-        attempt = attempt with { UserId = email.UserId };
-        await _passwordLoginAbuseService.EnsureAllowedAsync(attempt, cancellationToken);
-
-        if (_options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
+        if (email != null && _options.RequireVerifiedEmailForPasswordLogin && !email.IsVerified)
         {
             throw new InvalidOperationException("Email must be verified before password login.");
         }
 
-        var credential = await _context.Set<SqlOSCredential>()
-            .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
-        if (credential == null)
+        var credential = email == null
+            ? null
+            : await _context.Set<SqlOSCredential>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.UserId == email.UserId && x.Type == "password" && x.RevokedAt == null, cancellationToken);
+        await _passwordLoginAbuseService.ReserveAsync(attempt, cancellationToken);
+        var passwordMatches = _cryptoService.VerifyPassword(
+            credential?.SecretHash ?? SqlOSClientAuthenticationService.DummyCredentialHash,
+            request.Password);
+        if (credential == null || !passwordMatches)
         {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "missing_password_credential", cancellationToken);
+            var failureReason = email == null
+                ? "unknown_email"
+                : credential == null
+                    ? "missing_password_credential"
+                    : "invalid_password";
+            await _passwordLoginAbuseService.RecordFailureAsync(attempt, failureReason, cancellationToken);
             throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
         }
 
-        if (!_cryptoService.VerifyPassword(credential.SecretHash, request.Password))
-        {
-            await _passwordLoginAbuseService.RecordFailureAsync(attempt, "invalid_password", cancellationToken);
-            throw new InvalidOperationException(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
-        }
-
-        credential.LastUsedAt = DateTime.UtcNow;
-
-        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == email.UserId, cancellationToken);
-        var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
+        var user = await _context.Set<SqlOSUser>().AsNoTracking().FirstAsync(x => x.Id == email!.UserId, cancellationToken);
         await _passwordLoginAbuseService.RecordSuccessAsync(attempt, cancellationToken);
+        var storedCredential = await _context.Set<SqlOSCredential>().FirstAsync(x => x.Id == credential.Id, cancellationToken);
+        storedCredential.LastUsedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
         return await FinalizeClientLoginAsync(user, client, request.OrganizationId, "password", httpContext, cancellationToken);
     }
