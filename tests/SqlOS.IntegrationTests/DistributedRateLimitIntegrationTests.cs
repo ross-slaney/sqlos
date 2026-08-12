@@ -110,6 +110,9 @@ public class DistributedRateLimitIntegrationTests
             var perIpRejection = await first.GetRejectionAsync(ip, options, now.AddSeconds(2));
             perIpRejection.Should().NotBeNull();
             perIpRejection!.Scope.Should().Be("ip");
+            var alreadyLocked = await first.RecordFailureAsync(ip, options, now.AddSeconds(2));
+            alreadyLocked.PerIpLocked.Should().BeTrue(
+                "legacy RecordFailureAsync should surface an existing lockout instead of None");
 
             var globalResult = await first.RecordFailureAsync(otherIp, options, now.AddSeconds(3));
             globalResult.GlobalLocked.Should().BeTrue();
@@ -119,6 +122,11 @@ public class DistributedRateLimitIntegrationTests
                 now.AddSeconds(4));
             globalRejection.Should().NotBeNull();
             globalRejection!.Scope.Should().Be("global");
+            var alreadyGloballyLocked = await second.RecordFailureAsync(
+                $"ip-{Guid.NewGuid():N}",
+                options,
+                now.AddSeconds(5));
+            alreadyGloballyLocked.GlobalLocked.Should().BeTrue();
         }
         finally
         {
@@ -126,6 +134,43 @@ public class DistributedRateLimitIntegrationTests
             await firstStore.DeleteAsync("dashboard-ip", otherIp);
             await firstStore.DeleteAsync("dashboard-global", "all");
         }
+    }
+
+    [TestMethod]
+    public async Task DashboardPasswordReservations_AdmitExactCapAcrossApplicationInstances()
+    {
+        var connectionString = GetConnectionString();
+        var authOptions = Options.Create(new SqlOSAuthServerOptions());
+        var options = new SqlOSDashboardLoginThrottlingOptions
+        {
+            MaxFailuresPerIp = 2,
+            MaxGlobalFailures = 20,
+            Window = TimeSpan.FromMinutes(5),
+            LockoutDuration = TimeSpan.FromMinutes(10)
+        };
+        var ip = $"ip-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var attempts = Enumerable.Range(0, 10).Select(async _ =>
+        {
+            await using var context = CreateContext(connectionString);
+            var service = new SqlOSDashboardLoginThrottlingService(
+                new SqlOSDistributedRateLimitStore(context, authOptions));
+            await start.Task;
+            return await service.ReserveAsync(ip, options, now);
+        }).ToArray();
+
+        start.SetResult();
+        var results = await Task.WhenAll(attempts);
+
+        results.Count(x => x.Reservation != null).Should().Be(2);
+        results.Count(x => x.Rejection?.Scope == "ip").Should().Be(8);
+
+        await using var cleanupContext = CreateContext(connectionString);
+        var cleanup = new SqlOSDistributedRateLimitStore(cleanupContext, authOptions);
+        await cleanup.DeleteAsync("dashboard-ip", ip);
+        await cleanup.DeleteAsync("dashboard-global", "all");
     }
 
     private static string GetConnectionString()

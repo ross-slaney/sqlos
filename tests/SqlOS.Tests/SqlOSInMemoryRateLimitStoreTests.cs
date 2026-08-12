@@ -58,4 +58,31 @@ public class SqlOSInMemoryRateLimitStoreTests
         (await store.GetAsync("test", "locked-0", now, TimeSpan.FromDays(2)))
             .Should().NotBeNull();
     }
+
+    [TestMethod]
+    public async Task ReservePair_WhenStoreIsFullOfLockedBuckets_FailsClosedWithoutThrowing()
+    {
+        var store = new SqlOSInMemoryRateLimitStore();
+        var now = DateTimeOffset.UtcNow;
+        for (var i = 0; i < SqlOSInMemoryRateLimitStore.MaximumBuckets; i++)
+        {
+            await store.IncrementAsync(
+                "test",
+                $"locked-{i}",
+                lockThreshold: 1,
+                window: TimeSpan.FromDays(2),
+                lockoutDuration: TimeSpan.FromDays(2),
+                now);
+        }
+
+        var result = await store.ReservePairAsync(
+            new SqlOSRateLimitBucketRequest("dashboard-global", "all", 10, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5)),
+            new SqlOSRateLimitBucketRequest("dashboard-ip", "203.0.113.50", 2, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5)),
+            now);
+
+        result.Admitted.Should().BeFalse();
+        result.RejectedIndex.Should().Be(0);
+        result.RejectedLockedUntil.Should().NotBeNull();
+        store.BucketCount.Should().Be(SqlOSInMemoryRateLimitStore.MaximumBuckets);
+    }
 }

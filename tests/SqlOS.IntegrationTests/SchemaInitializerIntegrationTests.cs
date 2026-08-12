@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 38;
+    private const int CurrentSchemaVersion = 39;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -34,6 +34,8 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSUserPhoneNumbers",
                      "SqlOSCredentials",
                      "SqlOSPasswordLoginBuckets",
+                     "SqlOSPasswordLoginReservations",
+                     "SqlOSPasswordLoginReservationBuckets",
                      "SqlOSMemberships",
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
@@ -112,11 +114,14 @@ public sealed class SchemaInitializerIntegrationTests
             await context.Database.ExecuteSqlRawAsync("""
                 DROP TABLE [dbo].[SqlOSEmailDeliveries];
                 DROP TABLE [dbo].[SqlOSEmailTemplates];
+                DROP TABLE [dbo].[SqlOSPasswordLoginReservationBuckets];
+                DROP TABLE [dbo].[SqlOSPasswordLoginReservations];
                 DROP TABLE [dbo].[SqlOSPasswordLoginBuckets];
                 DELETE FROM [dbo].[SqlOSAppliedMigrations]
                 WHERE [ScriptName] IN (
                     'SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql',
-                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql');
+                    'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql',
+                    'SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql');
                 UPDATE [dbo].[SqlOSSchema] SET [Version] = 17;
                 """);
 
@@ -126,6 +131,15 @@ public sealed class SchemaInitializerIntegrationTests
                 "SELECT COUNT(*) FROM [dbo].[SqlOSAppliedMigrations] WHERE [Version] = 17"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginBuckets'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservations'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservationBuckets'"));
+            Assert.AreEqual(0, await ScalarIntAsync(context, """
+                SELECT COUNT(*) FROM sys.indexes
+                WHERE [name] = 'IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt'
+                  AND [object_id] = OBJECT_ID('[dbo].[SqlOSPasswordLoginBuckets]')
+                """));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSEmailTemplates'"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
