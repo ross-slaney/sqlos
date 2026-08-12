@@ -110,6 +110,9 @@ public class DistributedRateLimitIntegrationTests
             var perIpRejection = await first.GetRejectionAsync(ip, options, now.AddSeconds(2));
             perIpRejection.Should().NotBeNull();
             perIpRejection!.Scope.Should().Be("ip");
+            var alreadyLocked = await first.RecordFailureAsync(ip, options, now.AddSeconds(2));
+            alreadyLocked.PerIpLocked.Should().BeTrue(
+                "legacy RecordFailureAsync should surface an existing lockout instead of None");
 
             var globalResult = await first.RecordFailureAsync(otherIp, options, now.AddSeconds(3));
             globalResult.GlobalLocked.Should().BeTrue();
@@ -119,6 +122,11 @@ public class DistributedRateLimitIntegrationTests
                 now.AddSeconds(4));
             globalRejection.Should().NotBeNull();
             globalRejection!.Scope.Should().Be("global");
+            var alreadyGloballyLocked = await second.RecordFailureAsync(
+                $"ip-{Guid.NewGuid():N}",
+                options,
+                now.AddSeconds(5));
+            alreadyGloballyLocked.GlobalLocked.Should().BeTrue();
         }
         finally
         {

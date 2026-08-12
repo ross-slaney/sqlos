@@ -105,6 +105,38 @@ public sealed class PasswordLoginAdmissionIntegrationTests
     }
 
     [TestMethod]
+    public async Task SuccessfulThresholdReservation_DoesNotEmitLockoutAudit()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        var user = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Success Threshold User",
+            $"success-threshold-{Guid.NewGuid():N}@example.com",
+            "P@ssword123!"));
+
+        await using var actor = database.CreateActor();
+        var result = await actor.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(user.DefaultEmail!, "P@ssword123!", "test-client", null),
+            CreateHttpContext("203.0.113.145", "success-threshold"));
+
+        result.Tokens.Should().NotBeNull();
+        database.Context.ChangeTracker.Clear();
+        var auditTypes = await database.Context.Set<SqlOSAuditEvent>()
+            .Where(x => x.DataJson != null
+                        && x.DataJson.Contains(SqlOSAdminService.NormalizeEmail(user.DefaultEmail!)))
+            .Select(x => x.EventType)
+            .ToListAsync();
+        auditTypes.Should().Contain("password.login.succeeded");
+        auditTypes.Should().NotContain("password.login.locked");
+        auditTypes.Should().NotContain("password.login.suspicious_pattern");
+    }
+
+    [TestMethod]
     public async Task OverlappingAccountAndIpBuckets_AdmitOnlyTheLowestCap()
     {
         await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>

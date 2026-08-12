@@ -107,11 +107,21 @@ public sealed class SqlOSDashboardLoginThrottlingService
         CancellationToken cancellationToken = default)
     {
         var result = await ReserveAsync(clientIp, options, now, cancellationToken);
-        return result.Reservation is { } reservation
-            ? new SqlOSDashboardLoginLockoutResult(
+        if (result.Reservation is { } reservation)
+        {
+            return new SqlOSDashboardLoginLockoutResult(
                 reservation.PerIpLockedUntil,
-                reservation.GlobalLockedUntil)
-            : SqlOSDashboardLoginLockoutResult.None;
+                reservation.GlobalLockedUntil);
+        }
+
+        if (result.Rejection is { } rejection)
+        {
+            return rejection.Scope == "ip"
+                ? new SqlOSDashboardLoginLockoutResult(rejection.RetryAfter, null)
+                : new SqlOSDashboardLoginLockoutResult(null, rejection.RetryAfter);
+        }
+
+        return SqlOSDashboardLoginLockoutResult.None;
     }
 
     public async Task RecordSuccessAsync(
