@@ -33,5 +33,8 @@ public sealed class SqlOSTotpMfaOptions
     public int MaxFailedAttemptsPerChallenge { get; set; } = 5;
     public int MaxFailedAttemptsPerUser { get; set; } = 10;
     public int MaxFailedAttemptsPerIp { get; set; } = 25;
+    public int MaxFailedAttemptsPerClient { get; set; } = 25;
+    public int MaxFailedAttemptsPerDevice { get; set; } = 10;
+    public int MaxFailedAttemptsPerAuthorizationRequest { get; set; } = 10;
     public TimeSpan FailedAttemptWindow { get; set; } = TimeSpan.FromMinutes(10);
 }

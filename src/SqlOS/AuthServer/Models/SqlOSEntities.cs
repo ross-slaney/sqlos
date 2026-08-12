@@ -127,6 +127,37 @@ public sealed class SqlOSPasswordLoginReservationBucket
     public SqlOSPasswordLoginBucket? Bucket { get; set; }
 }
 
+public sealed class SqlOSMfaAttemptBucket
+{
+    public string Id { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string BucketKey { get; set; } = string.Empty;
+    public int AttemptCount { get; set; }
+    public DateTime? WindowStartedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public ICollection<SqlOSMfaAttemptReservationBucket> Reservations { get; set; } = [];
+}
+
+public sealed class SqlOSMfaAttemptReservation
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+
+    public ICollection<SqlOSMfaAttemptReservationBucket> Buckets { get; set; } = [];
+}
+
+public sealed class SqlOSMfaAttemptReservationBucket
+{
+    public string ReservationId { get; set; } = string.Empty;
+    public string BucketId { get; set; } = string.Empty;
+
+    public SqlOSMfaAttemptReservation? Reservation { get; set; }
+    public SqlOSMfaAttemptBucket? Bucket { get; set; }
+}
+
 public sealed class SqlOSMembership
 {
     public string OrganizationId { get; set; } = string.Empty;

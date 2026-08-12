@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 39;
+    private const int CurrentSchemaVersion = 40;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -36,6 +36,9 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSPasswordLoginBuckets",
                      "SqlOSPasswordLoginReservations",
                      "SqlOSPasswordLoginReservationBuckets",
+                     "SqlOSMfaAttemptBuckets",
+                     "SqlOSMfaAttemptReservations",
+                     "SqlOSMfaAttemptReservationBuckets",
                      "SqlOSMemberships",
                      "SqlOSSsoConnections",
                      "SqlOSExternalIdentities",
@@ -114,6 +117,9 @@ public sealed class SchemaInitializerIntegrationTests
             await context.Database.ExecuteSqlRawAsync("""
                 DROP TABLE [dbo].[SqlOSEmailDeliveries];
                 DROP TABLE [dbo].[SqlOSEmailTemplates];
+                DROP TABLE [dbo].[SqlOSMfaAttemptReservationBuckets];
+                DROP TABLE [dbo].[SqlOSMfaAttemptReservations];
+                DROP TABLE [dbo].[SqlOSMfaAttemptBuckets];
                 DROP TABLE [dbo].[SqlOSPasswordLoginReservationBuckets];
                 DROP TABLE [dbo].[SqlOSPasswordLoginReservations];
                 DROP TABLE [dbo].[SqlOSPasswordLoginBuckets];
@@ -121,7 +127,8 @@ public sealed class SchemaInitializerIntegrationTests
                 WHERE [ScriptName] IN (
                     'SqlOS.AuthServer.Schema.017_PasswordLoginAbuse.sql',
                     'SqlOS.AuthServer.Schema.017_TransactionalEmail.sql',
-                    'SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql');
+                    'SqlOS.AuthServer.Schema.039_AtomicPasswordLoginAdmission.sql',
+                    'SqlOS.AuthServer.Schema.040_MfaAttemptAdmission.sql');
                 UPDATE [dbo].[SqlOSSchema] SET [Version] = 17;
                 """);
 
@@ -135,6 +142,12 @@ public sealed class SchemaInitializerIntegrationTests
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservations'"));
             Assert.AreEqual(1, await ScalarIntAsync(context,
                 "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSPasswordLoginReservationBuckets'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptBuckets'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptReservations'"));
+            Assert.AreEqual(1, await ScalarIntAsync(context,
+                "SELECT COUNT(*) FROM sys.tables WHERE [name] = 'SqlOSMfaAttemptReservationBuckets'"));
             Assert.AreEqual(0, await ScalarIntAsync(context, """
                 SELECT COUNT(*) FROM sys.indexes
                 WHERE [name] = 'IX_SqlOSPasswordLoginBuckets_ClientKey_UpdatedAt'

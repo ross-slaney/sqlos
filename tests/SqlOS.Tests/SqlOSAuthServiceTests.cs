@@ -910,7 +910,7 @@ public sealed class SqlOSAuthServiceTests
 
         var blockedChallenge = await harness.Context.Set<SqlOSTemporaryToken>()
             .SingleAsync(x => x.TokenHash == harness.Crypto.HashToken(blockedLogin.MfaToken!));
-        blockedChallenge.ConsumedAt.Should().NotBeNull();
+        blockedChallenge.ConsumedAt.Should().BeNull();
         (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
             x.Action == "user.mfa.challenge_failed" && x.IpAddress == sharedIp)).Should().Be(2);
         (await harness.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == blocked.User.Id)).Should().Be(0);

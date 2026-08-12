@@ -42,6 +42,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSTotpMfaService? _totpMfaService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
+    private readonly SqlOSMfaAttemptAdmissionService _mfaAttemptAdmissionService;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly ISqlOSAuthEmailSender? _authEmailSender;
 
@@ -59,7 +60,8 @@ public sealed class SqlOSAuthService
         ISqlOSAuthEmailSender? authEmailSender = null,
         SqlOSMfaPolicyService? mfaPolicyService = null,
         SqlOSTotpMfaService? totpMfaService = null,
-        SqlOSMagicLinkService? magicLinkService = null)
+        SqlOSMagicLinkService? magicLinkService = null,
+        SqlOSMfaAttemptAdmissionService? mfaAttemptAdmissionService = null)
     {
         _context = context;
         _options = options.Value;
@@ -73,6 +75,8 @@ public sealed class SqlOSAuthService
         _invitationService = invitationService;
         _passwordLoginAbuseService = passwordLoginAbuseService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
+        _mfaAttemptAdmissionService = mfaAttemptAdmissionService
+            ?? new SqlOSMfaAttemptAdmissionService(context, cryptoService, options);
         _transactionalEmailService = transactionalEmailService;
         _authEmailSender = authEmailSender;
         _mfaPolicyService = mfaPolicyService;
@@ -1901,13 +1905,22 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("MFA challenge payload is invalid.");
         }
 
-        await EnsureMfaAttemptAllowedAsync(token, httpContext, cancellationToken);
+        var payload = _cryptoService.DeserializePayload<SqlOSMfaChallengePayload>(token)
+            ?? throw new InvalidOperationException("MFA challenge payload is invalid.");
+        var reservationId = await _mfaAttemptAdmissionService.ReserveAsync(
+            token,
+            httpContext,
+            payload.AuthorizationRequestId,
+            cancellationToken);
         try
         {
-            return await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
+            var factorMethod = await RequireTotpMfaService().VerifySecondFactorCodeAsync(token.UserId, code, cancellationToken);
+            await _mfaAttemptAdmissionService.RecordSuccessAsync(reservationId, CancellationToken.None);
+            return factorMethod;
         }
         catch (InvalidOperationException)
         {
+            await _mfaAttemptAdmissionService.RecordFailureAsync(reservationId, CancellationToken.None);
             var attemptCount = await RecordMfaChallengeFailureAsync(token, cancellationToken);
             await TryRecordMfaChallengeAuditAsync(
                 MfaChallengeFailedAuditEvent,
@@ -1935,15 +1948,14 @@ public sealed class SqlOSAuthService
         string? resource = null,
         CancellationToken cancellationToken = default)
     {
-        var recentFailures = await CountRecentMfaFailuresAsync(user.Id, null, cancellationToken);
-        if (recentFailures >= _options.Mfa.Totp.MaxFailedAttemptsPerUser)
+        if (await _mfaAttemptAdmissionService.IsUserCapacityExhaustedAsync(user.Id, cancellationToken))
         {
             await TryRecordMfaChallengeAuditAsync(
                 "user.mfa.challenge_issue_rejected",
                 user.Id,
                 organizationId,
                 null,
-                new { recentFailures },
+                new { reason = "user_budget_exhausted" },
                 cancellationToken);
             throw new InvalidOperationException(MfaChallengeFailureMessage);
         }
@@ -1963,41 +1975,6 @@ public sealed class SqlOSAuthService
                 permittedEnrollmentFactors),
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
-    }
-
-    private async Task EnsureMfaAttemptAllowedAsync(
-        SqlOSTemporaryToken token,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        var ipAddress = GetIp(httpContext);
-        var recentUserFailures = await CountRecentMfaFailuresAsync(token.UserId!, null, cancellationToken);
-        var recentIpFailures = ipAddress == null
-            ? 0
-            : await CountRecentMfaFailuresAsync(null, ipAddress, cancellationToken);
-        if (recentUserFailures < _options.Mfa.Totp.MaxFailedAttemptsPerUser
-            && recentIpFailures < _options.Mfa.Totp.MaxFailedAttemptsPerIp)
-        {
-            return;
-        }
-
-        token.ConsumedAt = DateTime.UtcNow;
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Another request has already consumed or updated this challenge.
-        }
-
-        await TryRecordMfaChallengeAuditAsync(
-            "user.mfa.challenge_rate_limited",
-            token,
-            httpContext,
-            new { recentUserFailures, recentIpFailures },
-            cancellationToken);
-        throw new InvalidOperationException(MfaChallengeFailureMessage);
     }
 
     private async Task<int> RecordMfaChallengeFailureAsync(
@@ -2033,22 +2010,6 @@ public sealed class SqlOSAuthService
                     ?? throw new InvalidOperationException(MfaChallengeFailureMessage);
             }
         }
-    }
-
-    private async Task<int> CountRecentMfaFailuresAsync(
-        string? userId,
-        string? ipAddress,
-        CancellationToken cancellationToken)
-    {
-        var cutoff = DateTime.UtcNow.Subtract(_options.Mfa.Totp.FailedAttemptWindow);
-        return await _context.Set<SqlOSAuditEvent>()
-            .AsNoTracking()
-            .CountAsync(
-                x => x.Action == MfaChallengeFailedAuditEvent
-                    && x.OccurredAt >= cutoff
-                    && (userId == null || x.UserId == userId)
-                    && (ipAddress == null || x.IpAddress == ipAddress),
-                cancellationToken);
     }
 
     private Task TryRecordMfaChallengeAuditAsync(

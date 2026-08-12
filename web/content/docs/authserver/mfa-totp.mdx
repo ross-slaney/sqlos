@@ -175,10 +175,15 @@ hosted, headless, and direct API verification.
 
 By default, SqlOS:
 
+- reserves comparison capacity before TOTP or recovery-code verification, so several
+  active challenges and application replicas share one budget;
 - consumes a challenge after 5 failed TOTP or recovery-code attempts;
 - rejects new challenges after 10 recent failures for the same user;
-- rejects verification after 25 recent failures from the same IP address; and
-- counts user and IP failures over a 10-minute window.
+- rejects verification after 25 recent failures from the same IP or client;
+- binds device limits to the authenticated user and client so a shared User-Agent
+  cannot lock out other accounts; and
+- counts failures over a 10-minute window. Abandoned reservations stay fail-closed
+  for two minutes, then expire. A successful verification releases its reservation.
 
 Failures remain deliberately generic. A rejected code does not reveal whether
 the factor exists, was previously used, or was blocked by a limit. TOTP codes
@@ -195,6 +200,9 @@ builder.AddSqlOS<AppDbContext>(options =>
         mfa.Totp.MaxFailedAttemptsPerChallenge = 5;
         mfa.Totp.MaxFailedAttemptsPerUser = 10;
         mfa.Totp.MaxFailedAttemptsPerIp = 25;
+        mfa.Totp.MaxFailedAttemptsPerClient = 25;
+        mfa.Totp.MaxFailedAttemptsPerDevice = 10;
+        mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest = 10;
         mfa.Totp.FailedAttemptWindow = TimeSpan.FromMinutes(10);
     });
 });

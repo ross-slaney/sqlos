@@ -114,6 +114,36 @@ public static class SqlOSAuthServerModelConfiguration
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<SqlOSMfaAttemptBucket>(entity =>
+        {
+            entity.ToTable("SqlOSMfaAttemptBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Scope, x.BucketKey }).IsUnique();
+            entity.Property(x => x.Scope).HasMaxLength(40);
+            entity.Property(x => x.BucketKey).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<SqlOSMfaAttemptReservation>(entity =>
+        {
+            entity.ToTable("SqlOSMfaAttemptReservations", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ExpiresAt);
+        });
+
+        modelBuilder.Entity<SqlOSMfaAttemptReservationBucket>(entity =>
+        {
+            entity.ToTable("SqlOSMfaAttemptReservationBuckets", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => new { x.ReservationId, x.BucketId });
+            entity.HasOne(x => x.Reservation)
+                .WithMany(x => x.Buckets)
+                .HasForeignKey(x => x.ReservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Bucket)
+                .WithMany(x => x.Reservations)
+                .HasForeignKey(x => x.BucketId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<SqlOSMembership>(entity =>
         {
             entity.ToTable("SqlOSMemberships", schema, t => t.ExcludeFromMigrations());
