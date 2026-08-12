@@ -181,18 +181,26 @@ public sealed class SqlOSPasswordLoginAbuseService
         }
 
         var identities = GetBucketIdentities(attempt, includeUserBucket: true).ToArray();
-        var buckets = new List<(PasswordBucketIdentity Identity, SqlOSPasswordLoginBucket Bucket)>(identities.Length);
+        var existing = new List<(PasswordBucketIdentity Identity, SqlOSPasswordLoginBucket Bucket)>();
+        var missing = new List<PasswordBucketIdentity>();
         foreach (var identity in identities)
         {
-            buckets.Add((identity, await GetOrCreateBucketAsync(identity, attempt, now, cancellationToken)));
+            var bucket = await FindBucketAsync(identity, cancellationToken);
+            if (bucket == null)
+            {
+                missing.Add(identity);
+                continue;
+            }
+
+            existing.Add((identity, bucket));
         }
 
         await CleanupExpiredReservationsForBucketsAsync(
-            buckets.Select(static x => x.Bucket.Id).ToArray(),
+            existing.Select(static x => x.Bucket.Id).ToArray(),
             now,
             cancellationToken);
 
-        foreach (var (identity, bucket) in buckets)
+        foreach (var (identity, bucket) in existing)
         {
             await RebaseIfExpiredAsync(bucket, identity.Threshold, now, cancellationToken);
             if (bucket.LockedUntil is { } lockedUntil && lockedUntil > now)
@@ -201,6 +209,13 @@ public sealed class SqlOSPasswordLoginAbuseService
                 return new ReservationOutcome(
                     new RejectedBucket(bucket.Scope, bucket.FailureCount, lockedUntil, bucket.LockoutReason));
             }
+        }
+
+        var buckets = new List<(PasswordBucketIdentity Identity, SqlOSPasswordLoginBucket Bucket)>(identities.Length);
+        buckets.AddRange(existing);
+        foreach (var identity in missing)
+        {
+            buckets.Add((identity, CreateBucket(identity, attempt, now)));
         }
 
         var reservation = new SqlOSPasswordLoginReservation
@@ -490,20 +505,18 @@ public sealed class SqlOSPasswordLoginAbuseService
         }
     }
 
-    private async Task<SqlOSPasswordLoginBucket> GetOrCreateBucketAsync(
+    private Task<SqlOSPasswordLoginBucket?> FindBucketAsync(
+        PasswordBucketIdentity identity,
+        CancellationToken cancellationToken)
+        => _context.Set<SqlOSPasswordLoginBucket>()
+            .SingleOrDefaultAsync(x => x.Scope == identity.Scope && x.BucketKey == identity.Key, cancellationToken);
+
+    private SqlOSPasswordLoginBucket CreateBucket(
         PasswordBucketIdentity identity,
         SqlOSPasswordLoginAttempt attempt,
-        DateTime now,
-        CancellationToken cancellationToken)
+        DateTime now)
     {
-        var bucket = await _context.Set<SqlOSPasswordLoginBucket>()
-            .SingleOrDefaultAsync(x => x.Scope == identity.Scope && x.BucketKey == identity.Key, cancellationToken);
-        if (bucket != null)
-        {
-            return bucket;
-        }
-
-        bucket = new SqlOSPasswordLoginBucket
+        var bucket = new SqlOSPasswordLoginBucket
         {
             Id = _cryptoService.GenerateId("plb"),
             Scope = identity.Scope,

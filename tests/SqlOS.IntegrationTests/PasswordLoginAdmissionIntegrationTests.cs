@@ -268,6 +268,48 @@ public sealed class PasswordLoginAdmissionIntegrationTests
             .Should().Be(1);
     }
 
+    [TestMethod]
+    public async Task LockedSharedBucket_DoesNotPersistNovelRejectedIdentityBuckets()
+    {
+        await using var database = await PasswordAdmissionDatabase.CreateAsync(options =>
+        {
+            options.PasswordLogin.MaxFailedAttemptsPerAccount = 10;
+            options.PasswordLogin.MaxFailedAttemptsPerIp = 1;
+            options.PasswordLogin.MaxFailedAttemptsPerClient = 20;
+            options.PasswordLogin.MaxFailedAttemptsPerDevice = 20;
+        });
+        const string ip = "203.0.113.190";
+        await using (var first = database.CreateActor())
+        {
+            var attempt = first.Abuse.CreateAttempt(
+                SqlOSAdminService.NormalizeEmail("first@example.com"),
+                CreateHttpContext(ip, "first"),
+                surface: "api");
+            await first.Abuse.ReserveAsync(attempt);
+            await first.Abuse.RecordFailureAsync(attempt, "unknown_email");
+        }
+
+        var rejectedEmails = Enumerable.Range(0, 5)
+            .Select(index => SqlOSAdminService.NormalizeEmail($"rejected-{index}@example.com"))
+            .ToArray();
+        foreach (var email in rejectedEmails)
+        {
+            await using var actor = database.CreateActor();
+            var attempt = actor.Abuse.CreateAttempt(email, CreateHttpContext(ip, email), surface: "api");
+            var act = async () => await actor.Abuse.ReserveAsync(attempt);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage(SqlOSPasswordLoginAbuseService.PublicFailureMessage);
+        }
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSPasswordLoginBucket>()
+                .CountAsync(x => x.Scope == "email" && rejectedEmails.Contains(x.BucketKey)))
+            .Should().Be(0);
+        (await database.Context.Set<SqlOSPasswordLoginBucket>()
+                .CountAsync(x => x.Scope == "device"))
+            .Should().Be(1);
+    }
+
     private static DefaultHttpContext CreateHttpContext(string ipAddress, string userAgent)
     {
         var context = new DefaultHttpContext();
