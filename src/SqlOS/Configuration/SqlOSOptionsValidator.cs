@@ -188,14 +188,29 @@ internal static class SqlOSOptionsValidator
             errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerChallenge must be greater than zero.");
         }
 
-        if (options.Totp.MaxFailedAttemptsPerUser < options.Totp.MaxFailedAttemptsPerChallenge)
+        if (options.Totp.MaxFailedAttemptsPerUser <= 0)
         {
-            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerUser must be at least MaxFailedAttemptsPerChallenge.");
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerUser must be greater than zero.");
         }
 
-        if (options.Totp.MaxFailedAttemptsPerIp < options.Totp.MaxFailedAttemptsPerChallenge)
+        if (options.Totp.MaxFailedAttemptsPerIp <= 0)
         {
-            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerIp must be at least MaxFailedAttemptsPerChallenge.");
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerIp must be greater than zero.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerClient <= 0)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerClient must be greater than zero.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerDevice <= 0)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerDevice must be greater than zero.");
+        }
+
+        if (options.Totp.MaxFailedAttemptsPerAuthorizationRequest <= 0)
+        {
+            errors.Add("AuthServer.Mfa.Totp.MaxFailedAttemptsPerAuthorizationRequest must be greater than zero.");
         }
 
         if (options.Totp.FailedAttemptWindow <= TimeSpan.Zero)
