@@ -336,6 +336,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         fgaSource.Should().Contain("loadServiceAccounts()");
         fgaSource.Should().Contain("loadUserGroups()");
         fgaSource.Should().Contain("loadAccessTester()");
+        fgaSource.Should().Contain("nextCursor");
+        fgaSource.Should().NotContain("pageSize=500");
+        fgaSource.Should().NotContain("maxDepth=5");
     }
 
     private static DashboardMiddlewareHarness CreateHarness(

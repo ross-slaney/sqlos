@@ -222,12 +222,13 @@ public static partial class EndpointRouteBuilderExtensions
             string organizationId,
             int? page,
             int? pageSize,
+            string? cursor,
             SqlOSAdminService adminService,
             IOptions<SqlOSAuthServerOptions> options,
             IHostEnvironment environment,
             CancellationToken cancellationToken) =>
             await HandleAdminApiAsync(context, options, environment, async () =>
-                Results.Ok(await adminService.ListOrganizationScimConnectionsAsync(organizationId, page, pageSize, cancellationToken))));
+                Results.Ok(await adminService.ListOrganizationScimConnectionsAsync(organizationId, cursor, pageSize, page, cancellationToken))));
 
         api.MapPost("/organizations/{organizationId}/scim-connections", async (
             HttpContext context,
@@ -307,12 +308,13 @@ public static partial class EndpointRouteBuilderExtensions
             string connectionId,
             int? page,
             int? pageSize,
+            string? cursor,
             SqlOSAdminService adminService,
             IOptions<SqlOSAuthServerOptions> options,
             IHostEnvironment environment,
             CancellationToken cancellationToken) =>
             await HandleAdminApiAsync(context, options, environment, async () =>
-                Results.Ok(await adminService.ListScimGroupMappingsAsync(connectionId, page, pageSize, cancellationToken))));
+                Results.Ok(await adminService.ListScimGroupMappingsAsync(connectionId, cursor, pageSize, page, cancellationToken))));
 
         api.MapPost("/scim-connections/{connectionId}/mappings", async (
             HttpContext context,
@@ -361,11 +363,12 @@ public static partial class EndpointRouteBuilderExtensions
             string connectionId,
             int? page,
             int? pageSize,
+            string? cursor,
             SqlOSAdminService adminService,
             IOptions<SqlOSAuthServerOptions> options,
             IHostEnvironment environment,
             CancellationToken cancellationToken) =>
             await HandleAdminApiAsync(context, options, environment, async () =>
-                Results.Ok(await adminService.ListScimSyncEventsAsync(connectionId, page, pageSize, cancellationToken))));
+                Results.Ok(await adminService.ListScimSyncEventsAsync(connectionId, cursor, pageSize, page, cancellationToken))));
     }
 }

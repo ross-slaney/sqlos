@@ -206,7 +206,8 @@ SqlOS redacts common secret-like metadata keys, but callers are still responsibl
 
 | Filter | Description |
 | --- | --- |
-| `Page`, `PageSize` | Pagination. `PageSize` is capped at 100. |
+| `Cursor`, `PageSize` | Keyset pagination. `PageSize` is capped at 100. Omit `Cursor` for the first window. |
+| `Page` | Compatibility only. Omit it or pass `1`. Values greater than 1 are rejected. |
 | `OrganizationId` | Filter to one tenant. |
 | `ApplicationId`, `ApplicationKey`, `Application` | Filter by registered app/client id or host application key. |
 | `Source` | Filter by `application`, `authserver`, or another stable source. |
@@ -217,7 +218,7 @@ SqlOS redacts common secret-like metadata keys, but callers are still responsibl
 | `Search` | Free text search over common event fields. |
 | `OccurredAtFrom`, `OccurredAtTo` | UTC date range. |
 
-Results sort by `OccurredAt` descending, then `IngestedAt` descending.
+Results sort by `OccurredAt` descending, then `IngestedAt` descending, then `Id`. The list payload is `{ data, pageSize, nextCursor, hasNextPage }` and does not include `totalCount` or `totalPages`. See [Admin cursor pagination](/docs/guides/admin-cursor-pagination).
 
 ## Service methods
 

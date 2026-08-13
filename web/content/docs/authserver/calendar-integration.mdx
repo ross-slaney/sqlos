@@ -104,7 +104,7 @@ Dashboard: **`/sqlos/admin/calendar/connections`** — status, owner, granted ac
 Admin API (dashboard-session guarded, mirrors the other admin surfaces):
 
 ```
-GET  /sqlos/admin/calendar/api/connections?search=&includeRevoked=&page=&pageSize=
+GET  /sqlos/admin/calendar/api/connections?search=&includeRevoked=&cursor=&pageSize=
 GET  /sqlos/admin/calendar/api/connections/{id}
 POST /sqlos/admin/calendar/api/connections/{id}/sync
 POST /sqlos/admin/calendar/api/connections/{id}/refresh

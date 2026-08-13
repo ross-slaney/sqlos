@@ -16,6 +16,7 @@ using SqlOS.Calendar.Contracts;
 using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Models;
 using SqlOS.Configuration;
+using SqlOS.Pagination;
 
 namespace SqlOS.Calendar.Services;
 
@@ -593,14 +594,12 @@ public sealed class SqlOSCalendarService
     public async Task<object> GetAdminConnectionsAsync(
         string? search = null,
         bool includeRevoked = true,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var resolvedPage = Math.Max(1, page.GetValueOrDefault(1));
-        var resolvedPageSize = Math.Clamp(pageSize.GetValueOrDefault(25), 1, 100);
         var query = _context.Set<SqlOSCalendarConnection>().AsNoTracking();
-
         if (!includeRevoked)
         {
             query = query.Where(x => x.RevokedAt == null);
@@ -616,23 +615,17 @@ public sealed class SqlOSCalendarService
                 (x.OrganizationId != null && x.OrganizationId.Contains(trimmed)));
         }
 
-        query = query.OrderByDescending(x => x.CreatedAt);
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
-        var currentPage = Math.Min(resolvedPage, totalPages);
-        var data = await query
-            .Skip((currentPage - 1) * resolvedPageSize)
-            .Take(resolvedPageSize)
-            .ToListAsync(cancellationToken);
-
-        return new
-        {
-            Data = data.Select(ToSummary).ToList(),
-            Page = currentPage,
-            PageSize = resolvedPageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
-        };
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 25);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSCalendarConnection>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "calendar.connections",
+            SqlOSCursorCodec.Fingerprint(search, includeRevoked ? "revoked" : "active"),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(ToSummary);
     }
 
     /// <summary>Admin detail view including per-calendar sync health.</summary>

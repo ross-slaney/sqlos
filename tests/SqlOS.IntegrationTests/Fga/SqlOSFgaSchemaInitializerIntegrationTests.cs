@@ -88,9 +88,13 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         await initializer.EnsureSchemaAsync();
 
         Assert.IsTrue(await IndexExistsAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId_Id"));
         Assert.IsTrue(await IndexExistsAsync("SqlOSFgaRolePermissions", "IX_SqlOSFgaRolePermissions_PermissionId_RoleId"));
         Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_SubjectId"));
         Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_CreatedAt_Id"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id"));
+        Assert.IsTrue(await IndexExistsAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id"));
     }
 
     [TestMethod]

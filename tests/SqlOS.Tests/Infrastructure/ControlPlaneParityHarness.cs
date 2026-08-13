@@ -140,7 +140,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     {
         var item = await Context.Set<SqlOSOidcConnection>().AsNoTracking().SingleAsync(x => x.DisplayName == displayName);
         var response = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.OidcConnections);
-        var dashboardItem = response.EnumerateArray().Single(x => x.GetProperty("displayName").GetString() == displayName);
+        var dashboardItem = response.GetProperty("data").EnumerateArray().Single(x => x.GetProperty("displayName").GetString() == displayName);
         return new ParityProjection("oidc_connection", new Dictionary<string, string?>
         {
             ["displayName"] = item.DisplayName,

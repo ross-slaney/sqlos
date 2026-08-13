@@ -12,6 +12,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Interfaces;
 using SqlOS.Email.Models;
+using SqlOS.Pagination;
 using SqlOS.Email.Services;
 
 namespace SqlOS.AuthServer.Services;
@@ -126,35 +127,23 @@ public sealed class SqlOSInvitationService
 
     public async Task<object> ListOrganizationInvitationsAsync(
         string organizationId,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
         _ = await RequireActiveOrganizationAsync(organizationId, cancellationToken);
-        var resolvedPage = Math.Max(1, page.GetValueOrDefault(1));
-        var resolvedPageSize = Math.Clamp(pageSize.GetValueOrDefault(50), 1, 200);
-        var query = _context.Set<SqlOSInvitation>()
-            .AsNoTracking()
-            .Include(x => x.Organization)
-            .Where(x => x.OrganizationId == organizationId)
-            .OrderByDescending(x => x.CreatedAt);
-
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
-        var currentPage = Math.Min(resolvedPage, totalPages);
-        var data = await query
-            .Skip((currentPage - 1) * resolvedPageSize)
-            .Take(resolvedPageSize)
-            .ToListAsync(cancellationToken);
-
-        return new
-        {
-            Data = data.Select(x => ToResult(x, x.Organization!, inviteUrl: null)).ToList(),
-            Page = currentPage,
-            PageSize = resolvedPageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
-        };
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 50);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSInvitation>().AsNoTracking().Include(x => x.Organization).Where(x => x.OrganizationId == organizationId),
+            SqlOSKeyset<SqlOSInvitation>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.organization-invitations",
+            SqlOSCursorCodec.Fingerprint(organizationId),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(x => ToResult(x, x.Organization!, inviteUrl: null));
     }
 
     public async Task<SqlOSEmailInvitationResult> ResendEmailInvitationAsync(

@@ -20,6 +20,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -114,6 +115,10 @@ public static partial class EndpointRouteBuilderExtensions
         try
         {
             return await action();
+        }
+        catch (SqlOSCursorException ex)
+        {
+            return SqlOSCursorPagination.BadRequest(ex);
         }
         catch (InvalidOperationException ex)
         {

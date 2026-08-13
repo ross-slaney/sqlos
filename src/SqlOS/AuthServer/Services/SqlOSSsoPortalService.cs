@@ -6,6 +6,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -145,8 +146,9 @@ public sealed class SqlOSSsoPortalService
 
     public async Task<object> ListOrganizationSessionsAsync(
         string organizationId,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
@@ -155,29 +157,17 @@ public sealed class SqlOSSsoPortalService
             .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
             ?? throw new InvalidOperationException("Organization not found.");
 
-        var resolvedPage = Math.Max(1, page.GetValueOrDefault(1));
-        var resolvedPageSize = Math.Clamp(pageSize.GetValueOrDefault(20), 1, 100);
-        var query = _context.Set<SqlOSSsoPortalSession>()
-            .AsNoTracking()
-            .Include(x => x.Organization)
-            .Where(x => x.OrganizationId == organizationId)
-            .OrderByDescending(x => x.CreatedAt);
-
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
-        var data = await query
-            .Skip((resolvedPage - 1) * resolvedPageSize)
-            .Take(resolvedPageSize)
-            .ToListAsync(cancellationToken);
-
-        return new
-        {
-            Data = data.Select(x => ToSessionResult(x, setupUrl: null)).ToList(),
-            Page = resolvedPage,
-            PageSize = resolvedPageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
-        };
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 20);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSSsoPortalSession>().AsNoTracking().Include(x => x.Organization).Where(x => x.OrganizationId == organizationId),
+            SqlOSKeyset<SqlOSSsoPortalSession>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.sso-portal-sessions",
+            SqlOSCursorCodec.Fingerprint(organizationId),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(x => ToSessionResult(x, setupUrl: null));
     }
 
     public async Task<SqlOSSsoPortalSessionResult> RevokeSessionAsync(

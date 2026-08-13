@@ -1,0 +1,70 @@
+---
+title: "Admin cursor pagination"
+description: "How dashboard and admin API lists return the next window without OFFSET or COUNT(*)."
+order: 21
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Walk admin lists with opaque cursors"
+  href="/docs/authserver/dashboard-overview"
+  actionLabel="Dashboard overview"
+>
+  High-cardinality AuthServer, FGA, audit, email, and calendar admin lists share one keyset/cursor contract. The dashboard Previous/Next controls follow `nextCursor`; they never send a numeric page index.
+</Banner>
+
+## Response shape
+
+Admin list endpoints return:
+
+```json
+{
+  "data": [],
+  "pageSize": 25,
+  "nextCursor": "opaque-versioned-value",
+  "hasNextPage": true
+}
+```
+
+Request the first window with `pageSize` (default 25, maximum 100). Follow-up windows send the previous `nextCursor` as `cursor`. `page` omitted or `page=1` is accepted as the first window for existing callers. `page` greater than 1 returns HTTP 400 `invalid_cursor` and does not run `OFFSET`.
+
+Malformed, wrong-version, or filter-mismatched cursors also return 400 `invalid_cursor` without leaking decoded internals.
+
+## What stays out of the hot path
+
+- Exact `totalCount` and `totalPages`
+- SQL `OFFSET` for dashboard navigation
+- Loading an entire table to paginate in memory
+- Numeric page pickers in the dashboard
+
+CSV audit export remains a bounded download (`Take` up to 5000 rows in a date range). It is not a paginated UI.
+
+Public SCIM `/Users` and `/Groups` keep RFC 7644 `startIndex`/`count`. Do not send admin cursors there.
+
+## Dashboard behavior
+
+Each list keeps an in-memory cursor history for Previous/Next. Changing search, source, status, or other filters resets that history. Nested tables (SCIM mappings, sync events, client credentials, resource children) use Load more. User, organization, and FGA selectors search remotely and load more instead of requesting `pageSize=500`.
+
+Client list `summary` counts are computed on the first window only. The dashboard caches that first-page summary while you walk Next.
+
+FGA resource trees load a cursor window of roots. Children load from `resources/{id}/children`. FGA stats run nine table counts in parallel on the stats endpoint only; list pages do not wait on those counts.
+
+## Migrating a caller
+
+Replace:
+
+```
+GET /sqlos/admin/auth/api/users?page=2&pageSize=25
+```
+
+with:
+
+```
+GET /sqlos/admin/auth/api/users?pageSize=25
+GET /sqlos/admin/auth/api/users?pageSize=25&cursor={nextCursor}
+```
+
+Keep the same `search` and other filters on every window. A cursor from a different filter set is rejected.
+
+Application-level authorized lists still use FGA `PagedSpecification`. Admin lists use the shared `SqlOS.Pagination` keyset helper and do not go through `SpecificationExecutor`.

@@ -348,7 +348,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         var existingResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/oidc-connections");
         existingResponse.EnsureSuccessStatusCode();
         var existingJson = JsonDocument.Parse(await existingResponse.Content.ReadAsStringAsync());
-        var existing = existingJson.RootElement.EnumerateArray()
+        var existing = existingJson.RootElement.GetProperty("data").EnumerateArray()
             .FirstOrDefault(x => string.Equals(x.GetProperty("providerType").GetString(), providerType, StringComparison.OrdinalIgnoreCase));
 
         if (existing.ValueKind != JsonValueKind.Undefined)
@@ -440,7 +440,7 @@ public sealed class SqlOSExampleOidcAuthIntegrationTests
         var existingResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/oidc-connections");
         existingResponse.EnsureSuccessStatusCode();
         var existingJson = JsonDocument.Parse(await existingResponse.Content.ReadAsStringAsync());
-        var existing = existingJson.RootElement.EnumerateArray()
+        var existing = existingJson.RootElement.GetProperty("data").EnumerateArray()
             .FirstOrDefault(x => string.Equals(x.GetProperty("providerType").GetString(), "Apple", StringComparison.OrdinalIgnoreCase));
         var payload = new
         {

@@ -44,7 +44,7 @@ public sealed class SqlOSExampleOidcSeedingIntegrationTests
         connectionsResponse.EnsureSuccessStatusCode();
         var connections = JsonDocument.Parse(await connectionsResponse.Content.ReadAsStringAsync());
 
-        var microsoft = connections.RootElement.EnumerateArray()
+        var microsoft = connections.RootElement.GetProperty("data").EnumerateArray()
             .Single(x => x.GetProperty("providerType").GetString() == "Microsoft");
 
         microsoft.GetProperty("clientId").GetString().Should().Be(SeededClientId);

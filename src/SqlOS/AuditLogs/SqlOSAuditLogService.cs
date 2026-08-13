@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuditLogs;
 
@@ -178,23 +179,40 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
         SqlOSAuditLogListRequest request,
         CancellationToken cancellationToken = default)
     {
-        var (page, pageSize) = NormalizePagination(request.Page, request.PageSize);
+        SqlOSCursorPagination.RejectLegacyOffset(request.Page);
+        var pageSize = SqlOSCursorPagination.NormalizePageSize(request.PageSize, 25);
         var query = ApplyFilters(_context.Set<SqlOSAuditEvent>().AsNoTracking(), request);
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
-        var events = await query
-            .OrderByDescending(x => x.OccurredAt)
-            .ThenByDescending(x => x.IngestedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        var page = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSAuditEvent>.Create()
+                .Descending(x => x.OccurredAt)
+                .ThenDescending(x => x.IngestedAt)
+                .ThenDescending(x => x.Id),
+            "audit.events",
+            SqlOSCursorCodec.Fingerprint(
+                request.OrganizationId,
+                request.ApplicationId,
+                request.ApplicationKey,
+                request.Application,
+                request.Source,
+                request.Action,
+                request.ActorType,
+                request.ActorId,
+                request.TargetType,
+                request.TargetId,
+                request.Result,
+                request.Search,
+                request.OccurredAtFrom?.ToString("O"),
+                request.OccurredAtTo?.ToString("O")),
+            request.Cursor,
+            pageSize,
+            cancellationToken);
 
         return new SqlOSAuditLogListResult(
-            events.Select(MapEvent).ToList(),
-            page,
-            pageSize,
-            totalCount,
-            totalPages);
+            page.Data.Select(MapEvent).ToList(),
+            page.PageSize,
+            page.NextCursor,
+            page.HasNextPage);
     }
 
     public async Task<SqlOSAuditLogEvent?> GetAsync(
@@ -231,6 +249,7 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
 
         var exportRequest = request with
         {
+            Cursor = null,
             OccurredAtFrom = from,
             OccurredAtTo = to,
             Page = 1,
@@ -581,13 +600,6 @@ public sealed class SqlOSAuditLogService : ISqlOSAuditLogService
                 NormalizeNullable(x.DisplayName, 320)))
             .ToList()
         ?? [];
-
-    private static (int Page, int PageSize) NormalizePagination(int? page, int? pageSize)
-    {
-        var resolvedPage = Math.Max(1, page.GetValueOrDefault(1));
-        var resolvedPageSize = Math.Clamp(pageSize.GetValueOrDefault(25), 1, MaxPageSize);
-        return (resolvedPage, resolvedPageSize);
-    }
 
     private static string NormalizeRequired(string? value, string name, int maxLength)
         => NormalizeNullable(value, maxLength)

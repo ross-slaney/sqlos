@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -91,8 +92,12 @@ public sealed class SqlOSControlPlaneParityTests
         var serviceCredential = await service.ClientAuthentication.CreateCredentialAsync(
             serviceClient.Id,
             "Initial credential");
-        (await service.ClientAuthentication.ListCredentialsAsync(serviceClient.ClientId))
-            .Should().ContainSingle(x => x.Id == serviceCredential.Credential.Id);
+        var credentialsJson = JsonSerializer.Serialize(
+            await service.ClientAuthentication.ListCredentialsAsync(serviceClient.ClientId),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var credentials = JsonDocument.Parse(credentialsJson);
+        credentials.RootElement.GetProperty("data").EnumerateArray()
+            .Should().ContainSingle(x => x.GetProperty("id").GetString() == serviceCredential.Credential.Id);
         var dashboardClient = await dashboard.PostDashboardAsync(
             DashboardAdminContracts.Clients,
             ConfidentialClientPayload());
@@ -292,6 +297,14 @@ public sealed class SqlOSControlPlaneParityTests
         AssertDashboardContract(
             Section(javascript, "async function renderAuthOidc()", "async function renderAuthSso()"),
             "`${authApiBasePath}/oidc-connections`");
+        AssertDashboardContract(
+            Section(javascript, "function createPagerState(defaultPageSize, filterKey = \"\")", "async function render()"),
+            "cursors: [null]",
+            "pagerQuery(pager)",
+            "nextCursor",
+            "hasNextPage");
+        javascript.Should().NotContain("page=1&pageSize=500");
+        javascript.Should().NotContain("page=1&pageSize=100");
         AssertDashboardContract(
             Section(javascript, "async function renderAuthMfa()", "async function renderAuthPage()"),
             "`${authApiBasePath}/settings/mfa`",

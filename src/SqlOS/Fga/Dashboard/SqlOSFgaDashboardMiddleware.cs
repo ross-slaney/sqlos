@@ -12,6 +12,7 @@ using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
 using SqlOS.Fga.Services;
+using SqlOS.Pagination;
 using SqlOS.Security;
 
 namespace SqlOS.Fga.Dashboard;
@@ -26,7 +27,6 @@ public class SqlOSFgaDashboardMiddleware
     private readonly IFileProvider _fileProvider;
     private readonly SqlOSBrowserSecurityHeaders _securityHeaders;
     private const int DefaultPageSize = 25;
-    private const int MaxPageSize = 100;
     private const int MaxAncestorTraversalDepth = 50;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -133,10 +133,23 @@ public class SqlOSFgaDashboardMiddleware
 
     private async Task HandleApiRequest(HttpContext context, string endpoint)
     {
+        context.Response.ContentType = "application/json";
+        try
+        {
+            await HandleApiRequestCore(context, endpoint);
+        }
+        catch (SqlOSCursorException ex)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = ex.Error, message = ex.Message }, JsonOptions));
+        }
+    }
+
+    private async Task HandleApiRequestCore(HttpContext context, string endpoint)
+    {
         using var scope = context.RequestServices.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>();
-
-        context.Response.ContentType = "application/json";
 
         // Handle POST trace endpoint
         if (endpoint.Equals("trace", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
@@ -305,18 +318,7 @@ public class SqlOSFgaDashboardMiddleware
             "roles" => await GetRolesAsync(dbContext, context),
             "permissions" => await GetPermissionsAsync(dbContext, context),
             "resource-types" => await GetResourceTypesAsync(dbContext, context),
-            "stats" => new
-            {
-                Resources = await dbContext.Set<SqlOSFgaResource>().CountAsync(),
-                Subjects = await dbContext.Set<SqlOSFgaSubject>().CountAsync(),
-                Users = await dbContext.Set<SqlOSFgaUser>().CountAsync(),
-                Agents = await dbContext.Set<SqlOSFgaAgent>().CountAsync(),
-                ServiceAccounts = await dbContext.Set<SqlOSFgaServiceAccount>().CountAsync(),
-                UserGroups = await dbContext.Set<SqlOSFgaUserGroup>().CountAsync(),
-                Grants = await dbContext.Set<SqlOSFgaGrant>().CountAsync(),
-                Roles = await dbContext.Set<SqlOSFgaRole>().CountAsync(),
-                Permissions = await dbContext.Set<SqlOSFgaPermission>().CountAsync(),
-            },
+            "stats" => await GetStatsAsync(context.RequestServices, context.RequestAborted),
             _ => null
         };
 
@@ -330,101 +332,86 @@ public class SqlOSFgaDashboardMiddleware
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
     }
 
-    // --- Resource Tree (breadth-first initial load) ---
+    // --- Resource Tree (cursor-paginated roots only) ---
 
     private static async Task<object> GetResourceTreeAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var maxDepth = GetIntParam(context, "maxDepth", 2);
-        maxDepth = Math.Clamp(maxDepth, 1, 5);
+        var search = context.Request.Query["search"].FirstOrDefault();
 
-        var allResources = dbContext.Set<SqlOSFgaResource>()
-            .Include(r => r.ResourceType)
-            .Where(r => r.IsActive);
+        var resources = dbContext.Set<SqlOSFgaResource>()
+            .Where(r => r.ParentId == null && r.IsActive);
 
-        // Find root nodes (no parent)
-        var rootIds = await allResources
-            .Where(r => r.ParentId == null)
-            .OrderBy(r => r.Name)
-            .Select(r => r.Id)
-            .ToListAsync();
+        if (!string.IsNullOrEmpty(search))
+            resources = resources.Where(r => r.Name.Contains(search));
 
-        var nodes = new List<object>();
-        var currentLevelIds = rootIds;
-
-        for (int depth = 0; depth <= maxDepth && currentLevelIds.Count > 0; depth++)
+        var query = resources.Select(r => new ResourceTreeRow
         {
-            var levelNodes = await allResources
-                .Where(r => currentLevelIds.Contains(r.Id))
-                .OrderBy(r => r.Name)
-                .Select(r => new
-                {
-                    r.Id,
-                    r.ParentId,
-                    r.Name,
-                    ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId,
-                    ChildCount = dbContext.Set<SqlOSFgaResource>().Count(c => c.ParentId == r.Id && c.IsActive),
-                    GrantsCount = dbContext.Set<SqlOSFgaGrant>().Count(g => g.ResourceId == r.Id)
-                })
-                .ToListAsync();
+            Id = r.Id,
+            ParentId = r.ParentId,
+            Name = r.Name,
+            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
+        });
 
-            nodes.AddRange(levelNodes.Cast<object>());
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.resource-tree",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
 
-            // Get next level IDs
-            if (depth < maxDepth)
-            {
-                currentLevelIds = await allResources
-                    .Where(r => currentLevelIds.Contains(r.ParentId!))
-                    .Select(r => r.Id)
-                    .ToListAsync();
-            }
-            else
-            {
-                currentLevelIds = [];
-            }
-        }
-
-        return new { Nodes = nodes, RootIds = rootIds, LoadedDepth = maxDepth };
+        var counts = await GetResourcePageCountsAsync(dbContext, page.Data.Select(x => x.Id).ToList(), context.RequestAborted);
+        return page.ToResponse(r => new
+        {
+            r.Id,
+            r.ParentId,
+            r.Name,
+            r.ResourceType,
+            ChildCount = counts.ChildCounts.GetValueOrDefault(r.Id),
+            GrantsCount = counts.GrantCounts.GetValueOrDefault(r.Id)
+        });
     }
 
     private static async Task HandleResourceChildren(
         HttpContext context, ISqlOSFgaDbContext dbContext, string parentId)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaResource>()
-            .Include(r => r.ResourceType)
+        var resources = dbContext.Set<SqlOSFgaResource>()
             .Where(r => r.ParentId == parentId && r.IsActive);
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(r => r.Name.Contains(search));
+            resources = resources.Where(r => r.Name.Contains(search));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(r => r.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(r => new
+        var query = resources.Select(r => new ResourceTreeRow
+        {
+            Id = r.Id,
+            ParentId = r.ParentId,
+            Name = r.Name,
+            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
+        });
+
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.resource-children",
+            SqlOSCursorCodec.Fingerprint(parentId, search),
+            context);
+
+        var counts = await GetResourcePageCountsAsync(dbContext, page.Data.Select(x => x.Id).ToList(), context.RequestAborted);
+        var result = new
+        {
+            Data = page.Data.Select(r => new
             {
                 r.Id,
                 r.ParentId,
                 r.Name,
-                ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId,
-                ChildCount = dbContext.Set<SqlOSFgaResource>().Count(c => c.ParentId == r.Id && c.IsActive),
-                GrantsCount = dbContext.Set<SqlOSFgaGrant>().Count(g => g.ResourceId == r.Id)
-            })
-            .ToListAsync();
-
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-
-        var result = new
-        {
-            Data = data,
-            Page = page,
-            PageSize = pageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages,
-            HasNextPage = page < totalPages,
+                r.ResourceType,
+                ChildCount = counts.ChildCounts.GetValueOrDefault(r.Id),
+                GrantsCount = counts.GrantCounts.GetValueOrDefault(r.Id)
+            }).ToList(),
+            page.PageSize,
+            page.NextCursor,
+            page.HasNextPage,
             ParentId = parentId
         };
 
@@ -532,42 +519,41 @@ public class SqlOSFgaDashboardMiddleware
 
     private static async Task HandleResourceGrants(HttpContext context, ISqlOSFgaDbContext dbContext, string resourceId)
     {
-        var page = GetIntParam(context, "page", 1);
-        var pageSize = Math.Clamp(GetIntParam(context, "pageSize", 10), 1, 50);
-
         var query = dbContext.Set<SqlOSFgaGrant>()
-            .Include(g => g.Subject).ThenInclude(s => s!.SubjectType)
-            .Include(g => g.Role)
-            .Where(g => g.ResourceId == resourceId);
-
-        var total = await query.CountAsync();
-        var grants = await query
-            .OrderBy(g => g.Subject != null ? g.Subject.DisplayName : g.SubjectId)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(g => new
+            .Where(g => g.ResourceId == resourceId)
+            .Select(g => new ResourceGrantRow
             {
-                g.Id,
+                Id = g.Id,
                 SubjectId = g.SubjectId,
                 SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
                 SubjectType = g.Subject != null && g.Subject.SubjectType != null ? g.Subject.SubjectType.Name : null,
                 RoleId = g.RoleId,
                 RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+                EffectiveFrom = g.EffectiveFrom,
+                EffectiveTo = g.EffectiveTo,
+                CreatedAt = g.CreatedAt
+            });
+
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ResourceGrantRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "fga.resource-grants",
+            SqlOSCursorCodec.Fingerprint(resourceId),
+            context);
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(
+            page.ToResponse(g => new
+            {
+                g.Id,
+                g.SubjectId,
+                g.SubjectName,
+                g.SubjectType,
+                g.RoleId,
+                g.RoleName,
                 g.EffectiveFrom,
                 g.EffectiveTo
-            })
-            .ToListAsync();
-
-        var result = new
-        {
-            data = grants,
-            page,
-            pageSize,
-            total,
-            totalPages = (int)Math.Ceiling((double)total / pageSize)
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
+            }),
+            JsonOptions));
     }
 
     // --- Subject detail ---
@@ -626,222 +612,194 @@ public class SqlOSFgaDashboardMiddleware
     private static async Task HandleSubjectGrants(
         HttpContext context, ISqlOSFgaDbContext dbContext, string subjectId)
     {
-        var (page, pageSize) = GetPaginationParams(context);
-
         var query = dbContext.Set<SqlOSFgaGrant>()
-            .Include(g => g.Resource)
-            .Include(g => g.Role)
-            .Where(g => g.SubjectId == subjectId);
-
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderByDescending(g => g.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(g => new
+            .Where(g => g.SubjectId == subjectId)
+            .Select(g => new SubjectGrantRow
             {
-                g.Id,
+                Id = g.Id,
                 ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-                g.ResourceId,
+                ResourceId = g.ResourceId,
                 RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                g.RoleId,
-                g.EffectiveFrom, g.EffectiveTo, g.CreatedAt
-            })
-            .ToListAsync();
+                RoleId = g.RoleId,
+                EffectiveFrom = g.EffectiveFrom,
+                EffectiveTo = g.EffectiveTo,
+                CreatedAt = g.CreatedAt
+            });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<SubjectGrantRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "fga.subject-grants",
+            SqlOSCursorCodec.Fingerprint(subjectId),
+            context);
 
-        var result = new
-        {
-            Data = data,
-            Page = page,
-            PageSize = pageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
+        await context.Response.WriteAsync(JsonSerializer.Serialize(page.ToResponse(), JsonOptions));
     }
 
     // --- Paginated table endpoints ---
 
     private static async Task<object> GetSubjectsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var type = context.Request.Query["type"].FirstOrDefault();
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaSubject>()
-            .Include(s => s.SubjectType)
-            .AsQueryable();
+        var subjects = dbContext.Set<SqlOSFgaSubject>().AsQueryable();
 
         if (!string.IsNullOrEmpty(type))
-            query = query.Where(s => s.SubjectTypeId == type);
+            subjects = subjects.Where(s => s.SubjectTypeId == type);
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(s => s.DisplayName.Contains(search) || s.Id.Contains(search));
+            subjects = subjects.Where(s => s.DisplayName.Contains(search) || s.Id.Contains(search));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(s => s.DisplayName)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(s => new
-            {
-                s.Id, s.DisplayName, s.SubjectTypeId,
-                SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
-                s.OrganizationId, s.ExternalRef, s.CreatedAt
-            })
-            .ToListAsync();
+        var query = subjects.Select(s => new SubjectListRow
+        {
+            Id = s.Id,
+            DisplayName = s.DisplayName,
+            SubjectTypeId = s.SubjectTypeId,
+            SubjectType = s.SubjectType != null ? s.SubjectType.Name : s.SubjectTypeId,
+            OrganizationId = s.OrganizationId,
+            ExternalRef = s.ExternalRef,
+            CreatedAt = s.CreatedAt
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<SubjectListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "fga.subjects",
+            SqlOSCursorCodec.Fingerprint(type, search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetUsersAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaUser>()
-            .Include(u => u.Subject)
-            .AsQueryable();
+        var users = dbContext.Set<SqlOSFgaUser>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(u =>
+            users = users.Where(u =>
                 (u.Subject != null && (u.Subject.DisplayName.Contains(search) || u.Subject.Id.Contains(search))) ||
                 (u.Email != null && u.Email.Contains(search)));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(u => u.Subject != null ? u.Subject.DisplayName : u.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(u => new
-            {
-                u.Id,
-                u.SubjectId,
-                DisplayName = u.Subject != null ? u.Subject.DisplayName : u.Id,
-                u.Email,
-                u.IsActive,
-                u.LastLoginAt,
-                u.CreatedAt
-            })
-            .ToListAsync();
+        var query = users.Select(u => new UserListRow
+        {
+            Id = u.Id,
+            SubjectId = u.SubjectId,
+            DisplayName = u.Subject != null ? u.Subject.DisplayName : u.Id,
+            Email = u.Email,
+            IsActive = u.IsActive,
+            LastLoginAt = u.LastLoginAt,
+            CreatedAt = u.CreatedAt
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<UserListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "fga.users",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetAgentsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaAgent>()
-            .Include(a => a.Subject)
-            .AsQueryable();
+        var agents = dbContext.Set<SqlOSFgaAgent>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(a =>
+            agents = agents.Where(a =>
                 (a.Subject != null && (a.Subject.DisplayName.Contains(search) || a.Subject.Id.Contains(search))) ||
                 (a.AgentType != null && a.AgentType.Contains(search)) ||
                 (a.Description != null && a.Description.Contains(search)));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(a => a.Subject != null ? a.Subject.DisplayName : a.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(a => new
-            {
-                a.Id,
-                a.SubjectId,
-                DisplayName = a.Subject != null ? a.Subject.DisplayName : a.Id,
-                a.AgentType,
-                a.Description,
-                a.LastRunAt,
-                a.CreatedAt
-            })
-            .ToListAsync();
+        var query = agents.Select(a => new AgentListRow
+        {
+            Id = a.Id,
+            SubjectId = a.SubjectId,
+            DisplayName = a.Subject != null ? a.Subject.DisplayName : a.Id,
+            AgentType = a.AgentType,
+            Description = a.Description,
+            LastRunAt = a.LastRunAt,
+            CreatedAt = a.CreatedAt
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<AgentListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "fga.agents",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetServiceAccountsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaServiceAccount>()
-            .Include(s => s.Subject)
-            .AsQueryable();
+        var accounts = dbContext.Set<SqlOSFgaServiceAccount>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(s =>
+            accounts = accounts.Where(s =>
                 (s.Subject != null && (s.Subject.DisplayName.Contains(search) || s.Subject.Id.Contains(search))) ||
                 s.ClientId.Contains(search) ||
                 (s.Description != null && s.Description.Contains(search)));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(s => s.Subject != null ? s.Subject.DisplayName : s.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(s => new
-            {
-                s.Id,
-                s.SubjectId,
-                DisplayName = s.Subject != null ? s.Subject.DisplayName : s.Id,
-                s.ClientId,
-                s.Description,
-                s.LastUsedAt,
-                s.ExpiresAt,
-                s.ConfigurationOwner,
-                s.ConfigurationSourceKey,
-                s.ConfigurationOrphanedAt,
-                s.CreatedAt
-            })
-            .ToListAsync();
+        var query = accounts.Select(s => new ServiceAccountListRow
+        {
+            Id = s.Id,
+            SubjectId = s.SubjectId,
+            DisplayName = s.Subject != null ? s.Subject.DisplayName : s.Id,
+            ClientId = s.ClientId,
+            Description = s.Description,
+            LastUsedAt = s.LastUsedAt,
+            ExpiresAt = s.ExpiresAt,
+            ConfigurationOwner = s.ConfigurationOwner,
+            ConfigurationSourceKey = s.ConfigurationSourceKey,
+            ConfigurationOrphanedAt = s.ConfigurationOrphanedAt,
+            CreatedAt = s.CreatedAt
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ServiceAccountListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "fga.service-accounts",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetUserGroupsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaUserGroup>()
-            .Include(g => g.Subject)
-            .AsQueryable();
+        var groups = dbContext.Set<SqlOSFgaUserGroup>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(g =>
+            groups = groups.Where(g =>
                 g.Name.Contains(search) ||
                 (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
                 (g.Description != null && g.Description.Contains(search)));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(g => g.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(g => new
-            {
-                g.Id,
-                g.SubjectId,
-                g.Name,
-                g.Description,
-                g.GroupType,
-                g.CreatedAt
-            })
-            .ToListAsync();
+        var query = groups.Select(g => new UserGroupListRow
+        {
+            Id = g.Id,
+            SubjectId = g.SubjectId,
+            Name = g.Name,
+            Description = g.Description,
+            GroupType = g.GroupType,
+            CreatedAt = g.CreatedAt
+        });
 
-        // Fetch member counts in a single query to avoid N+1 from correlated Count in projection
-        var groupIds = data.Select(x => x.Id).ToList();
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<UserGroupListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.user-groups",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+
+        var groupIds = page.Data.Select(x => x.Id).ToList();
         Dictionary<string, int> memberCountLookup;
         if (groupIds.Count > 0)
         {
@@ -849,7 +807,7 @@ public class SqlOSFgaDashboardMiddleware
                 .Where(m => groupIds.Contains(m.UserGroupId))
                 .GroupBy(m => m.UserGroupId)
                 .Select(g => new { UserGroupId = g.Key, Count = g.Count() })
-                .ToListAsync();
+                .ToListAsync(context.RequestAborted);
             memberCountLookup = memberCounts.ToDictionary(x => x.UserGroupId, x => x.Count);
         }
         else
@@ -857,7 +815,7 @@ public class SqlOSFgaDashboardMiddleware
             memberCountLookup = new Dictionary<string, int>();
         }
 
-        var dataWithCounts = data.Select(g => new
+        return page.ToResponse(g => new
         {
             g.Id,
             g.SubjectId,
@@ -866,144 +824,218 @@ public class SqlOSFgaDashboardMiddleware
             g.GroupType,
             MemberCount = memberCountLookup.GetValueOrDefault(g.Id, 0),
             g.CreatedAt
-        }).ToList();
-
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = dataWithCounts, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        });
     }
 
     private static async Task<object> GetGrantsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaGrant>()
-            .Include(g => g.Subject)
-            .Include(g => g.Resource)
-            .Include(g => g.Role)
-            .AsQueryable();
+        var grants = dbContext.Set<SqlOSFgaGrant>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(g =>
+            grants = grants.Where(g =>
                 (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
                 (g.Resource != null && g.Resource.Name.Contains(search)) ||
                 (g.Role != null && g.Role.Name.Contains(search)));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderByDescending(g => g.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(g => new
-            {
-                g.Id,
-                SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
-                g.SubjectId,
-                ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
-                g.ResourceId,
-                RoleName = g.Role != null ? g.Role.Name : g.RoleId,
-                g.RoleId,
-                g.EffectiveFrom, g.EffectiveTo, g.CreatedAt
-            })
-            .ToListAsync();
+        var query = grants.Select(g => new GrantListRow
+        {
+            Id = g.Id,
+            SubjectName = g.Subject != null ? g.Subject.DisplayName : g.SubjectId,
+            SubjectId = g.SubjectId,
+            ResourceName = g.Resource != null ? g.Resource.Name : g.ResourceId,
+            ResourceId = g.ResourceId,
+            RoleName = g.Role != null ? g.Role.Name : g.RoleId,
+            RoleId = g.RoleId,
+            EffectiveFrom = g.EffectiveFrom,
+            EffectiveTo = g.EffectiveTo,
+            CreatedAt = g.CreatedAt
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<GrantListRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "fga.grants",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetRolesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaRole>()
-            .Include(r => r.RolePermissions)
-            .AsQueryable();
+        var roles = dbContext.Set<SqlOSFgaRole>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(r => r.Name.Contains(search) || r.Key.Contains(search));
+            roles = roles.Where(r => r.Name.Contains(search) || r.Key.Contains(search));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(r => r.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(r => new
-            {
-                r.Id, r.Key, r.Name, r.Description, r.IsVirtual,
-                PermissionCount = r.RolePermissions.Count
-            })
-            .ToListAsync();
+        var query = roles.Select(r => new RoleListRow
+        {
+            Id = r.Id,
+            Key = r.Key,
+            Name = r.Name,
+            Description = r.Description,
+            IsVirtual = r.IsVirtual,
+            PermissionCount = r.RolePermissions.Count
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<RoleListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.roles",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetPermissionsAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaPermission>()
-            .Include(p => p.ResourceType)
-            .AsQueryable();
+        var permissions = dbContext.Set<SqlOSFgaPermission>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(p => p.Key.Contains(search) || p.Name.Contains(search));
+            permissions = permissions.Where(p => p.Key.Contains(search) || p.Name.Contains(search));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(p => p.Key)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(p => new
-            {
-                p.Id, p.Key, p.Name, p.Description,
-                ResourceType = p.ResourceType != null ? p.ResourceType.Name : null
-            })
-            .ToListAsync();
+        var query = permissions.Select(p => new PermissionListRow
+        {
+            Id = p.Id,
+            Key = p.Key,
+            Name = p.Name,
+            Description = p.Description,
+            ResourceType = p.ResourceType != null ? p.ResourceType.Name : null
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<PermissionListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.permissions",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task<object> GetResourceTypesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
-        var (page, pageSize) = GetPaginationParams(context);
         var search = context.Request.Query["search"].FirstOrDefault();
 
-        var query = dbContext.Set<SqlOSFgaResourceType>().AsQueryable();
+        var types = dbContext.Set<SqlOSFgaResourceType>().AsQueryable();
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(rt => rt.Name.Contains(search) || rt.Id.Contains(search));
+            types = types.Where(rt => rt.Name.Contains(search) || rt.Id.Contains(search));
 
-        var totalCount = await query.CountAsync();
-        var data = await query
-            .OrderBy(rt => rt.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(rt => new { rt.Id, Key = rt.Id, rt.Name, rt.Description })
-            .ToListAsync();
+        var query = types.Select(rt => new ResourceTypeListRow
+        {
+            Id = rt.Id,
+            Key = rt.Id,
+            Name = rt.Name,
+            Description = rt.Description
+        });
 
-        var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
-        return new { Data = data, Page = page, PageSize = pageSize, TotalCount = totalCount, TotalPages = totalPages };
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ResourceTypeListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.resource-types",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
+    }
+
+    private static async Task<object> GetStatsAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        async Task<int> CountAsync<TEntity>()
+            where TEntity : class
+        {
+            using var scope = services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ISqlOSFgaDbContext>();
+            return await dbContext.Set<TEntity>().CountAsync(cancellationToken);
+        }
+
+        var counts = await Task.WhenAll(
+            CountAsync<SqlOSFgaResource>(),
+            CountAsync<SqlOSFgaSubject>(),
+            CountAsync<SqlOSFgaUser>(),
+            CountAsync<SqlOSFgaAgent>(),
+            CountAsync<SqlOSFgaServiceAccount>(),
+            CountAsync<SqlOSFgaUserGroup>(),
+            CountAsync<SqlOSFgaGrant>(),
+            CountAsync<SqlOSFgaRole>(),
+            CountAsync<SqlOSFgaPermission>());
+
+        return new
+        {
+            Resources = counts[0],
+            Subjects = counts[1],
+            Users = counts[2],
+            Agents = counts[3],
+            ServiceAccounts = counts[4],
+            UserGroups = counts[5],
+            Grants = counts[6],
+            Roles = counts[7],
+            Permissions = counts[8]
+        };
     }
 
     // --- Helpers ---
 
-    private static (int Page, int PageSize) GetPaginationParams(HttpContext context)
+    private static (string? Cursor, int PageSize) GetCursorParams(HttpContext context)
     {
-        var page = GetIntParam(context, "page", 1);
-        var pageSize = GetIntParam(context, "pageSize", DefaultPageSize);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
-        return (page, pageSize);
+        SqlOSCursorPagination.RejectLegacyOffset(TryGetIntQuery(context, "page"));
+        var pageSize = SqlOSCursorPagination.NormalizePageSize(TryGetIntQuery(context, "pageSize"), DefaultPageSize);
+        var cursor = context.Request.Query["cursor"].FirstOrDefault();
+        return (cursor, pageSize);
     }
 
-    private static int GetIntParam(HttpContext context, string name, int defaultValue)
+    private static int? TryGetIntQuery(HttpContext context, string name)
     {
         var value = context.Request.Query[name].FirstOrDefault();
-        return int.TryParse(value, out var parsed) ? parsed : defaultValue;
+        return int.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static Task<SqlOSCursorPage<T>> ToCursorPageAsync<T>(
+        IQueryable<T> query,
+        SqlOSKeyset<T> keyset,
+        string sortKey,
+        string filterFingerprint,
+        HttpContext context)
+        where T : class
+    {
+        var (cursor, pageSize) = GetCursorParams(context);
+        return SqlOSCursorPagination.ToPageAsync(
+            query,
+            keyset,
+            sortKey,
+            filterFingerprint,
+            cursor,
+            pageSize,
+            context.RequestAborted);
+    }
+
+    private static async Task<(Dictionary<string, int> ChildCounts, Dictionary<string, int> GrantCounts)> GetResourcePageCountsAsync(
+        ISqlOSFgaDbContext dbContext,
+        IReadOnlyList<string> resourceIds,
+        CancellationToken cancellationToken)
+    {
+        if (resourceIds.Count == 0)
+        {
+            return (new Dictionary<string, int>(), new Dictionary<string, int>());
+        }
+
+        var childCounts = await dbContext.Set<SqlOSFgaResource>()
+            .Where(c => resourceIds.Contains(c.ParentId!) && c.IsActive)
+            .GroupBy(c => c.ParentId!)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, cancellationToken);
+
+        var grantCounts = await dbContext.Set<SqlOSFgaGrant>()
+            .Where(g => resourceIds.Contains(g.ResourceId))
+            .GroupBy(g => g.ResourceId)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, cancellationToken);
+
+        return (childCounts, grantCounts);
     }
 
     private async Task ServeStaticFile(HttpContext context, string relativePath)
@@ -1365,6 +1397,138 @@ public class SqlOSFgaDashboardMiddleware
 
         context.Response.StatusCode = 201;
         await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
+    }
+
+    private sealed class ResourceTreeRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string? ParentId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string ResourceType { get; set; } = string.Empty;
+    }
+
+    private sealed class SubjectListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string SubjectTypeId { get; set; } = string.Empty;
+        public string SubjectType { get; set; } = string.Empty;
+        public string? OrganizationId { get; set; }
+        public string? ExternalRef { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class UserListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string? Email { get; set; }
+        public bool IsActive { get; set; }
+        public DateTime? LastLoginAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class AgentListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string? AgentType { get; set; }
+        public string? Description { get; set; }
+        public DateTime? LastRunAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class ServiceAccountListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string ClientId { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public DateTime? LastUsedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string ConfigurationOwner { get; set; } = string.Empty;
+        public string? ConfigurationSourceKey { get; set; }
+        public DateTime? ConfigurationOrphanedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class UserGroupListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? GroupType { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class GrantListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectName { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string ResourceName { get; set; } = string.Empty;
+        public string ResourceId { get; set; } = string.Empty;
+        public string RoleName { get; set; } = string.Empty;
+        public string RoleId { get; set; } = string.Empty;
+        public DateTime? EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class ResourceGrantRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string SubjectId { get; set; } = string.Empty;
+        public string SubjectName { get; set; } = string.Empty;
+        public string? SubjectType { get; set; }
+        public string RoleId { get; set; } = string.Empty;
+        public string RoleName { get; set; } = string.Empty;
+        public DateTime? EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class SubjectGrantRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string ResourceName { get; set; } = string.Empty;
+        public string ResourceId { get; set; } = string.Empty;
+        public string RoleName { get; set; } = string.Empty;
+        public string RoleId { get; set; } = string.Empty;
+        public DateTime? EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private sealed class RoleListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public bool IsVirtual { get; set; }
+        public int PermissionCount { get; set; }
+    }
+
+    private sealed class PermissionListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? ResourceType { get; set; }
+    }
+
+    private sealed class ResourceTypeListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
     }
 
     private record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);

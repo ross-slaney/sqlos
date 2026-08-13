@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
+using SqlOS.Pagination;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -86,8 +87,11 @@ public sealed class SqlOSAdminDashboardTests
             page: 1,
             pageSize: 10));
 
-        dcrResult.GetProperty("totalCount").GetInt32().Should().Be(2);
-        dcrResult.GetProperty("page").GetInt32().Should().Be(1);
+        dcrResult.GetProperty("data").GetArrayLength().Should().Be(2);
+        dcrResult.GetProperty("pageSize").GetInt32().Should().Be(10);
+        dcrResult.GetProperty("hasNextPage").GetBoolean().Should().BeFalse();
+        dcrResult.TryGetProperty("totalCount", out _).Should().BeFalse();
+        dcrResult.TryGetProperty("page", out _).Should().BeFalse();
         dcrResult.GetProperty("summary").GetProperty("activeCount").GetInt32().Should().Be(2);
         dcrResult.GetProperty("summary").GetProperty("registeredCount").GetInt32().Should().Be(2);
         dcrResult.GetProperty("summary").GetProperty("discoveredCount").GetInt32().Should().Be(0);
@@ -107,7 +111,7 @@ public sealed class SqlOSAdminDashboardTests
             page: 1,
             pageSize: 10));
 
-        cimdResult.GetProperty("totalCount").GetInt32().Should().Be(1);
+        cimdResult.GetProperty("data").GetArrayLength().Should().Be(1);
         cimdResult.GetProperty("summary").GetProperty("activeCount").GetInt32().Should().Be(1);
         cimdResult.GetProperty("summary").GetProperty("discoveredCount").GetInt32().Should().Be(1);
         var cimdItem = cimdResult.GetProperty("data")[0];
@@ -120,7 +124,7 @@ public sealed class SqlOSAdminDashboardTests
             page: 1,
             pageSize: 10));
 
-        descriptionSearchResult.GetProperty("totalCount").GetInt32().Should().Be(1);
+        descriptionSearchResult.GetProperty("data").GetArrayLength().Should().Be(1);
         descriptionSearchResult.GetProperty("data")[0].GetProperty("clientId").GetString().Should().Be("manual-disabled");
     }
 
@@ -179,6 +183,19 @@ public sealed class SqlOSAdminDashboardTests
         detail.GetProperty("metadataJson").GetString().Should().Contain("Detail Client One");
         detail.GetProperty("recentAuditEvents").GetArrayLength().Should().BeGreaterThan(0);
         detail.GetProperty("recentAuditEvents")[0].GetProperty("eventType").GetString().Should().Be("client.disabled");
+    }
+
+    [TestMethod]
+    public async Task ListUsersAsync_RejectsLegacyOffsetPages()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        var act = async () => await admin.ListUsersAsync(page: 2, pageSize: 10);
+        await act.Should().ThrowAsync<SqlOSCursorException>()
+            .WithMessage("*Offset pagination*");
     }
 
     private static JsonElement SerializeForDashboard(object value)

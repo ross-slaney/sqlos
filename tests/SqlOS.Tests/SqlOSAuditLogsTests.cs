@@ -65,7 +65,7 @@ public sealed class SqlOSAuditLogsTests
 
         var result = await service.ListAsync(new SqlOSAuditLogListRequest(ApplicationKey: "northwind-retail"));
 
-        result.TotalCount.Should().Be(1);
+        result.Data.Should().ContainSingle();
         result.Data[0].ApplicationKey.Should().Be("northwind-retail");
     }
 
@@ -91,9 +91,9 @@ public sealed class SqlOSAuditLogsTests
         var byId = await service.ListAsync(new SqlOSAuditLogListRequest(ApplicationId: "cli_retail"));
         var byEither = await service.ListAsync(new SqlOSAuditLogListRequest(Application: "retail-web"));
 
-        byId.TotalCount.Should().Be(1);
+        byId.Data.Should().ContainSingle();
         byId.Data[0].ApplicationId.Should().Be("cli_retail");
-        byEither.TotalCount.Should().Be(1);
+        byEither.Data.Should().ContainSingle();
     }
 
     [TestMethod]
@@ -274,7 +274,7 @@ public sealed class SqlOSAuditLogsTests
             OccurredAtFrom: now.AddMinutes(-1),
             OccurredAtTo: now.AddMinutes(1)));
 
-        result.TotalCount.Should().Be(1);
+        result.Data.Should().ContainSingle();
         result.Data[0].OrganizationId.Should().Be("org_retail");
         result.Data[0].Targets.Should().ContainSingle(x => x.Id == "inv_1");
     }
@@ -306,11 +306,18 @@ public sealed class SqlOSAuditLogsTests
         await service.RecordAsync(CreateRecord("event.2", occurredAt: now.AddMinutes(-1)));
         await service.RecordAsync(CreateRecord("event.3", occurredAt: now.AddMinutes(-2)));
 
-        var result = await service.ListAsync(new SqlOSAuditLogListRequest(Page: 2, PageSize: 2));
+        var first = await service.ListAsync(new SqlOSAuditLogListRequest(PageSize: 2));
+        first.HasNextPage.Should().BeTrue();
+        first.NextCursor.Should().NotBeNullOrWhiteSpace();
+        first.Data.Should().HaveCount(2);
+        first.Data.Select(x => x.Action).Should().ContainInOrder("event.1", "event.2");
 
-        result.TotalCount.Should().Be(3);
-        result.TotalPages.Should().Be(2);
-        result.Data.Should().ContainSingle(x => x.Action == "event.3");
+        var second = await service.ListAsync(new SqlOSAuditLogListRequest(Cursor: first.NextCursor, PageSize: 2));
+        second.HasNextPage.Should().BeFalse();
+        second.Data.Should().ContainSingle(x => x.Action == "event.3");
+
+        var offset = async () => await service.ListAsync(new SqlOSAuditLogListRequest(Page: 2, PageSize: 2));
+        await offset.Should().ThrowAsync<SqlOS.Pagination.SqlOSCursorException>();
     }
 
     [TestMethod]
@@ -408,7 +415,10 @@ public sealed class SqlOSAuditLogsTests
         appJs.Should().Contain("Application key or client ID");
         appJs.Should().Contain("Event Detail");
         appJs.Should().Contain("events/export.csv");
-        appJs.Should().Contain("audit-filter-form");
+        appJs.Should().Contain("pagerQuery(");
+        appJs.Should().Contain("nextCursor");
+        appJs.Should().NotContain("page=1&pageSize=500");
+        appJs.Should().NotContain("page=1&pageSize=100");
     }
 
     [TestMethod]

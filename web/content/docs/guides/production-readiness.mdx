@@ -325,7 +325,7 @@ Run this against the public origin through the real proxy, not directly against 
 - [ ] `/sqlos/auth/*` remains reachable without operator edge authentication.
 - [ ] `/sqlos`, `/sqlos/`, and operator routes under `/sqlos/admin/*` are unavailable to untrusted callers, except the narrowly reviewed delegated SSO portal paths when that customer flow is enabled.
 - [ ] CIMD is disabled or constrained by a pre-fetch host allowlist and outbound network policy.
-- [ ] An authorized operator can sign in, open the dashboard, and view audit events.
+- [ ] An authorized operator can sign in, open the dashboard, walk a list with Previous/Next (not numeric pages), and view audit events.
 - [ ] Restarting or replacing an instance with the shared key ring preserves protected secrets and sessions as designed.
 - [ ] The current database/key-ring backup has a recent successful restore drill.
 
@@ -337,7 +337,7 @@ The operational behavior described here is visible in the current source:
 - [`SqlOSBootstrapper`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Services/SqlOSBootstrapper.cs) shows the startup order.
 - [`SqlOSSchemaInitializer`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/AuthServer/Services/SqlOSSchemaInitializer.cs) and [`SqlOSFgaSchemaInitializer`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Fga/Services/SqlOSFgaSchemaInitializer.cs) execute embedded forward scripts.
 - [`SqlOSCryptoService`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/AuthServer/Services/SqlOSCryptoService.cs) shows Data Protection-backed persisted secrets and signing-key behavior.
-- [`SqlOSDashboardMiddleware`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Dashboard/SqlOSDashboardMiddleware.cs) and the auth endpoint mappings show the dashboard/admin boundary.
+- [`SqlOSCursorPagination`](https://github.com/ross-slaney/sqlos/blob/main/src/SqlOS/Pagination/SqlOSCursorPagination.cs) is the shared admin list contract: keyset seek, `Take(pageSize + 1)`, opaque cursors, no hot-path `COUNT(*)` or `OFFSET`.
 
 ## Next steps
 

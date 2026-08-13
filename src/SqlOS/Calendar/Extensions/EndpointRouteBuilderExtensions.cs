@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.Calendar.Services;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Pagination;
 
 namespace SqlOS.Calendar.Extensions;
 
@@ -52,8 +53,9 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             string? search,
             bool? includeRevoked,
-            int? page,
+            string? cursor,
             int? pageSize,
+            int? page,
             SqlOSCalendarService calendarService,
             IOptions<SqlOSOptions> options,
             IHostEnvironment environment,
@@ -64,7 +66,7 @@ public static class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await calendarService.GetAdminConnectionsAsync(search, includeRevoked ?? true, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => calendarService.GetAdminConnectionsAsync(search, includeRevoked ?? true, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/connections/{connectionId}", async (
