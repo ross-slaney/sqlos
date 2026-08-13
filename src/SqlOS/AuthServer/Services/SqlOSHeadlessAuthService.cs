@@ -1315,6 +1315,7 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
+        SqlOSSignupOrchestration.RejectInvitationEmailMismatch(boundInvitation?.Email, request.Email);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
         var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
         if (ssoRedirect != null)
@@ -1327,6 +1328,7 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
+            await _authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
             if (SupportsDatabaseTransactions())
             {
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);

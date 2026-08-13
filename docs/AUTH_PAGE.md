@@ -112,6 +112,7 @@ The auth dashboard now keeps client onboarding in one place:
 
 ## Notes
 
+- Password, hosted, and headless signup validate the client, redirect, resource, invitation, and organization join policy before writing durable state. The account, membership, session or authorization code, and audits commit together; a failed validation, duplicate identity race, or later callback leaves no partial user.
 - SqlOS still keeps consent simple by default.
 - Password is still the default local credential path.
 - `CIMD`, `DCR`, and resource indicators are now supported. Use them when you need portable or compatibility clients, not for the very first hosted setup.

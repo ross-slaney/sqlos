@@ -1196,6 +1196,55 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task SignUpAsync_WithUnknownClient_DoesNotCreateUser()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var email = $"unknown-client-{Guid.NewGuid():N}@example.com";
+
+        var act = async () => await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "Unknown Client",
+                email,
+                "P@ssword123!",
+                $"Org {Guid.NewGuid():N}",
+                ClientId: "missing-client",
+                OrganizationId: null),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Unknown client 'missing-client'.");
+
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))).Should().Be(0);
+        (await harness.Context.Set<SqlOSOrganization>()
+            .CountAsync(x => x.Name.StartsWith("Org "))).Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup")).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task SignUpAsync_WithEmptyPassword_DoesNotCreateUser()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var email = $"empty-password-{Guid.NewGuid():N}@example.com";
+
+        var act = async () => await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "No Password",
+                email,
+                "   ",
+                OrganizationName: null,
+                ClientId: "test-client",
+                OrganizationId: null),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSSignupOrchestration.PasswordRequiredMessage);
+
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task PublicSignup_UnknownOrgAndExistingOrg_ReturnUniformPublicFailure()
     {
         var harness = await TestHarness.CreateAsync();

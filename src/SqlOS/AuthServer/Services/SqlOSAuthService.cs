@@ -91,22 +91,55 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password signup is disabled.");
         }
 
+        var input = SqlOSSignupOrchestration.NormalizePasswordSignup(
+            request.DisplayName,
+            request.Email,
+            request.Password,
+            request.OrganizationName);
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
-
-        var user = await _adminService.CreateUserAsync(new SqlOSCreateUserRequest(request.DisplayName, request.Email, request.Password), cancellationToken);
-
-        string? organizationId = null;
-        if (!string.IsNullOrWhiteSpace(request.OrganizationName))
-        {
-            var organization = await _adminService.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(request.OrganizationName, null), cancellationToken);
-            organizationId = organization.Id;
-            await _adminService.CreateMembershipAsync(organization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        await _adminService.RecordAuditAsync("user.signup", "user", user.Id, userId: user.Id, organizationId: organizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
-
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        return await FinalizeClientLoginAsync(user, client, organizationId, "password", httpContext, cancellationToken);
+
+        SqlOSPasswordAuthenticationResult? signup = null;
+        try
+        {
+            return await SqlOSSignupOrchestration.ExecuteAsync(_context, async ct =>
+            {
+                signup = await SqlOSSignupOrchestration.CreatePasswordAccountAsync(
+                    _adminService,
+                    _context,
+                    input,
+                    ct);
+                var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                await _adminService.RecordAuditAsync(
+                    "user.signup",
+                    "user",
+                    signup.User.Id,
+                    userId: signup.User.Id,
+                    organizationId: organizationId,
+                    ipAddress: GetIp(httpContext),
+                    cancellationToken: ct);
+                return await FinalizeClientLoginAsync(
+                    signup.User,
+                    client,
+                    organizationId,
+                    "password",
+                    httpContext,
+                    ct);
+            }, cancellationToken);
+        }
+        catch
+        {
+            if (!SupportsDatabaseTransactions())
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    existingOrganizationId: null,
+                    input.OrganizationName,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSLoginResult> LoginWithPasswordAsync(SqlOSPasswordLoginRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
