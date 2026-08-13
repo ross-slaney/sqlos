@@ -239,6 +239,7 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
             var setupStack = BuildStack(setupContext, options);
             await setupStack.Admin.UpsertSeededClientsAsync();
             await setupStack.Crypto.EnsureActiveSigningKeyAsync();
+            await setupStack.Settings.EnsureDefaultMfaSettingsAsync();
             var (user, organization) = await SeedUserWithOrganizationAsync(setupStack, "Complete Race");
             var codeVerifier = setupStack.Crypto.GenerateOpaqueToken();
 
@@ -439,7 +440,7 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
             options,
             mfaPolicyService: mfaPolicy);
         var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy);
-        return new ServiceStack(context, crypto, admin, authorizationServer, device);
+        return new ServiceStack(context, crypto, admin, settings, authorizationServer, device);
     }
 
     private static TestSqlOSDbContext CreateContext(string connectionString)
@@ -473,12 +474,14 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
             TestSqlOSDbContext context,
             SqlOSCryptoService crypto,
             SqlOSAdminService admin,
+            SqlOSSettingsService settings,
             SqlOSAuthorizationServerService authorizationServer,
             SqlOSDeviceAuthorizationService device)
         {
             Context = context;
             Crypto = crypto;
             Admin = admin;
+            Settings = settings;
             AuthorizationServer = authorizationServer;
             Device = device;
         }
@@ -486,6 +489,7 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
         public TestSqlOSDbContext Context { get; }
         public SqlOSCryptoService Crypto { get; }
         public SqlOSAdminService Admin { get; }
+        public SqlOSSettingsService Settings { get; }
         public SqlOSAuthorizationServerService AuthorizationServer { get; }
         public SqlOSDeviceAuthorizationService Device { get; }
 
