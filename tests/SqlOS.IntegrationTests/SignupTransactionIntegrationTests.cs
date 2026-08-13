@@ -117,11 +117,13 @@ public sealed class SignupTransactionIntegrationTests
         outcomes.Count(static succeeded => !succeeded).Should().Be(3);
         database.Context.ChangeTracker.Clear();
         var normalized = SqlOSAdminService.NormalizeEmail(email);
-        (await database.Context.Set<SqlOSUserEmail>().CountAsync(x => x.NormalizedEmail == normalized))
+        var userId = await database.Context.Set<SqlOSUserEmail>()
+            .Where(x => x.NormalizedEmail == normalized)
+            .Select(x => x.UserId)
+            .SingleAsync();
+        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup" && x.UserId == userId))
             .Should().Be(1);
-        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup"))
-            .Should().Be(1);
-        (await database.Context.Set<SqlOSSession>().CountAsync())
+        (await database.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == userId))
             .Should().Be(1);
     }
 
@@ -144,11 +146,13 @@ public sealed class SignupTransactionIntegrationTests
         result.Tokens.Should().NotBeNull();
         database.Context.ChangeTracker.Clear();
         var normalized = SqlOSAdminService.NormalizeEmail(email);
-        (await database.Context.Set<SqlOSUserEmail>().CountAsync(x => x.NormalizedEmail == normalized))
+        var userId = await database.Context.Set<SqlOSUserEmail>()
+            .Where(x => x.NormalizedEmail == normalized)
+            .Select(x => x.UserId)
+            .SingleAsync();
+        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup" && x.UserId == userId))
             .Should().Be(1);
-        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup"))
-            .Should().Be(1);
-        (await database.Context.Set<SqlOSSession>().CountAsync())
+        (await database.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == userId))
             .Should().Be(1);
     }
 
@@ -332,8 +336,8 @@ public sealed class SignupTransactionIntegrationTests
         var email = $"hosted-{Guid.NewGuid():N}@example.com";
 
         var authorize = await client.GetAsync(
-            "/sqlos/auth/authorize?response_type=code&client_id=browser-client"
-            + "&redirect_uri=https%3A%2F%2Fclient.example.test%2Fcallback"
+            "/sqlos/auth/authorize?response_type=code&client_id=" + Uri.EscapeDataString(server.ClientId)
+            + "&redirect_uri=" + Uri.EscapeDataString(server.RedirectUri)
             + "&scope=openid%20profile%20email&state=hosted-state"
             + "&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256");
         authorize.EnsureSuccessStatusCode();
@@ -400,15 +404,22 @@ public sealed class SignupTransactionIntegrationTests
     {
         context.ChangeTracker.Clear();
         var normalized = SqlOSAdminService.NormalizeEmail(email);
-        (await context.Set<SqlOSUserEmail>().CountAsync(x => x.NormalizedEmail == normalized)).Should().Be(0);
+        var userIds = context.Set<SqlOSUserEmail>()
+            .Where(x => x.NormalizedEmail == normalized)
+            .Select(x => x.UserId);
+        (await userIds.CountAsync()).Should().Be(0);
         (await context.Set<SqlOSUser>().CountAsync(x => x.DefaultEmail == email)).Should().Be(0);
-        (await context.Set<SqlOSCredential>().CountAsync()).Should().Be(0);
-        (await context.Set<SqlOSMembership>().CountAsync()).Should().Be(0);
-        (await context.Set<SqlOSSession>().CountAsync()).Should().Be(0);
-        (await context.Set<SqlOSRefreshToken>().CountAsync()).Should().Be(0);
-        (await context.Set<SqlOSAuthorizationCode>().CountAsync()).Should().Be(0);
+        (await context.Set<SqlOSCredential>().CountAsync(x => userIds.Contains(x.UserId))).Should().Be(0);
+        (await context.Set<SqlOSMembership>().CountAsync(x => userIds.Contains(x.UserId))).Should().Be(0);
+        (await context.Set<SqlOSSession>().CountAsync(x => userIds.Contains(x.UserId))).Should().Be(0);
+        (await context.Set<SqlOSAuthorizationCode>().CountAsync(x => userIds.Contains(x.UserId))).Should().Be(0);
         (await context.Set<SqlOSAuditEvent>().CountAsync(x =>
-                x.EventType == "user.signup" || x.EventType.StartsWith("user.login.")))
+                (x.EventType == "user.signup" || x.EventType.StartsWith("user.login."))
+                && x.UserId != null
+                && userIds.Contains(x.UserId)))
+            .Should().Be(0);
+        (await context.Set<SqlOSRefreshToken>().CountAsync(x =>
+                context.Set<SqlOSSession>().Any(session => session.Id == x.SessionId && userIds.Contains(session.UserId))))
             .Should().Be(0);
     }
 
@@ -495,10 +506,12 @@ public sealed class SignupTransactionIntegrationTests
 
         public static async Task<SignupDatabase> CreateAsync(Action<SqlOSHeadlessAuthOptions>? configureHeadless = null)
         {
-            var context = await AspireFixture.CreateIsolatedAuthContextAsync("SignupTx");
-            var connectionString = context.Database.GetConnectionString()
-                ?? throw new InvalidOperationException("The signup database has no connection string.");
-            var clientId = "test-client";
+            var context = new TestSqlOSDbContext(
+                new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                    .UseSqlServer(AspireFixture.SqlConnectionString)
+                    .Options);
+            var connectionString = AspireFixture.SqlConnectionString;
+            var clientId = $"signup-{Guid.NewGuid():N}";
             var redirectUri = "https://client.example.test/callback";
             var optionsValue = CreateOptions(clientId, redirectUri, configureHeadless);
             var actor = BuildActor(context, optionsValue, ownsContext: false);
@@ -532,7 +545,6 @@ public sealed class SignupTransactionIntegrationTests
 
         public async ValueTask DisposeAsync()
         {
-            await Context.Database.EnsureDeletedAsync();
             await Context.DisposeAsync();
         }
 
@@ -666,6 +678,8 @@ public sealed class SignupTransactionIntegrationTests
     {
         public required WebApplication App { get; init; }
         public required string ConnectionString { get; init; }
+        public required string ClientId { get; init; }
+        public required string RedirectUri { get; init; }
 
         public TestSqlOSDbContext CreateContext()
             => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
@@ -674,8 +688,9 @@ public sealed class SignupTransactionIntegrationTests
 
         public static async Task<SignupHttpServer> CreateAsync()
         {
-            await using var bootstrap = await AspireFixture.CreateIsolatedAuthContextAsync("SignupHttp");
-            var connectionString = bootstrap.Database.GetConnectionString()!;
+            var connectionString = AspireFixture.SqlConnectionString;
+            var clientId = $"signup-http-{Guid.NewGuid():N}";
+            var redirectUri = "https://client.example.test/callback";
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {
                 EnvironmentName = Environments.Development
@@ -688,15 +703,16 @@ public sealed class SignupTransactionIntegrationTests
                 options.AuthServer.BasePath = "/sqlos/auth";
                 options.AuthServer.PublicOrigin = TrustedOrigin;
                 options.AuthServer.SeedBrowserClient(
-                    "browser-client",
+                    clientId,
                     "Browser Client",
-                    "https://client.example.test/callback");
+                    redirectUri);
                 options.AuthServer.SeedAuthPage(page =>
                 {
-                    page.EnabledCredentialTypes = ["password"];
+                    page.EnabledCredentialTypes = ["password", "email_otp"];
                     page.EnablePasswordSignup = true;
                 });
             });
+            builder.Services.AddSingleton(AspireFixture.DataProtectionProvider);
             builder.Services.RemoveAll<IHostedService>();
 
             var app = builder.Build();
@@ -710,7 +726,9 @@ public sealed class SignupTransactionIntegrationTests
             return new SignupHttpServer
             {
                 App = app,
-                ConnectionString = connectionString
+                ConnectionString = connectionString,
+                ClientId = clientId,
+                RedirectUri = redirectUri
             };
         }
 
@@ -719,7 +737,7 @@ public sealed class SignupTransactionIntegrationTests
             await using var scope = App.Services.CreateAsyncScope();
             var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
             var client = await context.Set<SqlOSClientApplication>()
-                .SingleAsync(x => x.ClientId == "browser-client");
+                .SingleAsync(x => x.ClientId == ClientId);
             client.IsActive = false;
             client.DisabledAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
@@ -727,11 +745,6 @@ public sealed class SignupTransactionIntegrationTests
 
         public async ValueTask DisposeAsync()
         {
-            await using (var scope = App.Services.CreateAsyncScope())
-            {
-                await scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>().Database.EnsureDeletedAsync();
-            }
-
             await App.StopAsync();
             await App.DisposeAsync();
         }
