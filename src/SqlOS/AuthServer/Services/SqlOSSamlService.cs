@@ -227,72 +227,18 @@ public sealed class SqlOSSamlService
         if (_authorizationServerService != null)
         {
             authorizationRequest.ResolvedConnectionId = connection.Id;
-            return await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            authorizationRequest.OrganizationId ??= organizationId;
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 user,
-                organizationId,
                 authenticationMethod,
                 httpContext ?? new DefaultHttpContext(),
                 cancellationToken);
+            return completion.RedirectUrl
+                ?? _authorizationServerService.BuildAuthorizationInteractionRedirect(completion);
         }
 
-        var client = authorizationRequest.ClientApplication
-            ?? await _context.Set<SqlOSClientApplication>()
-                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
-        await _adminService.EnsureApplicationAccessAsync(
-            client,
-            user.Id,
-            organizationId,
-            "application.access.authorization_denied",
-            httpContext?.Connection.RemoteIpAddress?.ToString(),
-            cancellationToken);
-
-        var rawCode = _cryptoService.GenerateOpaqueToken();
-        _context.Set<SqlOSAuthorizationCode>().Add(new SqlOSAuthorizationCode
-        {
-            Id = _cryptoService.GenerateId("acd"),
-            AuthorizationRequestId = authorizationRequest.Id,
-            UserId = user.Id,
-            ClientApplicationId = authorizationRequest.ClientApplicationId,
-            OrganizationId = organizationId,
-            RedirectUri = authorizationRequest.RedirectUri,
-            State = authorizationRequest.State,
-            Scope = authorizationRequest.Scope,
-            Resource = authorizationRequest.Resource,
-            CodeHash = _cryptoService.HashToken(rawCode),
-            CodeChallenge = authorizationRequest.CodeChallenge,
-            CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
-            AuthenticationMethod = authenticationMethod,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(5)
-        });
-
-        authorizationRequest.CompletedAt = DateTime.UtcNow;
-        authorizationRequest.ResolvedAuthMethod = authenticationMethod;
-        authorizationRequest.ResolvedOrganizationId = organizationId;
-        authorizationRequest.ResolvedConnectionId = connection.Id;
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            throw new InvalidOperationException("Authorization request is no longer active.", ex);
-        }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
-        {
-            throw new InvalidOperationException("Authorization request is no longer active.", ex);
-        }
-
-        await _adminService.RecordAuditAsync(
-            "user.login.saml",
-            "user",
-            user.Id,
-            userId: user.Id,
-            organizationId: organizationId,
-            cancellationToken: cancellationToken);
-        var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
+        throw new InvalidOperationException("SAML login requires the authorization server to evaluate issuance assurance.");
     }
 
     private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection)

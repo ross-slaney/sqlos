@@ -20,19 +20,22 @@ public sealed class SqlOSDeviceAuthorizationService
     private readonly SqlOSAuthService _authService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAuthServerOptions _options;
+    private readonly SqlOSMfaPolicyService? _mfaPolicyService;
 
     public SqlOSDeviceAuthorizationService(
         ISqlOSAuthServerDbContext context,
         SqlOSAdminService adminService,
         SqlOSAuthService authService,
         SqlOSCryptoService cryptoService,
-        IOptions<SqlOSAuthServerOptions> options)
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSMfaPolicyService? mfaPolicyService = null)
     {
         _context = context;
         _adminService = adminService;
         _authService = authService;
         _cryptoService = cryptoService;
         _options = options.Value;
+        _mfaPolicyService = mfaPolicyService;
     }
 
     public async Task<SqlOSDeviceAuthorizationStartResult> StartAsync(
@@ -234,6 +237,12 @@ public sealed class SqlOSDeviceAuthorizationService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod)
+            || !string.Equals(authorizationRequest.ResolvedAuthMethod, authenticationMethod, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Device approval is missing authorization assurance.");
+        }
+
         var resolved = await ApproveAsync(
             new SqlOSDeviceAuthorizationApprovalRequest(
                 (await GetRequiredByAuthorizationRequestAsync(authorizationRequest, cancellationToken)).UserCode,
@@ -282,6 +291,8 @@ public sealed class SqlOSDeviceAuthorizationService
         {
             return ToResolveResult(deviceAuthorization, true, organizations);
         }
+
+        await EnsureMfaSatisfiedAsync(user.Id, organizationId, authenticationMethod, cancellationToken);
 
         await _adminService.EnsureApplicationAccessAsync(
             deviceAuthorization.ClientApplication!,
@@ -401,6 +412,30 @@ public sealed class SqlOSDeviceAuthorizationService
             throw new SqlOSDeviceAuthorizationException("invalid_grant", "Approved user is no longer available.");
         }
 
+        if (await RequiresMfaAsync(
+            deviceAuthorization.ApprovedUser.Id,
+            deviceAuthorization.ApprovedOrganizationId,
+            deviceAuthorization.AuthenticationMethod ?? "device",
+            cancellationToken))
+        {
+            deviceAuthorization.Status = PendingStatus;
+            deviceAuthorization.ApprovedUserId = null;
+            deviceAuthorization.ApprovedOrganizationId = null;
+            deviceAuthorization.AuthenticationMethod = null;
+            deviceAuthorization.ApprovedAt = null;
+            await _context.SaveChangesAsync(cancellationToken);
+            await _adminService.RecordAuditAsync(
+                "oauth.device.assurance_required",
+                "client",
+                client.Id,
+                ipAddress: GetIp(httpContext),
+                cancellationToken: cancellationToken);
+            throw new SqlOSDeviceAuthorizationException(
+                "authorization_pending",
+                "Current MFA policy requires the user to approve this device request again.",
+                deviceAuthorization.PollingIntervalSeconds);
+        }
+
         deviceAuthorization.ConsumedAt = DateTime.UtcNow;
         deviceAuthorization.PollCount++;
         deviceAuthorization.LastPolledAt = DateTime.UtcNow;
@@ -433,6 +468,41 @@ public sealed class SqlOSDeviceAuthorizationService
             cancellationToken: cancellationToken);
 
         return new SqlOSDeviceTokenPollResult(tokens, deviceAuthorization.Scope);
+    }
+
+    private async Task EnsureMfaSatisfiedAsync(
+        string userId,
+        string? organizationId,
+        string authenticationMethod,
+        CancellationToken cancellationToken)
+    {
+        if (await RequiresMfaAsync(userId, organizationId, authenticationMethod, cancellationToken))
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        }
+    }
+
+    private async Task<bool> RequiresMfaAsync(
+        string userId,
+        string? organizationId,
+        string authenticationMethod,
+        CancellationToken cancellationToken)
+    {
+        if (_mfaPolicyService == null)
+        {
+            if (_options.Mfa.Enabled)
+            {
+                throw new InvalidOperationException(SqlOSMfaPolicyService.EvaluationUnavailableMessage);
+            }
+
+            return false;
+        }
+
+        return (await _mfaPolicyService.EvaluateAsync(
+            userId,
+            organizationId,
+            authenticationMethod,
+            cancellationToken)).RequiresMfa;
     }
 
     private async Task RecordPollAsync(SqlOSDeviceAuthorization deviceAuthorization, HttpContext httpContext, CancellationToken cancellationToken)

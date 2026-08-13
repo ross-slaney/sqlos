@@ -14,6 +14,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.IntegrationTests.Infrastructure;
@@ -40,7 +41,7 @@ public sealed class SamlServiceIntegrationTests
             var options = Options.Create(optionsValue);
             var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
             var admin = new SqlOSAdminService(context, options, crypto);
-            var saml = new SqlOSSamlService(context, options, admin, crypto);
+            var saml = CreateSamlService(context, options, admin, crypto);
             var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Seeded signed login", "seeded-signed-login"));
             var client = await CreateSamlClientAsync(admin, "seeded-signed");
             using var rsa = RSA.Create(2048);
@@ -244,7 +245,7 @@ public sealed class SamlServiceIntegrationTests
             crypto,
             new FakeOidcProviderHttpClientFactory(),
             NullLogger<SqlOSOidcAuthService>.Instance);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
         var email = $"inactive-federated-{Guid.NewGuid():N}@example.com";
         var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest(
             "Inactive Federated User",
@@ -367,7 +368,7 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
         var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
@@ -566,7 +567,7 @@ public sealed class SamlServiceIntegrationTests
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
         var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
         var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
         var discovery = new SqlOSHomeRealmDiscoveryService(AspireFixture.SharedContext);
@@ -742,7 +743,7 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
 
         var email = $"existing-saml-{Guid.NewGuid():N}@example.com";
         var existingUser = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing SAML User", email, "P@ssword123!"));
@@ -1258,7 +1259,7 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
 
         var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"Redirect {Guid.NewGuid():N}", null));
         var client = await admin.CreateClientAsync(new SqlOSCreateClientRequest(
@@ -1513,7 +1514,7 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
-        var saml = new SqlOSSamlService(AspireFixture.SharedContext, options, admin, crypto);
+        var saml = CreateSamlService(AspireFixture.SharedContext, options, admin, crypto);
         return (crypto, admin, saml);
     }
 
@@ -1525,11 +1526,26 @@ public sealed class SamlServiceIntegrationTests
         return new TestSqlOSDbContext(dbOptions);
     }
 
+    private static SqlOSSamlService CreateSamlService(
+        ISqlOSAuthServerDbContext context,
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSAdminService admin,
+        SqlOSCryptoService crypto)
+    {
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authPage = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPage, options);
+        return new SqlOSSamlService(context, options, admin, crypto, authorization);
+    }
+
     private static SqlOSSamlService CreateSamlService(TestSqlOSDbContext context)
     {
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
-        return new SqlOSSamlService(context, options, new SqlOSAdminService(context, options, crypto), crypto);
+        return CreateSamlService(context, options, new SqlOSAdminService(context, options, crypto), crypto);
     }
 
     private static async Task<(string? Redirect, Exception? Error)> CaptureAcsAsync(
@@ -1553,7 +1569,7 @@ public sealed class SamlServiceIntegrationTests
         var options = Options.Create(AspireFixture.Options);
         var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var saml = new SqlOSSamlService(context, options, admin, crypto);
+        var saml = CreateSamlService(context, options, admin, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);

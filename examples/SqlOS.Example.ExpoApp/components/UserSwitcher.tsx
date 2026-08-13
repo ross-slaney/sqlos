@@ -86,6 +86,9 @@ export function UserSwitcher() {
         });
         if (!res.ok) throw new Error("Switch failed");
         const data = await res.json();
+        if (data.requiresMfa || !data.accessToken) {
+          throw new Error("Switch requires MFA");
+        }
         const decoded = jwtDecode<{
           sub?: string;
           exp: number;

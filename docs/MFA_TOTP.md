@@ -119,13 +119,23 @@ verified through the account self-enrollment API.
 
 ## Hosted OAuth
 
-Hosted authorization-code login evaluates MFA after the user and organization
-are resolved and before the authorization code is issued. A required policy
-renders either:
+Every authorization issuance path evaluates the current global, organization,
+role, and user MFA policy before it creates an authorization code, AuthPage
+session, access token, refresh token, or device approval. Hosted password login,
+OIDC and SAML callbacks, all hosted signup variants, silent SSO, headless login,
+and device approval share that same pre-issuance gate.
+
+A required policy renders either:
 
 - a second-factor code form, when the user already has TOTP or recovery codes;
 - a forced authenticator-app enrollment form, when the user has no strong
   factor yet.
+
+Primary authentication alone cannot issue authority. Email OTP, password,
+invitation, and ordinary upstream OIDC or SAML do not count as MFA. Phone OTP
+satisfies MFA only when `PhoneOtp.SatisfiesMfa` is enabled. Explicitly trusted
+upstream MFA remains accepted. If policy becomes stricter between the first
+factor and issuance, SqlOS re-evaluates the current policy and refuses to issue.
 
 Successful MFA appends the second factor to `amr`, for example:
 

@@ -38,7 +38,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSEmailOtpService _emailOtpService;
     private readonly SqlOSMagicLinkService? _magicLinkService;
     private readonly SqlOSPhoneOtpService? _phoneOtpService;
-    private readonly SqlOSMfaPolicyService? _mfaPolicyService;
+    private readonly SqlOSMfaPolicyService _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
@@ -79,7 +79,7 @@ public sealed class SqlOSAuthService
             ?? new SqlOSMfaAttemptAdmissionService(context, cryptoService, options);
         _transactionalEmailService = transactionalEmailService;
         _authEmailSender = authEmailSender;
-        _mfaPolicyService = mfaPolicyService;
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
         _totpMfaService = totpMfaService;
     }
 
@@ -2130,6 +2130,15 @@ public sealed class SqlOSAuthService
         return new SqlOSMfaChallengeVerifyResult(tokens, null);
     }
 
+    public Task<SqlOSLoginResult> CompleteClientAuthenticationAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string? organizationId,
+        string authenticationMethod,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+        => FinalizeClientLoginAsync(user, client, organizationId, authenticationMethod, httpContext, cancellationToken);
+
     public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
         SqlOSUser user,
         SqlOSClientApplication client,
@@ -2208,6 +2217,17 @@ public sealed class SqlOSAuthService
         CancellationToken cancellationToken)
     {
         organizationId = string.IsNullOrWhiteSpace(organizationId) ? null : organizationId.Trim();
+        var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequestId: null,
+            cancellationToken);
+        if (!issuanceDecision.CanIssue)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        }
+
         await RequireActiveLifecycleAsync(
             user.Id,
             organizationId,
@@ -2826,7 +2846,7 @@ public sealed class SqlOSAuthService
         => _totpMfaService ?? throw new InvalidOperationException("TOTP MFA service is not registered.");
 
     private SqlOSMfaPolicyService RequireMfaPolicyService()
-        => _mfaPolicyService ?? throw new InvalidOperationException("MFA policy service is not registered.");
+        => _mfaPolicyService;
 
     private async Task<SqlOSLoginResult?> TryCreateMfaLoginResultAsync(
         SqlOSUser user,
@@ -2836,11 +2856,6 @@ public sealed class SqlOSAuthService
         IReadOnlyList<SqlOSOrganizationOption> organizations,
         CancellationToken cancellationToken)
     {
-        if (_mfaPolicyService == null)
-        {
-            return null;
-        }
-
         var evaluation = await _mfaPolicyService.EvaluateAsync(user.Id, organizationId, authenticationMethod, cancellationToken);
         if (!evaluation.RequiresMfa)
         {
@@ -3070,5 +3085,5 @@ public sealed class SqlOSAuthService
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
 
     private SqlOSDeviceAuthorizationService CreateDeviceAuthorizationService()
-        => new(_context, _adminService, this, _cryptoService, Options.Create(_options));
+        => new(_context, _adminService, this, _cryptoService, Options.Create(_options), _mfaPolicyService);
 }

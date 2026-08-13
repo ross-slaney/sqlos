@@ -341,13 +341,15 @@ public sealed class SqlOSOidcBrowserAuthService
             var organizationId = await InvokeSocialSignupHookAsync(httpContext, authorizationRequest, result, cancellationToken);
 
             var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
-            var redirectUrl = await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            authorizationRequest.OrganizationId ??= organizationId;
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 user,
-                organizationId ?? authorizationRequest.OrganizationId,
                 result.AuthenticationMethod,
                 httpContext,
                 cancellationToken);
+            var redirectUrl = completion.RedirectUrl
+                ?? _authorizationServerService.BuildAuthorizationInteractionRedirect(completion);
 
             return Results.Redirect(redirectUrl);
         }

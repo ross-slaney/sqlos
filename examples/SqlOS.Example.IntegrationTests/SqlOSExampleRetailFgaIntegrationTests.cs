@@ -195,19 +195,21 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
     }
 
     [TestMethod]
-    public async Task DemoSwitch_ReturnsTokensWithoutMfaChallenge()
+    public async Task DemoSwitch_WhenOrganizationRequiresMfa_ReturnsChallengeInsteadOfTokens()
     {
-        var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");
+        var noGrantsEmail = await GetUserEmailByDisplayNameAsync("No Grants User");
 
         var response = await ExampleApiFixture.Client.PostAsJsonAsync(
             "/api/v1/auth/demo/switch",
-            new { email = companyAdminEmail });
+            new { email = noGrantsEmail });
 
         response.EnsureSuccessStatusCode();
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        json.RootElement.GetProperty("accessToken").GetString().Should().NotBeNullOrWhiteSpace();
-        json.RootElement.GetProperty("refreshToken").GetString().Should().NotBeNullOrWhiteSpace();
-        json.RootElement.TryGetProperty("requiresMfa", out _).Should().BeFalse();
+        json.RootElement.TryGetProperty("accessToken", out _).Should().BeFalse();
+        json.RootElement.TryGetProperty("refreshToken", out _).Should().BeFalse();
+        json.RootElement.GetProperty("requiresMfa").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("requiresMfaEnrollment").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("mfaToken").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
     private static async Task<IReadOnlyList<DemoSubject>> GetDemoSubjectsAsync()

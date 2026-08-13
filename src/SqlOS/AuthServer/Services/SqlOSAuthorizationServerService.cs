@@ -24,7 +24,7 @@ public sealed class SqlOSAuthorizationServerService
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
-    private readonly SqlOSMfaPolicyService? _mfaPolicyService;
+    private readonly SqlOSMfaPolicyService _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
 
     public SqlOSAuthorizationServerService(
@@ -50,7 +50,7 @@ public sealed class SqlOSAuthorizationServerService
         _invitationService = invitationService;
         _passwordLoginAbuseService = passwordLoginAbuseService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
-        _mfaPolicyService = mfaPolicyService;
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
         _totpMfaService = totpMfaService;
     }
 
@@ -571,24 +571,71 @@ public sealed class SqlOSAuthorizationServerService
 
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == temporaryToken.UserId, cancellationToken);
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-        var mfaResult = await TryCreateMfaAuthorizationResultAsync(
+        return await CompleteAssuredLoginAsync(
             authorizationRequest,
             user,
             organizationId,
             payload.AuthenticationMethod,
             organizations,
+            httpContext,
             cancellationToken);
-        if (mfaResult != null)
+    }
+
+    internal async Task<SqlOSAuthorizationRequestLoginResult> GetPendingOrganizationSelectionForLoginAsync(
+        string pendingToken,
+        string authorizationRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        var temporaryToken = await _cryptoService.FindTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+            ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
+        if (temporaryToken.UserId == null)
         {
-            return mfaResult;
+            throw new InvalidOperationException("The organization selection session is invalid.");
         }
 
+        var payload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(temporaryToken)
+            ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
+        if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The organization selection session is not valid for this authorization request.");
+        }
+
+        var organizations = await _adminService.GetUserOrganizationsAsync(temporaryToken.UserId, cancellationToken);
         return new SqlOSAuthorizationRequestLoginResult(
-            await IssueAuthorizationRedirectAsync(authorizationRequest, user, organizationId, payload.AuthenticationMethod, httpContext, cancellationToken),
-            false,
             null,
+            true,
+            pendingToken,
             organizations,
-            AuthorizationRequestId: authorizationRequest.Id);
+            AuthorizationRequestId: authorizationRequestId);
+    }
+
+    public string BuildAuthorizationInteractionRedirect(SqlOSAuthorizationRequestLoginResult completion)
+    {
+        if (string.IsNullOrWhiteSpace(completion.AuthorizationRequestId))
+        {
+            throw new InvalidOperationException("The authorization interaction is missing its request binding.");
+        }
+
+        var parameters = new Dictionary<string, string?>
+        {
+            ["request"] = completion.AuthorizationRequestId
+        };
+        if (completion.RequiresMfa)
+        {
+            parameters["mfa_token"] = completion.MfaToken
+                ?? throw new InvalidOperationException("The MFA interaction is missing its challenge binding.");
+        }
+        else if (completion.RequiresOrganizationSelection)
+        {
+            parameters["pending_token"] = completion.PendingToken
+                ?? throw new InvalidOperationException("The organization interaction is missing its pending binding.");
+        }
+        else
+        {
+            throw new InvalidOperationException("The authorization interaction is already complete.");
+        }
+
+        return QueryHelpers.AddQueryString($"{_options.BasePath.TrimEnd('/')}/continue", parameters);
     }
 
     public async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
@@ -608,29 +655,14 @@ public sealed class SqlOSAuthorizationServerService
                 cancellationToken);
             var invitationOrganizationId = invitationAcceptance?.OrganizationId;
             var invitationOrganizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-            var mfaResult = await TryCreateMfaAuthorizationResultAsync(
+            return await CompleteAssuredLoginAsync(
                 authorizationRequest,
                 user,
                 invitationOrganizationId,
                 authenticationMethod,
                 invitationOrganizations,
+                httpContext,
                 cancellationToken);
-            if (mfaResult != null)
-            {
-                return mfaResult;
-            }
-
-            return new SqlOSAuthorizationRequestLoginResult(
-                await IssueAuthorizationRedirectAsync(
-                    authorizationRequest,
-                    user,
-                    invitationOrganizationId,
-                    authenticationMethod,
-                    httpContext,
-                    cancellationToken),
-                false,
-                null,
-                await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken));
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
@@ -642,29 +674,14 @@ public sealed class SqlOSAuthorizationServerService
                 throw new InvalidOperationException("The selected organization is not available to this user.");
             }
 
-            var mfaResult = await TryCreateMfaAuthorizationResultAsync(
+            return await CompleteAssuredLoginAsync(
                 authorizationRequest,
                 user,
                 authorizationRequest.OrganizationId,
                 authenticationMethod,
                 organizations,
+                httpContext,
                 cancellationToken);
-            if (mfaResult != null)
-            {
-                return mfaResult;
-            }
-
-            return new SqlOSAuthorizationRequestLoginResult(
-                await IssueAuthorizationRedirectAsync(
-                    authorizationRequest,
-                    user,
-                    authorizationRequest.OrganizationId,
-                    authenticationMethod,
-                    httpContext,
-                    cancellationToken),
-                false,
-                null,
-                organizations);
         }
 
         if (organizations.Count > 1)
@@ -677,33 +694,19 @@ public sealed class SqlOSAuthorizationServerService
                     authorizationRequest,
                     authenticationMethod,
                     cancellationToken),
-                organizations);
+                organizations,
+                AuthorizationRequestId: authorizationRequest.Id);
         }
 
         var selectedOrganizationId = organizations.FirstOrDefault()?.Id;
-        var directMfaResult = await TryCreateMfaAuthorizationResultAsync(
+        return await CompleteAssuredLoginAsync(
             authorizationRequest,
             user,
             selectedOrganizationId,
             authenticationMethod,
             organizations,
+            httpContext,
             cancellationToken);
-        if (directMfaResult != null)
-        {
-            return directMfaResult;
-        }
-
-        return new SqlOSAuthorizationRequestLoginResult(
-            await IssueAuthorizationRedirectAsync(
-                authorizationRequest,
-                user,
-                selectedOrganizationId,
-                authenticationMethod,
-                httpContext,
-                cancellationToken),
-            false,
-            null,
-            organizations);
     }
 
     public async Task<string> CompleteMfaChallengeAsync(
@@ -830,25 +833,55 @@ public sealed class SqlOSAuthorizationServerService
         return redirectUrl;
     }
 
-    private async Task<SqlOSAuthorizationRequestLoginResult?> TryCreateMfaAuthorizationResultAsync(
+    private async Task<SqlOSAuthorizationRequestLoginResult> CompleteAssuredLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         string? organizationId,
         string authenticationMethod,
         IReadOnlyList<SqlOSOrganizationOption> organizations,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        if (_mfaPolicyService == null)
+        var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequest.Id,
+            cancellationToken);
+        if (!decision.CanIssue)
         {
-            return null;
+            return await CreateMfaAuthorizationResultAsync(
+                authorizationRequest,
+                user,
+                organizationId,
+                authenticationMethod,
+                organizations,
+                decision.Evaluation,
+                cancellationToken);
         }
 
-        var evaluation = await _mfaPolicyService.EvaluateAsync(user.Id, organizationId, authenticationMethod, cancellationToken);
-        if (!evaluation.RequiresMfa)
-        {
-            return null;
-        }
+        return new SqlOSAuthorizationRequestLoginResult(
+            await IssueAssuredAuthorizationRedirectAsync(
+                decision.Assurance!,
+                authorizationRequest,
+                user,
+                httpContext,
+                cancellationToken),
+            false,
+            null,
+            organizations,
+            AuthorizationRequestId: authorizationRequest.Id);
+    }
 
+    private async Task<SqlOSAuthorizationRequestLoginResult> CreateMfaAuthorizationResultAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        string? organizationId,
+        string authenticationMethod,
+        IReadOnlyList<SqlOSOrganizationOption> organizations,
+        SqlOSMfaPolicyEvaluation evaluation,
+        CancellationToken cancellationToken)
+    {
         var client = authorizationRequest.ClientApplication
             ?? await _context.Set<SqlOSClientApplication>()
                 .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
@@ -879,7 +912,7 @@ public sealed class SqlOSAuthorizationServerService
             AuthorizationRequestId: authorizationRequest.Id);
     }
 
-    public async Task<string> IssueAuthorizationRedirectAsync(
+    internal async Task<string> IssueAuthorizationRedirectAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         string? organizationId,
@@ -887,6 +920,41 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequest.Id,
+            cancellationToken);
+        if (decision.Assurance == null)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        }
+
+        return await IssueAssuredAuthorizationRedirectAsync(
+            decision.Assurance,
+            authorizationRequest,
+            user,
+            httpContext,
+            cancellationToken);
+    }
+
+    private async Task<string> IssueAssuredAuthorizationRedirectAsync(
+        SqlOSIssuanceAssurance assurance,
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSUser user,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(assurance.UserId, user.Id, StringComparison.Ordinal)
+            || !string.Equals(assurance.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Authorization assurance binding is invalid.");
+        }
+
+        var organizationId = assurance.OrganizationId;
+        var authenticationMethod = assurance.AuthenticationMethod;
+
         await RequireActiveLifecycleAsync(
             user.Id,
             organizationId: null,
@@ -904,6 +972,22 @@ public sealed class SqlOSAuthorizationServerService
                 httpContext,
                 cancellationToken);
             organizationId = invitationAcceptance?.OrganizationId ?? organizationId;
+        }
+
+        if (!string.Equals(assurance.OrganizationId, organizationId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Authorization assurance binding is invalid.");
+        }
+
+        var currentPolicy = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequest.Id,
+            cancellationToken);
+        if (!currentPolicy.CanIssue)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
         }
 
         await RequireActiveLifecycleAsync(

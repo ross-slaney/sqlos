@@ -159,7 +159,7 @@ Render `qrCodeDataUrl` as an image, keep `secret` available for manual setup, an
 
 ## Handle login-time MFA
 
-Hosted auth handles this automatically.
+Hosted auth handles this automatically for password login, OIDC and SAML callbacks, signup, silent SSO, and device approval. Primary authentication cannot issue a code, session, token, or device approval while MFA is required.
 
 For headless auth, render these view names:
 

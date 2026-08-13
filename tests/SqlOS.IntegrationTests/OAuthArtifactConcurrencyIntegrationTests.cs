@@ -426,7 +426,8 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
         var emailSender = new TestAuthEmailSender { IsConfigured = true };
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, mfaPolicyService: mfaPolicy);
         var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
         var authorizationServer = new SqlOSAuthorizationServerService(
             context,
@@ -435,8 +436,9 @@ public sealed class OAuthArtifactConcurrencyIntegrationTests
             crypto,
             settings,
             authPageSession,
-            options);
-        var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options);
+            options,
+            mfaPolicyService: mfaPolicy);
+        var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy);
         return new ServiceStack(context, crypto, admin, authorizationServer, device);
     }
 

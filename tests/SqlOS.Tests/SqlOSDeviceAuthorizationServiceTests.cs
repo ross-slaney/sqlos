@@ -180,15 +180,17 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
-            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options);
-            var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPageSession, options);
+            var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, mfaPolicyService: mfaPolicy);
+            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy);
+            var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPageSession, options, mfaPolicyService: mfaPolicy);
             var http = new DefaultHttpContext();
             http.Request.Scheme = "https";
             http.Request.Host = new HostString("auth.example.com");
             http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
 
             await settings.EnsureDefaultAuthPageSettingsAsync();
+            await settings.EnsureDefaultMfaSettingsAsync();
             await admin.UpsertSeededClientsAsync();
 
             return new Harness(context, device, authorization, crypto, http);

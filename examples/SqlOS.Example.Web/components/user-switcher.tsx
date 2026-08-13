@@ -107,7 +107,10 @@ export function UserSwitcher() {
           body: JSON.stringify({ email: subject.email }),
         });
         if (!res.ok) throw new Error("Switch failed");
-        const data: SwitchResponse = await res.json();
+        const data = await res.json() as SwitchResponse & { requiresMfa?: boolean };
+        if (data.requiresMfa || !data.accessToken) {
+          throw new Error("Switch requires MFA");
+        }
         const decoded = jwtDecode<{ sub?: string; exp: number; org_id?: string }>(data.accessToken);
 
         await signIn("credentials", {
