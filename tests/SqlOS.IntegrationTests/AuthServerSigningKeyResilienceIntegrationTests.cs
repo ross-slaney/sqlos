@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -208,6 +211,130 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             }
             await DeleteDatabaseAsync(connectionString);
             DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureAndRotateSigningKey_RetryEnabledContext_SucceedsAndRemainsIdempotent()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+        var keyRingPath = CreateKeyRingDirectory("retry-enabled");
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSRetryEnabledKey");
+            connectionString = setupContext.Database.GetConnectionString();
+            await setupContext.DisposeAsync();
+            setupContext = null;
+
+            await using var retryContext = CreateRetryEnabledContext(connectionString!);
+            var stack = BuildStack(
+                retryContext,
+                CreateOptions("retry-enabled", "https://client.example.test/retry-enabled/callback"),
+                CreateFileSystemProvider(keyRingPath));
+
+            var first = await stack.Crypto.EnsureActiveSigningKeyAsync();
+            var repeated = await stack.Crypto.EnsureActiveSigningKeyAsync();
+            repeated.Id.Should().Be(first.Id);
+
+            var rotated = await stack.Crypto.RotateSigningKeyAsync();
+            rotated.Id.Should().NotBe(first.Id);
+
+            var keys = await retryContext.Set<SqlOSSigningKey>()
+                .AsNoTracking()
+                .OrderBy(key => key.ActivatedAt)
+                .ToListAsync();
+            keys.Should().HaveCount(2);
+            keys.Should().ContainSingle(key => key.IsActive).Which.Id.Should().Be(rotated.Id);
+            keys.Should().ContainSingle(key => !key.IsActive).Which.RetiredAt.Should().NotBeNull();
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+            DeleteKeyRingDirectory(keyRingPath);
+        }
+    }
+
+    [TestMethod]
+    public async Task EnsureActiveSigningKey_TransientSaveFailure_RetriesWithoutOrphaningKey()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSRetryCleanup");
+            connectionString = setupContext.Database.GetConnectionString();
+            await setupContext.DisposeAsync();
+            setupContext = null;
+
+            await using var retryContext = CreateTestRetryContext(connectionString!);
+            using var custody = new TrackingTestSigningKeyCustody();
+            var stack = BuildStack(
+                retryContext,
+                CreateOptions("retry-cleanup", "https://client.example.test/retry-cleanup/callback"),
+                custody);
+
+            var key = await stack.Crypto.EnsureActiveSigningKeyAsync();
+
+            custody.DeleteCount.Should().Be(1);
+            custody.KeyCount.Should().Be(1);
+            var persisted = await retryContext.Set<SqlOSSigningKey>().AsNoTracking().ToListAsync();
+            persisted.Should().ContainSingle().Which.Id.Should().Be(key.Id);
+            persisted.Should().OnlyContain(candidate => candidate.IsActive);
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
+        }
+    }
+
+    [TestMethod]
+    public async Task RotateSigningKey_TransientSaveFailure_RetriesWithoutOrphaningKey()
+    {
+        TestSqlOSDbContext? setupContext = null;
+        string? connectionString = null;
+
+        try
+        {
+            setupContext = await AspireFixture.CreateIsolatedAuthContextAsync("SqlOSRetryRotate");
+            connectionString = setupContext.Database.GetConnectionString();
+            using var custody = new TrackingTestSigningKeyCustody();
+            var options = CreateOptions("retry-rotate", "https://client.example.test/retry-rotate/callback");
+            var original = await BuildStack(setupContext, options, custody).Crypto.EnsureActiveSigningKeyAsync();
+            await setupContext.DisposeAsync();
+            setupContext = null;
+
+            await using var retryContext = CreateTestRetryContext(connectionString!);
+            var rotated = await BuildStack(retryContext, options, custody).Crypto.RotateSigningKeyAsync();
+
+            rotated.Id.Should().NotBe(original.Id);
+            custody.DeleteCount.Should().Be(1);
+            custody.KeyCount.Should().Be(2);
+            var persisted = await retryContext.Set<SqlOSSigningKey>()
+                .AsNoTracking()
+                .OrderBy(key => key.ActivatedAt)
+                .ToListAsync();
+            persisted.Should().HaveCount(2);
+            persisted.Should().ContainSingle(key => key.IsActive).Which.Id.Should().Be(rotated.Id);
+            persisted.Should().ContainSingle(key => !key.IsActive).Which.Id.Should().Be(original.Id);
+        }
+        finally
+        {
+            if (setupContext != null)
+            {
+                await setupContext.DisposeAsync();
+            }
+            await DeleteDatabaseAsync(connectionString);
         }
     }
 
@@ -795,6 +922,18 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
     private static TestSqlOSDbContext CreateContext(string connectionString)
         => new(new DbContextOptionsBuilder<TestSqlOSDbContext>().UseSqlServer(connectionString).Options);
 
+    private static TestSqlOSDbContext CreateRetryEnabledContext(string connectionString)
+        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(connectionString, sqlServer => sqlServer.EnableRetryOnFailure())
+            .Options);
+
+    private static TestSqlOSDbContext CreateTestRetryContext(string connectionString)
+        => new(new DbContextOptionsBuilder<TestSqlOSDbContext>()
+            .UseSqlServer(connectionString)
+            .AddInterceptors(new FailOnceSaveChangesInterceptor())
+            .ReplaceService<IExecutionStrategyFactory, TestRetryExecutionStrategyFactory>()
+            .Options);
+
     private static string CreateKeyRingDirectory(string suffix)
     {
         var path = Path.Combine(
@@ -932,6 +1071,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
 
         public string ProviderId => "mock-kms:integration:v1";
         public int DeleteCount { get; private set; }
+        public int KeyCount => _keys.Count;
 
         public Task<SqlOSSigningKeyCreationResult> CreateKeyAsync(
             string kid,
@@ -983,4 +1123,47 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             _keys.Clear();
         }
     }
+
+    private sealed class FailOnceSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        private int _failed;
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _failed, 1) == 0)
+            {
+                throw new TestTransientException();
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class TestRetryExecutionStrategyFactory(ExecutionStrategyDependencies dependencies)
+        : IExecutionStrategyFactory
+    {
+        public IExecutionStrategy Create() => new TestRetryExecutionStrategy(dependencies);
+    }
+
+    private sealed class TestRetryExecutionStrategy(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, maxRetryCount: 2, maxRetryDelay: TimeSpan.Zero)
+    {
+        protected override bool ShouldRetryOn(Exception exception)
+        {
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (current is TestTransientException)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private sealed class TestTransientException : Exception;
 }

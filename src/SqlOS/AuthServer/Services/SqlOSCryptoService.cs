@@ -330,43 +330,45 @@ public sealed class SqlOSCryptoService
         bool validateExistingCustody,
         CancellationToken cancellationToken)
     {
-        await using var transaction = await BeginSigningKeyTransactionAsync(cancellationToken);
-        SqlOSSigningKey? createdKey = null;
+        var createdKeys = new List<SqlOSSigningKey>();
+        SqlOSSigningKey result;
         try
         {
-            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
-            var activeKeys = keys.Where(static key => key.IsActive).ToList();
-            if (activeKeys.Count > 1)
+            result = await ExecuteSigningKeyTransactionAsync(async attemptCancellationToken =>
             {
-                throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing to issue tokens until signing-key state is repaired.");
-            }
-
-            if (activeKeys.Count == 1)
-            {
-                if (validateExistingCustody)
+                var keys = await LoadAndValidateSigningKeysAsync(attemptCancellationToken);
+                var activeKeys = keys.Where(static key => key.IsActive).ToList();
+                if (activeKeys.Count > 1)
                 {
-                    await ValidateCustodyCanSignAsync(activeKeys[0], cancellationToken);
+                    throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing to issue tokens until signing-key state is repaired.");
                 }
-                await CommitAsync(transaction, cancellationToken);
-                return activeKeys[0];
-            }
 
-            createdKey = await CreateSigningKeyAsync(keys, cancellationToken);
-            _context.Set<SqlOSSigningKey>().Add(createdKey);
-            await _context.SaveChangesAsync(cancellationToken);
-            await CommitAsync(transaction, cancellationToken);
-            _validationSigningKeyCache.InvalidateAll();
-            return createdKey;
+                if (activeKeys.Count == 1)
+                {
+                    if (validateExistingCustody)
+                    {
+                        await ValidateCustodyCanSignAsync(activeKeys[0], attemptCancellationToken);
+                    }
+
+                    return activeKeys[0];
+                }
+
+                var createdKey = await CreateSigningKeyAsync(keys, attemptCancellationToken);
+                createdKeys.Add(createdKey);
+                _context.Set<SqlOSSigningKey>().Add(createdKey);
+                await _context.SaveChangesAsync(attemptCancellationToken);
+                return createdKey;
+            }, cancellationToken);
         }
         catch
         {
-            if (createdKey != null)
-            {
-                await TryDeleteCreatedKeyAsync(createdKey);
-            }
-
+            await CleanupUncommittedCreatedKeysAsync(createdKeys, CancellationToken.None);
             throw;
         }
+
+        await CleanupUncommittedCreatedKeysAsync(createdKeys, CancellationToken.None);
+        _validationSigningKeyCache.InvalidateAll();
+        return result;
     }
 
     public async Task<List<SqlOSSigningKey>> GetValidationSigningKeysAsync(CancellationToken cancellationToken = default)
@@ -396,46 +398,46 @@ public sealed class SqlOSCryptoService
 
     public async Task<SqlOSSigningKey> RotateSigningKeyAsync(CancellationToken cancellationToken = default)
     {
-        await using var transaction = await BeginSigningKeyTransactionAsync(cancellationToken);
-        var now = DateTime.UtcNow;
-        SqlOSSigningKey? newKey = null;
-
+        var createdKeys = new List<SqlOSSigningKey>();
+        SqlOSSigningKey result;
         try
         {
-            var keys = await LoadAndValidateSigningKeysAsync(cancellationToken);
-            var activeKeys = keys.Where(static key => key.IsActive).ToList();
-            if (activeKeys.Count > 1)
+            result = await ExecuteSigningKeyTransactionAsync(async attemptCancellationToken =>
             {
-                throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing rotation until signing-key state is repaired.");
-            }
+                var keys = await LoadAndValidateSigningKeysAsync(attemptCancellationToken);
+                var activeKeys = keys.Where(static key => key.IsActive).ToList();
+                if (activeKeys.Count > 1)
+                {
+                    throw new InvalidOperationException("SqlOS found multiple active signing keys. Refusing rotation until signing-key state is repaired.");
+                }
 
-            if (activeKeys.Count == 1)
-            {
-                await ValidateCustodyCanSignAsync(activeKeys[0], cancellationToken);
-            }
+                if (activeKeys.Count == 1)
+                {
+                    await ValidateCustodyCanSignAsync(activeKeys[0], attemptCancellationToken);
+                }
 
-            newKey = await CreateSigningKeyAsync(keys, cancellationToken);
-            if (activeKeys.Count == 1)
-            {
-                activeKeys[0].IsActive = false;
-                activeKeys[0].RetiredAt = now;
-            }
+                var newKey = await CreateSigningKeyAsync(keys, attemptCancellationToken);
+                createdKeys.Add(newKey);
+                if (activeKeys.Count == 1)
+                {
+                    activeKeys[0].IsActive = false;
+                    activeKeys[0].RetiredAt = DateTime.UtcNow;
+                }
 
-            _context.Set<SqlOSSigningKey>().Add(newKey);
-            await _context.SaveChangesAsync(cancellationToken);
-            await CommitAsync(transaction, cancellationToken);
-            _validationSigningKeyCache.InvalidateAll();
-            return newKey;
+                _context.Set<SqlOSSigningKey>().Add(newKey);
+                await _context.SaveChangesAsync(attemptCancellationToken);
+                return newKey;
+            }, cancellationToken);
         }
         catch
         {
-            if (newKey != null)
-            {
-                await TryDeleteCreatedKeyAsync(newKey);
-            }
-
+            await CleanupUncommittedCreatedKeysAsync(createdKeys, CancellationToken.None);
             throw;
         }
+
+        await CleanupUncommittedCreatedKeysAsync(createdKeys, CancellationToken.None);
+        _validationSigningKeyCache.InvalidateAll();
+        return result;
     }
 
     public async Task<bool> ShouldRotateSigningKeyAsync(TimeSpan rotationInterval, CancellationToken cancellationToken = default)
@@ -1081,49 +1083,124 @@ public sealed class SqlOSCryptoService
         }
     }
 
-    private async Task<IDbContextTransaction?> BeginSigningKeyTransactionAsync(CancellationToken cancellationToken)
+    private async Task<SqlOSSigningKey> ExecuteSigningKeyTransactionAsync(
+        Func<CancellationToken, Task<SqlOSSigningKey>> operation,
+        CancellationToken cancellationToken)
     {
         if (!_context.Database.IsRelational())
         {
-            return null;
+            return await operation(cancellationToken);
         }
 
-        var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        try
+        SqlOSSigningKey? attemptedResult = null;
+        var attemptStarted = false;
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        async Task<SqlOSSigningKey> ExecuteAttemptAsync(CancellationToken attemptCancellationToken)
         {
-            if (string.Equals(
-                _context.Database.ProviderName,
-                "Microsoft.EntityFrameworkCore.SqlServer",
-                StringComparison.Ordinal))
+            if (attemptStarted)
             {
-                await _context.Database.ExecuteSqlRawAsync(
-                    """
-                    DECLARE @result int;
-                    EXEC @result = sys.sp_getapplock
-                        @Resource = 'SqlOS.SigningKeys',
-                        @LockMode = 'Exclusive',
-                        @LockOwner = 'Transaction',
-                        @LockTimeout = 30000;
-                    IF @result < 0
-                        THROW 51000, 'SqlOS could not acquire the signing-key custody lock.', 1;
-                    """,
-                    cancellationToken);
+                DetachTrackedSigningKeys();
             }
 
-            return transaction;
+            attemptStarted = true;
+            await AcquireSigningKeyLockAsync(attemptCancellationToken);
+            attemptedResult = await operation(attemptCancellationToken);
+            return attemptedResult;
+        }
+
+        async Task<bool> VerifySucceededAsync(CancellationToken verifyCancellationToken)
+        {
+            DetachTrackedSigningKeys();
+            return attemptedResult != null
+                && await HasSingleActiveSigningKeyAsync(attemptedResult.Id, verifyCancellationToken);
+        }
+
+        return await strategy.ExecuteInTransactionAsync(
+            ExecuteAttemptAsync,
+            VerifySucceededAsync,
+            IsolationLevel.Serializable,
+            cancellationToken);
+    }
+
+    private async Task AcquireSigningKeyLockAsync(CancellationToken cancellationToken)
+    {
+        if (!string.Equals(
+            _context.Database.ProviderName,
+            "Microsoft.EntityFrameworkCore.SqlServer",
+            StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await _context.Database.ExecuteSqlRawAsync(
+            """
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = 'SqlOS.SigningKeys',
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 30000;
+            IF @result < 0
+                THROW 51000, 'SqlOS could not acquire the signing-key custody lock.', 1;
+            """,
+            cancellationToken);
+    }
+
+    private async Task<bool> HasSingleActiveSigningKeyAsync(string keyId, CancellationToken cancellationToken)
+    {
+        var activeIds = await _context.Set<SqlOSSigningKey>()
+            .AsNoTracking()
+            .Where(static key => key.IsActive)
+            .Select(static key => key.Id)
+            .ToListAsync(cancellationToken);
+        return activeIds.Count == 1 && string.Equals(activeIds[0], keyId, StringComparison.Ordinal);
+    }
+
+    private async Task CleanupUncommittedCreatedKeysAsync(
+        IReadOnlyCollection<SqlOSSigningKey> createdKeys,
+        CancellationToken cancellationToken)
+    {
+        if (createdKeys.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> persistedIds;
+        try
+        {
+            var createdIds = createdKeys.Select(static key => key.Id).ToList();
+            persistedIds = (await _context.Set<SqlOSSigningKey>()
+                    .AsNoTracking()
+                    .Where(key => createdIds.Contains(key.Id))
+                    .Select(static key => key.Id)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.Ordinal);
         }
         catch
         {
-            await transaction.DisposeAsync();
-            throw;
+            // A failed verification cannot safely distinguish an orphan from a key whose
+            // commit response was lost. Preserve custody material rather than deleting a
+            // key that may now be active in the database.
+            return;
+        }
+
+        foreach (var createdKey in createdKeys.Where(key => !persistedIds.Contains(key.Id)))
+        {
+            await TryDeleteCreatedKeyAsync(createdKey);
         }
     }
 
-    private static async Task CommitAsync(IDbContextTransaction? transaction, CancellationToken cancellationToken)
+    private void DetachTrackedSigningKeys()
     {
-        if (transaction != null)
+        if (_context is not DbContext dbContext)
         {
-            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        foreach (var entry in dbContext.ChangeTracker.Entries<SqlOSSigningKey>().ToList())
+        {
+            entry.State = EntityState.Detached;
         }
     }
 
