@@ -502,6 +502,19 @@ public sealed class TodoSampleIntegrationTests
             .ToArray();
         todoIds.Should().Contain(todoResourceId);
         todoResourceId.Should().Be($"todo::{todoId:D}");
+
+        var treeIds = tree.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        treeIds.Should().NotContain(todoResourceId);
+
+        var resourceSearch = await GetJsonAsync(
+            client,
+            $"/sqlos/admin/fga/api/resources?pageSize=25&search={Uri.EscapeDataString(todoResourceId!)}");
+        var searchedIds = resourceSearch.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        searchedIds.Should().Contain(todoResourceId);
     }
 
     [TestMethod]

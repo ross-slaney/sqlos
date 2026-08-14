@@ -1423,7 +1423,7 @@
                 getLabel: p => `${p.key} — ${p.name}`
             }),
             resource: bindRemotePicker('tester-resource-picker', {
-                endpoint: 'resources/tree',
+                endpoint: 'resources',
                 pageSize: 25,
                 getValue: r => r.id,
                 getLabel: r => `${r.name} (${r.resourceType})`
@@ -1449,7 +1449,7 @@
 
         testerPickers = {
             listResource: bindRemotePicker('list-resource-picker', {
-                endpoint: 'resources/tree',
+                endpoint: 'resources',
                 pageSize: 25,
                 getValue: r => r.id,
                 getLabel: r => `${r.name} (${r.resourceType})`
@@ -1661,7 +1661,7 @@
             getLabel: r => `${r.name} (${r.key})`
         });
         const resourcePicker = resourceId ? null : bindRemotePicker('grant-resource-picker', {
-            endpoint: 'resources/tree',
+            endpoint: 'resources',
             pageSize: 25,
             getValue: r => r.id,
             getLabel: r => `${r.name} (${r.resourceType})`

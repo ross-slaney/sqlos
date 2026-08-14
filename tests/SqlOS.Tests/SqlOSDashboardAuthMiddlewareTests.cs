@@ -339,6 +339,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         fgaSource.Should().Contain("nextCursor");
         fgaSource.Should().NotContain("pageSize=500");
         fgaSource.Should().NotContain("maxDepth=5");
+        fgaSource.Should().NotContain("endpoint: 'resources/tree'");
+        fgaSource.Should().Contain("endpoint: 'resources'");
     }
 
     private static DashboardMiddlewareHarness CreateHarness(

@@ -309,6 +309,7 @@ public class SqlOSFgaDashboardMiddleware
         object? result = endpoint.ToLowerInvariant() switch
         {
             "resources/tree" => await GetResourceTreeAsync(dbContext, context),
+            "resources" => await GetResourcesAsync(dbContext, context),
             "subjects" => await GetSubjectsAsync(dbContext, context),
             "users" => await GetUsersAsync(dbContext, context),
             "agents" => await GetAgentsAsync(dbContext, context),
@@ -332,7 +333,7 @@ public class SqlOSFgaDashboardMiddleware
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
     }
 
-    // --- Resource Tree (cursor-paginated roots only) ---
+    // --- Resource Tree (bounded roots only; children load on expand) ---
 
     private static async Task<object> GetResourceTreeAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
     {
@@ -369,6 +370,36 @@ public class SqlOSFgaDashboardMiddleware
             ChildCount = counts.ChildCounts.GetValueOrDefault(r.Id),
             GrantsCount = counts.GrantCounts.GetValueOrDefault(r.Id)
         });
+    }
+
+    // Flat searchable list for Access Tester and grant pickers (any depth; no child prefetch).
+    private static async Task<object> GetResourcesAsync(ISqlOSFgaDbContext dbContext, HttpContext context)
+    {
+        var search = context.Request.Query["search"].FirstOrDefault();
+
+        var resources = dbContext.Set<SqlOSFgaResource>()
+            .Where(r => r.IsActive);
+
+        if (!string.IsNullOrEmpty(search))
+        {
+            resources = resources.Where(r => r.Name.Contains(search) || r.Id.Contains(search));
+        }
+
+        var query = resources.Select(r => new ResourceTreeRow
+        {
+            Id = r.Id,
+            ParentId = r.ParentId,
+            Name = r.Name,
+            ResourceType = r.ResourceType != null ? r.ResourceType.Name : r.ResourceTypeId
+        });
+
+        var page = await ToCursorPageAsync(
+            query,
+            SqlOSKeyset<ResourceTreeRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "fga.resources",
+            SqlOSCursorCodec.Fingerprint(search),
+            context);
+        return page.ToResponse();
     }
 
     private static async Task HandleResourceChildren(

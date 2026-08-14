@@ -48,7 +48,7 @@ Each list keeps an in-memory cursor history for Previous/Next. Changing search, 
 
 Client list `summary` counts are computed on the first window only. The dashboard caches that first-page summary while you walk Next.
 
-FGA resource trees load a cursor window of roots. Children load from `resources/{id}/children`. FGA stats run nine table counts in parallel on the stats endpoint only; list pages do not wait on those counts.
+FGA resource trees load a cursor window of roots. Children load from `resources/{id}/children` when a node is expanded. Access Tester and grant pickers search `GET resources` (any depth) instead of prefetching the tree. FGA stats run nine table counts in parallel on the stats endpoint only; list pages do not wait on those counts.
 
 ## Migrating a caller
 
