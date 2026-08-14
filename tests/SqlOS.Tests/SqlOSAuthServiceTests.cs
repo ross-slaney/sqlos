@@ -1245,6 +1245,36 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task SignUpAsync_PreservesLeadingAndTrailingPasswordWhitespace()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var email = $"password-whitespace-{Guid.NewGuid():N}@example.com";
+        const string password = "  P@ssword123!  ";
+
+        var signup = await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "Whitespace Password",
+                email,
+                password,
+                OrganizationName: null,
+                ClientId: "test-client",
+                OrganizationId: null),
+            new DefaultHttpContext());
+
+        signup.Tokens.Should().NotBeNull();
+
+        var login = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(email, password, "test-client", null),
+            new DefaultHttpContext());
+        login.Tokens.Should().NotBeNull();
+
+        var trimmedLogin = async () => await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(email, password.Trim(), "test-client", null),
+            new DefaultHttpContext());
+        await trimmedLogin.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [TestMethod]
     public async Task PublicSignup_UnknownOrgAndExistingOrg_ReturnUniformPublicFailure()
     {
         var harness = await TestHarness.CreateAsync();

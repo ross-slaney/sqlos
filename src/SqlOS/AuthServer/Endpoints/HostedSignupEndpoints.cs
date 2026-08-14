@@ -157,6 +157,11 @@ public static partial class EndpointRouteBuilderExtensions
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 SqlOSSignupOrchestration.RejectInvitationEmailMismatch(invitation?.Email, email);
                 email = invitation?.Email ?? email;
+                if (authorizationRequest != null)
+                {
+                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+                }
+
                 var ssoRedirect = await RedirectToSsoIfRequiredAsync(
                     authorizationRequest,
                     email,
@@ -167,11 +172,6 @@ public static partial class EndpointRouteBuilderExtensions
                 if (ssoRedirect != null)
                 {
                     return ssoRedirect;
-                }
-
-                if (authorizationRequest != null)
-                {
-                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
                 }
 
                 if (SupportsDatabaseTransactions(dbContext))
@@ -384,6 +384,11 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                if (authorizationRequest != null)
+                {
+                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+                }
+
                 var ssoRedirect = await RedirectToSsoIfRequiredAsync(
                     authorizationRequest,
                     email,

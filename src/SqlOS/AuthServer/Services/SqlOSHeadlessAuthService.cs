@@ -1186,17 +1186,19 @@ public sealed class SqlOSHeadlessAuthService
         }
 
         var email = boundInvitation.Email;
-        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
-        if (ssoRedirect != null)
-        {
-            return ssoRedirect;
-        }
 
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
 
         try
         {
+            await _authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+            var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+            if (ssoRedirect != null)
+            {
+                return ssoRedirect;
+            }
+
             if (SupportsDatabaseTransactions())
             {
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
@@ -1317,11 +1319,6 @@ public sealed class SqlOSHeadlessAuthService
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
         SqlOSSignupOrchestration.RejectInvitationEmailMismatch(boundInvitation?.Email, request.Email);
         var email = await ResolveEffectiveEmailAsync(authorizationRequest, request.Email, cancellationToken);
-        var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
-        if (ssoRedirect != null)
-        {
-            return ssoRedirect;
-        }
 
         IDbContextTransaction? transaction = null;
         SqlOSPasswordAuthenticationResult? signup = null;
@@ -1329,6 +1326,12 @@ public sealed class SqlOSHeadlessAuthService
         try
         {
             await _authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+            var ssoRedirect = await RedirectToSsoIfRequiredAsync(authorizationRequest, email, cancellationToken);
+            if (ssoRedirect != null)
+            {
+                return ssoRedirect;
+            }
+
             if (SupportsDatabaseTransactions())
             {
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);

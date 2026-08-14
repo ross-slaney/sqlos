@@ -127,7 +127,7 @@ public sealed class SqlOSAuthService
                     ct);
             }, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
             if (!SupportsDatabaseTransactions())
             {
@@ -135,6 +135,15 @@ public sealed class SqlOSAuthService
                     signup,
                     existingOrganizationId: null,
                     input.OrganizationName,
+                    cancellationToken);
+            }
+            else
+            {
+                await PersistRolledBackSignupAccessDenialAsync(
+                    ex,
+                    client,
+                    signup,
+                    httpContext,
                     cancellationToken);
             }
 
@@ -2799,6 +2808,41 @@ public sealed class SqlOSAuthService
             user,
             Array.Empty<SqlOSOrganizationOption>(),
             "invitation");
+    }
+
+    private async Task PersistRolledBackSignupAccessDenialAsync(
+        Exception exception,
+        SqlOSClientApplication client,
+        SqlOSPasswordAuthenticationResult? signup,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (signup == null
+            || exception is not InvalidOperationException
+            || !string.Equals(exception.Message, "Application access is not allowed.", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_context is DbContext tracked)
+        {
+            tracked.ChangeTracker.Clear();
+        }
+
+        try
+        {
+            await _adminService.EnsureApplicationAccessAsync(
+                client,
+                signup.User.Id,
+                signup.Organizations.FirstOrDefault()?.Id,
+                "application.access.token_denied",
+                GetIp(httpContext),
+                cancellationToken);
+        }
+        catch (InvalidOperationException persistException)
+            when (string.Equals(persistException.Message, exception.Message, StringComparison.Ordinal))
+        {
+        }
     }
 
     private async Task CleanupNonTransactionalSignupArtifactsAsync(

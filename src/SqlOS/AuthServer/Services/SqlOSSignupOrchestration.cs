@@ -44,8 +44,7 @@ internal static class SqlOSSignupOrchestration
             "Email address is required.",
             EmailMaxLength,
             EmailTooLongMessage);
-        var trimmedPassword = password?.Trim() ?? string.Empty;
-        if (requirePassword && string.IsNullOrWhiteSpace(trimmedPassword))
+        if (requirePassword && string.IsNullOrWhiteSpace(password))
         {
             throw new InvalidOperationException(PasswordRequiredMessage);
         }
@@ -63,7 +62,7 @@ internal static class SqlOSSignupOrchestration
         return new PasswordSignupInput(
             trimmedDisplayName,
             trimmedEmail,
-            trimmedPassword,
+            password ?? string.Empty,
             trimmedOrganizationName);
     }
 
@@ -117,30 +116,23 @@ internal static class SqlOSSignupOrchestration
         PasswordSignupInput input,
         CancellationToken cancellationToken)
     {
-        try
+        var user = await adminService.CreateUserAsync(
+            new SqlOSCreateUserRequest(input.DisplayName, input.Email, input.Password),
+            cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(input.OrganizationName))
         {
-            var user = await adminService.CreateUserAsync(
-                new SqlOSCreateUserRequest(input.DisplayName, input.Email, input.Password),
+            var organization = await adminService.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest(input.OrganizationName, null),
                 cancellationToken);
-
-            if (!string.IsNullOrWhiteSpace(input.OrganizationName))
-            {
-                var organization = await adminService.CreateOrganizationAsync(
-                    new SqlOSCreateOrganizationRequest(input.OrganizationName, null),
-                    cancellationToken);
-                await adminService.CreateMembershipAsync(
-                    organization.Id,
-                    new SqlOSCreateMembershipRequest(user.Id, "owner"),
-                    cancellationToken);
-            }
-
-            var organizations = await adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-            return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
+            await adminService.CreateMembershipAsync(
+                organization.Id,
+                new SqlOSCreateMembershipRequest(user.Id, "owner"),
+                cancellationToken);
         }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
-        {
-            throw new InvalidOperationException($"Email '{input.Email}' already exists.", ex);
-        }
+
+        var organizations = await adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+        return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
 
     public static async Task<T> ExecuteAsync<T>(

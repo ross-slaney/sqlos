@@ -79,6 +79,10 @@ public sealed class SignupTransactionIntegrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Application access is not allowed.");
         await AssertNoSignupArtifactsAsync(database.Context, email);
+        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x =>
+                x.EventType == "application.access.token_denied"
+                && x.ActorId == client.Id))
+            .Should().Be(1);
     }
 
     [TestMethod]
@@ -154,6 +158,41 @@ public sealed class SignupTransactionIntegrationTests
             .Should().Be(1);
         (await database.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == userId))
             .Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task PublicJsonSignup_DuplicateOrganizationName_DoesNotReportEmailConflict()
+    {
+        await using var database = await SignupDatabase.CreateAsync();
+        var organizationName = $"Shared Org {Guid.NewGuid():N}";
+        var firstEmail = $"org-a-{Guid.NewGuid():N}@example.com";
+        var secondEmail = $"org-b-{Guid.NewGuid():N}@example.com";
+
+        var first = await database.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "First Org User",
+                firstEmail,
+                Password,
+                organizationName,
+                database.ClientId,
+                null),
+            CreateHttpContext());
+        first.Tokens.Should().NotBeNull();
+
+        var second = await database.Auth.SignUpAsync(
+            new SqlOSSignupRequest(
+                "Second Org User",
+                secondEmail,
+                Password,
+                organizationName,
+                database.ClientId,
+                null),
+            CreateHttpContext());
+        second.Tokens.Should().NotBeNull();
+
+        database.Context.ChangeTracker.Clear();
+        (await database.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName))
+            .Should().Be(2);
     }
 
     [TestMethod]
