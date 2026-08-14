@@ -4,9 +4,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Primitives;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -117,6 +119,29 @@ public sealed class SqlOSHostedFormAntiforgeryTests
     }
 
     [TestMethod]
+    public async Task ValidateRequest_OriginNullWithValidCookieAndToken_IsAccepted()
+    {
+        var antiforgery = CreateAntiforgery("/sqlos/auth");
+        var issued = IssueToken(antiforgery);
+
+        (await antiforgery.ValidateRequestAsync(CreateFormContext(antiforgery, issued, "null")))
+            .Should().BeTrue();
+        (await antiforgery.ValidateRequestAsync(CreateFormContext(antiforgery, issued, origin: null)))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ValidateRequest_AttackerOriginWithValidCookieAndToken_IsRejected()
+    {
+        var antiforgery = CreateAntiforgery("/sqlos/auth");
+        var issued = IssueToken(antiforgery);
+
+        (await antiforgery.ValidateRequestAsync(
+                CreateFormContext(antiforgery, issued, "https://attacker.example.test")))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
     public void AddSqlOS_DoesNotChangeHostAntiforgeryConfigurationOrProvider()
     {
         var services = new ServiceCollection();
@@ -177,6 +202,29 @@ public sealed class SqlOSHostedFormAntiforgeryTests
             new EphemeralDataProtectionProvider(),
             options,
             timeProvider ?? TimeProvider.System);
+    }
+
+    private static DefaultHttpContext CreateFormContext(
+        SqlOSHostedFormAntiforgery antiforgery,
+        (string CookieSecret, string RequestToken) issued,
+        string? origin)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("auth.example.test");
+        context.Request.Method = HttpMethods.Post;
+        context.Request.ContentType = "application/x-www-form-urlencoded";
+        context.Request.Headers.Cookie = $"{antiforgery.CookieName}={issued.CookieSecret}";
+        if (origin != null)
+        {
+            context.Request.Headers.Origin = origin;
+        }
+
+        context.Features.Set<IFormFeature>(new FormFeature(new FormCollection(new Dictionary<string, StringValues>
+        {
+            [SqlOSHostedFormAntiforgery.FormFieldName] = issued.RequestToken
+        })));
+        return context;
     }
 
     private static (string CookieSecret, string RequestToken) IssueToken(SqlOSHostedFormAntiforgery antiforgery)

@@ -152,7 +152,7 @@ internal sealed class SqlOSHostedFormAntiforgery
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(source))
+        if (IsAbsentBrowserSource(source))
         {
             source = ReadSingleHeader(request.Headers.Referer);
             if (source == null && request.Headers.Referer.Count > 0)
@@ -161,12 +161,12 @@ internal sealed class SqlOSHostedFormAntiforgery
             }
         }
 
-        if (string.IsNullOrWhiteSpace(source))
+        if (IsAbsentBrowserSource(source))
         {
             return true;
         }
 
-        if (!Uri.TryCreate(source.Trim(), UriKind.Absolute, out var sourceUri))
+        if (!Uri.TryCreate(source!.Trim(), UriKind.Absolute, out var sourceUri))
         {
             return false;
         }
@@ -184,6 +184,10 @@ internal sealed class SqlOSHostedFormAntiforgery
             trustedUri.GetLeftPart(UriPartial.Authority).TrimEnd('/'),
             StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsAbsentBrowserSource(string? source)
+        => string.IsNullOrWhiteSpace(source)
+            || string.Equals(source.Trim(), "null", StringComparison.OrdinalIgnoreCase);
 
     private static string? ReadSingleHeader(StringValues values)
         => values.Count switch

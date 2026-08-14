@@ -100,6 +100,36 @@ public sealed class AuthPageCsrfIntegrationTests
     }
 
     [TestMethod]
+    public async Task HostedStandaloneLogin_NullOriginFromNoReferrerFormPost_SetsFreshSession()
+    {
+        await using var server = await AuthPageCsrfServer.CreateAsync();
+        using var client = server.App.GetTestClient();
+        client.BaseAddress = new Uri(TrustedOrigin);
+
+        var loginPage = await client.GetAsync("/sqlos/auth/login");
+        loginPage.EnsureSuccessStatusCode();
+        var html = await loginPage.Content.ReadAsStringAsync();
+        var requestToken = ExtractInputValue(html, "__RequestVerificationToken");
+        var antiforgeryCookie = ExtractCookie(loginPage, "sqlos_auth_page_csrf_");
+
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/login/password")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["email"] = server.Email,
+                ["password"] = Password,
+                ["__RequestVerificationToken"] = requestToken
+            })
+        };
+        login.Headers.TryAddWithoutValidation("Cookie", antiforgeryCookie);
+        login.Headers.TryAddWithoutValidation("Origin", "null");
+        var response = await client.SendAsync(login);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        response.Headers.Location.Should().Be(new Uri("/sqlos/auth/login?status=signed-in", UriKind.Relative));
+    }
+
+    [TestMethod]
     public async Task HostedAuthPage_UsesLockedBrowserSecurityHeadersAndPerResponseNonce()
     {
         await using var server = await AuthPageCsrfServer.CreateAsync();
