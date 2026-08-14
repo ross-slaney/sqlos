@@ -80,5 +80,9 @@ public static class SqlOSCursorPagination
         {
             return BadRequest(exception);
         }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { message = exception.Message });
+        }
     }
 }

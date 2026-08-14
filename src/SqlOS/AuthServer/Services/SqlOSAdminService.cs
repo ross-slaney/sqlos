@@ -1400,15 +1400,7 @@ public sealed partial class SqlOSAdminService
         var duplicateCount = 0;
         if (!string.IsNullOrWhiteSpace(duplicateFingerprint))
         {
-            duplicateCount = await _context.Set<SqlOSClientApplication>()
-                .AsNoTracking()
-                .CountAsync(
-                    x => x.RegistrationSource == "dcr"
-                        && x.SoftwareId == client.SoftwareId
-                        && x.SoftwareVersion == client.SoftwareVersion
-                        && x.ClientUri == client.ClientUri
-                        && x.RedirectUrisJson == client.RedirectUrisJson,
-                    cancellationToken);
+            duplicateCount = await CountDuplicateClientsAsync(client, duplicateFingerprint, cancellationToken);
         }
 
         var recentAuditEvents = await _context.Set<SqlOSAuditEvent>()
@@ -2349,15 +2341,7 @@ public sealed partial class SqlOSAdminService
                 continue;
             }
 
-            counts[fingerprint] = await _context.Set<SqlOSClientApplication>()
-                .AsNoTracking()
-                .CountAsync(
-                    x => x.RegistrationSource == "dcr"
-                        && x.SoftwareId == client.SoftwareId
-                        && x.SoftwareVersion == client.SoftwareVersion
-                        && x.ClientUri == client.ClientUri
-                        && x.RedirectUrisJson == client.RedirectUrisJson,
-                    cancellationToken);
+            counts[fingerprint] = await CountDuplicateClientsAsync(client, fingerprint, cancellationToken);
         }
 
         return counts;
@@ -3324,19 +3308,49 @@ public sealed partial class SqlOSAdminService
             : "fresh";
     }
 
-    private static string? CalculateDuplicateFingerprint(SqlOSClientApplication client)
+    private async Task<int> CountDuplicateClientsAsync(
+        SqlOSClientApplication client,
+        string fingerprint,
+        CancellationToken cancellationToken)
     {
-        if (!string.Equals(client.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
+        var candidates = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .Where(x => x.RegistrationSource == "dcr"
+                && x.SoftwareId == client.SoftwareId
+                && x.SoftwareVersion == client.SoftwareVersion
+                && x.ClientUri == client.ClientUri)
+            .Select(x => new { x.RegistrationSource, x.SoftwareId, x.SoftwareVersion, x.ClientUri, x.RedirectUrisJson })
+            .ToListAsync(cancellationToken);
+
+        return candidates.Count(x => string.Equals(
+            CalculateDuplicateFingerprint(x.RegistrationSource, x.SoftwareId, x.SoftwareVersion, x.ClientUri, x.RedirectUrisJson),
+            fingerprint,
+            StringComparison.Ordinal));
+    }
+
+    private static string? CalculateDuplicateFingerprint(SqlOSClientApplication client)
+        => CalculateDuplicateFingerprint(
+            client.RegistrationSource,
+            client.SoftwareId,
+            client.SoftwareVersion,
+            client.ClientUri,
+            client.RedirectUrisJson);
+
+    private static string? CalculateDuplicateFingerprint(
+        string? registrationSource,
+        string? softwareId,
+        string? softwareVersion,
+        string? clientUri,
+        string? redirectUrisJson)
+    {
+        if (!string.Equals(registrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
-        var softwareId = client.SoftwareId ?? string.Empty;
-        var softwareVersion = client.SoftwareVersion ?? string.Empty;
-        var clientUri = client.ClientUri ?? string.Empty;
+        var redirectUris = DeserializeJsonList(redirectUrisJson);
         return string.Join("|", redirectUris.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
-            + $"|{softwareId}|{softwareVersion}|{clientUri}";
+            + $"|{softwareId ?? string.Empty}|{softwareVersion ?? string.Empty}|{clientUri ?? string.Empty}";
     }
 
     private HashSet<string> GetStartupManagedClientIds()

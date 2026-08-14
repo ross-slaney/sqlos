@@ -1,6 +1,8 @@
 -- SqlOSFga Schema v8: admin cursor-pagination indexes.
 -- Name/key columns remain NVARCHAR(MAX) and cannot host a full keyset index.
--- Parent-scoped resource windows and time-ordered grants get unique-tiebreaker indexes.
+-- Id is NVARCHAR(450). Putting two of those in one nonclustered key is 1,800
+-- bytes and exceeds SQL Server's 1,700-byte limit, so the unique tiebreaker
+-- is INCLUDE'd instead of keyed.
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.indexes
@@ -9,7 +11,8 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_{Resources}_ParentId_Id]
-        ON [{Schema}].[{Resources}]([ParentId], [Id]);
+        ON [{Schema}].[{Resources}]([ParentId])
+        INCLUDE ([Id]);
 END
 GO
 
@@ -31,7 +34,8 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_{Grants}_SubjectId_CreatedAt_Id]
-        ON [{Schema}].[{Grants}]([SubjectId], [CreatedAt] DESC, [Id] DESC);
+        ON [{Schema}].[{Grants}]([SubjectId], [CreatedAt] DESC)
+        INCLUDE ([Id]);
 END
 GO
 
@@ -42,7 +46,8 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_{Grants}_ResourceId_CreatedAt_Id]
-        ON [{Schema}].[{Grants}]([ResourceId], [CreatedAt] DESC, [Id] DESC);
+        ON [{Schema}].[{Grants}]([ResourceId], [CreatedAt] DESC)
+        INCLUDE ([Id]);
 END
 GO
 

@@ -1310,6 +1310,7 @@
         const pageSize = options.pageSize || 25;
         let latest = options.initialResult || { data: [], hasNextPage: false, nextCursor: null };
         let debounceId = 0;
+        let requestSeq = 0;
 
         const fillOptions = (result, append) => {
             latest = result;
@@ -1338,9 +1339,17 @@
 
                 const search = String(searchInput.value || "").trim();
                 const pager = resetPager(options.pagerKey, pageSize, search);
+                const seq = ++requestSeq;
                 try {
-                    fillOptions(await options.fetchPage(pager, search), false);
+                    const result = await options.fetchPage(pager, search);
+                    if (seq !== requestSeq) {
+                        return;
+                    }
+                    fillOptions(result, false);
                 } catch (error) {
+                    if (seq !== requestSeq) {
+                        return;
+                    }
                     setFlash("error", error.message || String(error));
                 }
             }, 250);
@@ -1356,9 +1365,17 @@
             }
             pager.index += 1;
             const search = String(searchInput?.value || "").trim();
+            const seq = ++requestSeq;
             try {
-                fillOptions(await options.fetchPage(pager, search), true);
+                const result = await options.fetchPage(pager, search);
+                if (seq !== requestSeq) {
+                    return;
+                }
+                fillOptions(result, true);
             } catch (error) {
+                if (seq !== requestSeq) {
+                    return;
+                }
                 setFlash("error", error.message || String(error));
             }
         });

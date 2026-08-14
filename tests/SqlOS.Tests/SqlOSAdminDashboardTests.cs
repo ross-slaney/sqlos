@@ -186,6 +186,55 @@ public sealed class SqlOSAdminDashboardTests
     }
 
     [TestMethod]
+    public async Task DuplicateCount_UsesNormalizedRedirectUriFingerprint()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().AddRange(
+            new SqlOSClientApplication
+            {
+                Id = "cli_fp_1",
+                ClientId = "fp-client-1",
+                Name = "Fingerprint One",
+                Audience = "sqlos",
+                RedirectUrisJson = "[\"https://a.example.test/callback\",\"https://b.example.test/callback\"]",
+                RegistrationSource = "dcr",
+                SoftwareId = "fp-suite",
+                SoftwareVersion = "1.0.0",
+                ClientUri = "https://fp.example.test",
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                IsActive = true
+            },
+            new SqlOSClientApplication
+            {
+                Id = "cli_fp_2",
+                ClientId = "fp-client-2",
+                Name = "Fingerprint Two",
+                Audience = "sqlos",
+                RedirectUrisJson = "[\"https://b.example.test/callback\",\"https://a.example.test/callback\"]",
+                RegistrationSource = "dcr",
+                SoftwareId = "fp-suite",
+                SoftwareVersion = "1.0.0",
+                ClientUri = "https://fp.example.test",
+                CreatedAt = DateTime.UtcNow.AddDays(-1),
+                IsActive = true
+            });
+        await context.SaveChangesAsync();
+
+        var list = SerializeForDashboard(await admin.ListClientsAsync(source: "dcr", pageSize: 10));
+        foreach (var item in list.GetProperty("data").EnumerateArray())
+        {
+            item.GetProperty("duplicateCount").GetInt32().Should().Be(2);
+        }
+
+        var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_fp_1"));
+        detail.GetProperty("duplicateCount").GetInt32().Should().Be(2);
+    }
+
+    [TestMethod]
     public async Task ListUsersAsync_RejectsLegacyOffsetPages()
     {
         using var context = CreateContext();

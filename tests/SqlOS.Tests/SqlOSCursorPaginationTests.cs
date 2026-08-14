@@ -1,4 +1,6 @@
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Pagination;
 
@@ -98,6 +100,18 @@ public sealed class SqlOSCursorPaginationTests
 
         var afterFirst = keyset.After(keyset.Encode(ordered[0])).Compile();
         ordered.Where(afterFirst).Select(x => x.Id).Should().Equal("n1", "o1");
+    }
+
+    [TestMethod]
+    public async Task Ok_MapsDomainErrorsToBadRequest_AndKeepsCursorPayload()
+    {
+        var domain = await SqlOSCursorPagination.Ok(() => Task.FromException<object>(new InvalidOperationException("Organization not found.")));
+        domain.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        JsonSerializer.Serialize(((IValueHttpResult)domain).Value).Should().Contain("Organization not found.").And.NotContain("invalid_cursor");
+
+        var cursor = await SqlOSCursorPagination.Ok(() => Task.FromException<object>(new SqlOSCursorException("Offset pagination is no longer supported.")));
+        cursor.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        JsonSerializer.Serialize(((IValueHttpResult)cursor).Value).Should().Contain("invalid_cursor").And.Contain("Offset pagination is no longer supported.");
     }
 
     [TestMethod]

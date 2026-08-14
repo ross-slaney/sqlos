@@ -326,6 +326,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         dashboardSource.Should().Contain("New organization");
         dashboardSource.Should().Contain("list-row");
         dashboardSource.Should().Contain("/memberships?${query}");
+        dashboardSource.Should().Contain("let requestSeq = 0");
+        dashboardSource.Should().Contain("if (seq !== requestSeq)");
         dashboardSource.Should().NotContain("Window ${windowNumber}");
         dashboardSource.Should().NotContain("<iframe");
         dashboardSource.Should().NotContain("embed=1");
@@ -346,6 +348,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         fgaSource.Should().NotContain("maxDepth=5");
         fgaSource.Should().NotContain("endpoint: 'resources/tree'");
         fgaSource.Should().Contain("endpoint: 'resources'");
+        fgaSource.Should().Contain("let requestSeq = 0");
+        fgaSource.Should().Contain("if (seq !== requestSeq) return");
     }
 
     private static DashboardMiddlewareHarness CreateHarness(

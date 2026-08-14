@@ -249,14 +249,13 @@
         let items = [];
         let nextCursor = null;
         let hasNextPage = false;
-        let loading = false;
+        let requestSeq = 0;
         let debounceTimer = null;
         let selectedLabel = '';
         const pageSize = config.pageSize || 25;
 
         async function load({ append } = {}) {
-            if (loading) return;
-            loading = true;
+            const seq = ++requestSeq;
             const params = new URLSearchParams();
             params.set('pageSize', String(pageSize));
             const query = searchInput.value.trim();
@@ -264,16 +263,17 @@
             if (append && nextCursor) params.set('cursor', nextCursor);
             try {
                 const result = await api(`${config.endpoint}?${params.toString()}`);
+                if (seq !== requestSeq) return;
                 const data = pageItems(result);
                 items = append ? items.concat(data) : data;
                 nextCursor = result.nextCursor || null;
                 hasNextPage = !!result.hasNextPage;
                 renderResults();
             } catch (err) {
+                if (seq !== requestSeq) return;
                 resultsEl.innerHTML = `<div class="remote-picker-empty">Error: ${esc(err.message)}</div>`;
                 resultsEl.hidden = false;
             }
-            loading = false;
         }
 
         function renderResults() {
