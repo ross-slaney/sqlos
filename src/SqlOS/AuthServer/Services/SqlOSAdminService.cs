@@ -1263,12 +1263,15 @@ public sealed partial class SqlOSAdminService
     }
 
     public async Task<object> ListMembershipsAsync(
+        string? search = null,
         string? cursor = null,
         int? pageSize = null,
         int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var query = ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking());
+        var query = ApplyMembershipSearch(
+            ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking()),
+            search);
         return await PaginateByCursorAsync(
             query,
             SqlOSKeyset<MembershipListRow>.Create()
@@ -1277,7 +1280,7 @@ public sealed partial class SqlOSAdminService
                 .ThenAscending(x => x.OrganizationId)
                 .ThenAscending(x => x.UserId),
             "auth.memberships",
-            SqlOSCursorCodec.Fingerprint(),
+            SqlOSCursorCodec.Fingerprint(search),
             cursor,
             pageSize,
             page,
@@ -1287,20 +1290,23 @@ public sealed partial class SqlOSAdminService
 
     public async Task<object> ListOrganizationMembershipsAsync(
         string organizationId,
+        string? search = null,
         string? cursor = null,
         int? pageSize = null,
         int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var query = ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking())
-            .Where(x => x.OrganizationId == organizationId);
+        var query = ApplyMembershipSearch(
+            ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking())
+                .Where(x => x.OrganizationId == organizationId),
+            search);
         return await PaginateByCursorAsync(
             query,
             SqlOSKeyset<MembershipListRow>.Create()
                 .Ascending(x => x.UserDisplayName)
                 .ThenAscending(x => x.UserId),
             "auth.organization-memberships",
-            SqlOSCursorCodec.Fingerprint(organizationId),
+            SqlOSCursorCodec.Fingerprint(organizationId, search),
             cursor,
             pageSize,
             page,
@@ -2176,6 +2182,23 @@ public sealed partial class SqlOSAdminService
             })
             .Cast<object>()
             .ToListAsync(cancellationToken);
+
+    private static IQueryable<MembershipListRow> ApplyMembershipSearch(
+        IQueryable<MembershipListRow> query,
+        string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return query;
+        }
+
+        var trimmed = search.Trim();
+        return query.Where(x =>
+            x.OrganizationName.Contains(trimmed)
+            || x.UserDisplayName.Contains(trimmed)
+            || (x.UserEmail != null && x.UserEmail.Contains(trimmed))
+            || x.Role.Contains(trimmed));
+    }
 
     private static IQueryable<MembershipListRow> ProjectMemberships(IQueryable<SqlOSMembership> query)
         => query.Select(x => new MembershipListRow

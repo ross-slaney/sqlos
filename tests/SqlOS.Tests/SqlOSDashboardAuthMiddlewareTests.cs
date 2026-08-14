@@ -322,6 +322,11 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
 
         dashboardSource.Should().Contain("window.SqlOSFgaDashboard.mount");
         dashboardSource.Should().Contain("initialRoute: route.componentRoute");
+        dashboardSource.Should().Contain("Showing ${count}");
+        dashboardSource.Should().Contain("New organization");
+        dashboardSource.Should().Contain("list-row");
+        dashboardSource.Should().Contain("/memberships?${query}");
+        dashboardSource.Should().NotContain("Window ${windowNumber}");
         dashboardSource.Should().NotContain("<iframe");
         dashboardSource.Should().NotContain("embed=1");
 

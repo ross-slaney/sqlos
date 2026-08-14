@@ -127,6 +127,10 @@ nav a.active {
     color: var(--amber-100);
 }
 
+.sidebar-action:active {
+    transform: scale(0.97);
+}
+
 .page-header {
     margin-bottom: 20px;
     padding: 20px 24px;
@@ -146,8 +150,8 @@ nav a.active {
 
 .page-header h1 {
     margin: 0 0 6px;
-    font-size: 32px;
-    line-height: 1;
+    font-size: 24px;
+    line-height: 1.15;
     color: var(--zinc-900);
 }
 
@@ -284,10 +288,27 @@ nav a.active {
     color: #fff;
     cursor: pointer;
     font-weight: 600;
+    transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), background 140ms ease;
 }
 
 .content-area button:hover {
     background: var(--zinc-700);
+}
+
+.content-area button:active:not(:disabled) {
+    transform: scale(0.97);
+}
+
+.content-area button.btn-secondary,
+.modal-actions .btn-secondary {
+    background: #fff;
+    color: var(--zinc-700);
+    border: 1px solid var(--zinc-300);
+}
+
+.content-area button.btn-secondary:hover,
+.modal-actions .btn-secondary:hover {
+    background: var(--zinc-50);
 }
 
 .checkbox-row {
@@ -859,11 +880,16 @@ nav a.active {
     color: var(--zinc-700);
     min-width: 32px;
     text-align: center;
+    transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), background 140ms ease, border-color 140ms ease;
 }
 
 .pg-btn:hover:not([disabled]) {
     background: var(--zinc-50);
     border-color: var(--zinc-300);
+}
+
+.pg-btn:active:not([disabled]) {
+    transform: scale(0.97);
 }
 
 .pg-btn:disabled {
@@ -1034,6 +1060,241 @@ body.login-mode .content-area {
     font-size: 13px;
 }
 
+.list-page .list-toolbar,
+.list-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.list-toolbar-start {
+    display: grid;
+    gap: 8px;
+    min-width: min(100%, 320px);
+    flex: 1;
+}
+
+.list-toolbar-start h2 {
+    margin: 0;
+}
+
+.list-toolbar-end {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.list-search {
+    width: 100%;
+    max-width: 360px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--zinc-300);
+    background: #fff;
+    color: var(--zinc-900);
+}
+
+.list-search:focus {
+    outline: none;
+    border-color: var(--amber-400);
+    box-shadow: 0 0 0 2px var(--amber-50);
+}
+
+.list-rows {
+    display: grid;
+}
+
+.list-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--zinc-100);
+    color: inherit;
+    text-decoration: none;
+}
+
+.list-row:last-child {
+    border-bottom: 0;
+}
+
+.list-row-link {
+    border-radius: 6px;
+    margin: 0 -8px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .list-row-link:hover {
+        background: var(--zinc-50);
+    }
+}
+
+.list-row-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.list-row-title {
+    font-weight: 600;
+    color: var(--zinc-900);
+}
+
+.list-row-sub {
+    margin-top: 2px;
+    color: var(--zinc-500);
+    font-size: 12px;
+}
+
+.list-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.list-row-chevron {
+    color: var(--zinc-400);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.id-chip,
+.chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--zinc-100);
+    color: var(--zinc-700);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.id-chip {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: var(--zinc-600);
+}
+
+.chip-amber { background: var(--amber-100); color: #92400e; }
+.chip-green { background: var(--green-100); color: var(--green-600); }
+.chip-blue { background: var(--blue-50); color: var(--blue-600); }
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(9, 9, 11, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+}
+
+.modal-overlay[hidden] {
+    display: none;
+}
+
+.modal {
+    width: min(480px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid var(--zinc-200);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--zinc-100);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.modal-close {
+    border: none;
+    background: none;
+    color: var(--zinc-500);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.modal-close:hover {
+    color: var(--zinc-900);
+}
+
+.modal-body {
+    padding: 16px 20px 20px;
+}
+
+.modal-body form {
+    display: grid;
+    gap: 10px;
+}
+
+.modal-body input,
+.modal-body textarea,
+.modal-body select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--zinc-300);
+    background: #fff;
+    color: var(--zinc-900);
+    font: inherit;
+}
+
+.modal-body input:focus,
+.modal-body textarea:focus,
+.modal-body select:focus {
+    outline: none;
+    border-color: var(--amber-400);
+    box-shadow: 0 0 0 2px var(--amber-50);
+}
+
+.modal-body button[type="submit"] {
+    padding: 10px 14px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--zinc-800);
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.modal-body button[type="submit"]:hover {
+    background: var(--zinc-700);
+}
+
+.modal-body button[type="submit"]:active {
+    transform: scale(0.97);
+}
+
+.modal-body .modal-actions {
+    margin-top: 8px;
+}
+
 @media (max-width: 960px) {
     .layout { grid-template-columns: 1fr; }
     .sidebar {
@@ -1053,6 +1314,8 @@ body.login-mode .content-area {
     .audit-detail-panel { grid-column: auto; }
     .panel-actions,
     .list-item-header,
+    .list-toolbar,
+    .list-toolbar-end,
     .client-list-header,
     .client-action-row { flex-direction: column; align-items: stretch; }
     .fga-component-shell { padding: 14px; }

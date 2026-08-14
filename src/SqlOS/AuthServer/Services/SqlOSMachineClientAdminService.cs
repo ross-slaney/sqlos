@@ -102,8 +102,11 @@ public sealed class SqlOSMachineClientAdminService
     {
         SqlOSCursorPagination.RejectLegacyOffset(page);
         var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 25);
+        var clientIdsWithApps = _context.Set<SqlOSClientApplication>().AsNoTracking().Select(x => x.ClientId);
         var pageResult = await SqlOSCursorPagination.ToPageAsync(
-            _context.Set<SqlOSFgaServiceAccount>().AsNoTracking().Include(x => x.Subject),
+            _context.Set<SqlOSFgaServiceAccount>().AsNoTracking()
+                .Include(x => x.Subject)
+                .Where(x => clientIdsWithApps.Contains(x.ClientId)),
             SqlOSKeyset<SqlOSFgaServiceAccount>.Create()
                 .Ascending(x => x.ClientId)
                 .ThenAscending(x => x.Id),

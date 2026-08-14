@@ -203,10 +203,13 @@
     function renderPagination(pager, result) {
         const hasPrev = pager.index > 0;
         const hasNext = !!(result && result.hasNextPage && result.nextCursor);
-        if (!hasPrev && !hasNext) return '';
+        const count = pageItems(result).length;
+        const showing = count === 0 ? 'No results' : `Showing ${count}`;
+        if (!hasPrev && !hasNext && count === 0) return '';
         return `<div class="pagination">
             <button type="button" class="pg-btn" data-dir="prev" ${hasPrev ? '' : 'disabled'}>Previous</button>
             <button type="button" class="pg-btn" data-dir="next" ${hasNext ? '' : 'disabled'}>Next</button>
+            <span class="pg-info">${showing}</span>
         </div>`;
     }
 

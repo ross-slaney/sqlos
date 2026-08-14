@@ -68,6 +68,13 @@
         search: "",
         includeRevoked: true
     };
+    const listFilters = {
+        organizations: "",
+        users: "",
+        memberships: "",
+        orgUsers: "",
+        orgUsersOrganizationId: ""
+    };
 
     const authViews = {
         overview: { title: "Auth Server", description: "Organizations, users, sessions, applications, and security settings." },
@@ -350,6 +357,18 @@
         }
 
         window.location.href = `${dashboardBasePath}/login`;
+    });
+
+    document.getElementById("dashboard-modal-close")?.addEventListener("click", closeCreateModal);
+    document.getElementById("dashboard-modal")?.addEventListener("click", event => {
+        if (event.target.id === "dashboard-modal") {
+            closeCreateModal();
+        }
+    });
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            closeCreateModal();
+        }
     });
 
     render();
@@ -995,6 +1014,108 @@
         return `<div class="list-stack">${items.map(item => `<div class="list-item">${formatter(item)}</div>`).join("")}</div>`;
     }
 
+    function renderIdChip(id) {
+        if (!id) {
+            return "";
+        }
+        return `<span class="id-chip" title="${esc(id)}">${esc(id)}</span>`;
+    }
+
+    function renderChip(text, tone) {
+        if (text === null || text === undefined || text === "" || text === "n/a") {
+            return "";
+        }
+        const cls = tone ? `chip chip-${tone}` : "chip";
+        return `<span class="${cls}">${esc(String(text))}</span>`;
+    }
+
+    function renderListRows(items, rowFn, emptyText) {
+        if (!items || items.length === 0) {
+            return `<div class="empty-state-block">${esc(emptyText)}</div>`;
+        }
+        return `<div class="list-rows">${items.map(rowFn).join("")}</div>`;
+    }
+
+    function renderListRow({ href, title, subtitle, metaHtml, actionsHtml }) {
+        const tag = href ? "a" : "div";
+        const hrefAttr = href ? ` href="${esc(href)}"` : "";
+        return `
+            <${tag} class="list-row${href ? " list-row-link" : ""}"${hrefAttr}>
+                <div class="list-row-main">
+                    <div class="list-row-title">${esc(title)}</div>
+                    ${subtitle ? `<div class="list-row-sub">${subtitle}</div>` : ""}
+                </div>
+                <div class="list-row-meta">${metaHtml || ""}</div>
+                ${actionsHtml || (href ? `<span class="list-row-chevron" aria-hidden="true">›</span>` : "")}
+            </${tag}>`;
+    }
+
+    function renderListToolbar({ title, searchId, searchPlaceholder, searchValue, createLabel, pagerHtml }) {
+        return `
+            <div class="list-toolbar">
+                <div class="list-toolbar-start">
+                    <h2>${esc(title)}</h2>
+                    ${searchId ? `<input type="search" class="list-search" id="${esc(searchId)}" placeholder="${esc(searchPlaceholder || "Search")}" value="${esc(searchValue || "")}" autocomplete="off">` : ""}
+                </div>
+                <div class="list-toolbar-end">
+                    ${createLabel ? `<button type="button" class="btn-primary" id="open-create-modal">${esc(createLabel)}</button>` : ""}
+                    ${pagerHtml || ""}
+                </div>
+            </div>`;
+    }
+
+    function closeCreateModal() {
+        const overlay = document.getElementById("dashboard-modal");
+        const body = document.getElementById("dashboard-modal-body");
+        if (overlay) {
+            overlay.hidden = true;
+        }
+        if (body) {
+            body.innerHTML = "";
+        }
+    }
+
+    function openCreateModal(title, bodyHtml) {
+        const overlay = document.getElementById("dashboard-modal");
+        const titleEl = document.getElementById("dashboard-modal-title");
+        const body = document.getElementById("dashboard-modal-body");
+        if (!overlay || !titleEl || !body) {
+            return;
+        }
+        titleEl.textContent = title;
+        body.innerHTML = bodyHtml;
+        overlay.hidden = false;
+        body.querySelector("input, select, textarea")?.focus();
+    }
+
+    function bindCreateModal(openButtonId, title, bodyHtml, bindFn) {
+        document.getElementById(openButtonId)?.addEventListener("click", () => {
+            openCreateModal(title, bodyHtml);
+            bindFn?.();
+        });
+    }
+
+    function bindListSearch(inputId, onSearch) {
+        const input = document.getElementById(inputId);
+        if (!input) {
+            return;
+        }
+        let debounce;
+        input.addEventListener("input", () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => onSearch(String(input.value || "").trim()), 300);
+        });
+    }
+
+    function listQuery(pagerKey, pageSize, search) {
+        const pager = resetPager(pagerKey, pageSize, search || "");
+        const params = new URLSearchParams(pagerQuery(pager));
+        if (search) {
+            params.set("search", search);
+        }
+        return { pager, query: params.toString() };
+    }
+
     function buildOidcPayload(form) {
         const claimMappingText = String(form.get("claimMapping") || "").trim();
         return {
@@ -1045,6 +1166,7 @@
     }
 
     function renderLoading(message) {
+        closeCreateModal();
         content.innerHTML = `<div class="loading">${esc(message)}</div>`;
     }
 
@@ -1109,12 +1231,13 @@
     function renderPagination(pager, result) {
         const atStart = !pager || pager.index === 0;
         const hasNext = !!(result && result.hasNextPage);
-        const windowNumber = (pager?.index || 0) + 1;
+        const count = Array.isArray(result?.data) ? result.data.length : 0;
+        const showing = count === 0 ? "No results" : `Showing ${count}`;
         return `
             <div class="pagination">
-                <button class="pg-btn" data-pager="prev" ${atStart ? "disabled" : ""}>Previous</button>
-                <button class="pg-btn" data-pager="next" ${hasNext ? "" : "disabled"}>Next</button>
-                <span class="pg-info">Window ${windowNumber}</span>
+                <button type="button" class="pg-btn" data-pager="prev" ${atStart ? "disabled" : ""}>Previous</button>
+                <button type="button" class="pg-btn" data-pager="next" ${hasNext ? "" : "disabled"}>Next</button>
+                <span class="pg-info">${showing}</span>
             </div>
         `;
     }
@@ -1535,60 +1658,69 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading organizations...");
 
-        const pager = getPagerState("auth-organizations");
-        const organizations = await fetchJson(`${authApiBasePath}/organizations?${pagerQuery(pager)}`);
+        const search = listFilters.organizations;
+        const { pager, query } = listQuery("auth-organizations", 10, search);
+        const organizations = await fetchJson(`${authApiBasePath}/organizations?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create Organization</h2>
-                    <p>Create a tenant and optionally set its primary login domain.</p>
-                    <form id="create-org-form">
-                        <input name="name" placeholder="Organization name" required>
-                        <input name="slug" placeholder="Slug (optional)">
-                        <input name="primaryDomain" placeholder="Primary domain (optional)">
-                        <button type="submit">Create organization</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Organizations</h2>
-                        <div id="organizations-pagination-top">${renderPagination(pager, organizations)}</div>
-                    </div>
-                    ${renderList(
-                        organizations.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.name)}</strong>
-                                <a class="inline-link" href="${esc(organizationDetailPath(item.id, "general"))}">Open</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "ID", value: item.id },
-                                { label: "Slug", value: item.slug },
-                                { label: "Primary domain", value: item.primaryDomain || "n/a" },
-                                { label: "Memberships", value: item.membershipCount },
-                                { label: "Enabled SSO", value: item.enabledSsoConnections }
-                            ])}
-                        `,
-                        "No organizations yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Organizations",
+                    searchId: "organizations-search",
+                    searchPlaceholder: "Search name, slug, or domain",
+                    searchValue: search,
+                    createLabel: "New organization",
+                    pagerHtml: `<div id="organizations-pagination-top">${renderPagination(pager, organizations)}</div>`
+                })}
+                ${renderListRows(
+                    organizations.data,
+                    item => renderListRow({
+                        href: organizationDetailPath(item.id, "general"),
+                        title: item.name,
+                        subtitle: [item.slug, item.primaryDomain].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            renderIdChip(item.id),
+                            renderChip(item.membershipCount ? `${item.membershipCount} members` : "", "neutral"),
+                            item.enabledSsoConnections ? renderChip("SSO", "amber") : "",
+                            item.isActive === false ? renderChip("Disabled") : ""
+                        ].join("")
+                    }),
+                    "No organizations yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-org-form", async form => {
-            await fetchJson(`${authApiBasePath}/organizations`, {
-                method: "POST",
-                body: JSON.stringify({
-                    name: form.get("name"),
-                    slug: form.get("slug") || null,
-                    primaryDomain: form.get("primaryDomain") || null
-                })
+        bindCreateModal("open-create-modal", "New organization", `
+            <p>Create a tenant and optionally set its primary login domain.</p>
+            <form id="create-org-form">
+                <input name="name" placeholder="Organization name" required>
+                <input name="slug" placeholder="Slug (optional)">
+                <input name="primaryDomain" placeholder="Primary domain (optional)">
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create organization</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-org-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        name: form.get("name"),
+                        slug: form.get("slug") || null,
+                        primaryDomain: form.get("primaryDomain") || null
+                    })
+                });
+                setFlash("success", "Organization created.");
             });
-            setFlash("success", "Organization created.");
         });
 
+        bindListSearch("organizations-search", value => {
+            listFilters.organizations = value;
+            render();
+        });
         bindPagination("#organizations-pagination-top", "auth-organizations", organizations, () => render());
     }
 
@@ -1598,7 +1730,13 @@
         setHeader("Auth Server", config.title, "Manage organization details, memberships, and SSO in one place.");
         renderLoading("Loading organization details...");
 
-        const usersPager = getPagerState(`auth-org-${organizationId}-users`);
+        if (listFilters.orgUsersOrganizationId !== organizationId) {
+            listFilters.orgUsers = "";
+            listFilters.orgUsersOrganizationId = organizationId;
+        }
+        const orgUserSearch = listFilters.orgUsers;
+        const orgUsersList = listQuery(`auth-org-${organizationId}-users`, 10, orgUserSearch);
+        const usersPager = orgUsersList.pager;
         const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`, 50);
         const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
         const ssoPortalPager = getPagerState(`auth-org-${organizationId}-sso-portal`);
@@ -1614,7 +1752,7 @@
         const [organization, users, memberships, invitations, ssoConnections, ssoPortalSessions, scimConnections] = await Promise.all([
             fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
             usersRequest,
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?${pagerQuery(usersPager)}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?${orgUsersList.query}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?${pagerQuery(invitationsPager)}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?${pagerQuery(ssoPager)}`),
             fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?${pagerQuery(ssoPortalPager)}`),
@@ -1722,95 +1860,54 @@
             `;
         } else if (tab === "users") {
             tabContent = `
-                <div class="panel-grid">
-                    <section class="panel">
-                        <h2>Add User To Organization</h2>
-                        <p>Create or update a membership for this organization.</p>
-                        <form id="create-org-membership-form">
-                            ${renderRemotePicker({
-                                searchId: "org-user-picker-search",
-                                selectName: "userId",
-                                selectId: "org-user-picker",
-                                loadMoreId: "org-user-picker-more",
-                                searchPlaceholder: "Search users by name or email",
-                                emptyLabel: "Select a user",
-                                required: true,
-                                items: users.data || [],
-                                hasNextPage: !!users.hasNextPage,
-                                itemValue: user => user.id,
-                                itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`
-                            })}
-                            <input name="role" placeholder="Role" value="member" required>
-                            <button type="submit">Add membership</button>
-                        </form>
-                    </section>
-                    <section class="panel">
-                        <h2>Organization Users</h2>
-                        <div id="organization-users-pagination-top">${renderPagination(usersPager, memberships)}</div>
-                        ${renderList(
-                            memberships.data,
-                            item => `
-                                <div class="list-item-header">
-                                    <strong>${esc(item.user)}</strong>
-                                    <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open</a>
-                                </div>
-                                ${renderMetadataRows([
-                                    { label: "User ID", value: item.userId },
-                                    { label: "Email", value: item.userEmail || "n/a" },
-                                    { label: "Role", value: item.role },
-                                    { label: "Active", value: item.isActive ? "Yes" : "No" }
-                                ])}
-                            `,
-                            "No memberships yet."
-                        )}
-                    </section>
-                </div>
+                <section class="panel list-page">
+                    ${renderListToolbar({
+                        title: "Organization users",
+                        searchId: "org-users-search",
+                        searchPlaceholder: "Search name or email",
+                        searchValue: orgUserSearch,
+                        createLabel: "Add user",
+                        pagerHtml: `<div id="organization-users-pagination-top">${renderPagination(usersPager, memberships)}</div>`
+                    })}
+                    ${renderListRows(
+                        memberships.data,
+                        item => renderListRow({
+                            href: userDetailPath(item.userId, "general"),
+                            title: item.user,
+                            subtitle: item.userEmail || "",
+                            metaHtml: [
+                                renderChip(item.role, "amber"),
+                                item.isActive === false ? renderChip("Inactive") : "",
+                                renderIdChip(item.userId)
+                            ].join("")
+                        }),
+                        "No memberships yet."
+                    )}
+                </section>
             `;
         } else if (tab === "invitations") {
             tabContent = `
-                <div class="panel-grid">
-                    <section class="panel">
-                        <h2>Invite by Email</h2>
-                        <p>Send a one-time invitation link. The invited email must verify through OTP, SSO, existing login, or invite-backed signup before membership is activated.</p>
-                        <form id="create-org-invitation-form">
-                            <input name="email" type="email" placeholder="Email address" required>
-                            <input name="role" placeholder="Role" value="member" required>
-                            <input name="clientId" placeholder="Optional client id">
-                            <input name="redirectUri" placeholder="Optional redirect URI">
-                            <label class="checkbox-row"><input name="sendEmail" type="checkbox" checked> Send invitation email now</label>
-                            <button type="submit">Send invitation</button>
-                        </form>
-                        <div class="callout"><strong>Email delivery:</strong> invitations use the same SqlOS auth email sender as Email OTP.</div>
-                    </section>
-                    <section class="panel">
-                        <h2>Organization Invitations</h2>
-                        <div id="organization-invitations-pagination-top">${renderPagination(invitationsPager, invitations)}</div>
-                        ${renderList(
-                            organizationInvitations,
-                            item => `
-                                <div class="list-item-header">
-                                    <strong>${esc(item.email)}</strong>
-                                    <span class="inline-code">${esc(item.status)}</span>
-                                </div>
-                                ${renderMetadataRows([
-                                    { label: "Invitation ID", value: item.id },
-                                    { label: "Role", value: item.role },
-                                    { label: "Expires", value: formatDate(item.expiresAt) },
-                                    { label: "Last sent", value: formatDate(item.lastSentAt) },
-                                    { label: "Accepted", value: item.acceptedAt ? formatDate(item.acceptedAt) : "No" },
-                                    { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "No" },
-                                    { label: "Delivery error", value: item.lastSendError || "n/a" }
-                                ])}
-                                <div class="form-actions">
-                                    ${item.inviteUrl ? `<button type="button" class="js-copy-invite" data-url="${esc(item.inviteUrl)}">Copy link</button>` : ""}
-                                    ${item.status === "pending" ? `<button type="button" class="js-resend-invite" data-id="${esc(item.id)}">Resend</button>` : ""}
-                                    ${item.status === "pending" ? `<button type="button" class="js-revoke-invite" data-id="${esc(item.id)}">Revoke</button>` : ""}
-                                </div>
-                            `,
-                            "No invitations yet."
-                        )}
-                    </section>
-                </div>
+                <section class="panel list-page">
+                    ${renderListToolbar({
+                        title: "Invitations",
+                        createLabel: "Invite by email",
+                        pagerHtml: `<div id="organization-invitations-pagination-top">${renderPagination(invitationsPager, invitations)}</div>`
+                    })}
+                    ${renderListRows(
+                        organizationInvitations,
+                        item => renderListRow({
+                            title: item.email,
+                            subtitle: [item.role, item.expiresAt ? `Expires ${formatDate(item.expiresAt)}` : ""].filter(Boolean).join(" · "),
+                            metaHtml: [
+                                renderChip(item.status, item.status === "pending" ? "amber" : item.status === "accepted" ? "green" : ""),
+                                item.lastSendError ? renderChip("Delivery error") : "",
+                                renderIdChip(item.id)
+                            ].join(""),
+                            actionsHtml: `<div class="form-actions">${item.inviteUrl ? `<button type="button" class="btn-secondary js-copy-invite" data-url="${esc(item.inviteUrl)}">Copy link</button>` : ""}${item.status === "pending" ? `<button type="button" class="btn-secondary js-resend-invite" data-id="${esc(item.id)}">Resend</button><button type="button" class="js-revoke-invite" data-id="${esc(item.id)}">Revoke</button>` : ""}</div>`
+                        }),
+                        "No invitations yet."
+                    )}
+                </section>
             `;
         } else if (tab === "sso") {
             tabContent = `
@@ -2150,38 +2247,81 @@
                 await render();
             });
         } else if (tab === "users") {
-            bindForm("create-org-membership-form", async form => {
-                await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                        userId: form.get("userId"),
-                        role: form.get("role") || "member"
-                    })
+            bindCreateModal("open-create-modal", "Add user", `
+                <p>Create or update a membership for this organization.</p>
+                <form id="create-org-membership-form">
+                    ${renderRemotePicker({
+                        searchId: "org-user-picker-search",
+                        selectName: "userId",
+                        selectId: "org-user-picker",
+                        loadMoreId: "org-user-picker-more",
+                        searchPlaceholder: "Search users by name or email",
+                        emptyLabel: "Select a user",
+                        required: true,
+                        items: users.data || [],
+                        hasNextPage: !!users.hasNextPage,
+                        itemValue: user => user.id,
+                        itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`
+                    })}
+                    <input name="role" placeholder="Role" value="member" required>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                        <button type="submit">Add membership</button>
+                    </div>
+                </form>
+            `, () => {
+                document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+                bindForm("create-org-membership-form", async form => {
+                    await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            userId: form.get("userId"),
+                            role: form.get("role") || "member"
+                        })
+                    });
+                    setFlash("success", "Organization membership saved.");
                 });
-                setFlash("success", "Organization membership saved.");
-            });
-
-            bindRemotePicker({
-                searchId: "org-user-picker-search",
-                selectId: "org-user-picker",
-                loadMoreId: "org-user-picker-more",
-                pagerKey: `auth-org-${organizationId}-user-picker`,
-                pageSize: 25,
-                emptyLabel: "Select a user",
-                initialResult: users,
-                itemValue: user => user.id,
-                itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`,
-                fetchPage: (pager, search) => {
-                    const params = new URLSearchParams(pagerQuery(pager));
-                    if (search) {
-                        params.set("search", search);
+                bindRemotePicker({
+                    searchId: "org-user-picker-search",
+                    selectId: "org-user-picker",
+                    loadMoreId: "org-user-picker-more",
+                    pagerKey: `auth-org-${organizationId}-user-picker`,
+                    pageSize: 25,
+                    emptyLabel: "Select a user",
+                    initialResult: users,
+                    itemValue: user => user.id,
+                    itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`,
+                    fetchPage: (pager, search) => {
+                        const params = new URLSearchParams(pagerQuery(pager));
+                        if (search) {
+                            params.set("search", search);
+                        }
+                        return fetchJson(`${authApiBasePath}/users?${params.toString()}`);
                     }
-                    return fetchJson(`${authApiBasePath}/users?${params.toString()}`);
-                }
+                });
+            });
+            bindListSearch("org-users-search", value => {
+                listFilters.orgUsers = value;
+                render();
             });
             bindPagination("#organization-users-pagination-top", `auth-org-${organizationId}-users`, memberships, () => render());
         } else if (tab === "invitations") {
-            bindForm("create-org-invitation-form", async form => {
+            bindCreateModal("open-create-modal", "Invite by email", `
+                <p>Send a one-time invitation link. The invited email must verify through OTP, SSO, existing login, or invite-backed signup before membership is activated.</p>
+                <form id="create-org-invitation-form">
+                    <input name="email" type="email" placeholder="Email address" required>
+                    <input name="role" placeholder="Role" value="member" required>
+                    <input name="clientId" placeholder="Optional client id">
+                    <input name="redirectUri" placeholder="Optional redirect URI">
+                    <label class="checkbox-row"><input name="sendEmail" type="checkbox" checked> Send invitation email now</label>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                        <button type="submit">Send invitation</button>
+                    </div>
+                </form>
+            `, () => {
+                document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+                bindForm("create-org-invitation-form", async form => {
                 await fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations`, {
                     method: "POST",
                     body: JSON.stringify({
@@ -2198,6 +2338,7 @@
                     })
                 });
                 setFlash("success", "Invitation created.");
+            });
             });
 
             document.querySelectorAll(".js-copy-invite").forEach(button => {
@@ -2582,59 +2723,68 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading users...");
 
-        const pager = getPagerState("auth-users");
-        const users = await fetchJson(`${authApiBasePath}/users?${pagerQuery(pager)}`);
+        const search = listFilters.users;
+        const { pager, query } = listQuery("auth-users", 10, search);
+        const users = await fetchJson(`${authApiBasePath}/users?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create User</h2>
-                    <p>Create a user and optionally assign a password credential immediately.</p>
-                    <form id="create-user-form">
-                        <input name="displayName" placeholder="Display name" required>
-                        <input name="email" placeholder="Email" required>
-                        <input name="password" type="password" placeholder="Password (optional)">
-                        <button type="submit">Create user</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Users</h2>
-                        <div id="users-pagination-top">${renderPagination(pager, users)}</div>
-                    </div>
-                    ${renderList(
-                        users.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.displayName)}</strong>
-                                <a class="inline-link" href="${esc(userDetailPath(item.id, "general"))}">Open</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "ID", value: item.id },
-                                { label: "Email", value: item.defaultEmail || "n/a" },
-                                { label: "Memberships", value: item.membershipCount ?? 0 },
-                                { label: "Created", value: formatDate(item.createdAt) }
-                            ])}
-                        `,
-                        "No users yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Users",
+                    searchId: "users-search",
+                    searchPlaceholder: "Search name or email",
+                    searchValue: search,
+                    createLabel: "New user",
+                    pagerHtml: `<div id="users-pagination-top">${renderPagination(pager, users)}</div>`
+                })}
+                ${renderListRows(
+                    users.data,
+                    item => renderListRow({
+                        href: userDetailPath(item.id, "general"),
+                        title: item.displayName,
+                        subtitle: item.defaultEmail || "",
+                        metaHtml: [
+                            renderIdChip(item.id),
+                            renderChip(item.membershipCount ? `${item.membershipCount} orgs` : ""),
+                            item.isActive === false ? renderChip("Disabled") : ""
+                        ].join("")
+                    }),
+                    "No users yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-user-form", async form => {
-            await fetchJson(`${authApiBasePath}/users`, {
-                method: "POST",
-                body: JSON.stringify({
-                    displayName: form.get("displayName"),
-                    email: form.get("email"),
-                    password: form.get("password") || null
-                })
+        bindCreateModal("open-create-modal", "New user", `
+            <p>Create a user and optionally assign a password credential immediately.</p>
+            <form id="create-user-form">
+                <input name="displayName" placeholder="Display name" required>
+                <input name="email" placeholder="Email" required>
+                <input name="password" type="password" placeholder="Password (optional)">
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create user</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-user-form", async form => {
+                await fetchJson(`${authApiBasePath}/users`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        displayName: form.get("displayName"),
+                        email: form.get("email"),
+                        password: form.get("password") || null
+                    })
+                });
+                setFlash("success", "User created.");
             });
-            setFlash("success", "User created.");
         });
 
+        bindListSearch("users-search", value => {
+            listFilters.users = value;
+            render();
+        });
         bindPagination("#users-pagination-top", "auth-users", users, () => render());
     }
 
@@ -2841,59 +2991,67 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading memberships...");
 
-        const pager = getPagerState("auth-memberships");
-        const memberships = await fetchJson(`${authApiBasePath}/memberships?${pagerQuery(pager)}`);
+        const search = listFilters.memberships;
+        const { pager, query } = listQuery("auth-memberships", 10, search);
+        const memberships = await fetchJson(`${authApiBasePath}/memberships?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create Membership</h2>
-                    <p>Use IDs from the Organizations and Users pages.</p>
-                    <form id="create-membership-form">
-                        <input name="organizationId" placeholder="Organization ID" required>
-                        <input name="userId" placeholder="User ID" required>
-                        <input name="role" placeholder="Role" value="member" required>
-                        <button type="submit">Create membership</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Memberships</h2>
-                        <div id="memberships-pagination-top">${renderPagination(pager, memberships)}</div>
-                    </div>
-                    ${renderList(
-                        memberships.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.organization)}</strong>
-                                <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open user</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "Organization ID", value: item.organizationId },
-                                { label: "User", value: `${item.user} (${item.userEmail || "no email"})` },
-                                { label: "User ID", value: item.userId },
-                                { label: "Role", value: item.role }
-                            ])}
-                        `,
-                        "No memberships yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Memberships",
+                    searchId: "memberships-search",
+                    searchPlaceholder: "Search organization, user, or email",
+                    searchValue: search,
+                    createLabel: "New membership",
+                    pagerHtml: `<div id="memberships-pagination-top">${renderPagination(pager, memberships)}</div>`
+                })}
+                ${renderListRows(
+                    memberships.data,
+                    item => renderListRow({
+                        href: userDetailPath(item.userId, "general"),
+                        title: item.user,
+                        subtitle: [item.organization, item.userEmail].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            renderChip(item.role, "amber"),
+                            renderIdChip(item.organizationId)
+                        ].join("")
+                    }),
+                    "No memberships yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-membership-form", async form => {
-            await fetchJson(`${authApiBasePath}/memberships`, {
-                method: "POST",
-                body: JSON.stringify({
-                    organizationId: form.get("organizationId"),
-                    userId: form.get("userId"),
-                    role: form.get("role") || "member"
-                })
+        bindCreateModal("open-create-modal", "New membership", `
+            <p>Use IDs from the Organizations and Users pages.</p>
+            <form id="create-membership-form">
+                <input name="organizationId" placeholder="Organization ID" required>
+                <input name="userId" placeholder="User ID" required>
+                <input name="role" placeholder="Role" value="member" required>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create membership</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-membership-form", async form => {
+                await fetchJson(`${authApiBasePath}/memberships`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        organizationId: form.get("organizationId"),
+                        userId: form.get("userId"),
+                        role: form.get("role") || "member"
+                    })
+                });
+                setFlash("success", "Membership created.");
             });
-            setFlash("success", "Membership created.");
         });
 
+        bindListSearch("memberships-search", value => {
+            listFilters.memberships = value;
+            render();
+        });
         bindPagination("#memberships-pagination-top", "auth-memberships", memberships, () => render());
     }
 
@@ -3699,6 +3857,7 @@
                 grants: resourceId ? [{ resourceId, roleId, description: "Initial dashboard grant" }] : []
             }) });
             latestMachineClientSecret = { clientId: result.client.clientId, secret: result.clientSecret };
+            restartPagerWindow("auth-machine-clients");
             await renderAuthMachineClients();
         });
         document.getElementById("machine-secret-ack")?.addEventListener("click", async () => { latestMachineClientSecret = null; await renderAuthMachineClients(); });
@@ -4418,11 +4577,11 @@
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <section class="panel">
-                <div class="panel-actions">
-                    <h2>Sessions</h2>
-                    <div id="sessions-pagination-top">${renderPagination(pager, sessions)}</div>
-                </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Sessions",
+                    pagerHtml: `<div id="sessions-pagination-top">${renderPagination(pager, sessions)}</div>`
+                })}
                 <form id="session-revocation-form" class="client-filter-form">
                     <input name="userId" placeholder="User ID (optional)">
                     <input name="organizationId" placeholder="Organization ID (optional)">
@@ -4431,26 +4590,20 @@
                     <button type="submit">Preview and revoke</button>
                 </form>
                 <p>Use one or more filters. Combined filters use AND semantics, and you will see the affected session and refresh-token count before confirmation.</p>
-                ${renderList(
+                ${renderListRows(
                     sessions.data,
-                    item => `
-                        <div class="list-item-header">
-                            <strong>${esc(item.user)}</strong>
-                            ${item.userId ? `<a class="inline-link" href="${esc(userDetailPath(item.userId, "sessions"))}">Open user</a>` : ""}
-                        </div>
-                        ${renderMetadataRows([
-                            { label: "Session ID", value: item.id },
-                            { label: "Authentication", value: item.authenticationMethod || "unknown" },
-                            { label: "Client", value: item.clientApplicationId || "n/a" },
-                            { label: "Created", value: formatDate(item.createdAt) },
-                            { label: "Idle expires", value: formatDate(item.idleExpiresAt) },
-                            { label: "Absolute expires", value: formatDate(item.absoluteExpiresAt) },
-                            { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "Active" },
-                            { label: "Revocation reason", value: item.revocationReason || "n/a" }
-                        ])}
-                        ${item.revokedAt ? "" : `<button type="button" class="js-revoke-session" data-session-id="${esc(item.id)}">Revoke session</button>`}
-                        ${item.revokedAt ? `<a class="inline-link" href="${esc(pathForRoute("auth-audit"))}">Open audit history</a>` : ""}
-                    `,
+                    item => renderListRow({
+                        href: item.revokedAt && item.userId ? userDetailPath(item.userId, "sessions") : "",
+                        title: item.user || "Unknown user",
+                        subtitle: [item.authenticationMethod, item.clientApplicationId, item.createdAt ? formatDate(item.createdAt) : ""].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            item.revokedAt ? renderChip("Revoked") : renderChip("Active", "green"),
+                            renderIdChip(item.id)
+                        ].join(""),
+                        actionsHtml: item.revokedAt
+                            ? ""
+                            : `<button type="button" class="js-revoke-session" data-session-id="${esc(item.id)}">Revoke</button>`
+                    }),
                     "No sessions yet."
                 )}
             </section>

@@ -196,24 +196,24 @@ public static partial class EndpointRouteBuilderExtensions
             });
         });
 
-        api.MapGet("/memberships", async (HttpContext context, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/memberships", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return await SqlOSCursorPagination.Ok(() => adminService.ListMembershipsAsync(cursor, pageSize, page, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListMembershipsAsync(search, cursor, pageSize, page, cancellationToken));
         });
 
-        api.MapGet("/organizations/{organizationId}/memberships", async (HttpContext context, string organizationId, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/organizations/{organizationId}/memberships", async (HttpContext context, string organizationId, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return await SqlOSCursorPagination.Ok(() => adminService.ListOrganizationMembershipsAsync(organizationId, cursor, pageSize, page, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListOrganizationMembershipsAsync(organizationId, search, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, string? cursor, int? pageSize, int? page, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
