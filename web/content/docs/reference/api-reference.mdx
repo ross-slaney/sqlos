@@ -87,7 +87,7 @@ On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, 
 | `grant_type` | Required fields | Notes |
 | --- | --- | --- |
 | `authorization_code` | `code`, `client_id`; `code_verifier` when PKCE-bound | `redirect_uri`, when supplied, must match. `resource` must match the original request. |
-| `refresh_token` | `refresh_token` | `resource` is optional but cannot change the original resource binding. Public clients may still send `client_id`; SqlOS does not use it as client authentication for this grant. |
+| `refresh_token` | `refresh_token` | The refresh token identifies the client through its session. Public clients (`token_endpoint_auth_method=none`) do not authenticate at this gate; `client_id` is optional and, when sent, must match the token's client. Confidential clients still require `client_secret_basic`. `resource` is optional but cannot change the original resource binding. |
 | `urn:ietf:params:oauth:grant-type:device_code` | `client_id`, `device_code` | `resource` must match the device request. |
 
 Authorization-code exchange:
@@ -102,13 +102,22 @@ curl -X POST https://app.example.com/sqlos/auth/token \
   --data-urlencode 'code_verifier=...'
 ```
 
-Refresh:
+Public refresh — `client_id` is optional because the refresh token already names the client:
 
 ```bash
 curl -X POST https://app.example.com/sqlos/auth/token \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'grant_type=refresh_token' \
-  --data-urlencode 'client_id=acme-web' \
+  --data-urlencode 'refresh_token=...'
+```
+
+Confidential refresh still authenticates the client:
+
+```bash
+curl -X POST https://app.example.com/sqlos/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -u 'billing-server:$CLIENT_SECRET' \
+  --data-urlencode 'grant_type=refresh_token' \
   --data-urlencode 'refresh_token=...'
 ```
 

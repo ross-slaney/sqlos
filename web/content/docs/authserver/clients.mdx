@@ -79,7 +79,9 @@ Use a confidential client when the OAuth callback and refresh-token exchange run
 in server-side code that can protect a secret. SqlOS then requires
 `client_secret_basic` authentication for both the authorization-code and refresh
 grants. Public browser, native, and CLI clients continue to use PKCE without a
-secret.
+secret. Their refresh requests are identified by the refresh token itself;
+`client_id` is optional on `grant_type=refresh_token` and is not client
+authentication.
 
 The credential belongs to the OAuth client. Creating a confidential client does
 not create or require an FGA service account. Use `SeedMachineClient` only when

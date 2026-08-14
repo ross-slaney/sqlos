@@ -239,7 +239,7 @@ The exact client URL to which SqlOS returns an authorization result. Scheme, hos
 
 ### Refresh token
 
-A long-lived opaque credential used to obtain a new access token without another interactive sign-in. SqlOS rotates refresh tokens and tracks a token family. Reuse outside the configured grace behavior can indicate theft and revoke the family/session. Store refresh tokens more carefully than access tokens and never put them in URLs or logs. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
+A long-lived opaque credential used to obtain a new access token without another interactive sign-in. SqlOS rotates refresh tokens and tracks a token family. The token is bound to a client and session, so a public OAuth `/token` refresh does not require `client_id` as authentication. Confidential clients still present a client secret. Reuse outside the configured grace behavior can indicate theft and revoke the family/session. Store refresh tokens more carefully than access tokens and never put them in URLs or logs. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
 
 ### Resource indicator (`resource`)
 

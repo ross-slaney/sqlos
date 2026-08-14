@@ -28,6 +28,12 @@ await tokenVault.ReplaceTokensAsync(sessionId, tokens, ct);
 
 Keep refresh tokens out of browser JavaScript. Store them in a server-side session or, for native and desktop apps, the platform credential vault. The browser should receive only your application's encrypted `Secure`, `HttpOnly`, `SameSite` session cookie.
 
+### OAuth `/token` refresh
+
+In-process `RefreshAsync` already takes only the refresh token. The public OAuth token endpoint does the same for public clients: `grant_type=refresh_token` plus `refresh_token` is enough. The token is bound to a client and session, so SqlOS does not treat `client_id` as client authentication for this grant. Sending `client_id` is still allowed and must match the token's client.
+
+Confidential clients are different. Their refresh exchange still requires `client_secret_basic`. A missing or wrong secret returns generic `invalid_client` and does not consume the refresh token. See [Clients](/docs/authserver/clients) and the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
+
 ### Organization switching
 
 Switch organizations without re-authenticating by passing a different `organizationId`:

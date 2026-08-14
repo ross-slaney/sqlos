@@ -122,6 +122,55 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
     }
 
     [TestMethod]
+    public async Task PublicRefresh_WithoutClientId_SucceedsBecauseRefreshTokenIdentifiesTheClient()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(PublicClient);
+
+        var refreshed = await harness.PostTokenAsync(RefreshForm(refreshToken));
+        var body = await refreshed.Content.ReadAsStringAsync();
+        refreshed.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+        json.RootElement.GetProperty("refresh_token").GetString().Should().NotBeNullOrWhiteSpace();
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task PublicRefresh_WrongClientId_IsInvalidGrantAndDoesNotConsumeToken()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(PublicClient);
+
+        var wrongClient = await harness.PostTokenAsync(RefreshForm(refreshToken, ConfidentialA));
+        await AssertGenericInvalidGrantAsync(wrongClient);
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task PublicRefresh_DisabledClientWithoutClientId_IsInvalidClientAndDoesNotConsumeToken()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(PublicClient);
+        await harness.DisableClientAsync(PublicClient);
+
+        var disabled = await harness.PostTokenAsync(RefreshForm(refreshToken));
+        await AssertGenericInvalidClientAsync(disabled);
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ConfidentialRefresh_WithoutClientIdOrSecret_IsInvalidClientAndDoesNotConsumeToken()
+    {
+        await using var harness = await Harness.StartAsync();
+        var refreshToken = await harness.CreateRefreshTokenAsync(ConfidentialA);
+
+        var missing = await harness.PostTokenAsync(RefreshForm(refreshToken));
+        await AssertGenericInvalidClientAsync(missing);
+        (await harness.IsRefreshTokenConsumedAsync(refreshToken)).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task ConfidentialClientAuthenticationRejectsAmbiguityAndSupportsRotationOverlap()
     {
         await using var harness = await Harness.StartAsync();
@@ -196,13 +245,15 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
             new("code_verifier", Verifier)
         ];
 
-    private static IEnumerable<KeyValuePair<string, string>> RefreshForm(string refreshToken, string clientId)
-        =>
-        [
-            new("grant_type", "refresh_token"),
-            new("refresh_token", refreshToken),
-            new("client_id", clientId)
-        ];
+    private static IEnumerable<KeyValuePair<string, string>> RefreshForm(string refreshToken, string? clientId = null)
+    {
+        yield return new("grant_type", "refresh_token");
+        yield return new("refresh_token", refreshToken);
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            yield return new("client_id", clientId);
+        }
+    }
 
     private static async Task AssertGenericInvalidClientAsync(HttpResponseMessage response)
     {
