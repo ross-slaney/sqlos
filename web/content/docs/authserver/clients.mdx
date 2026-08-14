@@ -81,10 +81,15 @@ in server-side code that can protect a secret. SqlOS then requires
 grants. Public browser, native, and CLI clients continue to use PKCE without a
 secret.
 
-The credential belongs to the OAuth client. Creating a confidential client does
-not create or require an FGA service account. Use `SeedMachineClient` only when
-the same application also needs an FGA subject and grants for service-to-service
-authorization.
+The credential belongs to the OAuth client. Creating a confidential client for
+authorization-code or refresh does not create an FGA service account, and it
+does not enable `client_credentials`.
+
+A [machine client](/docs/authserver/machine-clients) is a different AuthServer
+shape: confidential, `client_secret_basic`, and `client_credentials`, with no
+user session. Use `SeedMachineClient` or **Auth Server > Machine Clients** when
+a worker also needs an FGA subject and grants. That binding is optional; an FGA
+service account is not an OAuth client.
 
 For code-owned configuration, resolve the secret from the host's existing
 secret provider:
@@ -228,6 +233,7 @@ auth.SeedOwnedNativeApp("example-expo", "Example Expo", "sqlos-expo://auth-callb
 
 ## Next client guides
 
+- [Machine Clients](/docs/authserver/machine-clients)
 - [Single-Application Setup](/docs/authserver/single-application)
 - [Application Access](/docs/authserver/application-access)
 - [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr)

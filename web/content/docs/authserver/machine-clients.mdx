@@ -1,0 +1,101 @@
+---
+title: "Machine Clients"
+description: "Confidential OAuth clients that authenticate workers with client credentials."
+order: 21
+section: authserver
+---
+
+A **machine client** is an AuthServer confidential OAuth client. It authenticates at `/sqlos/auth/token` with `client_credentials` and `client_secret_basic`, then receives a short-lived access token. There is no user, no browser, and no refresh token.
+
+A **service account** is a different object. It is an FGA subject (`SqlOSFgaServiceAccount`) that can receive grants. FGA never sees a client secret. Creating a service account does not register an OAuth client, and creating a confidential client does not create an FGA subject.
+
+| Concept | Plane | Answers |
+| --- | --- | --- |
+| Machine client | AuthServer | How does this worker prove who it is? |
+| Service account | FGA | What may this worker do to application data? |
+
+`SeedMachineClient` and **Auth Server > Machine Clients** create both records and link them by `client_id`. That binding is a convenience, not a definition. The Fine-Grained Auth **Service Accounts** page still lists FGA subjects, including ones that have no OAuth client.
+
+<Callout type="info" title="Use this page for tokens; use FGA for grants">
+  Exchange the client secret here. Authorize the resulting subject with [FGA grants](/docs/fga/grants). The end-to-end worker walkthrough is [Background jobs with machine clients](/docs/guides/service-account-jobs).
+</Callout>
+
+## Dashboard: copy the secret once
+
+Open **Auth Server > Machine Clients**. Create a client with an audience, allowed scopes, and optional organization and grants. SqlOS shows a generated 64-character secret exactly once.
+
+Store that value in the worker's environment or secret manager. Later list and detail responses include client ID, audience, scopes, organization, expiry, last use, ownership, readiness, and grant count. They never include the secret or its hash.
+
+Lost secret: use **Rotate**. Wrong secret: `401 invalid_client`. Do not put the secret in source control, logs, or queue payloads.
+
+Code-owned identities stay visible and testable, but rotation and grant edits are blocked so startup cannot overwrite an operator change. Update the seed or secret provider instead.
+
+## Exchange the secret for a token
+
+The worker authenticates with HTTP Basic. The form field is `resource`, not `audience`, and it must equal the client's registered audience. Every requested scope must already be allowed:
+
+```bash
+curl -u 'ledger-exporter:YOUR_SECRET' \
+  -d 'grant_type=client_credentials' \
+  -d 'resource=https://api.example.com/ledger' \
+  -d 'scope=ledger.export' \
+  https://identity.example.com/sqlos/auth/token
+```
+
+A successful response is an access token only:
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 599,
+  "scope": "ledger.export"
+}
+```
+
+Send that token as `Authorization: Bearer <access_token>` on API calls. The JWT has `token_kind=service`, `client_id`, `azp`, and `scope`. Its `sub` is the linked FGA subject id when a service account is bound, otherwise the `client_id`. It has no human email and no `sid` session claim. Resource servers still validate audience.
+
+Public DCR cannot create confidential machine clients.
+
+## Seed the bound pair
+
+`SeedMachineClient` reconciles the OAuth client, FGA subject, credential hash, organization binding, and initial grants as one ownership-safe unit. The resolver reads the secret from the host; SqlOS never writes or logs the plaintext:
+
+```csharp
+options.AuthServer.SeedMachineClient("ledger-exporter", (client, machine) =>
+{
+    client.Name = "Ledger Exporter";
+    client.Description = "Nightly read-only export for Northwind";
+    client.Audience = "https://api.example.com/ledger";
+    client.AllowedScopes = ["ledger.export"];
+
+    machine.OrganizationSlug = "northwind";
+    machine.ExpiresAt = DateTime.UtcNow.AddDays(90);
+    machine.SecretResolver = () =>
+        builder.Configuration["SqlOS:MachineClients:LedgerExporter:Secret"];
+    machine.Grant("ledger::northwind", "export_reader", "Nightly ledger export");
+});
+```
+
+The secret must contain 43 to 256 characters. Missing material fails startup closed. Changing the resolver value is an explicit code-owned rotation. Removing the declaration marks the machine client orphaned for operator review.
+
+Alternatively, provide `SecretHashResolver` when the pipeline already produces an ASP.NET Core `PasswordHasher`-compatible hash. Specify exactly one resolver.
+
+## Admin API
+
+| Operation | Route |
+| --- | --- |
+| List/readiness | `GET /sqlos/admin/auth/api/machine-clients` |
+| Atomic create and one-time secret | `POST /sqlos/admin/auth/api/machine-clients` |
+| Explicit rotation and one-time secret | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/rotate` |
+| Credential/audience/scope test without issuing a token | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/validate` |
+| Immediate OAuth and issued-token revocation | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/revoke` |
+| Narrow grant changes | `POST`/`DELETE /sqlos/admin/auth/api/machine-clients/{clientId}/grants...` |
+
+The list endpoint returns only bound pairs: FGA service accounts that also have a `SqlOSClientApplication`. FGA-only subjects stay on the Service Accounts page.
+
+## Related
+
+- [Clients](/docs/authserver/clients) for user-delegated confidential and public clients
+- [Subject types](/docs/fga/subject-types) for FGA service accounts
+- [Background jobs with machine clients](/docs/guides/service-account-jobs)
