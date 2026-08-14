@@ -148,6 +148,8 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaResources", "IX_SqlOSFgaResources_ParentId_Id") <= 1700);
         Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_SubjectId_CreatedAt_Id") <= 1700);
         Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_CreatedAt_Id") <= 1700);
+        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaGrants", "IX_SqlOSFgaGrants_ResourceId_SubjectId") <= 1700);
+        Assert.IsTrue(await IndexKeyWidthAsync("SqlOSFgaRolePermissions", "IX_SqlOSFgaRolePermissions_PermissionId_RoleId") <= 1700);
 
         var token = Guid.NewGuid().ToString("N");
         string MaxId(string prefix) => (prefix + token).PadRight(450, 'x');
@@ -160,43 +162,49 @@ public class SqlOSFgaSchemaInitializerIntegrationTests : FgaIntegrationTestBase
         var subjectId = MaxId("sub_");
         var grantId = MaxId("gr_");
 
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().Add(new() { Id = resourceTypeId, Name = "Bound index type" });
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaSubjectType>().Add(new() { Id = subjectTypeId, Name = "Bound index subject" });
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(new() { Id = roleId, Key = $"bound_{token}", Name = "Bound index role" });
-        await Context.SaveChangesAsync();
+        try
+        {
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResourceType>().Add(new() { Id = resourceTypeId, Name = "Bound index type" });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaSubjectType>().Add(new() { Id = subjectTypeId, Name = "Bound index subject" });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaRole>().Add(new() { Id = roleId, Key = $"bound_{token}", Name = "Bound index role" });
+            await Context.SaveChangesAsync();
 
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
-        {
-            Id = parentId,
-            Name = "Bound parent",
-            ResourceTypeId = resourceTypeId
-        });
-        await Context.SaveChangesAsync();
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
+            {
+                Id = parentId,
+                Name = "Bound parent",
+                ResourceTypeId = resourceTypeId
+            });
+            await Context.SaveChangesAsync();
 
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
-        {
-            Id = childId,
-            ParentId = parentId,
-            Name = "Bound child",
-            ResourceTypeId = resourceTypeId
-        });
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>().Add(new()
-        {
-            Id = subjectId,
-            SubjectTypeId = subjectTypeId,
-            DisplayName = "Bound subject"
-        });
-        await Context.SaveChangesAsync();
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaResource>().Add(new()
+            {
+                Id = childId,
+                ParentId = parentId,
+                Name = "Bound child",
+                ResourceTypeId = resourceTypeId
+            });
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaSubject>().Add(new()
+            {
+                Id = subjectId,
+                SubjectTypeId = subjectTypeId,
+                DisplayName = "Bound subject"
+            });
+            await Context.SaveChangesAsync();
 
-        Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Add(new()
+            Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().Add(new()
+            {
+                Id = grantId,
+                SubjectId = subjectId,
+                ResourceId = childId,
+                RoleId = roleId
+            });
+            await Context.SaveChangesAsync();
+        }
+        finally
         {
-            Id = grantId,
-            SubjectId = subjectId,
-            ResourceId = childId,
-            RoleId = roleId
-        });
-        await Context.SaveChangesAsync();
-        Context.ChangeTracker.Clear();
+            Context.ChangeTracker.Clear();
+        }
     }
 
     [TestMethod]
