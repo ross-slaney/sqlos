@@ -609,34 +609,113 @@ public sealed class SqlOSAuthorizationServerService
             AuthorizationRequestId: authorizationRequestId);
     }
 
-    public string BuildAuthorizationInteractionRedirect(SqlOSAuthorizationRequestLoginResult completion)
+    internal const string AuthorizationContinuationPurpose = "authorization_continue";
+    internal const string AuthorizationContinuationCookie = "sqlos_auth_continue";
+
+    public async Task<string> CreateAuthorizationContinuationRedirectAsync(
+        SqlOSAuthorizationRequestLoginResult completion,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(completion.AuthorizationRequestId))
         {
             throw new InvalidOperationException("The authorization interaction is missing its request binding.");
         }
 
-        var parameters = new Dictionary<string, string?>
-        {
-            ["request"] = completion.AuthorizationRequestId
-        };
-        if (completion.RequiresMfa)
-        {
-            parameters["mfa_token"] = completion.MfaToken
-                ?? throw new InvalidOperationException("The MFA interaction is missing its challenge binding.");
-        }
-        else if (completion.RequiresOrganizationSelection)
-        {
-            parameters["pending_token"] = completion.PendingToken
-                ?? throw new InvalidOperationException("The organization interaction is missing its pending binding.");
-        }
-        else
+        if (!completion.RequiresMfa && !completion.RequiresOrganizationSelection)
         {
             throw new InvalidOperationException("The authorization interaction is already complete.");
         }
 
-        return QueryHelpers.AddQueryString($"{_options.BasePath.TrimEnd('/')}/continue", parameters);
+        if (completion.RequiresMfa && string.IsNullOrWhiteSpace(completion.MfaToken))
+        {
+            throw new InvalidOperationException("The MFA interaction is missing its challenge binding.");
+        }
+
+        if (completion.RequiresOrganizationSelection && string.IsNullOrWhiteSpace(completion.PendingToken))
+        {
+            throw new InvalidOperationException("The organization interaction is missing its pending binding.");
+        }
+
+        var handle = await _cryptoService.CreateTemporaryTokenAsync(
+            AuthorizationContinuationPurpose,
+            userId: null,
+            clientApplicationId: null,
+            organizationId: null,
+            new AuthorizationContinuationPayload(
+                completion.AuthorizationRequestId,
+                completion.MfaToken,
+                completion.PendingToken),
+            _options.Mfa.Totp.ChallengeTokenLifetime,
+            cancellationToken);
+
+        var continuePath = $"{_options.BasePath.TrimEnd('/')}/continue";
+        httpContext.Response.Cookies.Append(AuthorizationContinuationCookie, handle, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Lax,
+            Secure = httpContext.Request.IsHttps,
+            Path = continuePath,
+            Expires = DateTimeOffset.UtcNow.Add(_options.Mfa.Totp.ChallengeTokenLifetime)
+        });
+
+        return QueryHelpers.AddQueryString(continuePath, new Dictionary<string, string?>
+        {
+            ["request"] = completion.AuthorizationRequestId
+        });
     }
+
+    internal async Task<SqlOSAuthorizationRequestLoginResult> ResolveAuthorizationContinuationAsync(
+        string authorizationRequestId,
+        string continuationHandle,
+        CancellationToken cancellationToken = default)
+    {
+        var token = await _cryptoService.FindTemporaryTokenAsync(
+            AuthorizationContinuationPurpose,
+            continuationHandle,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Authorization continuation is invalid or expired.");
+        var payload = _cryptoService.DeserializePayload<AuthorizationContinuationPayload>(token)
+            ?? throw new InvalidOperationException("Authorization continuation is invalid.");
+        if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Authorization continuation is not valid for this authorization request.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(payload.MfaToken))
+        {
+            var state = await _authService.GetAuthorizationMfaChallengeStateAsync(
+                payload.MfaToken,
+                authorizationRequestId,
+                cancellationToken);
+            return new SqlOSAuthorizationRequestLoginResult(
+                null,
+                false,
+                null,
+                Array.Empty<SqlOSOrganizationOption>(),
+                RequiresMfa: true,
+                MfaToken: payload.MfaToken,
+                RequiresMfaEnrollment: state.EnrollmentRequired,
+                MfaMethods: state.Methods,
+                AuthorizationRequestId: authorizationRequestId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(payload.PendingToken))
+        {
+            return await GetPendingOrganizationSelectionForLoginAsync(
+                payload.PendingToken,
+                authorizationRequestId,
+                cancellationToken);
+        }
+
+        throw new InvalidOperationException("Authorization continuation is invalid.");
+    }
+
+    private sealed record AuthorizationContinuationPayload(
+        string AuthorizationRequestId,
+        string? MfaToken,
+        string? PendingToken);
 
     public async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,

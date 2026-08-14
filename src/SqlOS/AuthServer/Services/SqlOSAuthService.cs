@@ -712,6 +712,17 @@ public sealed class SqlOSAuthService
             ? null
             : request.OrganizationId.Trim();
         var organizationId = requestedOrganizationId ?? session.OrganizationId;
+        var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            session.UserId,
+            organizationId,
+            session.AuthenticationMethod ?? "password",
+            authorizationRequestId: null,
+            cancellationToken);
+        if (!issuanceDecision.CanIssue)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        }
+
         await RequireActiveLifecycleAsync(
             session.UserId,
             organizationId,

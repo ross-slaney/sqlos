@@ -349,7 +349,10 @@ public sealed class SqlOSOidcBrowserAuthService
                 httpContext,
                 cancellationToken);
             var redirectUrl = completion.RedirectUrl
-                ?? _authorizationServerService.BuildAuthorizationInteractionRedirect(completion);
+                ?? await _authorizationServerService.CreateAuthorizationContinuationRedirectAsync(
+                    completion,
+                    httpContext,
+                    cancellationToken);
 
             return Results.Redirect(redirectUrl);
         }

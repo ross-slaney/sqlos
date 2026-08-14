@@ -20,7 +20,7 @@ public sealed class SqlOSDeviceAuthorizationService
     private readonly SqlOSAuthService _authService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAuthServerOptions _options;
-    private readonly SqlOSMfaPolicyService? _mfaPolicyService;
+    private readonly SqlOSMfaPolicyService _mfaPolicyService;
 
     public SqlOSDeviceAuthorizationService(
         ISqlOSAuthServerDbContext context,
@@ -35,7 +35,10 @@ public sealed class SqlOSDeviceAuthorizationService
         _authService = authService;
         _cryptoService = cryptoService;
         _options = options.Value;
-        _mfaPolicyService = mfaPolicyService;
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(
+            context,
+            new SqlOSSettingsService(context, options, new SqlOSAcsAuthEmailSender(options)),
+            options);
     }
 
     public async Task<SqlOSDeviceAuthorizationStartResult> StartAsync(
@@ -423,6 +426,19 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.ApprovedOrganizationId = null;
             deviceAuthorization.AuthenticationMethod = null;
             deviceAuthorization.ApprovedAt = null;
+            var boundRequest = await _context.Set<SqlOSAuthorizationRequest>()
+                .FirstOrDefaultAsync(x => x.DeviceAuthorizationId == deviceAuthorization.Id, cancellationToken);
+            if (boundRequest != null)
+            {
+                boundRequest.CompletedAt = null;
+                boundRequest.ResolvedAuthMethod = null;
+                boundRequest.ResolvedOrganizationId = null;
+                if (boundRequest.ExpiresAt < deviceAuthorization.ExpiresAt)
+                {
+                    boundRequest.ExpiresAt = deviceAuthorization.ExpiresAt;
+                }
+            }
+
             await _context.SaveChangesAsync(cancellationToken);
             await _adminService.RecordAuditAsync(
                 "oauth.device.assurance_required",
@@ -488,16 +504,6 @@ public sealed class SqlOSDeviceAuthorizationService
         string authenticationMethod,
         CancellationToken cancellationToken)
     {
-        if (_mfaPolicyService == null)
-        {
-            if (_options.Mfa.Enabled)
-            {
-                throw new InvalidOperationException(SqlOSMfaPolicyService.EvaluationUnavailableMessage);
-            }
-
-            return false;
-        }
-
         return (await _mfaPolicyService.EvaluateAsync(
             userId,
             organizationId,

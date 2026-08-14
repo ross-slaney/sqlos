@@ -52,19 +52,25 @@ public sealed class SqlOSSamlService
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAuthorizationServerService? _authorizationServerService;
+    private readonly SqlOSMfaPolicyService _mfaPolicyService;
 
     public SqlOSSamlService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSAdminService adminService,
         SqlOSCryptoService cryptoService,
-        SqlOSAuthorizationServerService? authorizationServerService = null)
+        SqlOSAuthorizationServerService? authorizationServerService = null,
+        SqlOSMfaPolicyService? mfaPolicyService = null)
     {
         _context = context;
         _options = options.Value;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _authorizationServerService = authorizationServerService;
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(
+            context,
+            new SqlOSSettingsService(context, options, new SqlOSAcsAuthEmailSender(options)),
+            options);
     }
 
     public async Task<string> CreateAuthorizationUrlAsync(SqlOSAuthorizationUrlRequest request, CancellationToken cancellationToken = default)
@@ -235,10 +241,80 @@ public sealed class SqlOSSamlService
                 httpContext ?? new DefaultHttpContext(),
                 cancellationToken);
             return completion.RedirectUrl
-                ?? _authorizationServerService.BuildAuthorizationInteractionRedirect(completion);
+                ?? await _authorizationServerService.CreateAuthorizationContinuationRedirectAsync(
+                    completion,
+                    httpContext ?? new DefaultHttpContext(),
+                    cancellationToken);
         }
 
-        throw new InvalidOperationException("SAML login requires the authorization server to evaluate issuance assurance.");
+        var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequest.Id,
+            cancellationToken);
+        if (!issuanceDecision.CanIssue)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        }
+
+        var client = authorizationRequest.ClientApplication
+            ?? await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        await _adminService.EnsureApplicationAccessAsync(
+            client,
+            user.Id,
+            organizationId,
+            "application.access.authorization_denied",
+            httpContext?.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
+        var rawCode = _cryptoService.GenerateOpaqueToken();
+        _context.Set<SqlOSAuthorizationCode>().Add(new SqlOSAuthorizationCode
+        {
+            Id = _cryptoService.GenerateId("acd"),
+            AuthorizationRequestId = authorizationRequest.Id,
+            UserId = user.Id,
+            ClientApplicationId = authorizationRequest.ClientApplicationId,
+            OrganizationId = organizationId,
+            RedirectUri = authorizationRequest.RedirectUri,
+            State = authorizationRequest.State,
+            Scope = authorizationRequest.Scope,
+            Resource = authorizationRequest.Resource,
+            CodeHash = _cryptoService.HashToken(rawCode),
+            CodeChallenge = authorizationRequest.CodeChallenge,
+            CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
+            AuthenticationMethod = authenticationMethod,
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+        });
+
+        authorizationRequest.CompletedAt = DateTime.UtcNow;
+        authorizationRequest.ResolvedAuthMethod = authenticationMethod;
+        authorizationRequest.ResolvedOrganizationId = organizationId;
+        authorizationRequest.ResolvedConnectionId = connection.Id;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            throw new InvalidOperationException("Authorization request is no longer active.", ex);
+        }
+
+        await _adminService.RecordAuditAsync(
+            "user.login.saml",
+            "user",
+            user.Id,
+            userId: user.Id,
+            organizationId: organizationId,
+            cancellationToken: cancellationToken);
+        var separator = authorizationRequest.RedirectUri.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
     }
 
     private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection)

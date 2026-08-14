@@ -76,65 +76,76 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSAuthService authService,
             CancellationToken cancellationToken) =>
         {
-            var requestId = context.Request.Query["request"].ToString();
-            var mfaToken = context.Request.Query["mfa_token"].ToString();
-            var pendingToken = context.Request.Query["pending_token"].ToString();
-            var authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+            try
+            {
+                var requestId = context.Request.Query["request"].ToString();
+                var continuationHandle = context.Request.Cookies[SqlOSAuthorizationServerService.AuthorizationContinuationCookie];
+                if (string.IsNullOrWhiteSpace(continuationHandle))
+                {
+                    throw new InvalidOperationException("Authorization continuation is invalid or expired.");
+                }
 
-            SqlOSAuthorizationRequestLoginResult completion;
-            if (!string.IsNullOrWhiteSpace(mfaToken) && string.IsNullOrWhiteSpace(pendingToken))
-            {
-                var state = await authService.GetAuthorizationMfaChallengeStateAsync(
-                    mfaToken,
+                var authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+                var completion = await authorizationServerService.ResolveAuthorizationContinuationAsync(
                     authorizationRequest.Id,
+                    continuationHandle,
                     cancellationToken);
-                completion = new SqlOSAuthorizationRequestLoginResult(
-                    null,
-                    false,
-                    null,
-                    Array.Empty<SqlOSOrganizationOption>(),
-                    RequiresMfa: true,
-                    MfaToken: mfaToken,
-                    RequiresMfaEnrollment: state.EnrollmentRequired,
-                    MfaMethods: state.Methods,
-                    AuthorizationRequestId: authorizationRequest.Id);
-            }
-            else if (!string.IsNullOrWhiteSpace(pendingToken) && string.IsNullOrWhiteSpace(mfaToken))
-            {
-                completion = await authorizationServerService.GetPendingOrganizationSelectionForLoginAsync(
-                    pendingToken,
-                    authorizationRequest.Id,
-                    cancellationToken);
-            }
-            else
-            {
-                throw new InvalidOperationException("Authorization continuation is invalid.");
-            }
 
-            if (headlessAuthService.IsBrowserUiEnabled && SqlOSHeadlessAuthService.IsHeadlessRequest(authorizationRequest))
+                if (headlessAuthService.IsBrowserUiEnabled && SqlOSHeadlessAuthService.IsHeadlessRequest(authorizationRequest))
+                {
+                    return Results.Redirect(headlessAuthService.BuildUiUrl(
+                        context,
+                        authorizationRequest.Id,
+                        completion.RequiresMfa
+                            ? completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa"
+                            : "organization",
+                        error: null,
+                        pendingToken: completion.PendingToken,
+                        email: authorizationRequest.LoginHintEmail,
+                        displayName: null,
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                        mfaToken: completion.MfaToken));
+                }
+
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    authorizationRequest.LoginHintEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException ex)
             {
-                return Results.Redirect(headlessAuthService.BuildUiUrl(
+                var mapped = await MapPublicAuthErrorAsync(
                     context,
-                    authorizationRequest.Id,
-                    completion.RequiresMfa
-                        ? completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa"
-                        : "organization",
-                    error: null,
-                    pendingToken: completion.PendingToken,
-                    email: authorizationRequest.LoginHintEmail,
-                    displayName: null,
-                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
-                    mfaToken: completion.MfaToken));
-            }
+                    ex,
+                    SqlOSPublicAuthErrorSurface.OAuthAuthorize,
+                    cancellationToken);
+                if (headlessAuthService.IsBrowserUiEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        "login",
+                        requestId: null,
+                        email: context.Request.Query["login_hint"].ToString(),
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()))
+                        + $"&error={Uri.EscapeDataString(mapped.PublicMessage)}");
+                }
 
-            return await RenderHostedAuthorizationCompletionAsync(
-                completion,
-                authorizationRequest,
-                authorizationRequest.LoginHintEmail,
-                authPrefix,
-                authorizationServerService,
-                authService,
-                cancellationToken);
+                var page = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    context.Request.Query["login_hint"].ToString(),
+                    mapped.PublicMessage,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, mapped.StatusCode);
+            }
         });
 
         auth.MapGet("/authorize", async (

@@ -163,7 +163,7 @@ public sealed class SqlOSSettingsService
         {
             if (_context is DbContext dbContext)
             {
-                dbContext.ChangeTracker.Clear();
+                dbContext.Entry(settings).State = EntityState.Detached;
             }
         }
     }

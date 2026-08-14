@@ -303,11 +303,16 @@ public sealed class SqlOSIssuanceAssuranceTests
         var start = await harness.Device.StartAsync(
             new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid", "https://api.example.com/todos"),
             harness.Http);
-        await harness.Device.ApproveAsync(
-            new SqlOSDeviceAuthorizationApprovalRequest(start.UserCode),
+        var bound = await harness.Device.CreateOrGetAuthorizationRequestAsync(start.UserCode, "hosted");
+        bound.OrganizationId = harness.OrganizationId;
+        await harness.Context.SaveChangesAsync();
+        var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            bound,
             user,
             "password",
             harness.Http);
+        completion.RedirectUrl.Should().Contain("/device/approve");
+        await harness.Device.ApproveAsync(bound, user, "password", harness.Http);
 
         await harness.Settings.UpdateOrganizationMfaPolicyAsync(
             harness.OrganizationId,
@@ -330,6 +335,70 @@ public sealed class SqlOSIssuanceAssuranceTests
         stored.ApprovedAt.Should().BeNull();
         (await harness.Context.Set<SqlOSSession>().CountAsync()).Should().Be(0);
         (await harness.Context.Set<SqlOSRefreshToken>().CountAsync()).Should().Be(0);
+
+        var rebound = await harness.Device.CreateOrGetAuthorizationRequestAsync(start.UserCode, "hosted");
+        rebound.Id.Should().Be(bound.Id);
+        rebound.CompletedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_WhenOrganizationRequiresMfa_DoesNotRotateTokens()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("refresh-mfa");
+        var client = await harness.RequireClientAsync();
+        var tokens = await harness.Auth.CreateSessionTokensForUserAsync(
+            user,
+            client,
+            harness.OrganizationId,
+            "password",
+            "agent",
+            "127.0.0.1");
+
+        await harness.Settings.UpdateOrganizationMfaPolicyAsync(
+            harness.OrganizationId,
+            new SqlOSUpdateOrganizationMfaPolicyRequest(
+                IsEnabled: true,
+                RequireMfaForAllUsers: true,
+                RequireMfaForOwnersAndAdmins: false,
+                UserSelfEnrollmentEnabled: true,
+                RecoveryCodesEnabled: true,
+                RequiredRoles: ["owner", "admin"],
+                AvailableFactors: [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]));
+
+        var act = async () => await harness.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(tokens.RefreshToken, harness.OrganizationId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
+        (await harness.Context.Set<SqlOSRefreshToken>().CountAsync(x => x.ConsumedAt != null)).Should().Be(0);
+        (await harness.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == user.Id)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task ContinuationRedirect_DoesNotPutMfaTokenInUrl()
+    {
+        await using var harness = await Harness.CreateAsync(RequireAllUsersMfa);
+        var user = await harness.CreateMemberAsync("continue-url");
+        var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail);
+        request.OrganizationId = harness.OrganizationId;
+        await harness.Context.SaveChangesAsync();
+
+        var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            request,
+            user,
+            "password",
+            harness.Http);
+        completion.RequiresMfa.Should().BeTrue();
+
+        var redirect = await harness.Authorization.CreateAuthorizationContinuationRedirectAsync(
+            completion,
+            harness.Http);
+        redirect.Should().NotContain("mfa_token");
+        redirect.Should().Contain("/continue");
+        redirect.Should().Contain(request.Id);
+        harness.Http.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_auth_continue");
+        harness.Http.Response.Headers.SetCookie.ToString().Should().NotContain(completion.MfaToken);
     }
 
     private static void RequireAllUsersMfa(SqlOSAuthServerOptions options)
