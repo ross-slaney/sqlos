@@ -789,7 +789,7 @@ public sealed class HeadlessAuthIntegrationTests
             crypto,
             new FakeOidcProviderHttpClientFactory(),
             NullLogger<SqlOSOidcAuthService>.Instance);
-        var samlService = new SqlOSSamlService(context, options, admin, crypto);
+        var samlService = new SqlOSSamlService(context, options, admin, crypto, authorizationServerService);
         var oidcBrowserAuthService = new SqlOSOidcBrowserAuthService(
             context,
             admin,

@@ -7,6 +7,7 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { jwtDecode } from "jwt-decode";
 import { API_URL } from "../services/config";
@@ -86,6 +87,13 @@ export function UserSwitcher() {
         });
         if (!res.ok) throw new Error("Switch failed");
         const data = await res.json();
+        if (data.requiresMfa || !data.accessToken) {
+          Alert.alert(
+            "MFA required",
+            "This demo identity requires MFA. Sign in through the normal login flow to enroll or verify an authenticator, then try again."
+          );
+          throw new Error("Switch requires MFA");
+        }
         const decoded = jwtDecode<{
           sub?: string;
           exp: number;

@@ -116,3 +116,38 @@ internal sealed record SqlOSMfaChallengePayload(
 internal sealed record SqlOSAuthorizationMfaChallengeState(
     bool EnrollmentRequired,
     IReadOnlyList<string> Methods);
+
+public sealed class SqlOSIssuanceAssurance
+{
+    private SqlOSIssuanceAssurance(
+        string userId,
+        string? organizationId,
+        string authenticationMethod,
+        string? authorizationRequestId,
+        DateTime evaluatedAtUtc)
+    {
+        UserId = userId;
+        OrganizationId = organizationId;
+        AuthenticationMethod = authenticationMethod;
+        AuthorizationRequestId = authorizationRequestId;
+        EvaluatedAtUtc = evaluatedAtUtc;
+    }
+
+    public string UserId { get; }
+    public string? OrganizationId { get; }
+    public string AuthenticationMethod { get; }
+    public string? AuthorizationRequestId { get; }
+    public DateTime EvaluatedAtUtc { get; }
+
+    internal static SqlOSIssuanceAssurance Create(
+        string userId,
+        string? organizationId,
+        string authenticationMethod,
+        string? authorizationRequestId)
+        => new(
+            userId,
+            organizationId,
+            authenticationMethod,
+            authorizationRequestId,
+            DateTime.UtcNow);
+}

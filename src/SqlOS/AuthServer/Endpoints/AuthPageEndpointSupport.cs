@@ -193,7 +193,47 @@ public static partial class EndpointRouteBuilderExtensions
             phoneNumber: phoneNumber,
             mfaToken: completion.MfaToken,
             mfaMethods: completion.MfaMethods);
-        return Html(page, string.IsNullOrWhiteSpace(error) ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+            return Html(page, string.IsNullOrWhiteSpace(error) ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+    }
+
+    private static async Task<IResult> RenderHostedAuthorizationCompletionAsync(
+        SqlOSAuthorizationRequestLoginResult completion,
+        SqlOSAuthorizationRequest authorizationRequest,
+        string? email,
+        string authPrefix,
+        SqlOSAuthorizationServerService authorizationServerService,
+        SqlOSAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        if (completion.RequiresMfa)
+        {
+            return await RenderMfaChallengeAsync(
+                completion,
+                authorizationRequest.Id,
+                email,
+                authPrefix,
+                authorizationServerService,
+                authService,
+                cancellationToken);
+        }
+
+        if (completion.RequiresOrganizationSelection)
+        {
+            return Html(await BuildAuthPageViewModelAsync(
+                "organization",
+                authorizationRequest.Id,
+                email,
+                error: null,
+                displayName: null,
+                pendingToken: completion.PendingToken,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                organizationSelection: completion.Organizations));
+        }
+
+        return Results.Redirect(completion.RedirectUrl
+            ?? throw new InvalidOperationException("Authorization completion did not produce a redirect."));
     }
 
     private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(

@@ -287,7 +287,28 @@ public sealed class SqlOSHeadlessAuthService
             var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
             if (!string.IsNullOrWhiteSpace(request.OrganizationId))
             {
-                authorizationRequest.ResolvedOrganizationId = request.OrganizationId;
+                authorizationRequest.OrganizationId = request.OrganizationId;
+            }
+
+            if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
+            {
+                var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                    authorizationRequest,
+                    session.User,
+                    session.AuthenticationMethod,
+                    httpContext,
+                    cancellationToken);
+                if (completion.RequiresMfa || completion.RequiresOrganizationSelection)
+                {
+                    return await BuildCompletionActionResultAsync(
+                        authorizationRequest,
+                        completion,
+                        session.User.DefaultEmail,
+                        cancellationToken);
+                }
+
+                session = await RequireAuthPageSessionService().TryGetSessionAsync(httpContext, cancellationToken)
+                    ?? throw new InvalidOperationException("Sign in before approving this device request.");
             }
 
             var requestResolved = await RequireDeviceAuthorizationService().ApproveAsync(
@@ -325,13 +346,38 @@ public sealed class SqlOSHeadlessAuthService
         }
 
         var userCode = RequireDeviceUserCode(request.UserCode);
-        var resolved = await RequireDeviceAuthorizationService().ApproveAsync(
-            new SqlOSDeviceAuthorizationApprovalRequest(userCode, request.OrganizationId),
+        var standaloneRequest = await RequireDeviceAuthorizationService().CreateOrGetAuthorizationRequestAsync(
+            userCode,
+            "headless",
+            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(request.OrganizationId))
+        {
+            standaloneRequest.OrganizationId = request.OrganizationId;
+        }
+
+        var standaloneCompletion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+            standaloneRequest,
             session.User,
             session.AuthenticationMethod,
             httpContext,
             cancellationToken);
+        if (standaloneCompletion.RequiresMfa || standaloneCompletion.RequiresOrganizationSelection)
+        {
+            return await BuildCompletionActionResultAsync(
+                standaloneRequest,
+                standaloneCompletion,
+                session.User.DefaultEmail,
+                cancellationToken);
+        }
 
+        session = await RequireAuthPageSessionService().TryGetSessionAsync(httpContext, cancellationToken)
+            ?? throw new InvalidOperationException("Sign in before approving this device request.");
+        var resolved = await RequireDeviceAuthorizationService().ApproveAsync(
+            standaloneRequest,
+            session.User,
+            session.AuthenticationMethod,
+            httpContext,
+            cancellationToken);
         if (resolved.RequiresOrganizationSelection)
         {
             return View(await BuildStandaloneDeviceViewModelAsync(

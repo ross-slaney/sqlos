@@ -33,6 +33,7 @@ public class SqlOSAuthEndpointRouteInventoryTests
             "GET /sqlos/auth/.well-known/oauth-authorization-server",
             "GET /sqlos/auth/.well-known/jwks.json",
             "GET /sqlos/auth/authorize",
+            "GET /sqlos/auth/continue",
             "POST /sqlos/auth/token",
             "POST /sqlos/auth/register",
             "GET /sqlos/auth/login",

@@ -403,7 +403,7 @@ public static class ExampleAuthEndpoints
         });
     }
 
-    private static async Task<object> ToLoginResponseAsync(
+    internal static async Task<object> ToLoginResponseAsync(
         SqlOSLoginResult result,
         ExampleAppDbContext context,
         SqlOSAuthService authService,

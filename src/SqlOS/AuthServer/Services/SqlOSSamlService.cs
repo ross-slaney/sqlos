@@ -52,19 +52,25 @@ public sealed class SqlOSSamlService
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAuthorizationServerService? _authorizationServerService;
+    private readonly SqlOSMfaPolicyService _mfaPolicyService;
 
     public SqlOSSamlService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
         SqlOSAdminService adminService,
         SqlOSCryptoService cryptoService,
-        SqlOSAuthorizationServerService? authorizationServerService = null)
+        SqlOSAuthorizationServerService? authorizationServerService = null,
+        SqlOSMfaPolicyService? mfaPolicyService = null)
     {
         _context = context;
         _options = options.Value;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _authorizationServerService = authorizationServerService;
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(
+            context,
+            new SqlOSSettingsService(context, options, new SqlOSAcsAuthEmailSender(options)),
+            options);
     }
 
     public async Task<string> CreateAuthorizationUrlAsync(SqlOSAuthorizationUrlRequest request, CancellationToken cancellationToken = default)
@@ -227,13 +233,29 @@ public sealed class SqlOSSamlService
         if (_authorizationServerService != null)
         {
             authorizationRequest.ResolvedConnectionId = connection.Id;
-            return await _authorizationServerService.IssueAuthorizationRedirectAsync(
+            authorizationRequest.OrganizationId ??= organizationId;
+            var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 user,
-                organizationId,
                 authenticationMethod,
                 httpContext ?? new DefaultHttpContext(),
                 cancellationToken);
+            return completion.RedirectUrl
+                ?? await _authorizationServerService.CreateAuthorizationContinuationRedirectAsync(
+                    completion,
+                    httpContext ?? new DefaultHttpContext(),
+                    cancellationToken);
+        }
+
+        var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
+            user.Id,
+            organizationId,
+            authenticationMethod,
+            authorizationRequest.Id,
+            cancellationToken);
+        if (!issuanceDecision.CanIssue)
+        {
+            throw new InvalidOperationException(SqlOSMfaPolicyService.UnsatisfiedPolicyMessage);
         }
 
         var client = authorizationRequest.ClientApplication

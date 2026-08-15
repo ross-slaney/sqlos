@@ -134,6 +134,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSHomeRealmDiscoveryService discoveryService,
             SqlOSSamlService samlService,
@@ -208,10 +209,10 @@ public static partial class EndpointRouteBuilderExtensions
                     return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
                 }
 
-                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                     authorizationRequest,
                     signup.User,
-                    invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -220,7 +221,14 @@ public static partial class EndpointRouteBuilderExtensions
                     await transaction.CommitAsync(cancellationToken);
                 }
 
-                return Results.Redirect(redirectUrl);
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    signup.User.DefaultEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -250,6 +258,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             SqlOSInvitationService invitationService,
             SqlOSSettingsService settingsService,
             SqlOSHomeRealmDiscoveryService discoveryService,
@@ -322,10 +331,10 @@ public static partial class EndpointRouteBuilderExtensions
                     return RedirectAfterStandaloneSignIn(authPrefix, "invitation-accepted", deviceUserCode);
                 }
 
-                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest.OrganizationId ??= invitation.OrganizationId;
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                     authorizationRequest,
                     signup.User,
-                    invitation.OrganizationId,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -334,7 +343,14 @@ public static partial class EndpointRouteBuilderExtensions
                     await transaction.CommitAsync(cancellationToken);
                 }
 
-                return Results.Redirect(redirectUrl);
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    signup.User.DefaultEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -452,6 +468,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             SqlOSEmailOtpService emailOtpService,
             ISqlOSAuthServerDbContext dbContext,
             SqlOSInvitationService invitationService,
@@ -512,10 +529,10 @@ public static partial class EndpointRouteBuilderExtensions
                     return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
                 }
 
-                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                     authorizationRequest,
                     signup.User,
-                    invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -526,7 +543,14 @@ public static partial class EndpointRouteBuilderExtensions
                     await transaction.CommitAsync(cancellationToken);
                 }
 
-                return Results.Redirect(redirectUrl);
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    signup.User.DefaultEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -630,6 +654,7 @@ public static partial class EndpointRouteBuilderExtensions
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             SqlOSPhoneOtpService phoneOtpService,
             ISqlOSAuthServerDbContext dbContext,
             SqlOSInvitationService invitationService,
@@ -695,10 +720,10 @@ public static partial class EndpointRouteBuilderExtensions
                     return RedirectAfterStandaloneSignIn(authPrefix, "signed-up", deviceUserCode);
                 }
 
-                var redirectUrl = await authorizationServerService.IssueAuthorizationRedirectAsync(
+                authorizationRequest.OrganizationId ??= signup.Organizations.FirstOrDefault()?.Id;
+                var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                     authorizationRequest,
                     signup.User,
-                    signup.Organizations.FirstOrDefault()?.Id,
                     signup.AuthenticationMethod,
                     context,
                     cancellationToken);
@@ -717,7 +742,14 @@ public static partial class EndpointRouteBuilderExtensions
                     await transaction.CommitAsync(cancellationToken);
                 }
 
-                return Results.Redirect(redirectUrl);
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    signup.User.DefaultEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
@@ -164,6 +165,7 @@ public static class ExampleDemoEndpoints
             ExampleFgaService fgaService,
             ExampleAppDbContext db,
             IOptions<ExampleWebOptions> webOptions,
+            IOptions<SqlOSAuthServerOptions> authOptions,
             HttpContext httpContext,
             CancellationToken cancellationToken) =>
         {
@@ -198,23 +200,20 @@ public static class ExampleDemoEndpoints
                     ?? throw new InvalidOperationException("Example web client is not configured.");
 
                 await fgaService.EnsureUserAccessAsync(user.Id, org.Id, cancellationToken);
-                var tokens = await authService.CreateSessionTokensForUserAsync(
+                var result = await authService.CompleteClientAuthenticationAsync(
                     user,
                     client,
                     org.Id,
                     "demo_switch",
-                    httpContext.Request.Headers.UserAgent.ToString(),
-                    httpContext.Connection.RemoteIpAddress?.ToString(),
+                    httpContext,
                     cancellationToken);
-                return Results.Ok(new
-                {
-                    accessToken = tokens.AccessToken,
-                    refreshToken = tokens.RefreshToken,
-                    sessionId = tokens.SessionId,
-                    organizationId = tokens.OrganizationId,
-                    accessTokenExpiresAt = tokens.AccessTokenExpiresAt,
-                    refreshTokenExpiresAt = tokens.RefreshTokenExpiresAt,
-                });
+                return Results.Ok(await ExampleAuthEndpoints.ToLoginResponseAsync(
+                    result,
+                    db,
+                    authService,
+                    fgaService,
+                    authOptions.Value.DefaultAudience,
+                    cancellationToken));
             }
             catch (InvalidOperationException ex)
             {

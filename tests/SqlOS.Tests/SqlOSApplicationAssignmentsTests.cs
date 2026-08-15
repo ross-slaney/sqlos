@@ -464,9 +464,10 @@ public sealed class SqlOSApplicationAssignmentsTests
             var settings = new SqlOSSettingsService(context, options, emailSender);
             var authPageSession = new SqlOSAuthPageSessionService(context, crypto, settings);
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
-            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
-            var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPageSession, options);
-            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options);
+            var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
+            var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, mfaPolicyService: mfaPolicy);
+            var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPageSession, options, mfaPolicyService: mfaPolicy);
+            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy);
             var http = new DefaultHttpContext();
             http.Request.Scheme = "https";
             http.Request.Host = new HostString("auth.example.test");
@@ -474,6 +475,7 @@ public sealed class SqlOSApplicationAssignmentsTests
 
             await crypto.EnsureActiveSigningKeyAsync();
             await settings.EnsureDefaultAuthPageSettingsAsync();
+            await settings.EnsureDefaultMfaSettingsAsync();
             var user = await admin.CreateUserAsync(new SqlOSCreateUserRequest("Ada Lovelace", "ada@example.com", "P@ssword123!"));
             context.Set<SqlOSOrganization>().AddRange(
                 new SqlOSOrganization { Id = "org_allowed", Slug = "allowed", Name = "Allowed Org", CreatedAt = DateTime.UtcNow, IsActive = true },

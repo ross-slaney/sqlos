@@ -133,6 +133,10 @@ export class UserSwitcherComponent implements OnInit {
         if (!res.ok) throw new Error('Switch failed');
 
         const data = await res.json();
+        if (data.requiresMfa || !data.accessToken) {
+          window.alert('This demo identity requires MFA. Sign in through the normal login flow to enroll or verify an authenticator, then try again.');
+          throw new Error('Switch requires MFA');
+        }
         const decoded = jwtDecode<{ sub?: string; exp: number; org_id?: string }>(data.accessToken);
 
         this.auth.setSession({

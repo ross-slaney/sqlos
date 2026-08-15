@@ -137,15 +137,17 @@ Organization-specific MFA policy is available through the admin API and startup 
 
 ## Hosted auth behavior
 
-Hosted authorization-code login enforces MFA automatically. You do not write the challenge page.
+Hosted authorization-code login enforces MFA automatically. You do not write the challenge page. The same pre-issuance gate covers hosted password login, OIDC and SAML callbacks, all hosted signup variants, silent SSO, headless login, and device approval.
 
 After password, Email OTP, OIDC, SAML, signup, or organization selection:
 
-1. SqlOS evaluates global and organization MFA policy.
+1. SqlOS evaluates the current global, organization, role, and user MFA policy.
 2. If no second factor is required, SqlOS continues to token or code issuance.
 3. If the user has TOTP or recovery codes, SqlOS renders `Two-step verification`.
 4. If the user must enroll, SqlOS renders `Add authenticator app` with a QR code and manual setup secret.
 5. Successful MFA appends the second factor to the authentication methods.
+
+Primary authentication alone cannot issue an authorization code, AuthPage session, access token, refresh token, or device approval. Email OTP, password, invitation, and ordinary upstream OIDC or SAML do not count as MFA. Phone OTP satisfies MFA only when `PhoneOtp.SatisfiesMfa` is enabled. Explicitly trusted upstream MFA remains accepted. If policy becomes stricter between the first factor and issuance, SqlOS re-evaluates and refuses to issue.
 
 These states are intentionally separate. A normal `mfa` challenge never grants
 authenticator enrollment, even if the caller has completed the password step.

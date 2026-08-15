@@ -11,6 +11,9 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSMfaPolicyService
 {
+    internal const string UnsatisfiedPolicyMessage = "Current MFA policy is not satisfied.";
+    internal const string EvaluationUnavailableMessage = "MFA policy evaluation is unavailable.";
+
     private readonly ISqlOSAuthServerDbContext? _context;
     private readonly SqlOSSettingsService? _settingsService;
     private readonly SqlOSAuthServerOptions _options;
@@ -28,6 +31,36 @@ public sealed class SqlOSMfaPolicyService
     {
         _context = context;
         _settingsService = settingsService;
+    }
+
+    public async Task<SqlOSIssuanceAssuranceDecision> EvaluateForIssuanceAsync(
+        string userId,
+        string? organizationId,
+        string authenticationMethod,
+        string? authorizationRequestId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context == null || _settingsService == null)
+        {
+            if (_options.Mfa.Enabled)
+            {
+                throw new InvalidOperationException(EvaluationUnavailableMessage);
+            }
+
+            return SqlOSIssuanceAssuranceDecision.Satisfied(
+                SqlOSMfaPolicyEvaluation.Disabled(),
+                SqlOSIssuanceAssurance.Create(userId, organizationId, authenticationMethod, authorizationRequestId));
+        }
+
+        var evaluation = await EvaluateAsync(userId, organizationId, authenticationMethod, cancellationToken);
+        if (evaluation.RequiresMfa)
+        {
+            return SqlOSIssuanceAssuranceDecision.ChallengeRequired(evaluation);
+        }
+
+        return SqlOSIssuanceAssuranceDecision.Satisfied(
+            evaluation,
+            SqlOSIssuanceAssurance.Create(userId, organizationId, authenticationMethod, authorizationRequestId));
     }
 
     public async Task<SqlOSMfaPolicyEvaluation> EvaluateAsync(
@@ -224,4 +257,19 @@ public sealed record SqlOSMfaPolicyEvaluation(
 {
     public static SqlOSMfaPolicyEvaluation Disabled()
         => new(false, false, false, false, false, false, 0, false, Array.Empty<string>(), null);
+}
+
+public sealed record SqlOSIssuanceAssuranceDecision(
+    SqlOSMfaPolicyEvaluation Evaluation,
+    SqlOSIssuanceAssurance? Assurance)
+{
+    public bool CanIssue => Assurance != null && !Evaluation.RequiresMfa;
+
+    public static SqlOSIssuanceAssuranceDecision Satisfied(
+        SqlOSMfaPolicyEvaluation evaluation,
+        SqlOSIssuanceAssurance assurance)
+        => new(evaluation, assurance);
+
+    public static SqlOSIssuanceAssuranceDecision ChallengeRequired(SqlOSMfaPolicyEvaluation evaluation)
+        => new(evaluation, null);
 }

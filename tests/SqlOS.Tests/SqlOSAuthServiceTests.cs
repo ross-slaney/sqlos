@@ -3286,7 +3286,7 @@ public sealed class SqlOSAuthServiceTests
                 crypto,
                 new FakeOidcProviderHttpClientFactory(),
                 NullLogger<SqlOSOidcAuthService>.Instance);
-            var saml = new SqlOSSamlService(context, options, admin, crypto);
+            var saml = new SqlOSSamlService(context, options, admin, crypto, authorization);
             var oidcBrowserAuth = new SqlOSOidcBrowserAuthService(
                 context,
                 admin,

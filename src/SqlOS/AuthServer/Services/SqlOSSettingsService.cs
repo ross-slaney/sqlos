@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
@@ -139,7 +140,7 @@ public sealed class SqlOSSettingsService
             return;
         }
 
-        _context.Set<SqlOSMfaSettings>().Add(new SqlOSMfaSettings
+        var settings = new SqlOSMfaSettings
         {
             Id = "default",
             Enabled = _options.Mfa.Enabled,
@@ -152,8 +153,19 @@ public sealed class SqlOSSettingsService
             AvailableFactorsJson = JsonSerializer.Serialize(NormalizeAvailableFactors(_options.Mfa.AvailableFactorsByDefault)),
             ConfigurationOwner = SqlOSConfigurationOwners.System,
             UpdatedAt = DateTime.UtcNow
-        });
-        await _context.SaveChangesAsync(cancellationToken);
+        };
+        _context.Set<SqlOSMfaSettings>().Add(settings);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.GetBaseException() is SqlException { Number: 2601 or 2627 })
+        {
+            if (_context is DbContext dbContext)
+            {
+                dbContext.Entry(settings).State = EntityState.Detached;
+            }
+        }
     }
 
     public async Task UpsertSeededMfaSettingsAsync(CancellationToken cancellationToken = default)

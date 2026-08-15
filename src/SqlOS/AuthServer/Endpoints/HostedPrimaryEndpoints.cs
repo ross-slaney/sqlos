@@ -219,6 +219,7 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
@@ -289,13 +290,41 @@ public static partial class EndpointRouteBuilderExtensions
 
                 if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
                 {
-                    return Results.Redirect(await authorizationServerService.IssueAuthorizationRedirectAsync(
+                    var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                         authorizationRequest,
                         session.User,
-                        session.OrganizationId,
                         session.AuthenticationMethod,
                         context,
-                        cancellationToken));
+                        cancellationToken);
+                    if (completion.RequiresOrganizationSelection || completion.RequiresMfa)
+                    {
+                        if (headlessAuthService.IsBrowserUiEnabled)
+                        {
+                            return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                context,
+                                authorizationRequest.Id,
+                                completion.RequiresOrganizationSelection
+                                    ? "organization"
+                                    : completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
+                                error: null,
+                                pendingToken: completion.PendingToken,
+                                email: session.User.DefaultEmail,
+                                displayName: null,
+                                uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                                mfaToken: completion.MfaToken));
+                        }
+
+                        return await RenderHostedAuthorizationCompletionAsync(
+                            completion,
+                            authorizationRequest,
+                            session.User.DefaultEmail,
+                            authPrefix,
+                            authorizationServerService,
+                            authService,
+                            cancellationToken);
+                    }
+
+                    return Results.Redirect(completion.RedirectUrl!);
                 }
 
                 return Html(await BuildAuthPageViewModelAsync(
@@ -393,6 +422,7 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSAuthorizationServerService authorizationServerService,
             SqlOSDeviceAuthorizationService deviceAuthorizationService,
             SqlOSAuthPageSessionService authPageSessionService,
+            SqlOSAuthService authService,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -410,38 +440,61 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                SqlOSAuthorizationRequest? authorizationRequest = null;
+                SqlOSAuthorizationRequest authorizationRequest;
                 SqlOSDeviceAuthorizationResolveResult resolved;
                 if (!string.IsNullOrWhiteSpace(requestId))
                 {
                     authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(organizationId))
-                    {
-                        authorizationRequest.ResolvedOrganizationId = organizationId;
-                    }
+                }
+                else
+                {
+                    authorizationRequest = await deviceAuthorizationService.CreateOrGetAuthorizationRequestAsync(
+                        userCode,
+                        "hosted",
+                        cancellationToken);
+                }
 
-                    resolved = await deviceAuthorizationService.ApproveAsync(
+                if (!string.IsNullOrWhiteSpace(organizationId))
+                {
+                    authorizationRequest.OrganizationId = organizationId;
+                }
+
+                if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
+                {
+                    var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                         authorizationRequest,
                         session.User,
                         session.AuthenticationMethod,
                         context,
                         cancellationToken);
+                    if (completion.RequiresMfa || completion.RequiresOrganizationSelection)
+                    {
+                        return await RenderHostedAuthorizationCompletionAsync(
+                            completion,
+                            authorizationRequest,
+                            session.User.DefaultEmail,
+                            authPrefix,
+                            authorizationServerService,
+                            authService,
+                            cancellationToken);
+                    }
+
+                    session = await authPageSessionService.TryGetSessionAsync(context, cancellationToken)
+                        ?? throw new InvalidOperationException("Sign in before approving this device request.");
                 }
-                else
-                {
-                    resolved = await deviceAuthorizationService.ApproveAsync(
-                        new SqlOSDeviceAuthorizationApprovalRequest(userCode, string.IsNullOrWhiteSpace(organizationId) ? null : organizationId),
-                        session.User,
-                        session.AuthenticationMethod,
-                        context,
-                        cancellationToken);
-                }
+
+                resolved = await deviceAuthorizationService.ApproveAsync(
+                    authorizationRequest,
+                    session.User,
+                    session.AuthenticationMethod,
+                    context,
+                    cancellationToken);
 
                 if (resolved.RequiresOrganizationSelection)
                 {
                     return Html(await BuildAuthPageViewModelAsync(
                         "device-approve",
-                        authorizationRequest?.Id,
+                        authorizationRequest.Id,
                         session.User.DefaultEmail,
                         null,
                         null,
@@ -455,7 +508,7 @@ public static partial class EndpointRouteBuilderExtensions
 
                 return Html(await BuildAuthPageViewModelAsync(
                     "device-approved",
-                    authorizationRequest?.Id,
+                    authorizationRequest.Id,
                     session.User.DefaultEmail,
                     null,
                     null,

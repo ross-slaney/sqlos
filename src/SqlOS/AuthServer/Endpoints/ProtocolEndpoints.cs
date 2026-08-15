@@ -69,6 +69,85 @@ public static partial class EndpointRouteBuilderExtensions
             return Results.Ok(cryptoService.GetJwksDocument(keys));
         });
 
+        auth.MapGet("/continue", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSHeadlessAuthService headlessAuthService,
+            SqlOSAuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var requestId = context.Request.Query["request"].ToString();
+                var continuationHandle = context.Request.Cookies[SqlOSAuthorizationServerService.AuthorizationContinuationCookie];
+                if (string.IsNullOrWhiteSpace(continuationHandle))
+                {
+                    throw new InvalidOperationException("Authorization continuation is invalid or expired.");
+                }
+
+                var authorizationRequest = await authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
+                var completion = await authorizationServerService.ResolveAuthorizationContinuationAsync(
+                    authorizationRequest.Id,
+                    continuationHandle,
+                    cancellationToken);
+
+                if (headlessAuthService.IsBrowserUiEnabled && SqlOSHeadlessAuthService.IsHeadlessRequest(authorizationRequest))
+                {
+                    return Results.Redirect(headlessAuthService.BuildUiUrl(
+                        context,
+                        authorizationRequest.Id,
+                        completion.RequiresMfa
+                            ? completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa"
+                            : "organization",
+                        error: null,
+                        pendingToken: completion.PendingToken,
+                        email: authorizationRequest.LoginHintEmail,
+                        displayName: null,
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                        mfaToken: completion.MfaToken));
+                }
+
+                return await RenderHostedAuthorizationCompletionAsync(
+                    completion,
+                    authorizationRequest,
+                    authorizationRequest.LoginHintEmail,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var mapped = await MapPublicAuthErrorAsync(
+                    context,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.OAuthAuthorize,
+                    cancellationToken);
+                if (headlessAuthService.IsBrowserUiEnabled)
+                {
+                    return Results.Redirect(headlessAuthService.BuildStandaloneUiUrl(
+                        context,
+                        "login",
+                        requestId: null,
+                        email: context.Request.Query["login_hint"].ToString(),
+                        uiContext: SqlOSHeadlessAuthService.ParseUiContext(context.Request.Query["ui_context"].ToString()))
+                        + $"&error={Uri.EscapeDataString(mapped.PublicMessage)}");
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "login",
+                    null,
+                    context.Request.Query["login_hint"].ToString(),
+                    mapped.PublicMessage,
+                    null,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken);
+                return Html(page, mapped.StatusCode);
+            }
+        });
+
         auth.MapGet("/authorize", async (
             HttpContext context,
             SqlOSAuthorizationServerService authorizationServerService,
