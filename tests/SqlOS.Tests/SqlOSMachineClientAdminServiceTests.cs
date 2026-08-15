@@ -49,6 +49,41 @@ public sealed class SqlOSMachineClientAdminServiceTests
     }
 
     [TestMethod]
+    public async Task ListAsync_SkipsFgaOnlyServiceAccounts_SoTheFirstPageShowsOAuthMachineClients()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var service = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        var (organization, resource, role) = await SeedDependenciesAsync(context, admin);
+
+        context.Set<SqlOSFgaSubject>().Add(new()
+        {
+            Id = "sub_sa_bulk_0001",
+            SubjectTypeId = "service_account",
+            DisplayName = "Bulk Service Account 0001"
+        });
+        context.Set<SqlOSFgaServiceAccount>().Add(new()
+        {
+            Id = "sa_bulk_0001",
+            SubjectId = "sub_sa_bulk_0001",
+            ClientId = "aaa-bulk-only",
+            ClientSecretHash = "bulk-not-a-real-hash",
+            Description = "FGA-only account"
+        });
+        await context.SaveChangesAsync();
+
+        await service.CreateAsync(new SqlOSCreateMachineClientRequest(
+            "nightly-worker", "Nightly worker", null, "https://api.example.test",
+            ["jobs.run"], organization.Id, null, [new(resource.Id, role.Id)]));
+
+        var list = JsonSerializer.Serialize(await service.ListAsync(pageSize: 25));
+        list.Should().Contain("nightly-worker");
+        list.Should().NotContain("aaa-bulk-only");
+    }
+
+    [TestMethod]
     public async Task CodeSeed_IsIdempotentOwnershipSafeAndOrphanVisible()
     {
         await using var context = CreateContext();

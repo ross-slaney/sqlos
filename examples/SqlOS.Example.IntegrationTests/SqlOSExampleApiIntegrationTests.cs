@@ -123,7 +123,8 @@ public sealed class SqlOSExampleApiIntegrationTests
         var membershipsResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships");
         membershipsResponse.EnsureSuccessStatusCode();
         var membershipsJson = JsonDocument.Parse(await membershipsResponse.Content.ReadAsStringAsync());
-        membershipsJson.RootElement.GetProperty("totalCount").GetInt32().Should().Be(0);
+        membershipsJson.RootElement.GetProperty("data").GetArrayLength().Should().Be(0);
+        membershipsJson.RootElement.GetProperty("hasNextPage").GetBoolean().Should().BeFalse();
     }
 
     [TestMethod]
@@ -1254,14 +1255,15 @@ public sealed class SqlOSExampleApiIntegrationTests
         usersResponse.EnsureSuccessStatusCode();
         var usersJson = JsonDocument.Parse(await usersResponse.Content.ReadAsStringAsync());
         usersJson.RootElement.GetProperty("data").ValueKind.Should().Be(JsonValueKind.Array);
-        usersJson.RootElement.GetProperty("page").GetInt32().Should().Be(1);
-        usersJson.RootElement.GetProperty("totalPages").GetInt32().Should().BeGreaterThanOrEqualTo(1);
+        usersJson.RootElement.GetProperty("pageSize").GetInt32().Should().Be(5);
+        usersJson.RootElement.TryGetProperty("hasNextPage", out _).Should().BeTrue();
+        usersJson.RootElement.TryGetProperty("totalPages", out _).Should().BeFalse();
 
         var orgMembershipsResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/organizations/{organizationId}/memberships?page=1&pageSize=5");
         orgMembershipsResponse.EnsureSuccessStatusCode();
         var membershipsJson = JsonDocument.Parse(await orgMembershipsResponse.Content.ReadAsStringAsync());
         membershipsJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
-        membershipsJson.RootElement.GetProperty("totalCount").GetInt32().Should().BeGreaterThan(0);
+        membershipsJson.RootElement.GetProperty("hasNextPage").GetBoolean().Should().BeFalse();
 
         var sessionsResponse = await ExampleApiFixture.Client.GetAsync("/sqlos/admin/auth/api/sessions?page=1&pageSize=5");
         sessionsResponse.EnsureSuccessStatusCode();
@@ -1345,7 +1347,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         var disabledListResponse = await ExampleApiFixture.Client.GetAsync($"/sqlos/admin/auth/api/clients?status=disabled&search={clientSuffix}&page=1&pageSize=10");
         disabledListResponse.EnsureSuccessStatusCode();
         var disabledListJson = JsonDocument.Parse(await disabledListResponse.Content.ReadAsStringAsync());
-        disabledListJson.RootElement.GetProperty("totalCount").GetInt32().Should().BeGreaterThan(0);
+        disabledListJson.RootElement.GetProperty("data").GetArrayLength().Should().BeGreaterThan(0);
 
         var enableResponse = await ExampleApiFixture.Client.PostAsync($"/sqlos/admin/auth/api/clients/{clientId}/enable", JsonContent.Create(new { }));
         enableResponse.EnsureSuccessStatusCode();

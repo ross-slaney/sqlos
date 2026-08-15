@@ -8,6 +8,7 @@ using SqlOS.AuditLogs;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -324,39 +325,65 @@ public sealed partial class SqlOSAdminService
             || mapping.IsEnabled != request.Enabled;
     }
 
-    public async Task<object> ListOrganizationScimConnectionsAsync(string organizationId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListOrganizationScimConnectionsAsync(
+        string organizationId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSScimConnection>()
-            .AsNoTracking()
-            .Where(x => x.OrganizationId == organizationId)
-            .OrderBy(x => x.DisplayName)
-            .Select(x => new
-            {
-                x.Id,
-                x.OrganizationId,
-                x.DisplayName,
-                x.IsEnabled,
-                x.Source,
-                x.SeedKey,
-                Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
-                    x.ConfigurationOwner,
-                    x.ConfigurationSourceKey,
-                    x.LastReconciledAt,
-                    x.ConfigurationFingerprint,
-                    x.ConfigurationOrphanedAt,
-                    true),
-                x.TokenPrefix,
-                x.TokenRotatedAt,
-                x.TokenLastUsedAt,
-                x.LastSyncAt,
-                x.CreatedAt,
-                x.UpdatedAt,
-                MappingCount = x.GroupMappings.Count,
-                SyncEventCount = x.SyncEvents.Count
-            });
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSScimConnection>().AsNoTracking().Where(x => x.OrganizationId == organizationId),
+            SqlOSKeyset<SqlOSScimConnection>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "auth.scim-connections",
+            SqlOSCursorCodec.Fingerprint(organizationId),
+            cursor,
+            size,
+            cancellationToken);
+        var ids = pageResult.Data.Select(x => x.Id).ToList();
+        var mappingCounts = ids.Count == 0
+            ? []
+            : await _context.Set<SqlOSScimGroupMapping>()
+                .AsNoTracking()
+                .Where(x => ids.Contains(x.ConnectionId))
+                .GroupBy(x => x.ConnectionId)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var syncEventCounts = ids.Count == 0
+            ? []
+            : await _context.Set<SqlOSScimSyncEvent>()
+                .AsNoTracking()
+                .Where(x => ids.Contains(x.ConnectionId))
+                .GroupBy(x => x.ConnectionId)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
 
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        return pageResult.ToResponse(x => new
+        {
+            x.Id,
+            x.OrganizationId,
+            x.DisplayName,
+            x.IsEnabled,
+            x.Source,
+            x.SeedKey,
+            Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                x.ConfigurationOwner,
+                x.ConfigurationSourceKey,
+                x.LastReconciledAt,
+                x.ConfigurationFingerprint,
+                x.ConfigurationOrphanedAt,
+                true),
+            x.TokenPrefix,
+            x.TokenRotatedAt,
+            x.TokenLastUsedAt,
+            x.LastSyncAt,
+            x.CreatedAt,
+            x.UpdatedAt,
+            MappingCount = mappingCounts.GetValueOrDefault(x.Id),
+            SyncEventCount = syncEventCounts.GetValueOrDefault(x.Id)
+        });
     }
 
     public async Task<object> GetScimConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
@@ -516,34 +543,52 @@ public sealed partial class SqlOSAdminService
             return new SqlOSRotateScimTokenResult(connection.Id, token, connection.TokenPrefix!, now);
         }, cancellationToken);
 
-    public async Task<object> ListScimGroupMappingsAsync(string connectionId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListScimGroupMappingsAsync(
+        string connectionId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSScimGroupMapping>()
-            .AsNoTracking()
-            .Where(x => x.ConnectionId == connectionId)
-            .OrderBy(x => x.GroupDisplayName ?? x.GroupExternalId ?? x.GroupPattern ?? x.Id)
-            .Select(x => new
-            {
-                x.Id,
-                x.ConnectionId,
-                x.Source,
-                x.SourceKey,
-                x.MatchType,
-                x.GroupDisplayName,
-                x.GroupExternalId,
-                x.GroupPattern,
-                x.RoleKey,
-                x.ResourceId,
-                x.ResourceIdTemplate,
-                x.Description,
-                x.IsEnabled,
-                x.CreatedAt,
-                x.UpdatedAt,
-                ActiveGrantCount = x.ManagedGrants.Count(g => g.RevokedAt == null)
-            });
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSScimGroupMapping>().AsNoTracking().Where(x => x.ConnectionId == connectionId),
+            SqlOSKeyset<SqlOSScimGroupMapping>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.scim-group-mappings",
+            SqlOSCursorCodec.Fingerprint(connectionId),
+            cursor,
+            size,
+            cancellationToken);
+        var ids = pageResult.Data.Select(x => x.Id).ToList();
+        var grantCounts = ids.Count == 0
+            ? []
+            : await _context.Set<SqlOSScimManagedGrant>()
+                .AsNoTracking()
+                .Where(x => ids.Contains(x.MappingId) && x.RevokedAt == null)
+                .GroupBy(x => x.MappingId)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
 
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        return pageResult.ToResponse(x => new
+        {
+            x.Id,
+            x.ConnectionId,
+            x.Source,
+            x.SourceKey,
+            x.MatchType,
+            x.GroupDisplayName,
+            x.GroupExternalId,
+            x.GroupPattern,
+            x.RoleKey,
+            x.ResourceId,
+            x.ResourceIdTemplate,
+            x.Description,
+            x.IsEnabled,
+            x.CreatedAt,
+            x.UpdatedAt,
+            ActiveGrantCount = grantCounts.GetValueOrDefault(x.Id)
+        });
     }
 
     public async Task<SqlOSScimGroupMapping> CreateScimGroupMappingAsync(string connectionId, SqlOSCreateScimGroupMappingRequest request, CancellationToken cancellationToken = default)
@@ -618,14 +663,21 @@ public sealed partial class SqlOSAdminService
             return mapping;
         }, cancellationToken);
 
-    public async Task<object> ListScimSyncEventsAsync(string connectionId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
-    {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSScimSyncEvent>()
-            .AsNoTracking()
-            .Where(x => x.ConnectionId == connectionId)
-            .OrderByDescending(x => x.OccurredAt)
-            .Select(x => new
+    public async Task<object> ListScimSyncEventsAsync(
+        string connectionId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
+        => await PaginateByCursorAsync(
+            _context.Set<SqlOSScimSyncEvent>().AsNoTracking().Where(x => x.ConnectionId == connectionId),
+            SqlOSKeyset<SqlOSScimSyncEvent>.Create().Descending(x => x.OccurredAt).ThenDescending(x => x.Id),
+            "auth.scim-sync-events",
+            SqlOSCursorCodec.Fingerprint(connectionId),
+            cursor,
+            pageSize,
+            page,
+            x => new
             {
                 x.Id,
                 x.ConnectionId,
@@ -639,10 +691,8 @@ public sealed partial class SqlOSAdminService
                 x.DataJson,
                 x.RequestId,
                 x.OccurredAt
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
-    }
+            },
+            cancellationToken: cancellationToken);
 
     private async Task<SqlOSScimConnection> GetRequiredScimConnectionAsync(string connectionId, CancellationToken cancellationToken)
         => await _context.Set<SqlOSScimConnection>()

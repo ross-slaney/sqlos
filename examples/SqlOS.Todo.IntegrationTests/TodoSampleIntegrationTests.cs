@@ -484,15 +484,37 @@ public sealed class TodoSampleIntegrationTests
         syncedStats.RootElement.GetProperty("users").GetInt32().Should().Be(initialUsers + 1);
         syncedStats.RootElement.GetProperty("grants").GetInt32().Should().Be(initialGrants + 1);
 
-        var tree = await GetJsonAsync(client, "/sqlos/admin/fga/api/resources/tree?maxDepth=3");
-        var nodeIds = tree.RootElement.GetProperty("nodes").EnumerateArray()
+        var tree = await GetJsonAsync(client, "/sqlos/admin/fga/api/resources/tree?pageSize=25");
+        var rootIds = tree.RootElement.GetProperty("data").EnumerateArray()
             .Select(node => node.GetProperty("id").GetString())
             .ToArray();
+        rootIds.Should().Contain("root");
 
-        nodeIds.Should().Contain("root");
-        nodeIds.Should().Contain(tenantResourceId);
-        nodeIds.Should().Contain(todoResourceId);
+        var rootChildren = await GetJsonAsync(client, "/sqlos/admin/fga/api/resources/root/children?pageSize=25");
+        var tenantIds = rootChildren.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        tenantIds.Should().Contain(tenantResourceId);
+
+        var tenantChildren = await GetJsonAsync(client, $"/sqlos/admin/fga/api/resources/{Uri.EscapeDataString(tenantResourceId!)}/children?pageSize=25");
+        var todoIds = tenantChildren.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        todoIds.Should().Contain(todoResourceId);
         todoResourceId.Should().Be($"todo::{todoId:D}");
+
+        var treeIds = tree.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        treeIds.Should().NotContain(todoResourceId);
+
+        var resourceSearch = await GetJsonAsync(
+            client,
+            $"/sqlos/admin/fga/api/resources?pageSize=25&search={Uri.EscapeDataString(todoResourceId!)}");
+        var searchedIds = resourceSearch.RootElement.GetProperty("data").EnumerateArray()
+            .Select(node => node.GetProperty("id").GetString())
+            .ToArray();
+        searchedIds.Should().Contain(todoResourceId);
     }
 
     [TestMethod]

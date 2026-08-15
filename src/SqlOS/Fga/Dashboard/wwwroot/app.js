@@ -30,6 +30,22 @@
         stylesheet.href = `${basePath}/style.css`;
         root.append(stylesheet);
 
+        const extraStyles = document.createElement('style');
+        extraStyles.textContent = `
+            .stats-cached { align-self: center; font-size: 0.7rem; }
+            .remote-picker { position: relative; }
+            .remote-picker-search { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--zinc-200); border-radius: var(--radius); font-size: 0.8125rem; background: #fff; color: var(--zinc-800); }
+            .remote-picker-search:focus { outline: none; border-color: var(--amber-400); box-shadow: 0 0 0 2px var(--amber-100); }
+            .remote-picker-results { position: absolute; left: 0; right: 0; z-index: 30; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid var(--zinc-200); border-radius: var(--radius); margin-top: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+            .remote-picker-item { display: block; width: 100%; text-align: left; padding: 0.4rem 0.6rem; border: none; background: none; cursor: pointer; font-size: 0.8125rem; color: var(--zinc-800); }
+            .remote-picker-item:hover, .remote-picker-item.selected { background: var(--zinc-50); }
+            .remote-picker-more { display: block; width: 100%; padding: 0.4rem; border: none; border-top: 1px dashed var(--zinc-200); background: none; color: var(--amber-600); cursor: pointer; font-size: 0.75rem; }
+            .remote-picker-more:hover { background: var(--amber-50); }
+            .remote-picker-empty { padding: 0.6rem; color: var(--zinc-500); font-size: 0.8rem; }
+            .load-more-wrap { margin-top: 0.75rem; }
+        `;
+        root.append(extraStyles);
+
         const component = document.createElement('div');
         component.innerHTML = componentMarkup;
         root.append(component.firstElementChild);
@@ -136,50 +152,190 @@
         return map[typeId] || 'users';
     }
 
-    // Load stats
+    // Load stats at mount and after mutations only. Never block list rendering.
     async function loadStats() {
-        const stats = await api('stats');
-        $('#stats').innerHTML = Object.entries(stats).map(([k, v]) =>
-            `<div class="stat-card"><div class="label">${k}</div><div class="value">${v}</div></div>`
-        ).join('');
+        try {
+            const stats = await api('stats');
+            const cards = Object.entries(stats || {}).map(([key, value]) =>
+                `<div class="stat-card"><div class="label">${esc(key)}</div><div class="value">${esc(String(value))}</div></div>`
+            ).join('');
+            $('#stats').innerHTML = cards;
+        } catch {
+            // Stats are advisory; list views render independently.
+        }
     }
 
-    // --- Shared pagination helpers ---
+    // --- Cursor pagination (same contract as the auth dashboard) ---
 
-    function renderPagination(page, totalPages, totalCount) {
-        if (totalPages <= 1) return `<div class="pagination-info">${totalCount} item${totalCount !== 1 ? 's' : ''}</div>`;
-        let html = '<div class="pagination">';
-        html += `<button class="pg-btn" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>Prev</button>`;
-        const pages = buildPageNumbers(page, totalPages);
-        pages.forEach(p => {
-            if (p === '...') {
-                html += '<span class="pg-ellipsis">...</span>';
-            } else {
-                html += `<button class="pg-btn ${p === page ? 'pg-active' : ''}" data-page="${p}">${p}</button>`;
+    function createPager(filterKey, pageSize) {
+        return { pageSize: pageSize || 25, cursors: [null], index: 0, filterKey: filterKey || '' };
+    }
+
+    function syncPagerFilter(pager, filterKey) {
+        const nextKey = filterKey || '';
+        if (pager.filterKey !== nextKey) {
+            pager.cursors = [null];
+            pager.index = 0;
+            pager.filterKey = nextKey;
+        }
+        return pager;
+    }
+
+    function cursorQueryString(pager, extras) {
+        const params = new URLSearchParams();
+        params.set('pageSize', String(pager.pageSize || 25));
+        const cursor = pager.cursors[pager.index];
+        if (cursor) params.set('cursor', cursor);
+        if (extras) {
+            Object.entries(extras).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') {
+                    params.set(key, String(value));
+                }
+            });
+        }
+        return params.toString();
+    }
+
+    function pageItems(result) {
+        return result && Array.isArray(result.data) ? result.data : [];
+    }
+
+    function renderPagination(pager, result) {
+        const hasPrev = pager.index > 0;
+        const hasNext = !!(result && result.hasNextPage && result.nextCursor);
+        const count = pageItems(result).length;
+        const showing = count === 0 ? 'No results' : `Showing ${count}`;
+        if (!hasPrev && !hasNext && count === 0) return '';
+        return `<div class="pagination">
+            <button type="button" class="pg-btn" data-dir="prev" ${hasPrev ? '' : 'disabled'}>Previous</button>
+            <button type="button" class="pg-btn" data-dir="next" ${hasNext ? '' : 'disabled'}>Next</button>
+            <span class="pg-info">${showing}</span>
+        </div>`;
+    }
+
+    function bindPagination(containerSel, pager, result, reload) {
+        const container = $(containerSel);
+        if (!container) return;
+        container.querySelector('.pg-btn[data-dir="prev"]:not([disabled])')?.addEventListener('click', () => {
+            if (pager.index > 0) {
+                pager.index -= 1;
+                reload();
             }
         });
-        html += `<button class="pg-btn" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''}>Next</button>`;
-        html += `<span class="pg-info">${totalCount} item${totalCount !== 1 ? 's' : ''}</span>`;
-        html += '</div>';
-        return html;
-    }
-
-    function buildPageNumbers(current, total) {
-        if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
-        const pages = [];
-        pages.push(1);
-        if (current > 3) pages.push('...');
-        for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) pages.push(i);
-        if (current < total - 2) pages.push('...');
-        pages.push(total);
-        return pages;
-    }
-
-    function bindPagination(containerSel, callback) {
-        root.querySelectorAll(`${containerSel} .pg-btn:not([disabled])`).forEach(btn => {
-            btn.addEventListener('click', () => callback(parseInt(btn.dataset.page)));
+        container.querySelector('.pg-btn[data-dir="next"]:not([disabled])')?.addEventListener('click', () => {
+            if (result && result.hasNextPage && result.nextCursor) {
+                pager.cursors = pager.cursors.slice(0, pager.index + 1);
+                pager.cursors.push(result.nextCursor);
+                pager.index += 1;
+                reload();
+            }
         });
     }
+
+    function renderRemotePicker(id, placeholder) {
+        return `<div class="remote-picker" id="${esc(id)}">
+            <input type="hidden" class="remote-picker-value" value="">
+            <input type="text" class="remote-picker-search" placeholder="${esc(placeholder)}" autocomplete="off">
+            <div class="remote-picker-results" hidden></div>
+        </div>`;
+    }
+
+    function bindRemotePicker(id, config) {
+        const el = $(`#${id}`);
+        if (!el) return { getValue: () => null };
+        const searchInput = el.querySelector('.remote-picker-search');
+        const resultsEl = el.querySelector('.remote-picker-results');
+        const hidden = el.querySelector('.remote-picker-value');
+        let items = [];
+        let nextCursor = null;
+        let hasNextPage = false;
+        let requestSeq = 0;
+        let debounceTimer = null;
+        let selectedLabel = '';
+        const pageSize = config.pageSize || 25;
+
+        async function load({ append } = {}) {
+            const seq = ++requestSeq;
+            const params = new URLSearchParams();
+            params.set('pageSize', String(pageSize));
+            const query = searchInput.value.trim();
+            if (query && query !== selectedLabel) params.set('search', query);
+            if (append && nextCursor) params.set('cursor', nextCursor);
+            try {
+                const result = await api(`${config.endpoint}?${params.toString()}`);
+                if (seq !== requestSeq) return;
+                const data = pageItems(result);
+                items = append ? items.concat(data) : data;
+                nextCursor = result.nextCursor || null;
+                hasNextPage = !!result.hasNextPage;
+                renderResults();
+            } catch (err) {
+                if (seq !== requestSeq) return;
+                resultsEl.innerHTML = `<div class="remote-picker-empty">Error: ${esc(err.message)}</div>`;
+                resultsEl.hidden = false;
+            }
+        }
+
+        function renderResults() {
+            const filter = config.filter || (() => true);
+            const shown = items.filter(filter);
+            let html = shown.map(item => {
+                const value = String(config.getValue(item) ?? '');
+                const label = config.getLabel(item) || value;
+                const selected = hidden.value === value ? ' selected' : '';
+                return `<button type="button" class="remote-picker-item${selected}" data-value="${esc(value)}">${esc(label)}</button>`;
+            }).join('');
+            if (shown.length === 0) {
+                html += `<div class="remote-picker-empty">${hasNextPage ? 'No matches on this page' : 'No matches'}</div>`;
+            }
+            if (hasNextPage) html += '<button type="button" class="remote-picker-more">Load more</button>';
+            resultsEl.innerHTML = html;
+            resultsEl.hidden = false;
+            resultsEl.querySelectorAll('.remote-picker-item').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    hidden.value = btn.dataset.value;
+                    selectedLabel = btn.textContent || '';
+                    searchInput.value = selectedLabel;
+                    resultsEl.hidden = true;
+                    config.onChange?.(hidden.value);
+                });
+            });
+            resultsEl.querySelector('.remote-picker-more')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                load({ append: true });
+            });
+        }
+
+        searchInput.addEventListener('focus', () => {
+            if (items.length === 0) load({ append: false });
+            else resultsEl.hidden = false;
+        });
+        searchInput.addEventListener('input', () => {
+            hidden.value = '';
+            selectedLabel = '';
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => load({ append: false }), 300);
+        });
+
+        return {
+            getValue: () => hidden.value || null,
+            setValue(value, label) {
+                hidden.value = value || '';
+                selectedLabel = label || '';
+                searchInput.value = label || '';
+            }
+        };
+    }
+
+    root.addEventListener('click', (e) => {
+        root.querySelectorAll('.remote-picker').forEach(picker => {
+            if (!picker.contains(e.target)) {
+                const results = picker.querySelector('.remote-picker-results');
+                if (results) results.hidden = true;
+            }
+        });
+    });
 
     function renderSearchBox(id, placeholder) {
         return `<div class="search-box"><input type="text" placeholder="${placeholder}" id="${id}"></div>`;
@@ -189,53 +345,82 @@
         return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, roles, and permissions defined in startup code are reapplied on boot. Custom roles and permissions created later are preserved.</div>`;
     }
 
-    // --- Resource Tree (lazy-loading) ---
+    // --- Resource Tree (cursor-paginated roots, lazy children) ---
 
     let treeNodes = new Map();
     let treeRootIds = [];
+    let treeRootsCursor = null;
+    let treeRootsHasNext = false;
+    let treeRootsLoading = false;
 
     async function loadResources() {
-        const result = await api('resources/tree?maxDepth=2');
-        if (result.error) {
-            content.innerHTML = `<div class="card"><p style="color:red">Error loading resources: ${esc(result.error)}</p></div>`;
-            return;
-        }
-        treeNodes = new Map();
-        treeRootIds = result.rootIds || [];
-
-        const nodes = result.nodes || [];
-        nodes.forEach(n => {
-            treeNodes.set(n.id, {
-                ...n,
-                expanded: false,
-                childrenLoaded: false,
-                childrenPage: 1,
-                hasMoreChildren: false,
-                isLoading: false
-            });
-        });
-
-        nodes.forEach(n => {
-            if (n.parentId && treeNodes.has(n.parentId)) {
-                const parent = treeNodes.get(n.parentId);
-                if (!parent.childrenLoaded) {
-                    parent.childrenLoaded = true;
-                    const loadedChildCount = result.nodes.filter(c => c.parentId === n.parentId).length;
-                    parent.hasMoreChildren = loadedChildCount < parent.childCount;
-                }
+        try {
+            const result = await api('resources/tree?pageSize=25');
+            if (result.error) {
+                content.innerHTML = `<div class="card"><p style="color:red">Error loading resources: ${esc(result.error)}</p></div>`;
+                return;
             }
-        });
+            treeNodes = new Map();
+            treeRootIds = [];
+            pageItems(result).forEach(n => {
+                treeNodes.set(n.id, {
+                    ...n,
+                    expanded: false,
+                    childrenLoaded: false,
+                    childrenCursor: null,
+                    hasMoreChildren: false,
+                    isLoading: false
+                });
+                treeRootIds.push(n.id);
+            });
+            treeRootsCursor = result.nextCursor || null;
+            treeRootsHasNext = !!result.hasNextPage;
+            treeRootsLoading = false;
+            renderResourceTree();
+        } catch (err) {
+            content.innerHTML = `<div class="card"><p style="color:red">Error loading resources: ${esc(err.message)}</p></div>`;
+        }
+    }
 
-        treeRootIds.forEach(id => {
-            if (treeNodes.has(id)) treeNodes.get(id).expanded = true;
-        });
-
+    async function loadMoreRoots() {
+        if (!treeRootsHasNext || !treeRootsCursor || treeRootsLoading) return;
+        treeRootsLoading = true;
+        renderResourceTree();
+        try {
+            const result = await api(`resources/tree?pageSize=25&cursor=${encodeURIComponent(treeRootsCursor)}`);
+            pageItems(result).forEach(n => {
+                if (!treeNodes.has(n.id)) {
+                    treeNodes.set(n.id, {
+                        ...n,
+                        expanded: false,
+                        childrenLoaded: false,
+                        childrenCursor: null,
+                        hasMoreChildren: false,
+                        isLoading: false
+                    });
+                    treeRootIds.push(n.id);
+                }
+            });
+            treeRootsCursor = result.nextCursor || null;
+            treeRootsHasNext = !!result.hasNextPage;
+        } catch (err) {
+            console.error('Failed to load more roots:', err);
+        }
+        treeRootsLoading = false;
         renderResourceTree();
     }
 
     function renderResourceTree() {
         content.innerHTML = `${renderSeedNotice()}<div class="card"><h3 style="margin-bottom:1rem">Resource Hierarchy</h3><div id="tree"></div></div>`;
-        $('#tree').innerHTML = treeRootIds.map(id => renderTreeNode(id)).join('');
+        let html = treeRootIds.map(id => renderTreeNode(id)).join('');
+        if (treeRootsLoading && treeRootIds.length === 0) {
+            html += '<div class="tree-loading">Loading...</div>';
+        } else if (treeRootsLoading) {
+            html += '<div class="tree-loading">Loading more...</div>';
+        } else if (treeRootsHasNext) {
+            html += '<button type="button" class="tree-load-more" id="load-more-roots">Load more roots</button>';
+        }
+        $('#tree').innerHTML = html;
         bindTreeEvents();
     }
 
@@ -262,9 +447,7 @@
                 html += childIds.map(cid => renderTreeNode(cid)).join('');
                 if (n.isLoading) html += '<div class="tree-loading">Loading more...</div>';
                 if (n.hasMoreChildren && !n.isLoading) {
-                    const loaded = childIds.length;
-                    const remaining = n.childCount - loaded;
-                    html += `<button class="tree-load-more" data-id="${esc(n.id)}">Load more (${remaining} remaining)</button>`;
+                    html += `<button class="tree-load-more" data-id="${esc(n.id)}">Load more</button>`;
                 }
             }
             html += '</div>';
@@ -292,6 +475,7 @@
         root.querySelectorAll('.tree-load-more[data-id]').forEach(el => {
             el.addEventListener('click', () => handleLoadMore(el.dataset.id));
         });
+        $('#load-more-roots')?.addEventListener('click', () => loadMoreRoots());
         root.querySelectorAll('.grants-badge[data-resource-id]').forEach(el => {
             el.addEventListener('click', (e) => { e.stopPropagation(); showGrantsPopup(el, el.dataset.resourceId); });
         });
@@ -337,29 +521,32 @@
             closeGrantsPopup();
         });
 
-        await loadGrantsPopupPage(resourceId, 1);
+        await loadGrantsPopupPage(resourceId, createPager('', 10));
     }
 
-    async function loadGrantsPopupPage(resourceId, page) {
+    async function loadGrantsPopupPage(resourceId, pager) {
         if (!activeGrantsPopup) return;
 
         const contentEl = activeGrantsPopup.querySelector('.grants-popup-content');
         contentEl.innerHTML = '<div class="grants-popup-loading">Loading...</div>';
 
         try {
-            const result = await api(`resources/${encodeURIComponent(resourceId)}/grants?page=${page}&pageSize=10`);
+            const result = await api(`resources/${encodeURIComponent(resourceId)}/grants?${cursorQueryString(pager)}`);
 
             if (!activeGrantsPopup) return;
 
-            if (result.total === 0) {
+            const rows = pageItems(result);
+            if (rows.length === 0 && pager.index === 0) {
                 contentEl.innerHTML = '<div class="grants-popup-empty">No direct grants on this resource</div>';
+                const emptyBar = activeGrantsPopup.querySelector('.grants-popup-pagination-bar');
+                if (emptyBar) emptyBar.remove();
                 return;
             }
 
             let html = `<table class="grants-popup-table">
                 <thead><tr><th>Subject</th><th>Type</th><th>Role</th></tr></thead>
                 <tbody>`;
-            result.data.forEach(g => {
+            rows.forEach(g => {
                 html += `<tr>
                     <td><span class="grants-popup-subject" title="${esc(g.subjectId)}">${esc(g.subjectName)}</span></td>
                     <td><span class="grants-popup-subject-type">${esc(g.subjectType || '-')}</span></td>
@@ -376,23 +563,29 @@
                 const headerEl = activeGrantsPopup.querySelector('.grants-popup-header');
                 headerEl.parentNode.insertBefore(paginationEl, headerEl.nextSibling);
             }
-            const startItem = (page - 1) * result.pageSize + 1;
-            const endItem = Math.min(page * result.pageSize, result.total);
+            const hasPrev = pager.index > 0;
+            const hasNext = !!(result.hasNextPage && result.nextCursor);
             paginationEl.innerHTML = `
                 <div class="grants-popup-pagination">
-                    <button class="grants-popup-prev" ${page <= 1 ? 'disabled' : ''}>&laquo;</button>
-                    <span class="grants-popup-page-info">Page ${page} of ${result.totalPages}</span>
-                    <button class="grants-popup-next" ${page >= result.totalPages ? 'disabled' : ''}>&raquo;</button>
+                    <button type="button" class="grants-popup-prev" ${hasPrev ? '' : 'disabled'}>&laquo;</button>
+                    <button type="button" class="grants-popup-next" ${hasNext ? '' : 'disabled'}>&raquo;</button>
                 </div>
-                <span class="grants-popup-info">Showing ${startItem}-${endItem} of ${result.total}</span>
             `;
             paginationEl.querySelector('.grants-popup-prev')?.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (page > 1) loadGrantsPopupPage(resourceId, page - 1);
+                if (pager.index > 0) {
+                    pager.index -= 1;
+                    loadGrantsPopupPage(resourceId, pager);
+                }
             });
             paginationEl.querySelector('.grants-popup-next')?.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (page < result.totalPages) loadGrantsPopupPage(resourceId, page + 1);
+                if (result.hasNextPage && result.nextCursor) {
+                    pager.cursors = pager.cursors.slice(0, pager.index + 1);
+                    pager.cursors.push(result.nextCursor);
+                    pager.index += 1;
+                    loadGrantsPopupPage(resourceId, pager);
+                }
             });
         } catch (err) {
             if (activeGrantsPopup) {
@@ -471,22 +664,22 @@
             node.isLoading = true;
             renderResourceTree();
             try {
-                const result = await api(`resources/${encodeURIComponent(nodeId)}/children?page=1&pageSize=50`);
-                result.data.forEach(child => {
+                const result = await api(`resources/${encodeURIComponent(nodeId)}/children?pageSize=25`);
+                pageItems(result).forEach(child => {
                     if (!treeNodes.has(child.id)) {
                         treeNodes.set(child.id, {
                             ...child,
                             expanded: false,
                             childrenLoaded: false,
-                            childrenPage: 1,
+                            childrenCursor: null,
                             hasMoreChildren: false,
                             isLoading: false
                         });
                     }
                 });
                 node.childrenLoaded = true;
-                node.childrenPage = 1;
-                node.hasMoreChildren = result.hasNextPage;
+                node.childrenCursor = result.nextCursor || null;
+                node.hasMoreChildren = !!result.hasNextPage;
             } catch (e) {
                 console.error('Failed to load children:', e);
             }
@@ -504,22 +697,25 @@
         renderResourceTree();
 
         try {
-            const nextPage = node.childrenPage + 1;
-            const result = await api(`resources/${encodeURIComponent(nodeId)}/children?page=${nextPage}&pageSize=50`);
-            result.data.forEach(child => {
+            const cursor = node.childrenCursor;
+            const query = cursor
+                ? `pageSize=25&cursor=${encodeURIComponent(cursor)}`
+                : 'pageSize=25';
+            const result = await api(`resources/${encodeURIComponent(nodeId)}/children?${query}`);
+            pageItems(result).forEach(child => {
                 if (!treeNodes.has(child.id)) {
                     treeNodes.set(child.id, {
                         ...child,
                         expanded: false,
                         childrenLoaded: false,
-                        childrenPage: 1,
+                        childrenCursor: null,
                         hasMoreChildren: false,
                         isLoading: false
                     });
                 }
             });
-            node.childrenPage = nextPage;
-            node.hasMoreChildren = result.hasNextPage;
+            node.childrenCursor = result.nextCursor || null;
+            node.hasMoreChildren = !!result.hasNextPage;
         } catch (e) {
             console.error('Failed to load more children:', e);
         }
@@ -529,130 +725,134 @@
 
     // --- Paginated table views ---
 
-    async function loadUsers(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`users?${params}`);
+    async function loadUsers(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`users?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `<div class="card">
             ${renderSearchBox('users-search', 'Search users...')}
             <table><thead><tr><th>Display Name</th><th>Email</th><th>Active</th><th>Created</th></tr></thead>
-            <tbody>${result.data.map(u => `<tr class="subject-row" data-id="${esc(u.subjectId)}" style="cursor:pointer">
+            <tbody>${rows.map(u => `<tr class="subject-row" data-id="${esc(u.subjectId)}" style="cursor:pointer">
                 <td>${esc(u.displayName)}</td><td>${esc(u.email || '-')}</td>
                 <td>${u.isActive ? 'Yes' : 'No'}</td>
                 <td>${new Date(u.createdAt).toLocaleDateString()}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="users-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="users-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/users/' + encodeURIComponent(row.dataset.id)));
         });
-        bindPagination('#users-pagination', (p) => loadUsers(p, search));
+        bindPagination('#users-pagination', pager, result, () => loadUsers({ pager, search }));
         const searchInput = $('#users-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadUsers(1, e.target.value), 300);
+                debounce = setTimeout(() => loadUsers({ search: e.target.value }), 300);
             });
         }
     }
 
-    async function loadAgents(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`agents?${params}`);
+    async function loadAgents(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`agents?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `<div class="card">
             ${renderSearchBox('agents-search', 'Search agents...')}
             <table><thead><tr><th>Display Name</th><th>Type</th><th>Description</th><th>Created</th></tr></thead>
-            <tbody>${result.data.map(a => `<tr class="subject-row" data-id="${esc(a.subjectId)}" style="cursor:pointer">
+            <tbody>${rows.map(a => `<tr class="subject-row" data-id="${esc(a.subjectId)}" style="cursor:pointer">
                 <td>${esc(a.displayName)}</td><td>${esc(a.agentType || '-')}</td>
                 <td>${esc((a.description || '').slice(0, 50))}${(a.description || '').length > 50 ? '...' : ''}</td>
                 <td>${new Date(a.createdAt).toLocaleDateString()}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="agents-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="agents-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/agents/' + encodeURIComponent(row.dataset.id)));
         });
-        bindPagination('#agents-pagination', (p) => loadAgents(p, search));
+        bindPagination('#agents-pagination', pager, result, () => loadAgents({ pager, search }));
         const searchInput = $('#agents-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadAgents(1, e.target.value), 300);
+                debounce = setTimeout(() => loadAgents({ search: e.target.value }), 300);
             });
         }
     }
 
-    async function loadServiceAccounts(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`service-accounts?${params}`);
+    async function loadServiceAccounts(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`service-accounts?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `<div class="card">
             ${renderSearchBox('sa-search', 'Search service accounts...')}
             <table><thead><tr><th>Display Name</th><th>Client ID</th><th>Description</th><th>Created</th></tr></thead>
-            <tbody>${result.data.map(s => `<tr class="subject-row" data-id="${esc(s.subjectId)}" style="cursor:pointer">
+            <tbody>${rows.map(s => `<tr class="subject-row" data-id="${esc(s.subjectId)}" style="cursor:pointer">
                 <td>${esc(s.displayName)}</td><td><code>${esc(s.clientId)}</code></td>
                 <td>${esc((s.description || '').slice(0, 40))}${(s.description || '').length > 40 ? '...' : ''}</td>
                 <td>${new Date(s.createdAt).toLocaleDateString()}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="sa-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="sa-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/service-accounts/' + encodeURIComponent(row.dataset.id)));
         });
-        bindPagination('#sa-pagination', (p) => loadServiceAccounts(p, search));
+        bindPagination('#sa-pagination', pager, result, () => loadServiceAccounts({ pager, search }));
         const searchInput = $('#sa-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadServiceAccounts(1, e.target.value), 300);
+                debounce = setTimeout(() => loadServiceAccounts({ search: e.target.value }), 300);
             });
         }
     }
 
-    async function loadUserGroups(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`user-groups?${params}`);
+    async function loadUserGroups(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`user-groups?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `<div class="card">
             ${renderSearchBox('groups-search', 'Search groups...')}
             <table><thead><tr><th>Name</th><th>Type</th><th>Members</th><th>Created</th></tr></thead>
-            <tbody>${result.data.map(g => `<tr class="subject-row" data-id="${esc(g.subjectId)}" style="cursor:pointer">
+            <tbody>${rows.map(g => `<tr class="subject-row" data-id="${esc(g.subjectId)}" style="cursor:pointer">
                 <td>${esc(g.name)}</td><td>${esc(g.groupType || '-')}</td>
                 <td><span class="badge badge-gray">${g.memberCount}</span></td>
                 <td>${new Date(g.createdAt).toLocaleDateString()}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="groups-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="groups-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         root.querySelectorAll('.subject-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/user-groups/' + encodeURIComponent(row.dataset.id)));
         });
-        bindPagination('#groups-pagination', (p) => loadUserGroups(p, search));
+        bindPagination('#groups-pagination', pager, result, () => loadUserGroups({ pager, search }));
         const searchInput = $('#groups-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadUserGroups(1, e.target.value), 300);
+                debounce = setTimeout(() => loadUserGroups({ search: e.target.value }), 300);
             });
         }
     }
@@ -664,12 +864,17 @@
         content.innerHTML = '<div class="loading">Loading...</div>';
         const [detail, grantsResult] = await Promise.all([
             api(`subjects/${encodeURIComponent(subjectId)}`),
-            api(`subjects/${encodeURIComponent(subjectId)}/grants?page=1&pageSize=25`)
+            api(`subjects/${encodeURIComponent(subjectId)}/grants?pageSize=25`)
         ]);
-        renderSubjectDetail(detail, grantsResult, backView);
+        const grantsState = {
+            rows: pageItems(grantsResult),
+            nextCursor: grantsResult.nextCursor || null,
+            hasNextPage: !!grantsResult.hasNextPage
+        };
+        renderSubjectDetail(detail, grantsState, backView);
     }
 
-    function renderSubjectDetail(detail, grantsResult, backView) {
+    function renderSubjectDetail(detail, grantsState, backView) {
         backView = backView || 'users';
         const s = detail.subject;
         const backLabels = { 'users': 'Users', 'agents': 'Agents', 'service-accounts': 'Service Accounts', 'user-groups': 'User Groups' };
@@ -722,21 +927,21 @@
                 Role Grants
                 <button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button>
             </h3>
-            ${renderSubjectGrantsTable(grantsResult, s.id)}
+            ${renderSubjectGrantsTable(grantsState, s.id)}
         </div>`;
 
         content.innerHTML = html;
-        bindSubjectDetailEvents(s.id, backView);
+        bindSubjectDetailEvents(s.id, backView, grantsState);
     }
 
-    function renderSubjectGrantsTable(result, subjectId) {
-        if (result.data.length === 0) {
+    function renderSubjectGrantsTable(grantsState, subjectId) {
+        if (!grantsState.rows.length) {
             return '<p style="color:#888;font-size:0.9rem">No grants found for this subject.</p>';
         }
         let html = `<table><thead><tr>
             <th>Role</th><th>Resource</th><th>Effective From</th><th>Effective To</th><th>Created</th><th></th>
         </tr></thead><tbody>`;
-        result.data.forEach(g => {
+        grantsState.rows.forEach(g => {
             html += `<tr data-grant-id="${esc(g.id)}">
                 <td><span class="badge badge-blue">${esc(g.roleName)}</span></td>
                 <td>${esc(g.resourceName)}<span class="tree-id">${esc(g.resourceId)}</span></td>
@@ -747,13 +952,24 @@
             </tr>`;
         });
         html += `</tbody></table>`;
-        html += `<div id="subject-grants-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>`;
+        if (grantsState.hasNextPage && grantsState.nextCursor) {
+            html += `<div class="load-more-wrap"><button type="button" class="tree-load-more" id="subject-grants-more">Load more</button></div>`;
+        }
         return html;
     }
 
-    function bindSubjectDetailEvents(subjectId, backView) {
+    function bindSubjectDetailEvents(subjectId, backView, grantsState, bindChrome) {
         backView = backView || 'users';
-        $('#back-to-subjects').addEventListener('click', () => navigate('#/' + backView));
+        if (bindChrome !== false) {
+            $('#back-to-subjects').addEventListener('click', () => navigate('#/' + backView));
+            root.querySelectorAll('[data-group-subject]').forEach(el => {
+                el.addEventListener('click', () => navigate('#/user-groups/' + encodeURIComponent(el.dataset.groupSubject)));
+            });
+            root.querySelectorAll('.member-row').forEach(row => {
+                const route = subjectTypeToRoute(row.dataset.type);
+                row.addEventListener('click', () => navigate('#/' + route + '/' + encodeURIComponent(row.dataset.id)));
+            });
+        }
         $('#grant-role-btn')?.addEventListener('click', () => openGrantModal(subjectId, null));
         root.querySelectorAll('.revoke-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
@@ -764,43 +980,36 @@
                     const resp = await apiDelete(`grants/${grantId}`);
                     if (!resp.ok) throw new Error('Failed to revoke');
                     loadStats();
-                    const r = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=1&pageSize=25`);
-                    const card = root.querySelector('#subject-grants-pagination')?.closest('.card');
-                    if (card) card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(r, subjectId);
-                    bindSubjectDetailEvents(subjectId, backView);
+                    const r = await api(`subjects/${encodeURIComponent(subjectId)}/grants?pageSize=25`);
+                    grantsState.rows = pageItems(r);
+                    grantsState.nextCursor = r.nextCursor || null;
+                    grantsState.hasNextPage = !!r.hasNextPage;
+                    const card = root.querySelector('#grant-role-btn')?.closest('.card');
+                    if (card) card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(grantsState, subjectId);
+                    bindSubjectDetailEvents(subjectId, backView, grantsState, false);
                 } catch (err) {
                     alert('Error: ' + (err.message || 'Unknown error'));
                 }
             });
         });
-        bindPagination('#subject-grants-pagination', async (page) => {
-            const grantsResult = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=${page}&pageSize=25`);
-            const grantsCard = root.querySelector('#subject-grants-pagination').closest('.card');
-            grantsCard.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(grantsResult, subjectId);
-            bindSubjectDetailEvents(subjectId, backView);
-            bindPagination('#subject-grants-pagination', async (p) => {
-                const r = await api(`subjects/${encodeURIComponent(subjectId)}/grants?page=${p}&pageSize=25`);
-                const card = root.querySelector('#subject-grants-pagination').closest('.card');
-                card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(r, subjectId);
-                bindSubjectDetailEvents(subjectId, backView);
-            });
-        });
-        // Click group badges to navigate to that group's detail
-        root.querySelectorAll('[data-group-subject]').forEach(el => {
-            el.addEventListener('click', () => navigate('#/user-groups/' + encodeURIComponent(el.dataset.groupSubject)));
-        });
-        // Click member rows to navigate to that member's detail
-        root.querySelectorAll('.member-row').forEach(row => {
-            const route = subjectTypeToRoute(row.dataset.type);
-            row.addEventListener('click', () => navigate('#/' + route + '/' + encodeURIComponent(row.dataset.id)));
+        $('#subject-grants-more')?.addEventListener('click', async () => {
+            if (!grantsState.nextCursor) return;
+            const more = await api(`subjects/${encodeURIComponent(subjectId)}/grants?pageSize=25&cursor=${encodeURIComponent(grantsState.nextCursor)}`);
+            grantsState.rows = grantsState.rows.concat(pageItems(more));
+            grantsState.nextCursor = more.nextCursor || null;
+            grantsState.hasNextPage = !!more.hasNextPage;
+            const card = root.querySelector('#grant-role-btn')?.closest('.card');
+            if (card) card.innerHTML = '<h3 style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem">Role Grants<button class="btn-primary btn-sm" id="grant-role-btn">Grant Role</button></h3>' + renderSubjectGrantsTable(grantsState, subjectId);
+            bindSubjectDetailEvents(subjectId, backView, grantsState, false);
         });
     }
 
-    async function loadGrants(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`grants?${params}`);
+    async function loadGrants(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`grants?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
@@ -809,7 +1018,7 @@
             </div>
             <table><thead><tr>
                 <th>Subject</th><th>Role</th><th>Resource</th><th>Effective From</th><th>Effective To</th><th>Created</th><th></th>
-            </tr></thead><tbody>${result.data.map(g => `<tr>
+            </tr></thead><tbody>${rows.map(g => `<tr>
                 <td>${esc(g.subjectName)}</td><td><span class="badge badge-blue">${esc(g.roleName)}</span></td>
                 <td>${esc(g.resourceName)}</td>
                 <td>${g.effectiveFrom ? new Date(g.effectiveFrom).toLocaleDateString() : '-'}</td>
@@ -817,7 +1026,7 @@
                 <td>${new Date(g.createdAt).toLocaleDateString()}</td>
                 <td><button class="btn-danger btn-sm revoke-btn grant-revoke-btn" data-grant-id="${esc(g.id)}">Revoke</button></td>
             </tr>`).join('')}</tbody></table>
-            <div id="grants-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="grants-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         $('#add-grant-btn')?.addEventListener('click', () => openGrantModal(null, null));
@@ -830,29 +1039,30 @@
                     const resp = await apiDelete(`grants/${grantId}`);
                     if (!resp.ok) throw new Error('Failed to revoke');
                     loadStats();
-                    loadGrants(result.page, $('#grants-search')?.value ?? search);
+                    loadGrants({ pager, search: $('#grants-search')?.value ?? search });
                 } catch (err) {
                     alert('Error: ' + (err.message || 'Unknown error'));
                 }
             });
         });
-        bindPagination('#grants-pagination', (p) => loadGrants(p, search));
+        bindPagination('#grants-pagination', pager, result, () => loadGrants({ pager, search }));
         const searchInput = $('#grants-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadGrants(1, e.target.value), 300);
+                debounce = setTimeout(() => loadGrants({ search: e.target.value }), 300);
             });
         }
     }
 
-    async function loadRoles(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const result = await api(`roles?${params}`);
+    async function loadRoles(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`roles?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
@@ -861,36 +1071,35 @@
             </div>
             <table><thead><tr>
                 <th>Name</th><th>Key</th><th>Permissions</th><th>Virtual</th>
-            </tr></thead><tbody>${result.data.map(r => `<tr class="role-row" data-id="${esc(r.id)}" style="cursor:pointer">
+            </tr></thead><tbody>${rows.map(r => `<tr class="role-row" data-id="${esc(r.id)}" style="cursor:pointer">
                 <td>${esc(r.name)}</td><td><code>${esc(r.key)}</code></td>
                 <td><span class="badge badge-gray">${r.permissionCount}</span></td>
                 <td>${r.isVirtual ? 'Yes' : 'No'}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="roles-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="roles-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
         $('#create-role-btn')?.addEventListener('click', openCreateRoleModal);
         root.querySelectorAll('.role-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/roles/' + encodeURIComponent(row.dataset.id)));
         });
-        bindPagination('#roles-pagination', (p) => loadRoles(p, search));
+        bindPagination('#roles-pagination', pager, result, () => loadRoles({ pager, search }));
         const searchInput = $('#roles-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadRoles(1, e.target.value), 300);
+                debounce = setTimeout(() => loadRoles({ search: e.target.value }), 300);
             });
         }
     }
 
     async function loadRoleDetail(roleId) {
         content.innerHTML = '<div class="loading">Loading...</div>';
-        const [role, perms, allPerms] = await Promise.all([
+        const [role, perms] = await Promise.all([
             api(`roles/${encodeURIComponent(roleId)}`),
-            api(`roles/${encodeURIComponent(roleId)}/permissions`),
-            api('permissions?pageSize=500')
+            api(`roles/${encodeURIComponent(roleId)}/permissions`)
         ]);
 
         let html = `<div class="detail-header">
@@ -948,7 +1157,7 @@
                 alert('Error: ' + (e.message || 'Unknown error'));
             }
         });
-        $('#add-perm-btn').addEventListener('click', () => openAddPermissionToRoleModal(roleId, perms, allPerms.data));
+        $('#add-perm-btn').addEventListener('click', () => openAddPermissionToRoleModal(roleId, perms));
         root.querySelectorAll('.remove-perm-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const permId = btn.dataset.permId;
@@ -1012,22 +1221,13 @@
         });
     }
 
-    function openAddPermissionToRoleModal(roleId, existingPerms, allPerms) {
+    function openAddPermissionToRoleModal(roleId, existingPerms) {
         const existingIds = new Set(existingPerms.map(p => p.id));
-        const available = allPerms.filter(p => !existingIds.has(p.id));
-
-        if (available.length === 0) {
-            alert('All permissions are already assigned to this role.');
-            return;
-        }
 
         let html = `<h3>Add Permission to Role</h3>
             <div class="modal-field">
                 <label>Permission</label>
-                <select id="add-perm-select">
-                    <option value="">Select permission...</option>
-                    ${available.map(p => `<option value="${esc(p.id)}">${esc(p.key)} - ${esc(p.name)}</option>`).join('')}
-                </select>
+                ${renderRemotePicker('add-perm-picker', 'Search permissions...')}
             </div>
             <div class="modal-actions">
                 <button class="btn-secondary" id="add-perm-cancel">Cancel</button>
@@ -1037,11 +1237,19 @@
         $('#modal').innerHTML = html;
         $('#modal-overlay').hidden = false;
 
+        const picker = bindRemotePicker('add-perm-picker', {
+            endpoint: 'permissions',
+            pageSize: 25,
+            getValue: p => p.id,
+            getLabel: p => `${p.key} - ${p.name}`,
+            filter: p => !existingIds.has(p.id)
+        });
+
         $('#add-perm-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
 
         $('#add-perm-submit').addEventListener('click', async () => {
-            const permId = $('#add-perm-select').value;
+            const permId = picker.getValue();
             if (!permId) {
                 alert('Please select a permission.');
                 return;
@@ -1060,14 +1268,12 @@
         });
     }
 
-    async function loadPermissions(page, search) {
-        page = page || 1;
-        search = search || '';
-        const params = `page=${page}&pageSize=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-        const [result, resourceTypes] = await Promise.all([
-            api(`permissions?${params}`),
-            api('resource-types?pageSize=100')
-        ]);
+    async function loadPermissions(opts = {}) {
+        const search = opts.search || '';
+        const pager = opts.pager || createPager(search);
+        syncPagerFilter(pager, search);
+        const result = await api(`permissions?${cursorQueryString(pager, { search })}`);
+        const rows = pageItems(result);
 
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
@@ -1075,27 +1281,27 @@
                 <button class="btn-primary btn-sm" id="create-perm-btn">Create Permission</button>
             </div>
             <table><thead><tr><th>Key</th><th>Name</th><th>Resource Type</th></tr></thead>
-            <tbody>${result.data.map(p => `<tr>
+            <tbody>${rows.map(p => `<tr>
                 <td><code>${esc(p.key)}</code></td><td>${esc(p.name)}</td>
                 <td>${p.resourceType ? `<span class="badge badge-green">${esc(p.resourceType)}</span>` : '-'}</td>
             </tr>`).join('')}</tbody></table>
-            <div id="perms-pagination">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+            <div id="perms-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
-        $('#create-perm-btn')?.addEventListener('click', () => openCreatePermissionModal(resourceTypes.data || []));
-        bindPagination('#perms-pagination', (p) => loadPermissions(p, search));
+        $('#create-perm-btn')?.addEventListener('click', () => openCreatePermissionModal());
+        bindPagination('#perms-pagination', pager, result, () => loadPermissions({ pager, search }));
         const searchInput = $('#perm-search');
         if (searchInput) {
             searchInput.value = search;
             let debounce;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounce);
-                debounce = setTimeout(() => loadPermissions(1, e.target.value), 300);
+                debounce = setTimeout(() => loadPermissions({ search: e.target.value }), 300);
             });
         }
     }
 
-    function openCreatePermissionModal(resourceTypes) {
+    function openCreatePermissionModal() {
         let html = `<h3>Create Permission</h3>
             <div class="modal-field">
                 <label>Key</label>
@@ -1111,10 +1317,7 @@
             </div>
             <div class="modal-field">
                 <label>Resource Type (optional)</label>
-                <select id="perm-resource-type">
-                    <option value="">Any resource type</option>
-                    ${resourceTypes.map(rt => `<option value="${esc(rt.id)}">${esc(rt.name)} (${esc(rt.key)})</option>`).join('')}
-                </select>
+                ${renderRemotePicker('perm-resource-type-picker', 'Search resource types...')}
             </div>
             <div class="modal-actions">
                 <button class="btn-secondary" id="perm-cancel">Cancel</button>
@@ -1124,6 +1327,13 @@
         $('#modal').innerHTML = html;
         $('#modal-overlay').hidden = false;
 
+        const typePicker = bindRemotePicker('perm-resource-type-picker', {
+            endpoint: 'resource-types',
+            pageSize: 25,
+            getValue: rt => rt.id,
+            getLabel: rt => `${rt.name} (${rt.key})`
+        });
+
         $('#perm-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
 
@@ -1131,7 +1341,7 @@
             const key = $('#perm-key').value.trim();
             const name = $('#perm-name').value.trim();
             const desc = $('#perm-desc').value.trim();
-            const resourceTypeId = $('#perm-resource-type').value || null;
+            const resourceTypeId = typePicker.getValue();
             if (!key || !name) {
                 alert('Key and Name are required.');
                 return;
@@ -1154,15 +1364,9 @@
     // --- Access Tester ---
 
     let accessTesterMode = 'check';
+    let testerPickers = {};
 
     async function loadAccessTester() {
-        const [subjectsResult, permissionsResult, treeResult] = await Promise.all([
-            api('subjects?pageSize=100'), api('permissions?pageSize=100'), api('resources/tree?maxDepth=5')
-        ]);
-        const subjects = subjectsResult.data;
-        const permissions = permissionsResult.data;
-        const resources = treeResult.nodes;
-
         content.innerHTML = `<div class="card">
             <h3 style="margin-bottom:1rem">Access Tester</h3>
             <div class="tabs" style="margin-bottom:1rem">
@@ -1180,13 +1384,13 @@
         });
 
         if (accessTesterMode === 'check') {
-            renderCheckAccessForm(subjects, permissions, resources);
+            renderCheckAccessForm();
         } else {
-            renderListAccessForm(resources);
+            renderListAccessForm();
         }
     }
 
-    function renderCheckAccessForm(subjects, permissions, resources) {
+    function renderCheckAccessForm() {
         $('#tester-content').innerHTML = `
             <p style="color:#666;margin-bottom:1.5rem;font-size:0.9rem">
                 Test whether a subject has a specific permission on a resource. Returns a detailed trace of how the decision was made.
@@ -1194,33 +1398,45 @@
             <div class="tester-form">
                 <div class="tester-field">
                     <label>Subject</label>
-                    <select id="tester-subject">
-                        <option value="">Select a subject...</option>
-                        ${subjects.map(s => `<option value="${esc(s.id)}">${esc(s.displayName)} (${esc(s.subjectTypeId)})</option>`).join('')}
-                    </select>
+                    ${renderRemotePicker('tester-subject-picker', 'Search subjects...')}
                 </div>
                 <div class="tester-field">
                     <label>Permission</label>
-                    <select id="tester-permission">
-                        <option value="">Select a permission...</option>
-                        ${permissions.map(p => `<option value="${esc(p.key)}">${esc(p.key)} — ${esc(p.name)}</option>`).join('')}
-                    </select>
+                    ${renderRemotePicker('tester-permission-picker', 'Search permissions...')}
                 </div>
                 <div class="tester-field">
                     <label>Resource</label>
-                    <select id="tester-resource">
-                        <option value="">Select a resource...</option>
-                        ${resources.map(r => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.resourceType)})</option>`).join('')}
-                    </select>
+                    ${renderRemotePicker('tester-resource-picker', 'Search resources...')}
                 </div>
                 <button id="tester-run" class="tester-btn">Test Access</button>
             </div>
             <div id="tester-result"></div>`;
 
+        testerPickers = {
+            subject: bindRemotePicker('tester-subject-picker', {
+                endpoint: 'subjects',
+                pageSize: 25,
+                getValue: s => s.id,
+                getLabel: s => `${s.displayName} (${s.subjectTypeId})`
+            }),
+            permission: bindRemotePicker('tester-permission-picker', {
+                endpoint: 'permissions',
+                pageSize: 25,
+                getValue: p => p.key,
+                getLabel: p => `${p.key} — ${p.name}`
+            }),
+            resource: bindRemotePicker('tester-resource-picker', {
+                endpoint: 'resources',
+                pageSize: 25,
+                getValue: r => r.id,
+                getLabel: r => `${r.name} (${r.resourceType})`
+            })
+        };
+
         $('#tester-run').addEventListener('click', runAccessTest);
     }
 
-    function renderListAccessForm(resources) {
+    function renderListAccessForm() {
         $('#tester-content').innerHTML = `
             <p style="color:#666;margin-bottom:1.5rem;font-size:0.9rem">
                 List all subjects who have access to a specific resource (including inherited access).
@@ -1228,20 +1444,26 @@
             <div class="tester-form" style="grid-template-columns:1fr auto">
                 <div class="tester-field">
                     <label>Resource</label>
-                    <select id="list-resource">
-                        <option value="">Select a resource...</option>
-                        ${resources.map(r => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.resourceType)})</option>`).join('')}
-                    </select>
+                    ${renderRemotePicker('list-resource-picker', 'Search resources...')}
                 </div>
                 <button id="list-run" class="tester-btn">List Access</button>
             </div>
             <div id="list-result"></div>`;
 
+        testerPickers = {
+            listResource: bindRemotePicker('list-resource-picker', {
+                endpoint: 'resources',
+                pageSize: 25,
+                getValue: r => r.id,
+                getLabel: r => `${r.name} (${r.resourceType})`
+            })
+        };
+
         $('#list-run').addEventListener('click', runListAccess);
     }
 
     async function runListAccess() {
-        const resourceId = $('#list-resource').value;
+        const resourceId = testerPickers.listResource?.getValue();
         if (!resourceId) {
             $('#list-result').innerHTML = '<div class="tester-error">Please select a resource.</div>';
             return;
@@ -1273,9 +1495,9 @@
     }
 
     async function runAccessTest() {
-        const subjectId = $('#tester-subject').value;
-        const permissionKey = $('#tester-permission').value;
-        const resourceId = $('#tester-resource').value;
+        const subjectId = testerPickers.subject?.getValue();
+        const permissionKey = testerPickers.permission?.getValue();
+        const resourceId = testerPickers.resource?.getValue();
 
         if (!subjectId || !permissionKey || !resourceId) {
             $('#tester-result').innerHTML = '<div class="tester-error">Please select a subject, permission, and resource.</div>';
@@ -1404,39 +1626,21 @@
     }
 
     async function openGrantModal(subjectId, resourceId) {
-        const [subjectsRes, rolesRes, treeRes] = await Promise.all([
-            api('subjects?pageSize=500'),
-            api('roles?pageSize=500'),
-            api('resources/tree?maxDepth=5')
-        ]);
-        const subjects = subjectsRes.data;
-        const roles = rolesRes.data;
-        const resources = treeRes.nodes || [];
-
         let html = `<h3>${subjectId ? 'Grant Role to Subject' : resourceId ? 'Add Grant to Resource' : 'Create Grant'}</h3>`;
         if (!subjectId) {
             html += `<div class="modal-field">
                 <label>Subject</label>
-                <select id="grant-subject">
-                    <option value="">Select subject...</option>
-                    ${subjects.map(s => `<option value="${esc(s.id)}">${esc(s.displayName)} (${esc(s.subjectTypeId)})</option>`).join('')}
-                </select>
+                ${renderRemotePicker('grant-subject-picker', 'Search subjects...')}
             </div>`;
         }
         html += `<div class="modal-field">
             <label>Role</label>
-            <select id="grant-role">
-                <option value="">Select role...</option>
-                ${roles.map(r => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.key)})</option>`).join('')}
-            </select>
+            ${renderRemotePicker('grant-role-picker', 'Search roles...')}
         </div>`;
         if (!resourceId) {
             html += `<div class="modal-field">
                 <label>Resource</label>
-                <select id="grant-resource">
-                    <option value="">Select resource...</option>
-                    ${resources.map(r => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.resourceType)})</option>`).join('')}
-                </select>
+                ${renderRemotePicker('grant-resource-picker', 'Search resources...')}
             </div>`;
         }
         html += `<div class="modal-actions">
@@ -1447,13 +1651,32 @@
         $('#modal').innerHTML = html;
         $('#modal-overlay').hidden = false;
 
+        const subjectPicker = subjectId ? null : bindRemotePicker('grant-subject-picker', {
+            endpoint: 'subjects',
+            pageSize: 25,
+            getValue: s => s.id,
+            getLabel: s => `${s.displayName} (${s.subjectTypeId})`
+        });
+        const rolePicker = bindRemotePicker('grant-role-picker', {
+            endpoint: 'roles',
+            pageSize: 25,
+            getValue: r => r.id,
+            getLabel: r => `${r.name} (${r.key})`
+        });
+        const resourcePicker = resourceId ? null : bindRemotePicker('grant-resource-picker', {
+            endpoint: 'resources',
+            pageSize: 25,
+            getValue: r => r.id,
+            getLabel: r => `${r.name} (${r.resourceType})`
+        });
+
         $('#grant-cancel').addEventListener('click', closeModal);
         $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
 
         $('#grant-submit').addEventListener('click', async () => {
-            const subj = subjectId || $('#grant-subject')?.value;
-            const role = $('#grant-role').value;
-            const res = resourceId || $('#grant-resource')?.value;
+            const subj = subjectId || subjectPicker?.getValue();
+            const role = rolePicker.getValue();
+            const res = resourceId || resourcePicker?.getValue();
             if (!subj || !role || !res) {
                 alert('Please select subject, role, and resource.');
                 return;

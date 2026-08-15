@@ -8,6 +8,7 @@ using SqlOS.Configuration;
 using SqlOS.Dashboard;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Services;
+using SqlOS.Pagination;
 
 namespace SqlOS.Email.Extensions;
 
@@ -28,8 +29,9 @@ public static class EndpointRouteBuilderExtensions
             HttpContext context,
             string? search,
             bool? includeInactive,
-            int? page,
+            string? cursor,
             int? pageSize,
+            int? page,
             SqlOSEmailAdminService emailAdmin,
             IOptions<SqlOSOptions> options,
             IHostEnvironment environment,
@@ -40,7 +42,7 @@ public static class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await emailAdmin.ListTemplatesAsync(search, includeInactive ?? true, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => emailAdmin.ListTemplatesAsync(search, includeInactive ?? true, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/templates/{templateId}", async (
@@ -172,8 +174,9 @@ public static class EndpointRouteBuilderExtensions
             string? recipient,
             DateTime? from,
             DateTime? to,
-            int? page,
+            string? cursor,
             int? pageSize,
+            int? page,
             SqlOSEmailAdminService emailAdmin,
             IOptions<SqlOSOptions> options,
             IHostEnvironment environment,
@@ -184,14 +187,15 @@ public static class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await emailAdmin.ListMessagesAsync(
+            return await SqlOSCursorPagination.Ok(() => emailAdmin.ListMessagesAsync(
                 status,
                 templateKey,
                 recipient,
                 from,
                 to,
-                page,
+                cursor,
                 pageSize,
+                page,
                 cancellationToken));
         });
 

@@ -74,6 +74,7 @@ public sealed class SqlOSAuditLogIdempotencyConflictException : InvalidOperation
 }
 
 public sealed record SqlOSAuditLogListRequest(
+    string? Cursor = null,
     int? Page = null,
     int? PageSize = null,
     string? OrganizationId = null,
@@ -93,10 +94,9 @@ public sealed record SqlOSAuditLogListRequest(
 
 public sealed record SqlOSAuditLogListResult(
     IReadOnlyList<SqlOSAuditLogEvent> Data,
-    int Page,
     int PageSize,
-    int TotalCount,
-    int TotalPages);
+    string? NextCursor,
+    bool HasNextPage);
 
 public sealed record SqlOSAuditLogEvent(
     string Id,

@@ -40,7 +40,7 @@ Public browser, native, device, CIMD, and DCR clients remain public. They contin
 
 Dashboard-managed confidential clients can overlap two hashed credentials during a rotation: create the replacement, move the server-side application, and revoke the old credential. Code-owned clients resolve their secret from the host configuration or secret provider and fail startup closed when the material is unavailable.
 
-The [Clients reference](/docs/authserver/clients#confidential-server-side-clients) covers server-side web clients. For service-to-service tokens and optional SqlOS FGA grants, use [Background jobs with service accounts](/docs/guides/service-account-jobs).
+The [Clients reference](/docs/authserver/clients#confidential-server-side-clients) covers server-side web clients. For service-to-service tokens and optional SqlOS FGA grants, use [Background jobs with machine clients](/docs/guides/service-account-jobs).
 
 ## Organization deactivation closes delegated SSO setup
 

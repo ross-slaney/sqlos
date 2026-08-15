@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -112,25 +113,33 @@ public sealed class SqlOSClientAuthenticationService
         return client;
     }
 
-    public async Task<IReadOnlyList<SqlOSClientCredentialDto>> ListCredentialsAsync(
+    public async Task<object> ListCredentialsAsync(
         string clientApplicationId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
         var client = await RequireClientAsync(clientApplicationId, cancellationToken);
-        return await _context.Set<SqlOSClientCredential>()
-            .AsNoTracking()
-            .Where(x => x.ClientApplicationId == client.Id)
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new SqlOSClientCredentialDto(
-                x.Id,
-                x.DisplayName,
-                x.CreatedAt,
-                x.ExpiresAt,
-                x.RevokedAt,
-                x.LastUsedAt,
-                x.ConfigurationOwner,
-                x.ConfigurationSourceKey))
-            .ToListAsync(cancellationToken);
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSClientCredential>().AsNoTracking().Where(x => x.ClientApplicationId == client.Id),
+            SqlOSKeyset<SqlOSClientCredential>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.client-credentials",
+            SqlOSCursorCodec.Fingerprint(client.Id),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(x => new SqlOSClientCredentialDto(
+            x.Id,
+            x.DisplayName,
+            x.CreatedAt,
+            x.ExpiresAt,
+            x.RevokedAt,
+            x.LastUsedAt,
+            x.ConfigurationOwner,
+            x.ConfigurationSourceKey));
     }
 
     public async Task<SqlOSClientCredentialCreated> CreateCredentialAsync(

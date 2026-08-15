@@ -68,6 +68,13 @@
         search: "",
         includeRevoked: true
     };
+    const listFilters = {
+        organizations: "",
+        users: "",
+        memberships: "",
+        orgUsers: "",
+        orgUsersOrganizationId: ""
+    };
 
     const authViews = {
         overview: { title: "Auth Server", description: "Organizations, users, sessions, applications, and security settings." },
@@ -350,6 +357,18 @@
         }
 
         window.location.href = `${dashboardBasePath}/login`;
+    });
+
+    document.getElementById("dashboard-modal-close")?.addEventListener("click", closeCreateModal);
+    document.getElementById("dashboard-modal")?.addEventListener("click", event => {
+        if (event.target.id === "dashboard-modal") {
+            closeCreateModal();
+        }
+    });
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            closeCreateModal();
+        }
     });
 
     render();
@@ -995,6 +1014,108 @@
         return `<div class="list-stack">${items.map(item => `<div class="list-item">${formatter(item)}</div>`).join("")}</div>`;
     }
 
+    function renderIdChip(id) {
+        if (!id) {
+            return "";
+        }
+        return `<span class="id-chip" title="${esc(id)}">${esc(id)}</span>`;
+    }
+
+    function renderChip(text, tone) {
+        if (text === null || text === undefined || text === "" || text === "n/a") {
+            return "";
+        }
+        const cls = tone ? `chip chip-${tone}` : "chip";
+        return `<span class="${cls}">${esc(String(text))}</span>`;
+    }
+
+    function renderListRows(items, rowFn, emptyText) {
+        if (!items || items.length === 0) {
+            return `<div class="empty-state-block">${esc(emptyText)}</div>`;
+        }
+        return `<div class="list-rows">${items.map(rowFn).join("")}</div>`;
+    }
+
+    function renderListRow({ href, title, subtitle, metaHtml, actionsHtml }) {
+        const tag = href ? "a" : "div";
+        const hrefAttr = href ? ` href="${esc(href)}"` : "";
+        return `
+            <${tag} class="list-row${href ? " list-row-link" : ""}"${hrefAttr}>
+                <div class="list-row-main">
+                    <div class="list-row-title">${esc(title)}</div>
+                    ${subtitle ? `<div class="list-row-sub">${subtitle}</div>` : ""}
+                </div>
+                <div class="list-row-meta">${metaHtml || ""}</div>
+                ${actionsHtml || (href ? `<span class="list-row-chevron" aria-hidden="true">›</span>` : "")}
+            </${tag}>`;
+    }
+
+    function renderListToolbar({ title, searchId, searchPlaceholder, searchValue, createLabel, pagerHtml }) {
+        return `
+            <div class="list-toolbar">
+                <div class="list-toolbar-start">
+                    <h2>${esc(title)}</h2>
+                    ${searchId ? `<input type="search" class="list-search" id="${esc(searchId)}" placeholder="${esc(searchPlaceholder || "Search")}" value="${esc(searchValue || "")}" autocomplete="off">` : ""}
+                </div>
+                <div class="list-toolbar-end">
+                    ${createLabel ? `<button type="button" class="btn-primary" id="open-create-modal">${esc(createLabel)}</button>` : ""}
+                    ${pagerHtml || ""}
+                </div>
+            </div>`;
+    }
+
+    function closeCreateModal() {
+        const overlay = document.getElementById("dashboard-modal");
+        const body = document.getElementById("dashboard-modal-body");
+        if (overlay) {
+            overlay.hidden = true;
+        }
+        if (body) {
+            body.innerHTML = "";
+        }
+    }
+
+    function openCreateModal(title, bodyHtml) {
+        const overlay = document.getElementById("dashboard-modal");
+        const titleEl = document.getElementById("dashboard-modal-title");
+        const body = document.getElementById("dashboard-modal-body");
+        if (!overlay || !titleEl || !body) {
+            return;
+        }
+        titleEl.textContent = title;
+        body.innerHTML = bodyHtml;
+        overlay.hidden = false;
+        body.querySelector("input, select, textarea")?.focus();
+    }
+
+    function bindCreateModal(openButtonId, title, bodyHtml, bindFn) {
+        document.getElementById(openButtonId)?.addEventListener("click", () => {
+            openCreateModal(title, bodyHtml);
+            bindFn?.();
+        });
+    }
+
+    function bindListSearch(inputId, onSearch) {
+        const input = document.getElementById(inputId);
+        if (!input) {
+            return;
+        }
+        let debounce;
+        input.addEventListener("input", () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => onSearch(String(input.value || "").trim()), 300);
+        });
+    }
+
+    function listQuery(pagerKey, pageSize, search) {
+        const pager = resetPager(pagerKey, pageSize, search || "");
+        const params = new URLSearchParams(pagerQuery(pager));
+        if (search) {
+            params.set("search", search);
+        }
+        return { pager, query: params.toString() };
+    }
+
     function buildOidcPayload(form) {
         const claimMappingText = String(form.get("claimMapping") || "").trim();
         return {
@@ -1045,68 +1166,218 @@
     }
 
     function renderLoading(message) {
+        closeCreateModal();
         content.innerHTML = `<div class="loading">${esc(message)}</div>`;
+    }
+
+    function createPagerState(defaultPageSize, filterKey = "") {
+        return {
+            pageSize: defaultPageSize,
+            cursors: [null],
+            index: 0,
+            filterKey
+        };
     }
 
     function getPagerState(key, defaultPageSize = 10) {
         if (!pagerState.has(key)) {
-            pagerState.set(key, { page: 1, pageSize: defaultPageSize });
+            pagerState.set(key, createPagerState(defaultPageSize));
+        }
+
+        const current = pagerState.get(key);
+        if (!Array.isArray(current.cursors)) {
+            pagerState.set(key, createPagerState(defaultPageSize, current.filterKey || ""));
         }
 
         return pagerState.get(key);
     }
 
-    function setPagerPage(key, page) {
-        const current = getPagerState(key);
-        current.page = Math.max(1, page);
+    function resetPager(key, defaultPageSize, filterKey) {
+        const normalized = filterKey ?? "";
+        const current = pagerState.get(key);
+        if (current
+            && Array.isArray(current.cursors)
+            && current.filterKey === normalized
+            && current.pageSize === defaultPageSize) {
+            return current;
+        }
+
+        const pager = createPagerState(defaultPageSize, normalized);
+        pagerState.set(key, pager);
+        return pager;
     }
 
-    function renderPagination(page, totalPages, totalCount) {
-        const safePage = Math.max(1, page || 1);
-        const safeTotalPages = Math.max(1, totalPages || 1);
-        let html = '<div class="pagination">';
-        html += `<button class="pg-btn" data-page="${safePage - 1}" ${safePage <= 1 ? 'disabled' : ''}>Prev</button>`;
+    function restartPagerWindow(key) {
+        const pager = pagerState.get(key);
+        if (!pager || !Array.isArray(pager.cursors)) {
+            return;
+        }
 
-        const pages = buildPageNumbers(safePage, safeTotalPages);
-        pages.forEach(item => {
-            if (item === "...") {
-                html += '<span class="pg-ellipsis">...</span>';
-            } else {
-                html += `<button class="pg-btn ${item === safePage ? 'pg-active' : ''}" data-page="${item}">${item}</button>`;
+        pager.cursors = [null];
+        pager.index = 0;
+        pager.filterKey = "";
+    }
+
+    function pagerQuery(pager) {
+        const params = new URLSearchParams();
+        params.set("pageSize", String(pager.pageSize));
+        const cursor = pager.cursors[pager.index];
+        if (cursor) {
+            params.set("cursor", cursor);
+        }
+        return params.toString();
+    }
+
+    function renderPagination(pager, result) {
+        const atStart = !pager || pager.index === 0;
+        const hasNext = !!(result && result.hasNextPage);
+        const count = Array.isArray(result?.data) ? result.data.length : 0;
+        const showing = count === 0 ? "No results" : `Showing ${count}`;
+        return `
+            <div class="pagination">
+                <button type="button" class="pg-btn" data-pager="prev" ${atStart ? "disabled" : ""}>Previous</button>
+                <button type="button" class="pg-btn" data-pager="next" ${hasNext ? "" : "disabled"}>Next</button>
+                <span class="pg-info">${showing}</span>
+            </div>
+        `;
+    }
+
+    function bindPagination(containerSelector, pagerKey, result, reloadFn) {
+        const pager = getPagerState(pagerKey);
+        document.querySelectorAll(`${containerSelector} [data-pager="prev"]:not([disabled])`).forEach(button => {
+            button.addEventListener("click", async () => {
+                if (pager.index > 0) {
+                    pager.index -= 1;
+                    await reloadFn();
+                }
+            });
+        });
+        document.querySelectorAll(`${containerSelector} [data-pager="next"]:not([disabled])`).forEach(button => {
+            button.addEventListener("click", async () => {
+                if (!result?.hasNextPage) {
+                    return;
+                }
+                if (pager.cursors[pager.index + 1] == null && result.nextCursor) {
+                    pager.cursors.push(result.nextCursor);
+                }
+                pager.index += 1;
+                await reloadFn();
+            });
+        });
+    }
+
+    function appendListItems(containerSelector, items, formatter) {
+        const container = document.querySelector(containerSelector);
+        if (!container || !items || items.length === 0) {
+            return;
+        }
+
+        container.querySelector(".empty-state-block")?.remove();
+        let stack = container.querySelector(".list-stack");
+        if (!stack) {
+            stack = document.createElement("div");
+            stack.className = "list-stack";
+            container.insertBefore(stack, container.firstChild);
+        }
+
+        items.forEach(item => {
+            const row = document.createElement("div");
+            row.className = "list-item";
+            row.innerHTML = formatter(item);
+            stack.appendChild(row);
+        });
+    }
+
+    function renderLoadMoreButton(id, hasNextPage) {
+        return `<button type="button" class="pg-btn js-load-more" id="${esc(id)}" ${hasNextPage ? "" : "hidden"}>Load more</button>`;
+    }
+
+    function renderRemotePicker(options) {
+        return `
+            <input type="search" id="${esc(options.searchId)}" placeholder="${esc(options.searchPlaceholder)}" autocomplete="off">
+            <select name="${esc(options.selectName)}" id="${esc(options.selectId)}" ${options.required ? "required" : ""}>
+                <option value="">${esc(options.emptyLabel)}</option>
+                ${(options.items || []).map(item => `<option value="${esc(options.itemValue(item))}">${esc(options.itemLabel(item))}</option>`).join("")}
+            </select>
+            ${renderLoadMoreButton(options.loadMoreId, options.hasNextPage)}
+        `;
+    }
+
+    function bindRemotePicker(options) {
+        const searchInput = document.getElementById(options.searchId);
+        const select = document.getElementById(options.selectId);
+        const loadMore = document.getElementById(options.loadMoreId);
+        const pageSize = options.pageSize || 25;
+        let latest = options.initialResult || { data: [], hasNextPage: false, nextCursor: null };
+        let debounceId = 0;
+        let requestSeq = 0;
+
+        const fillOptions = (result, append) => {
+            latest = result;
+            const items = result.data || [];
+            if (!append && select) {
+                const emptyLabel = select.querySelector("option[value='']")?.textContent || options.emptyLabel || "Select";
+                select.innerHTML = `<option value="">${esc(emptyLabel)}</option>`;
             }
+            items.forEach(item => {
+                const option = document.createElement("option");
+                option.value = options.itemValue(item);
+                option.textContent = options.itemLabel(item);
+                select?.appendChild(option);
+            });
+            if (loadMore) {
+                loadMore.hidden = !result.hasNextPage;
+            }
+        };
+
+        searchInput?.addEventListener("input", () => {
+            const token = ++debounceId;
+            window.setTimeout(async () => {
+                if (token !== debounceId) {
+                    return;
+                }
+
+                const search = String(searchInput.value || "").trim();
+                const pager = resetPager(options.pagerKey, pageSize, search);
+                const seq = ++requestSeq;
+                try {
+                    const result = await options.fetchPage(pager, search);
+                    if (seq !== requestSeq) {
+                        return;
+                    }
+                    fillOptions(result, false);
+                } catch (error) {
+                    if (seq !== requestSeq) {
+                        return;
+                    }
+                    setFlash("error", error.message || String(error));
+                }
+            }, 250);
         });
 
-        html += `<button class="pg-btn" data-page="${safePage + 1}" ${safePage >= safeTotalPages ? 'disabled' : ''}>Next</button>`;
-        html += `<span class="pg-info">${totalCount ?? 0} item${(totalCount ?? 0) === 1 ? "" : "s"}</span>`;
-        html += '</div>';
-        return html;
-    }
-
-    function buildPageNumbers(current, total) {
-        if (total <= 7) {
-            return Array.from({ length: total }, (_, index) => index + 1);
-        }
-
-        const pages = [1];
-        if (current > 3) {
-            pages.push("...");
-        }
-
-        for (let page = Math.max(2, current - 1); page <= Math.min(total - 1, current + 1); page += 1) {
-            pages.push(page);
-        }
-
-        if (current < total - 2) {
-            pages.push("...");
-        }
-
-        pages.push(total);
-        return pages;
-    }
-
-    function bindPagination(containerSelector, callback) {
-        document.querySelectorAll(`${containerSelector} .pg-btn:not([disabled])`).forEach(button => {
-            button.addEventListener("click", () => callback(Number(button.dataset.page)));
+        loadMore?.addEventListener("click", async () => {
+            const pager = getPagerState(options.pagerKey, pageSize);
+            if (!latest.hasNextPage) {
+                return;
+            }
+            if (pager.cursors[pager.index + 1] == null && latest.nextCursor) {
+                pager.cursors.push(latest.nextCursor);
+            }
+            pager.index += 1;
+            const search = String(searchInput?.value || "").trim();
+            const seq = ++requestSeq;
+            try {
+                const result = await options.fetchPage(pager, search);
+                if (seq !== requestSeq) {
+                    return;
+                }
+                fillOptions(result, true);
+            } catch (error) {
+                if (seq !== requestSeq) {
+                    return;
+                }
+                setFlash("error", error.message || String(error));
+            }
         });
     }
 
@@ -1404,64 +1675,70 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading organizations...");
 
-        const pager = getPagerState("auth-organizations");
-        const organizations = await fetchJson(`${authApiBasePath}/organizations?page=${pager.page}&pageSize=${pager.pageSize}`);
+        const search = listFilters.organizations;
+        const { pager, query } = listQuery("auth-organizations", 10, search);
+        const organizations = await fetchJson(`${authApiBasePath}/organizations?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create Organization</h2>
-                    <p>Create a tenant and optionally set its primary login domain.</p>
-                    <form id="create-org-form">
-                        <input name="name" placeholder="Organization name" required>
-                        <input name="slug" placeholder="Slug (optional)">
-                        <input name="primaryDomain" placeholder="Primary domain (optional)">
-                        <button type="submit">Create organization</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Organizations</h2>
-                        <div id="organizations-pagination-top">${renderPagination(organizations.page, organizations.totalPages, organizations.totalCount)}</div>
-                    </div>
-                    ${renderList(
-                        organizations.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.name)}</strong>
-                                <a class="inline-link" href="${esc(organizationDetailPath(item.id, "general"))}">Open</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "ID", value: item.id },
-                                { label: "Slug", value: item.slug },
-                                { label: "Primary domain", value: item.primaryDomain || "n/a" },
-                                { label: "Memberships", value: item.membershipCount },
-                                { label: "Enabled SSO", value: item.enabledSsoConnections }
-                            ])}
-                        `,
-                        "No organizations yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Organizations",
+                    searchId: "organizations-search",
+                    searchPlaceholder: "Search name, slug, or domain",
+                    searchValue: search,
+                    createLabel: "New organization",
+                    pagerHtml: `<div id="organizations-pagination-top">${renderPagination(pager, organizations)}</div>`
+                })}
+                ${renderListRows(
+                    organizations.data,
+                    item => renderListRow({
+                        href: organizationDetailPath(item.id, "general"),
+                        title: item.name,
+                        subtitle: [item.slug, item.primaryDomain].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            renderIdChip(item.id),
+                            renderChip(item.membershipCount ? `${item.membershipCount} members` : "", "neutral"),
+                            item.enabledSsoConnections ? renderChip("SSO", "amber") : "",
+                            item.isActive === false ? renderChip("Disabled") : ""
+                        ].join("")
+                    }),
+                    "No organizations yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-org-form", async form => {
-            await fetchJson(`${authApiBasePath}/organizations`, {
-                method: "POST",
-                body: JSON.stringify({
-                    name: form.get("name"),
-                    slug: form.get("slug") || null,
-                    primaryDomain: form.get("primaryDomain") || null
-                })
+        bindCreateModal("open-create-modal", "New organization", `
+            <p>Create a tenant and optionally set its primary login domain.</p>
+            <form id="create-org-form">
+                <input name="name" placeholder="Organization name" required>
+                <input name="slug" placeholder="Slug (optional)">
+                <input name="primaryDomain" placeholder="Primary domain (optional)">
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create organization</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-org-form", async form => {
+                await fetchJson(`${authApiBasePath}/organizations`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        name: form.get("name"),
+                        slug: form.get("slug") || null,
+                        primaryDomain: form.get("primaryDomain") || null
+                    })
+                });
+                setFlash("success", "Organization created.");
             });
-            setFlash("success", "Organization created.");
         });
 
-        bindPagination("#organizations-pagination-top", async page => {
-            setPagerPage("auth-organizations", page);
-            await render();
+        bindListSearch("organizations-search", value => {
+            listFilters.organizations = value;
+            render();
         });
+        bindPagination("#organizations-pagination-top", "auth-organizations", organizations, () => render());
     }
 
     async function renderAuthOrganizationDetail(organizationId, tab) {
@@ -1470,21 +1747,32 @@
         setHeader("Auth Server", config.title, "Manage organization details, memberships, and SSO in one place.");
         renderLoading("Loading organization details...");
 
-        const usersPager = getPagerState(`auth-org-${organizationId}-users`);
-        const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`);
+        if (listFilters.orgUsersOrganizationId !== organizationId) {
+            listFilters.orgUsers = "";
+            listFilters.orgUsersOrganizationId = organizationId;
+        }
+        const orgUserSearch = listFilters.orgUsers;
+        const orgUsersList = listQuery(`auth-org-${organizationId}-users`, 10, orgUserSearch);
+        const usersPager = orgUsersList.pager;
+        const invitationsPager = getPagerState(`auth-org-${organizationId}-invitations`, 50);
         const ssoPager = getPagerState(`auth-org-${organizationId}-sso`);
         const ssoPortalPager = getPagerState(`auth-org-${organizationId}-sso-portal`);
         const scimPager = getPagerState(`auth-org-${organizationId}-scim`);
+        restartPagerWindow(`auth-org-${organizationId}-user-picker`);
+        const userPickerPager = getPagerState(`auth-org-${organizationId}-user-picker`, 25);
         const scimConnectionsRequest = scimEnabled
-            ? fetchJson(`${authApiBasePath}/organizations/${organizationId}/scim-connections?page=${scimPager.page}&pageSize=${scimPager.pageSize}`)
-            : Promise.resolve({ data: [], page: 1, totalPages: 0, totalCount: 0 });
+            ? fetchJson(`${authApiBasePath}/organizations/${organizationId}/scim-connections?${pagerQuery(scimPager)}`)
+            : Promise.resolve({ data: [], pageSize: 10, nextCursor: null, hasNextPage: false });
+        const usersRequest = tab === "users"
+            ? fetchJson(`${authApiBasePath}/users?${pagerQuery(userPickerPager)}`)
+            : Promise.resolve({ data: [], pageSize: 25, nextCursor: null, hasNextPage: false });
         const [organization, users, memberships, invitations, ssoConnections, ssoPortalSessions, scimConnections] = await Promise.all([
             fetchJson(`${authApiBasePath}/organizations/${organizationId}`),
-            fetchJson(`${authApiBasePath}/users?page=1&pageSize=500`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?page=${usersPager.page}&pageSize=${usersPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?page=${invitationsPager.page}&pageSize=${invitationsPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?page=${ssoPager.page}&pageSize=${ssoPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?page=${ssoPortalPager.page}&pageSize=${ssoPortalPager.pageSize}`),
+            usersRequest,
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships?${orgUsersList.query}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations?${pagerQuery(invitationsPager)}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-connections?${pagerQuery(ssoPager)}`),
+            fetchJson(`${authApiBasePath}/organizations/${organizationId}/sso-portal/sessions?${pagerQuery(ssoPortalPager)}`),
             scimConnectionsRequest
         ]);
         const organizationSsoConnections = Array.isArray(ssoConnections?.data) ? ssoConnections.data : [];
@@ -1492,10 +1780,12 @@
         const organizationScimConnections = Array.isArray(scimConnections?.data) ? scimConnections.data : [];
         const scimDetails = scimEnabled && tab === "scim"
             ? await Promise.all(organizationScimConnections.map(async connection => {
+                restartPagerWindow(`auth-scim-${connection.id}-mappings`);
+                restartPagerWindow(`auth-scim-${connection.id}-sync-events`);
                 const [detail, mappings, syncEvents] = await Promise.all([
                     fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}`),
-                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/mappings?page=1&pageSize=50`),
-                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/sync-events?page=1&pageSize=10`)
+                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/mappings?${pagerQuery(getPagerState(`auth-scim-${connection.id}-mappings`, 50))}`),
+                    fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(connection.id)}/sync-events?${pagerQuery(getPagerState(`auth-scim-${connection.id}-sync-events`, 10))}`)
                 ]);
                 return { connection: detail, mappings, syncEvents };
             }))
@@ -1527,7 +1817,7 @@
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">Members</div>
-                    <div class="summary-value">${esc(organization.membershipCount || memberships.totalCount || 0)}</div>
+                    <div class="summary-value">${esc(organization.membershipCount || 0)}</div>
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">Pending invites</div>
@@ -1535,14 +1825,8 @@
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">SSO connections</div>
-                    <div class="summary-value">${esc(organization.ssoConnectionCount || ssoConnections.totalCount || 0)}</div>
+                    <div class="summary-value">${esc(organization.ssoConnectionCount || 0)}</div>
                 </div>
-                ${scimEnabled ? `
-                    <div class="summary-card">
-                        <div class="summary-label">SCIM connections</div>
-                        <div class="summary-value">${esc(scimConnections.totalCount || 0)}</div>
-                    </div>
-                ` : ""}
             </div>
         `;
 
@@ -1583,7 +1867,7 @@
                             { label: "Slug", value: organization.slug },
                             { label: "Primary domain", value: organization.primaryDomain || "n/a" },
                             { label: "Active", value: organization.isActive ? "Yes" : "No" },
-                            { label: "Members", value: organization.membershipCount || memberships.totalCount || 0 },
+                            { label: "Members", value: organization.membershipCount || 0 },
                             { label: "Pending invitations", value: pendingInvitations },
                             { label: "Enabled SSO", value: organization.enabledSsoConnections ?? 0 }
                         ])}
@@ -1593,86 +1877,54 @@
             `;
         } else if (tab === "users") {
             tabContent = `
-                <div class="panel-grid">
-                    <section class="panel">
-                        <h2>Add User To Organization</h2>
-                        <p>Create or update a membership for this organization.</p>
-                        <form id="create-org-membership-form">
-                            <select name="userId" required>
-                                <option value="">Select a user</option>
-                                ${users.data.map(user => `<option value="${esc(user.id)}">${esc(user.displayName)}${user.defaultEmail ? ` (${esc(user.defaultEmail)})` : ""}</option>`).join("")}
-                            </select>
-                            <input name="role" placeholder="Role" value="member" required>
-                            <button type="submit">Add membership</button>
-                        </form>
-                    </section>
-                    <section class="panel">
-                        <h2>Organization Users</h2>
-                        <div id="organization-users-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
-                        ${renderList(
-                            memberships.data,
-                            item => `
-                                <div class="list-item-header">
-                                    <strong>${esc(item.user)}</strong>
-                                    <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open</a>
-                                </div>
-                                ${renderMetadataRows([
-                                    { label: "User ID", value: item.userId },
-                                    { label: "Email", value: item.userEmail || "n/a" },
-                                    { label: "Role", value: item.role },
-                                    { label: "Active", value: item.isActive ? "Yes" : "No" }
-                                ])}
-                            `,
-                            "No memberships yet."
-                        )}
-                    </section>
-                </div>
+                <section class="panel list-page">
+                    ${renderListToolbar({
+                        title: "Organization users",
+                        searchId: "org-users-search",
+                        searchPlaceholder: "Search name or email",
+                        searchValue: orgUserSearch,
+                        createLabel: "Add user",
+                        pagerHtml: `<div id="organization-users-pagination-top">${renderPagination(usersPager, memberships)}</div>`
+                    })}
+                    ${renderListRows(
+                        memberships.data,
+                        item => renderListRow({
+                            href: userDetailPath(item.userId, "general"),
+                            title: item.user,
+                            subtitle: item.userEmail || "",
+                            metaHtml: [
+                                renderChip(item.role, "amber"),
+                                item.isActive === false ? renderChip("Inactive") : "",
+                                renderIdChip(item.userId)
+                            ].join("")
+                        }),
+                        "No memberships yet."
+                    )}
+                </section>
             `;
         } else if (tab === "invitations") {
             tabContent = `
-                <div class="panel-grid">
-                    <section class="panel">
-                        <h2>Invite by Email</h2>
-                        <p>Send a one-time invitation link. The invited email must verify through OTP, SSO, existing login, or invite-backed signup before membership is activated.</p>
-                        <form id="create-org-invitation-form">
-                            <input name="email" type="email" placeholder="Email address" required>
-                            <input name="role" placeholder="Role" value="member" required>
-                            <input name="clientId" placeholder="Optional client id">
-                            <input name="redirectUri" placeholder="Optional redirect URI">
-                            <label class="checkbox-row"><input name="sendEmail" type="checkbox" checked> Send invitation email now</label>
-                            <button type="submit">Send invitation</button>
-                        </form>
-                        <div class="callout"><strong>Email delivery:</strong> invitations use the same SqlOS auth email sender as Email OTP.</div>
-                    </section>
-                    <section class="panel">
-                        <h2>Organization Invitations</h2>
-                        <div id="organization-invitations-pagination-top">${renderPagination(invitations.page, invitations.totalPages, invitations.totalCount)}</div>
-                        ${renderList(
-                            organizationInvitations,
-                            item => `
-                                <div class="list-item-header">
-                                    <strong>${esc(item.email)}</strong>
-                                    <span class="inline-code">${esc(item.status)}</span>
-                                </div>
-                                ${renderMetadataRows([
-                                    { label: "Invitation ID", value: item.id },
-                                    { label: "Role", value: item.role },
-                                    { label: "Expires", value: formatDate(item.expiresAt) },
-                                    { label: "Last sent", value: formatDate(item.lastSentAt) },
-                                    { label: "Accepted", value: item.acceptedAt ? formatDate(item.acceptedAt) : "No" },
-                                    { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "No" },
-                                    { label: "Delivery error", value: item.lastSendError || "n/a" }
-                                ])}
-                                <div class="form-actions">
-                                    ${item.inviteUrl ? `<button type="button" class="js-copy-invite" data-url="${esc(item.inviteUrl)}">Copy link</button>` : ""}
-                                    ${item.status === "pending" ? `<button type="button" class="js-resend-invite" data-id="${esc(item.id)}">Resend</button>` : ""}
-                                    ${item.status === "pending" ? `<button type="button" class="js-revoke-invite" data-id="${esc(item.id)}">Revoke</button>` : ""}
-                                </div>
-                            `,
-                            "No invitations yet."
-                        )}
-                    </section>
-                </div>
+                <section class="panel list-page">
+                    ${renderListToolbar({
+                        title: "Invitations",
+                        createLabel: "Invite by email",
+                        pagerHtml: `<div id="organization-invitations-pagination-top">${renderPagination(invitationsPager, invitations)}</div>`
+                    })}
+                    ${renderListRows(
+                        organizationInvitations,
+                        item => renderListRow({
+                            title: item.email,
+                            subtitle: [item.role, item.expiresAt ? `Expires ${formatDate(item.expiresAt)}` : ""].filter(Boolean).join(" · "),
+                            metaHtml: [
+                                renderChip(item.status, item.status === "pending" ? "amber" : item.status === "accepted" ? "green" : ""),
+                                item.lastSendError ? renderChip("Delivery error") : "",
+                                renderIdChip(item.id)
+                            ].join(""),
+                            actionsHtml: `<div class="form-actions">${item.inviteUrl ? `<button type="button" class="btn-secondary js-copy-invite" data-url="${esc(item.inviteUrl)}">Copy link</button>` : ""}${item.status === "pending" ? `<button type="button" class="btn-secondary js-resend-invite" data-id="${esc(item.id)}">Resend</button><button type="button" class="js-revoke-invite" data-id="${esc(item.id)}">Revoke</button>` : ""}</div>`
+                        }),
+                        "No invitations yet."
+                    )}
+                </section>
             `;
         } else if (tab === "sso") {
             tabContent = `
@@ -1733,15 +1985,14 @@
                             <h2>Current SSO State</h2>
                             ${renderMetadataRows([
                                 { label: "Primary domain", value: organization.primaryDomain || "n/a" },
-                                { label: "Total connections", value: organization.ssoConnectionCount || ssoConnections.totalCount || 0 },
-                                { label: "Enabled connections", value: organization.enabledSsoConnections ?? 0 },
-                                { label: "Portal sessions", value: ssoPortalSessions.totalCount || 0 }
+                                { label: "Total connections", value: organization.ssoConnectionCount || 0 },
+                                { label: "Enabled connections", value: organization.enabledSsoConnections ?? 0 }
                             ])}
                         </section>
                     </div>
                     <section class="panel">
                         <h2>Delegated Portal Sessions</h2>
-                        <div id="organization-sso-portal-pagination-top">${renderPagination(ssoPortalSessions.page, ssoPortalSessions.totalPages, ssoPortalSessions.totalCount)}</div>
+                        <div id="organization-sso-portal-pagination-top">${renderPagination(ssoPortalPager, ssoPortalSessions)}</div>
                         ${renderList(
                             organizationSsoPortalSessions,
                             item => `
@@ -1766,7 +2017,7 @@
                     </section>
                     <section class="panel">
                         <h2>Organization SSO Connections</h2>
-                        <div id="organization-sso-pagination-top">${renderPagination(ssoConnections.page, ssoConnections.totalPages, ssoConnections.totalCount)}</div>
+                        <div id="organization-sso-pagination-top">${renderPagination(ssoPager, ssoConnections)}</div>
                         ${renderList(
                             organizationSsoConnections,
                             item => `
@@ -1853,9 +2104,7 @@
                         <section class="panel">
                             <h2>SCIM State</h2>
                             ${renderMetadataRows([
-                                { label: "Total connections", value: scimConnections.totalCount || 0 },
                                 { label: "Enabled connections", value: organizationScimConnections.filter(item => item.isEnabled).length },
-                                { label: "Managed mappings", value: scimDetails.reduce((total, item) => total + (item.mappings?.totalCount || 0), 0) },
                                 { label: "Last sync", value: formatDate(organizationScimConnections.map(item => item.lastSyncAt).filter(Boolean).sort().at(-1)) }
                             ])}
                         </section>
@@ -1881,7 +2130,7 @@
                                 <h2>SCIM Connections</h2>
                                 <p>Use one connection per identity-provider directory. Tokens are shown only once after creation or rotation.</p>
                             </div>
-                            <div id="organization-scim-pagination-top">${renderPagination(scimConnections.page, scimConnections.totalPages, scimConnections.totalCount)}</div>
+                            <div id="organization-scim-pagination-top">${renderPagination(scimPager, scimConnections)}</div>
                         </div>
                         ${renderList(
                             scimDetails,
@@ -1944,70 +2193,25 @@
                                         <label class="checkbox-row"><input name="enabled" type="checkbox" checked> Mapping is enabled</label>
                                         <button type="submit">Create mapping</button>
                                     </form>
-                                    ${renderList(
-                                        Array.isArray(item.mappings?.data) ? item.mappings.data : [],
-                                        mapping => `
-                                            <div class="list-item-header">
-                                                <strong>${esc(mapping.roleKey)} -> ${esc(mapping.resourceId || mapping.resourceIdTemplate || "resource")}</strong>
-                                                <span class="inline-code">${mapping.isEnabled ? "enabled" : "disabled"}</span>
-                                            </div>
-                                            ${renderMetadataRows([
-                                                { label: "Mapping ID", value: mapping.id },
-                                                { label: "Match type", value: mapping.matchType },
-                                                { label: "Group display name", value: mapping.groupDisplayName || "n/a" },
-                                                { label: "Group external ID", value: mapping.groupExternalId || "n/a" },
-                                                { label: "Group pattern", value: mapping.groupPattern || "n/a" },
-                                                { label: "Managed grants", value: mapping.activeGrantCount || 0 },
-                                                { label: "Source", value: mapping.source || "dashboard" }
-                                            ])}
-                                            ${mapping.source === "seeded" ? `
-                                                <div class="callout">
-                                                    This mapping is managed by <span class="inline-code">SeedScimConnection</span>. Edit the seed definition and restart SqlOS to change or disable it.
-                                                </div>
-                                            ` : `<form id="update-scim-mapping-${esc(mapping.id)}" class="nested-form">
-                                                <select name="matchType">
-                                                    <option value="display_name" ${mapping.matchType === "display_name" ? "selected" : ""}>Display name</option>
-                                                    <option value="external_id" ${mapping.matchType === "external_id" ? "selected" : ""}>External ID</option>
-                                                    <option value="pattern" ${mapping.matchType === "pattern" ? "selected" : ""}>Pattern</option>
-                                                </select>
-                                                <input name="groupDisplayName" placeholder="Group display name" value="${esc(mapping.groupDisplayName || "")}">
-                                                <input name="groupExternalId" placeholder="Group external ID" value="${esc(mapping.groupExternalId || "")}">
-                                                <input name="groupPattern" placeholder="Regex pattern with named captures" value="${esc(mapping.groupPattern || "")}">
-                                                <input name="roleKey" placeholder="FGA role key" value="${esc(mapping.roleKey || "")}" required>
-                                                <input name="resourceId" placeholder="FGA resource ID" value="${esc(mapping.resourceId || "")}">
-                                                <input name="resourceIdTemplate" placeholder="Resource ID template" value="${esc(mapping.resourceIdTemplate || "")}">
-                                                <input name="description" placeholder="Grant description" value="${esc(mapping.description || "")}">
-                                                <label class="checkbox-row"><input name="enabled" type="checkbox" ${mapping.isEnabled ? "checked" : ""}> Mapping is enabled</label>
-                                                <button type="submit">Save mapping</button>
-                                            </form>
-                                            <div class="form-actions">
-                                                ${mapping.isEnabled
-                                                    ? `<button type="button" class="js-disable-scim-mapping" data-id="${esc(mapping.id)}">Disable</button>`
-                                                    : `<button type="button" class="js-enable-scim-mapping" data-id="${esc(mapping.id)}">Enable</button>`}
-                                            </div>`}
-                                        `,
-                                        "No mapping rules yet."
-                                    )}
+                                    <div id="scim-mappings-${esc(item.connection.id)}">
+                                        ${renderList(
+                                            Array.isArray(item.mappings?.data) ? item.mappings.data : [],
+                                            renderScimMappingItem,
+                                            "No mapping rules yet."
+                                        )}
+                                        ${renderLoadMoreButton(`scim-mappings-more-${item.connection.id}`, !!item.mappings?.hasNextPage)}
+                                    </div>
                                 </details>
                                 <details class="client-explainer">
                                     <summary>Recent sync events</summary>
-                                    ${renderList(
-                                        Array.isArray(item.syncEvents?.data) ? item.syncEvents.data : [],
-                                        event => `
-                                            <div class="list-item-header">
-                                                <strong>${esc(event.action)}</strong>
-                                                <span class="inline-code">${esc(event.result)}</span>
-                                            </div>
-                                            ${renderMetadataRows([
-                                                { label: "When", value: formatDate(event.occurredAt) },
-                                                { label: "Resource", value: `${event.resourceType || "n/a"} ${event.resourceId || ""}`.trim() },
-                                                { label: "External ID", value: event.externalId || "n/a" },
-                                                { label: "Error", value: event.error || "n/a" },
-                                                { label: "Request ID", value: event.requestId || "n/a" }
-                                            ])}
-                                        `,
-                                        "No sync events yet."
-                                    )}
+                                    <div id="scim-sync-events-${esc(item.connection.id)}">
+                                        ${renderList(
+                                            Array.isArray(item.syncEvents?.data) ? item.syncEvents.data : [],
+                                            renderScimSyncEventItem,
+                                            "No sync events yet."
+                                        )}
+                                        ${renderLoadMoreButton(`scim-sync-events-more-${item.connection.id}`, !!item.syncEvents?.hasNextPage)}
+                                    </div>
                                 </details>
                             `,
                             "No SCIM connections yet."
@@ -2060,23 +2264,81 @@
                 await render();
             });
         } else if (tab === "users") {
-            bindForm("create-org-membership-form", async form => {
-                await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                        userId: form.get("userId"),
-                        role: form.get("role") || "member"
-                    })
+            bindCreateModal("open-create-modal", "Add user", `
+                <p>Create or update a membership for this organization.</p>
+                <form id="create-org-membership-form">
+                    ${renderRemotePicker({
+                        searchId: "org-user-picker-search",
+                        selectName: "userId",
+                        selectId: "org-user-picker",
+                        loadMoreId: "org-user-picker-more",
+                        searchPlaceholder: "Search users by name or email",
+                        emptyLabel: "Select a user",
+                        required: true,
+                        items: users.data || [],
+                        hasNextPage: !!users.hasNextPage,
+                        itemValue: user => user.id,
+                        itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`
+                    })}
+                    <input name="role" placeholder="Role" value="member" required>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                        <button type="submit">Add membership</button>
+                    </div>
+                </form>
+            `, () => {
+                document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+                bindForm("create-org-membership-form", async form => {
+                    await fetchJson(`${authApiBasePath}/organizations/${organizationId}/memberships`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            userId: form.get("userId"),
+                            role: form.get("role") || "member"
+                        })
+                    });
+                    setFlash("success", "Organization membership saved.");
                 });
-                setFlash("success", "Organization membership saved.");
+                bindRemotePicker({
+                    searchId: "org-user-picker-search",
+                    selectId: "org-user-picker",
+                    loadMoreId: "org-user-picker-more",
+                    pagerKey: `auth-org-${organizationId}-user-picker`,
+                    pageSize: 25,
+                    emptyLabel: "Select a user",
+                    initialResult: users,
+                    itemValue: user => user.id,
+                    itemLabel: user => `${user.displayName}${user.defaultEmail ? ` (${user.defaultEmail})` : ""}`,
+                    fetchPage: (pager, search) => {
+                        const params = new URLSearchParams(pagerQuery(pager));
+                        if (search) {
+                            params.set("search", search);
+                        }
+                        return fetchJson(`${authApiBasePath}/users?${params.toString()}`);
+                    }
+                });
             });
-
-            bindPagination("#organization-users-pagination-top", async page => {
-                setPagerPage(`auth-org-${organizationId}-users`, page);
-                await render();
+            bindListSearch("org-users-search", value => {
+                listFilters.orgUsers = value;
+                render();
             });
+            bindPagination("#organization-users-pagination-top", `auth-org-${organizationId}-users`, memberships, () => render());
         } else if (tab === "invitations") {
-            bindForm("create-org-invitation-form", async form => {
+            bindCreateModal("open-create-modal", "Invite by email", `
+                <p>Send a one-time invitation link. The invited email must verify through OTP, SSO, existing login, or invite-backed signup before membership is activated.</p>
+                <form id="create-org-invitation-form">
+                    <input name="email" type="email" placeholder="Email address" required>
+                    <input name="role" placeholder="Role" value="member" required>
+                    <input name="clientId" placeholder="Optional client id">
+                    <input name="redirectUri" placeholder="Optional redirect URI">
+                    <label class="checkbox-row"><input name="sendEmail" type="checkbox" checked> Send invitation email now</label>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                        <button type="submit">Send invitation</button>
+                    </div>
+                </form>
+            `, () => {
+                document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+                bindForm("create-org-invitation-form", async form => {
                 await fetchJson(`${authApiBasePath}/organizations/${organizationId}/invitations`, {
                     method: "POST",
                     body: JSON.stringify({
@@ -2093,6 +2355,7 @@
                     })
                 });
                 setFlash("success", "Invitation created.");
+            });
             });
 
             document.querySelectorAll(".js-copy-invite").forEach(button => {
@@ -2134,10 +2397,7 @@
                 });
             });
 
-            bindPagination("#organization-invitations-pagination-top", async page => {
-                setPagerPage(`auth-org-${organizationId}-invitations`, page);
-                await render();
-            });
+            bindPagination("#organization-invitations-pagination-top", `auth-org-${organizationId}-invitations`, invitations, () => render());
         } else if (tab === "sso") {
             document.querySelectorAll(".js-copy-sso-portal-link").forEach(button => {
                 button.addEventListener("click", async () => {
@@ -2229,15 +2489,8 @@
                 });
             });
 
-            bindPagination("#organization-sso-pagination-top", async page => {
-                setPagerPage(`auth-org-${organizationId}-sso`, page);
-                await render();
-            });
-
-            bindPagination("#organization-sso-portal-pagination-top", async page => {
-                setPagerPage(`auth-org-${organizationId}-sso-portal`, page);
-                await render();
-            });
+            bindPagination("#organization-sso-pagination-top", `auth-org-${organizationId}-sso`, ssoConnections, () => render());
+            bindPagination("#organization-sso-portal-pagination-top", `auth-org-${organizationId}-sso-portal`, ssoPortalSessions, () => render());
         } else if (scimEnabled && tab === "scim") {
             document.querySelectorAll(".js-copy-scim-value").forEach(button => {
                 button.addEventListener("click", async () => {
@@ -2336,44 +2589,145 @@
                     setFlash("success", "SCIM mapping created.");
                 });
 
-                (Array.isArray(item.mappings?.data) ? item.mappings.data : []).forEach(mapping => {
-                    bindForm(`update-scim-mapping-${mapping.id}`, async form => {
-                        await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(mapping.id)}`, {
-                            method: "PUT",
-                            body: JSON.stringify({
-                                matchType: form.get("matchType"),
-                                groupDisplayName: form.get("groupDisplayName") || null,
-                                groupExternalId: form.get("groupExternalId") || null,
-                                groupPattern: form.get("groupPattern") || null,
-                                roleKey: form.get("roleKey"),
-                                resourceId: form.get("resourceId") || null,
-                                resourceIdTemplate: form.get("resourceIdTemplate") || null,
-                                description: form.get("description") || null,
-                                enabled: form.get("enabled") === "on"
-                            })
-                        });
-                        setFlash("success", "SCIM mapping updated.");
-                    });
-                });
+                (Array.isArray(item.mappings?.data) ? item.mappings.data : []).forEach(bindScimMappingEditor);
             });
 
-            document.querySelectorAll(".js-enable-scim-mapping, .js-disable-scim-mapping").forEach(button => {
-                button.addEventListener("click", async () => {
-                    const action = button.classList.contains("js-enable-scim-mapping") ? "enable" : "disable";
-                    await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(button.dataset.id)}/${action}`, {
-                        method: "POST",
-                        body: JSON.stringify({})
-                    });
-                    setFlash("success", `SCIM mapping ${action}d.`);
-                    await render();
-                });
-            });
+            bindPagination("#organization-scim-pagination-top", `auth-org-${organizationId}-scim`, scimConnections, () => render());
 
-            bindPagination("#organization-scim-pagination-top", async page => {
-                setPagerPage(`auth-org-${organizationId}-scim`, page);
-                await render();
+            scimDetails.forEach(item => {
+                const mappingsButton = document.getElementById(`scim-mappings-more-${item.connection.id}`);
+                mappingsButton?.addEventListener("click", async () => {
+                    const pager = getPagerState(`auth-scim-${item.connection.id}-mappings`, 50);
+                    if (!item.mappings?.hasNextPage) {
+                        return;
+                    }
+                    if (pager.cursors[pager.index + 1] == null && item.mappings.nextCursor) {
+                        pager.cursors.push(item.mappings.nextCursor);
+                    }
+                    pager.index += 1;
+                    const next = await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}/mappings?${pagerQuery(pager)}`);
+                    item.mappings = next;
+                    appendListItems(`#scim-mappings-${item.connection.id}`, next.data || [], renderScimMappingItem);
+                    (next.data || []).forEach(bindScimMappingEditor);
+                    if (!next.hasNextPage) {
+                        mappingsButton.remove();
+                    }
+                });
+
+                const eventsButton = document.getElementById(`scim-sync-events-more-${item.connection.id}`);
+                eventsButton?.addEventListener("click", async () => {
+                    const pager = getPagerState(`auth-scim-${item.connection.id}-sync-events`, 10);
+                    if (!item.syncEvents?.hasNextPage) {
+                        return;
+                    }
+                    if (pager.cursors[pager.index + 1] == null && item.syncEvents.nextCursor) {
+                        pager.cursors.push(item.syncEvents.nextCursor);
+                    }
+                    pager.index += 1;
+                    const next = await fetchJson(`${authApiBasePath}/scim-connections/${encodeURIComponent(item.connection.id)}/sync-events?${pagerQuery(pager)}`);
+                    item.syncEvents = next;
+                    appendListItems(`#scim-sync-events-${item.connection.id}`, next.data || [], renderScimSyncEventItem);
+                    if (!next.hasNextPage) {
+                        eventsButton.remove();
+                    }
+                });
             });
         }
+    }
+
+    function bindScimMappingEditor(mapping) {
+        if (!mapping || mapping.source === "seeded") {
+            return;
+        }
+
+        bindForm(`update-scim-mapping-${mapping.id}`, async form => {
+            await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(mapping.id)}`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    matchType: form.get("matchType"),
+                    groupDisplayName: form.get("groupDisplayName") || null,
+                    groupExternalId: form.get("groupExternalId") || null,
+                    groupPattern: form.get("groupPattern") || null,
+                    roleKey: form.get("roleKey"),
+                    resourceId: form.get("resourceId") || null,
+                    resourceIdTemplate: form.get("resourceIdTemplate") || null,
+                    description: form.get("description") || null,
+                    enabled: form.get("enabled") === "on"
+                })
+            });
+            setFlash("success", "SCIM mapping updated.");
+        });
+
+        document.querySelectorAll(`[data-id="${mapping.id}"].js-enable-scim-mapping, [data-id="${mapping.id}"].js-disable-scim-mapping`).forEach(button => {
+            button.addEventListener("click", async () => {
+                const action = button.classList.contains("js-enable-scim-mapping") ? "enable" : "disable";
+                await fetchJson(`${authApiBasePath}/scim-mappings/${encodeURIComponent(mapping.id)}/${action}`, {
+                    method: "POST",
+                    body: JSON.stringify({})
+                });
+                setFlash("success", `SCIM mapping ${action}d.`);
+                await render();
+            });
+        });
+    }
+
+    function renderScimMappingItem(mapping) {
+        return `
+            <div class="list-item-header">
+                <strong>${esc(mapping.roleKey)} -> ${esc(mapping.resourceId || mapping.resourceIdTemplate || "resource")}</strong>
+                <span class="inline-code">${mapping.isEnabled ? "enabled" : "disabled"}</span>
+            </div>
+            ${renderMetadataRows([
+                { label: "Mapping ID", value: mapping.id },
+                { label: "Match type", value: mapping.matchType },
+                { label: "Group display name", value: mapping.groupDisplayName || "n/a" },
+                { label: "Group external ID", value: mapping.groupExternalId || "n/a" },
+                { label: "Group pattern", value: mapping.groupPattern || "n/a" },
+                { label: "Managed grants", value: mapping.activeGrantCount || 0 },
+                { label: "Source", value: mapping.source || "dashboard" }
+            ])}
+            ${mapping.source === "seeded" ? `
+                <div class="callout">
+                    This mapping is managed by <span class="inline-code">SeedScimConnection</span>. Edit the seed definition and restart SqlOS to change or disable it.
+                </div>
+            ` : `<form id="update-scim-mapping-${esc(mapping.id)}" class="nested-form">
+                <select name="matchType">
+                    <option value="display_name" ${mapping.matchType === "display_name" ? "selected" : ""}>Display name</option>
+                    <option value="external_id" ${mapping.matchType === "external_id" ? "selected" : ""}>External ID</option>
+                    <option value="pattern" ${mapping.matchType === "pattern" ? "selected" : ""}>Pattern</option>
+                </select>
+                <input name="groupDisplayName" placeholder="Group display name" value="${esc(mapping.groupDisplayName || "")}">
+                <input name="groupExternalId" placeholder="Group external ID" value="${esc(mapping.groupExternalId || "")}">
+                <input name="groupPattern" placeholder="Regex pattern with named captures" value="${esc(mapping.groupPattern || "")}">
+                <input name="roleKey" placeholder="FGA role key" value="${esc(mapping.roleKey || "")}" required>
+                <input name="resourceId" placeholder="FGA resource ID" value="${esc(mapping.resourceId || "")}">
+                <input name="resourceIdTemplate" placeholder="Resource ID template" value="${esc(mapping.resourceIdTemplate || "")}">
+                <input name="description" placeholder="Grant description" value="${esc(mapping.description || "")}">
+                <label class="checkbox-row"><input name="enabled" type="checkbox" ${mapping.isEnabled ? "checked" : ""}> Mapping is enabled</label>
+                <button type="submit">Save mapping</button>
+            </form>
+            <div class="form-actions">
+                ${mapping.isEnabled
+                    ? `<button type="button" class="js-disable-scim-mapping" data-id="${esc(mapping.id)}">Disable</button>`
+                    : `<button type="button" class="js-enable-scim-mapping" data-id="${esc(mapping.id)}">Enable</button>`}
+            </div>`}
+        `;
+    }
+
+    function renderScimSyncEventItem(event) {
+        return `
+            <div class="list-item-header">
+                <strong>${esc(event.action)}</strong>
+                <span class="inline-code">${esc(event.result)}</span>
+            </div>
+            ${renderMetadataRows([
+                { label: "When", value: formatDate(event.occurredAt) },
+                { label: "Resource", value: `${event.resourceType || "n/a"} ${event.resourceId || ""}`.trim() },
+                { label: "External ID", value: event.externalId || "n/a" },
+                { label: "Error", value: event.error || "n/a" },
+                { label: "Request ID", value: event.requestId || "n/a" }
+            ])}
+        `;
     }
 
     function renderTabLink(tab, label, activeTab, organizationId) {
@@ -2386,63 +2740,69 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading users...");
 
-        const pager = getPagerState("auth-users");
-        const users = await fetchJson(`${authApiBasePath}/users?page=${pager.page}&pageSize=${pager.pageSize}`);
+        const search = listFilters.users;
+        const { pager, query } = listQuery("auth-users", 10, search);
+        const users = await fetchJson(`${authApiBasePath}/users?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create User</h2>
-                    <p>Create a user and optionally assign a password credential immediately.</p>
-                    <form id="create-user-form">
-                        <input name="displayName" placeholder="Display name" required>
-                        <input name="email" placeholder="Email" required>
-                        <input name="password" type="password" placeholder="Password (optional)">
-                        <button type="submit">Create user</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Users</h2>
-                        <div id="users-pagination-top">${renderPagination(users.page, users.totalPages, users.totalCount)}</div>
-                    </div>
-                    ${renderList(
-                        users.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.displayName)}</strong>
-                                <a class="inline-link" href="${esc(userDetailPath(item.id, "general"))}">Open</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "ID", value: item.id },
-                                { label: "Email", value: item.defaultEmail || "n/a" },
-                                { label: "Memberships", value: item.membershipCount ?? 0 },
-                                { label: "Created", value: formatDate(item.createdAt) }
-                            ])}
-                        `,
-                        "No users yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Users",
+                    searchId: "users-search",
+                    searchPlaceholder: "Search name or email",
+                    searchValue: search,
+                    createLabel: "New user",
+                    pagerHtml: `<div id="users-pagination-top">${renderPagination(pager, users)}</div>`
+                })}
+                ${renderListRows(
+                    users.data,
+                    item => renderListRow({
+                        href: userDetailPath(item.id, "general"),
+                        title: item.displayName,
+                        subtitle: item.defaultEmail || "",
+                        metaHtml: [
+                            renderIdChip(item.id),
+                            renderChip(item.membershipCount ? `${item.membershipCount} orgs` : ""),
+                            item.isActive === false ? renderChip("Disabled") : ""
+                        ].join("")
+                    }),
+                    "No users yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-user-form", async form => {
-            await fetchJson(`${authApiBasePath}/users`, {
-                method: "POST",
-                body: JSON.stringify({
-                    displayName: form.get("displayName"),
-                    email: form.get("email"),
-                    password: form.get("password") || null
-                })
+        bindCreateModal("open-create-modal", "New user", `
+            <p>Create a user and optionally assign a password credential immediately.</p>
+            <form id="create-user-form">
+                <input name="displayName" placeholder="Display name" required>
+                <input name="email" placeholder="Email" required>
+                <input name="password" type="password" placeholder="Password (optional)">
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create user</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-user-form", async form => {
+                await fetchJson(`${authApiBasePath}/users`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        displayName: form.get("displayName"),
+                        email: form.get("email"),
+                        password: form.get("password") || null
+                    })
+                });
+                setFlash("success", "User created.");
             });
-            setFlash("success", "User created.");
         });
 
-        bindPagination("#users-pagination-top", async page => {
-            setPagerPage("auth-users", page);
-            await render();
+        bindListSearch("users-search", value => {
+            listFilters.users = value;
+            render();
         });
+        bindPagination("#users-pagination-top", "auth-users", users, () => render());
     }
 
     async function renderAuthUserDetail(userId, tab) {
@@ -2454,8 +2814,8 @@
         const sessionsPager = getPagerState(`auth-user-${userId}-sessions`);
         const [user, memberships, sessions] = await Promise.all([
             fetchJson(`${authApiBasePath}/users/${userId}`),
-            fetchJson(`${authApiBasePath}/users/${userId}/memberships?page=${membershipsPager.page}&pageSize=${membershipsPager.pageSize}`),
-            fetchJson(`${authApiBasePath}/users/${userId}/sessions?page=${sessionsPager.page}&pageSize=${sessionsPager.pageSize}`)
+            fetchJson(`${authApiBasePath}/users/${userId}/memberships?${pagerQuery(membershipsPager)}`),
+            fetchJson(`${authApiBasePath}/users/${userId}/sessions?${pagerQuery(sessionsPager)}`)
         ]);
 
         const summaryHtml = `
@@ -2466,11 +2826,11 @@
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">Organizations</div>
-                    <div class="summary-value">${esc(user.membershipCount || memberships.totalCount || 0)}</div>
+                    <div class="summary-value">${esc(user.membershipCount || 0)}</div>
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">Active sessions</div>
-                    <div class="summary-value">${esc(user.sessionCount || sessions.totalCount || 0)}</div>
+                    <div class="summary-value">${esc(user.sessionCount || 0)}</div>
                 </div>
                 <div class="summary-card">
                     <div class="summary-label">External identities</div>
@@ -2511,8 +2871,8 @@
                     <section class="panel">
                         <h2>Identity Summary</h2>
                         ${renderMetadataRows([
-                            { label: "Organizations", value: user.membershipCount || memberships.totalCount || 0 },
-                            { label: "Active sessions", value: user.sessionCount || sessions.totalCount || 0 },
+                            { label: "Organizations", value: user.membershipCount || 0 },
+                            { label: "Active sessions", value: user.sessionCount || 0 },
                             { label: "External identities", value: user.externalIdentityCount || 0 }
                         ])}
                     </section>
@@ -2532,7 +2892,7 @@
                 <section class="panel">
                     <div class="panel-actions">
                         <h2>Organization Memberships</h2>
-                        <div id="user-memberships-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
+                        <div id="user-memberships-pagination-top">${renderPagination(membershipsPager, memberships)}</div>
                     </div>
                     ${renderList(
                         memberships.data,
@@ -2557,7 +2917,7 @@
                 <section class="panel">
                     <div class="panel-actions">
                         <h2>Sessions</h2>
-                        <div id="user-sessions-pagination-top">${renderPagination(sessions.page, sessions.totalPages, sessions.totalCount)}</div>
+                        <div id="user-sessions-pagination-top">${renderPagination(sessionsPager, sessions)}</div>
                     </div>
                     ${renderList(
                         sessions.data,
@@ -2618,15 +2978,9 @@
                 await render();
             });
         } else if (tab === "organizations") {
-            bindPagination("#user-memberships-pagination-top", async page => {
-                setPagerPage(`auth-user-${userId}-memberships`, page);
-                await render();
-            });
+            bindPagination("#user-memberships-pagination-top", `auth-user-${userId}-memberships`, memberships, () => render());
         } else if (tab === "sessions") {
-            bindPagination("#user-sessions-pagination-top", async page => {
-                setPagerPage(`auth-user-${userId}-sessions`, page);
-                await render();
-            });
+            bindPagination("#user-sessions-pagination-top", `auth-user-${userId}-sessions`, sessions, () => render());
             document.querySelectorAll(".js-revoke-user-session").forEach(button => {
                 button.addEventListener("click", async () => {
                     try {
@@ -2654,63 +3008,68 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading memberships...");
 
-        const pager = getPagerState("auth-memberships");
-        const memberships = await fetchJson(`${authApiBasePath}/memberships?page=${pager.page}&pageSize=${pager.pageSize}`);
+        const search = listFilters.memberships;
+        const { pager, query } = listQuery("auth-memberships", 10, search);
+        const memberships = await fetchJson(`${authApiBasePath}/memberships?${query}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <div class="panel-grid">
-                <section class="panel">
-                    <h2>Create Membership</h2>
-                    <p>Use IDs from the Organizations and Users pages.</p>
-                    <form id="create-membership-form">
-                        <input name="organizationId" placeholder="Organization ID" required>
-                        <input name="userId" placeholder="User ID" required>
-                        <input name="role" placeholder="Role" value="member" required>
-                        <button type="submit">Create membership</button>
-                    </form>
-                </section>
-                <section class="panel">
-                    <div class="panel-actions">
-                        <h2>Memberships</h2>
-                        <div id="memberships-pagination-top">${renderPagination(memberships.page, memberships.totalPages, memberships.totalCount)}</div>
-                    </div>
-                    ${renderList(
-                        memberships.data,
-                        item => `
-                            <div class="list-item-header">
-                                <strong>${esc(item.organization)}</strong>
-                                <a class="inline-link" href="${esc(userDetailPath(item.userId, "general"))}">Open user</a>
-                            </div>
-                            ${renderMetadataRows([
-                                { label: "Organization ID", value: item.organizationId },
-                                { label: "User", value: `${item.user} (${item.userEmail || "no email"})` },
-                                { label: "User ID", value: item.userId },
-                                { label: "Role", value: item.role }
-                            ])}
-                        `,
-                        "No memberships yet."
-                    )}
-                </section>
-            </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Memberships",
+                    searchId: "memberships-search",
+                    searchPlaceholder: "Search organization, user, or email",
+                    searchValue: search,
+                    createLabel: "New membership",
+                    pagerHtml: `<div id="memberships-pagination-top">${renderPagination(pager, memberships)}</div>`
+                })}
+                ${renderListRows(
+                    memberships.data,
+                    item => renderListRow({
+                        href: userDetailPath(item.userId, "general"),
+                        title: item.user,
+                        subtitle: [item.organization, item.userEmail].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            renderChip(item.role, "amber"),
+                            renderIdChip(item.organizationId)
+                        ].join("")
+                    }),
+                    "No memberships yet."
+                )}
+            </section>
         `;
 
-        bindForm("create-membership-form", async form => {
-            await fetchJson(`${authApiBasePath}/memberships`, {
-                method: "POST",
-                body: JSON.stringify({
-                    organizationId: form.get("organizationId"),
-                    userId: form.get("userId"),
-                    role: form.get("role") || "member"
-                })
+        bindCreateModal("open-create-modal", "New membership", `
+            <p>Use IDs from the Organizations and Users pages.</p>
+            <form id="create-membership-form">
+                <input name="organizationId" placeholder="Organization ID" required>
+                <input name="userId" placeholder="User ID" required>
+                <input name="role" placeholder="Role" value="member" required>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="cancel-create-modal">Cancel</button>
+                    <button type="submit">Create membership</button>
+                </div>
+            </form>
+        `, () => {
+            document.getElementById("cancel-create-modal")?.addEventListener("click", closeCreateModal);
+            bindForm("create-membership-form", async form => {
+                await fetchJson(`${authApiBasePath}/memberships`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        organizationId: form.get("organizationId"),
+                        userId: form.get("userId"),
+                        role: form.get("role") || "member"
+                    })
+                });
+                setFlash("success", "Membership created.");
             });
-            setFlash("success", "Membership created.");
         });
 
-        bindPagination("#memberships-pagination-top", async page => {
-            setPagerPage("auth-memberships", page);
-            await render();
+        bindListSearch("memberships-search", value => {
+            listFilters.memberships = value;
+            render();
         });
+        bindPagination("#memberships-pagination-top", "auth-memberships", memberships, () => render());
     }
 
     async function renderAuthClients(route) {
@@ -2749,11 +3108,9 @@
         } catch {
             // Keep the clients page usable even if runtime metadata is not available.
         }
-        const pager = getPagerState("auth-clients", 25);
-        const params = new URLSearchParams({
-            page: String(pager.page),
-            pageSize: String(pager.pageSize)
-        });
+        const clientFilterKey = `${clientViewState.source}|${clientViewState.status}|${clientViewState.search}`;
+        const pager = resetPager("auth-clients", 25, clientFilterKey);
+        const params = new URLSearchParams(pagerQuery(pager));
         if (clientViewState.source !== "all") {
             params.set("source", clientViewState.source);
         }
@@ -2766,14 +3123,21 @@
 
         const clients = await fetchJson(`${authApiBasePath}/clients?${params.toString()}`);
         const clientItems = Array.isArray(clients.data) ? clients.data : [];
+        if (pager.index === 0 && clients.summary) {
+            pager.summary = clients.summary;
+        }
         let clientDetail = null;
         let clientAccess = null;
-        let clientCredentials = [];
+        let clientCredentials = { data: [], hasNextPage: false, nextCursor: null };
         if (selectedClientId) {
             try {
+                restartPagerWindow(`auth-client-${selectedClientId}-assignments`);
+                restartPagerWindow(`auth-client-${selectedClientId}-credentials`);
+                const assignmentPager = getPagerState(`auth-client-${selectedClientId}-assignments`, 10);
+                const credentialPager = getPagerState(`auth-client-${selectedClientId}-credentials`, 10);
                 clientDetail = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(selectedClientId)}`);
-                clientAccess = await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments`);
-                clientCredentials = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`);
+                clientAccess = await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments?includeRevoked=true&${pagerQuery(assignmentPager)}`);
+                clientCredentials = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials?${pagerQuery(credentialPager)}`);
                 selectedClientId = clientDetail.id;
             } catch {
                 if (route?.clientApplicationId) {
@@ -2784,7 +3148,7 @@
         }
 
         const preset = currentClientPreset();
-        const summary = clients.summary || {};
+        const summary = pager.summary || clients.summary || {};
         const activeCount = summary.activeCount ?? clientItems.filter(item => item.isActive && !item.disabledAt).length;
         const discoveredCount = summary.discoveredCount ?? clientItems.filter(item => item.registrationSource === "cimd").length;
         const registeredCount = summary.registeredCount ?? clientItems.filter(item => item.registrationSource === "dcr").length;
@@ -2878,7 +3242,6 @@
                 <section class="panel">
                     <h2>Client Overview</h2>
                     <div class="client-summary-grid">
-                        <div class="client-summary-card"><strong>${esc(String(clients.totalCount || clientItems.length))}</strong><span>Total on current query</span></div>
                         <div class="client-summary-card"><strong>${esc(String(activeCount))}</strong><span>Active</span></div>
                         <div class="client-summary-card"><strong>${esc(String(discoveredCount))}</strong><span>Discovered</span></div>
                         <div class="client-summary-card"><strong>${esc(String(registeredCount))}</strong><span>Registered</span></div>
@@ -3015,35 +3378,14 @@
                                         <input name="reason" placeholder="Reason">
                                         <button type="submit">Add assignment</button>
                                     </form>
+                                    <div id="client-assignments-list">
                                     ${renderList(
-                                        clientAccess?.assignments || [],
-                                        assignment => `
-                                            <div class="client-list-row">
-                                                <div class="client-list-header">
-                                                    <div>
-                                                        <strong>${esc(assignment.principalType)}</strong>
-                                                        <div class="client-badge-row">
-                                                            ${renderClientBadge(assignment.access, assignment.access === "denied" ? "danger" : "success")}
-                                                            ${assignment.revokedAt ? renderClientBadge("Revoked", "muted") : ""}
-                                                            ${renderClientBadge(assignment.ownership?.owner === "code" ? "Code owned" : "Dashboard owned", assignment.ownership?.owner === "code" ? "info" : "muted")}
-                                                        </div>
-                                                    </div>
-                                                    ${assignment.revokedAt || (assignment.ownership && !assignment.ownership.isEditable) ? "" : `
-                                                        <button type="button" data-application-assignment-revoke="${esc(assignment.id)}">Revoke</button>
-                                                    `}
-                                                </div>
-                                                ${renderMetadataRows([
-                                                    { label: "Organization", value: assignment.organization || assignment.organizationId || "n/a" },
-                                                    { label: "Principal ID", value: assignment.principalId || "n/a" },
-                                                    { label: "Role key", value: assignment.roleKey || "n/a" },
-                                                    { label: "Reason", value: assignment.reason || "n/a" },
-                                                    { label: "Source key", value: assignment.ownership?.sourceKey || "n/a" },
-                                                    { label: "Created", value: formatDate(assignment.createdAt) }
-                                                ])}
-                                            </div>
-                                        `,
+                                        clientAccess?.data || [],
+                                        renderClientAssignmentItem,
                                         "No assignments for this application."
                                     )}
+                                    ${renderLoadMoreButton("client-assignments-more", !!clientAccess?.hasNextPage)}
+                                    </div>
                                 </div>
                                 <div>
                                     <h3>Client credentials</h3>
@@ -3055,26 +3397,14 @@
                                             <button type="submit">Create credential</button>
                                         </form>
                                     ` : ""}
+                                    <div id="client-credentials-list">
                                     ${renderList(
-                                        clientCredentials,
-                                        credential => `
-                                            <div class="client-list-row">
-                                                <div class="client-list-header">
-                                                    <strong>${esc(credential.displayName || credential.id)}</strong>
-                                                    ${credential.revokedAt || credential.configurationOwner !== "dashboard" ? "" : `<button type="button" data-client-credential-revoke="${esc(credential.id)}">Revoke</button>`}
-                                                </div>
-                                                ${renderMetadataRows([
-                                                    { label: "Credential ID", value: credential.id },
-                                                    { label: "Owner", value: credential.configurationOwner },
-                                                    { label: "Created", value: formatDate(credential.createdAt) },
-                                                    { label: "Expires", value: formatDate(credential.expiresAt) },
-                                                    { label: "Last used", value: formatDate(credential.lastUsedAt) },
-                                                    { label: "Status", value: credential.revokedAt ? `Revoked ${formatDate(credential.revokedAt)}` : "Active" }
-                                                ])}
-                                            </div>
-                                        `,
+                                        clientCredentials.data || [],
+                                        renderClientCredentialItem,
                                         "No client credentials configured."
                                     )}
+                                    ${renderLoadMoreButton("client-credentials-more", !!clientCredentials.hasNextPage)}
+                                    </div>
                                 </div>
                                 <details>
                                     <summary>Raw metadata</summary>
@@ -3119,7 +3449,7 @@
                         <button type="submit">Apply filters</button>
                         <button type="button" id="client-filter-reset">Reset</button>
                     </form>
-                    <div id="clients-pagination-top">${renderPagination(clients.page, clients.totalPages, clients.totalCount)}</div>
+                    <div id="clients-pagination-top">${renderPagination(pager, clients)}</div>
                     ${renderList(
                         clientItems,
                         item => `
@@ -3158,7 +3488,6 @@
             clientViewState.source = form.get("source") || "all";
             clientViewState.status = form.get("status") || "all";
             clientViewState.search = String(form.get("search") || "").trim();
-            setPagerPage("auth-clients", 1);
         });
 
         document.querySelectorAll("[data-client-preset]").forEach(button => {
@@ -3172,7 +3501,6 @@
             clientViewState.source = "all";
             clientViewState.status = "all";
             clientViewState.search = "";
-            setPagerPage("auth-clients", 1);
             await render();
         });
 
@@ -3209,7 +3537,7 @@
             setFlash("success", confidential ? "Confidential client created. Copy its secret now." : "Manual client created.");
             clientDraftState = createClientDraftFromPreset(clientViewState.preset);
             suppressClientDraftSync = true;
-            setPagerPage("auth-clients", 1);
+            restartPagerWindow("auth-clients");
         });
 
         document.getElementById("client-secret-ack")?.addEventListener("click", async () => {
@@ -3232,22 +3560,44 @@
             setFlash("success", "Client credential created. Existing active credentials remain valid until revoked.");
         });
 
-        document.querySelectorAll("[data-client-credential-revoke]").forEach(button => {
-            button.addEventListener("click", async () => {
-                if (!clientDetail || !window.confirm("Revoke this client credential immediately?")) {
-                    return;
-                }
-                await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials/${encodeURIComponent(button.dataset.clientCredentialRevoke)}`, {
-                    method: "DELETE"
-                });
-                setFlash("success", "Client credential revoked.");
-                await render();
-            });
+        bindClientCredentialRevokeButtons(clientDetail);
+
+        bindPagination("#clients-pagination-top", "auth-clients", clients, () => render());
+
+        document.getElementById("client-assignments-more")?.addEventListener("click", async () => {
+            if (!clientDetail || !clientAccess?.hasNextPage) {
+                return;
+            }
+            const assignmentPager = getPagerState(`auth-client-${clientDetail.id}-assignments`, 10);
+            if (assignmentPager.cursors[assignmentPager.index + 1] == null && clientAccess.nextCursor) {
+                assignmentPager.cursors.push(clientAccess.nextCursor);
+            }
+            assignmentPager.index += 1;
+            const next = await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments?includeRevoked=true&${pagerQuery(assignmentPager)}`);
+            clientAccess = next;
+            appendListItems("#client-assignments-list", next.data || [], renderClientAssignmentItem);
+            bindClientAssignmentRevokeButtons(clientDetail);
+            if (!next.hasNextPage) {
+                document.getElementById("client-assignments-more")?.remove();
+            }
         });
 
-        bindPagination("#clients-pagination-top", async page => {
-            setPagerPage("auth-clients", page);
-            await render();
+        document.getElementById("client-credentials-more")?.addEventListener("click", async () => {
+            if (!clientDetail || !clientCredentials?.hasNextPage) {
+                return;
+            }
+            const credentialPager = getPagerState(`auth-client-${clientDetail.id}-credentials`, 10);
+            if (credentialPager.cursors[credentialPager.index + 1] == null && clientCredentials.nextCursor) {
+                credentialPager.cursors.push(clientCredentials.nextCursor);
+            }
+            credentialPager.index += 1;
+            const next = await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials?${pagerQuery(credentialPager)}`);
+            clientCredentials = next;
+            appendListItems("#client-credentials-list", next.data || [], renderClientCredentialItem);
+            bindClientCredentialRevokeButtons(clientDetail);
+            if (!next.hasNextPage) {
+                document.getElementById("client-credentials-more")?.remove();
+            }
         });
 
         bindForm("application-access-mode-form", async form => {
@@ -3281,24 +3631,7 @@
             setFlash("success", "Application assignment added.");
         });
 
-        document.querySelectorAll("[data-application-assignment-revoke]").forEach(button => {
-            button.addEventListener("click", async () => {
-                if (!clientDetail) {
-                    return;
-                }
-
-                const assignmentId = button.getAttribute("data-application-assignment-revoke");
-                if (!assignmentId) {
-                    return;
-                }
-
-                await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments/${encodeURIComponent(assignmentId)}`, {
-                    method: "DELETE"
-                });
-                setFlash("success", "Application assignment revoked.");
-                await render();
-            });
-        });
+        bindClientAssignmentRevokeButtons(clientDetail);
 
         document.querySelectorAll("[data-client-action]").forEach(button => {
             button.addEventListener("click", async () => {
@@ -3354,14 +3687,103 @@
         }
     }
 
+    function renderClientAssignmentItem(assignment) {
+        return `
+            <div class="client-list-row">
+                <div class="client-list-header">
+                    <div>
+                        <strong>${esc(assignment.principalType)}</strong>
+                        <div class="client-badge-row">
+                            ${renderClientBadge(assignment.access, assignment.access === "denied" ? "danger" : "success")}
+                            ${assignment.revokedAt ? renderClientBadge("Revoked", "muted") : ""}
+                            ${renderClientBadge(assignment.ownership?.owner === "code" ? "Code owned" : "Dashboard owned", assignment.ownership?.owner === "code" ? "info" : "muted")}
+                        </div>
+                    </div>
+                    ${assignment.revokedAt || (assignment.ownership && !assignment.ownership.isEditable) ? "" : `
+                        <button type="button" data-application-assignment-revoke="${esc(assignment.id)}">Revoke</button>
+                    `}
+                </div>
+                ${renderMetadataRows([
+                    { label: "Organization", value: assignment.organization || assignment.organizationId || "n/a" },
+                    { label: "Principal ID", value: assignment.principalId || "n/a" },
+                    { label: "Role key", value: assignment.roleKey || "n/a" },
+                    { label: "Reason", value: assignment.reason || "n/a" },
+                    { label: "Source key", value: assignment.ownership?.sourceKey || "n/a" },
+                    { label: "Created", value: formatDate(assignment.createdAt) }
+                ])}
+            </div>
+        `;
+    }
+
+    function renderClientCredentialItem(credential) {
+        return `
+            <div class="client-list-row">
+                <div class="client-list-header">
+                    <strong>${esc(credential.displayName || credential.id)}</strong>
+                    ${credential.revokedAt || credential.configurationOwner !== "dashboard" ? "" : `<button type="button" data-client-credential-revoke="${esc(credential.id)}">Revoke</button>`}
+                </div>
+                ${renderMetadataRows([
+                    { label: "Credential ID", value: credential.id },
+                    { label: "Owner", value: credential.configurationOwner },
+                    { label: "Created", value: formatDate(credential.createdAt) },
+                    { label: "Expires", value: formatDate(credential.expiresAt) },
+                    { label: "Last used", value: formatDate(credential.lastUsedAt) },
+                    { label: "Status", value: credential.revokedAt ? `Revoked ${formatDate(credential.revokedAt)}` : "Active" }
+                ])}
+            </div>
+        `;
+    }
+
+    function bindClientAssignmentRevokeButtons(clientDetail) {
+        document.querySelectorAll("[data-application-assignment-revoke]:not([data-bound])").forEach(button => {
+            button.dataset.bound = "true";
+            button.addEventListener("click", async () => {
+                if (!clientDetail) {
+                    return;
+                }
+
+                const assignmentId = button.getAttribute("data-application-assignment-revoke");
+                if (!assignmentId) {
+                    return;
+                }
+
+                await fetchJson(`${authApiBasePath}/applications/${encodeURIComponent(clientDetail.id)}/assignments/${encodeURIComponent(assignmentId)}`, {
+                    method: "DELETE"
+                });
+                setFlash("success", "Application assignment revoked.");
+                await render();
+            });
+        });
+    }
+
+    function bindClientCredentialRevokeButtons(clientDetail) {
+        document.querySelectorAll("[data-client-credential-revoke]:not([data-bound])").forEach(button => {
+            button.dataset.bound = "true";
+            button.addEventListener("click", async () => {
+                if (!clientDetail || !window.confirm("Revoke this client credential immediately?")) {
+                    return;
+                }
+                await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials/${encodeURIComponent(button.dataset.clientCredentialRevoke)}`, {
+                    method: "DELETE"
+                });
+                setFlash("success", "Client credential revoked.");
+                await render();
+            });
+        });
+    }
+
     async function renderAuthMachineClients() {
         const config = authViews["machine-clients"];
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading machine clients...");
+        const pager = getPagerState("auth-machine-clients", 25);
+        restartPagerWindow("auth-machine-org-picker");
+        const orgPickerPager = getPagerState("auth-machine-org-picker", 25);
         const [machines, organizations] = await Promise.all([
-            fetchJson(`${authApiBasePath}/machine-clients`),
-            fetchJson(`${authApiBasePath}/organizations?page=1&pageSize=100`)
+            fetchJson(`${authApiBasePath}/machine-clients?${pagerQuery(pager)}`),
+            fetchJson(`${authApiBasePath}/organizations?${pagerQuery(orgPickerPager)}`)
         ]);
+        const machineRows = machines.data || [];
         const organizationRows = organizations.data || [];
 
         content.innerHTML = `
@@ -3377,7 +3799,18 @@
                         <input name="description" maxlength="500" placeholder="Purpose (optional)">
                         <input name="audience" maxlength="500" placeholder="https://api.example.com" required>
                         <input name="scopes" placeholder="jobs.run jobs.read" required>
-                        <select name="organizationId"><option value="">No organization binding</option>${organizationRows.map(org => `<option value="${esc(org.id)}">${esc(org.name)}</option>`).join("")}</select>
+                        ${renderRemotePicker({
+                            searchId: "machine-org-picker-search",
+                            selectName: "organizationId",
+                            selectId: "machine-org-picker",
+                            loadMoreId: "machine-org-picker-more",
+                            searchPlaceholder: "Search organizations",
+                            emptyLabel: "No organization binding",
+                            items: organizationRows,
+                            hasNextPage: !!organizations.hasNextPage,
+                            itemValue: org => org.id,
+                            itemLabel: org => org.name
+                        })}
                         <input name="expiresAt" type="datetime-local" placeholder="Expiry (optional)">
                         <input name="resourceId" placeholder="Initial FGA resource ID (optional)">
                         <input name="roleId" placeholder="Initial FGA role ID (optional)">
@@ -3395,8 +3828,11 @@
                 </section>
             </div>
             <section class="panel">
-                <h2>Operational identities</h2>
-                ${machines.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Client / audience</th><th>Status</th><th>Ownership</th><th>Grants</th><th>Last use</th><th>Actions</th></tr></thead><tbody>${machines.map(machine => `<tr>
+                <div class="panel-actions">
+                    <h2>Operational identities</h2>
+                    <div id="machine-clients-pagination-top">${renderPagination(pager, machines)}</div>
+                </div>
+                ${machineRows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Client / audience</th><th>Status</th><th>Ownership</th><th>Grants</th><th>Last use</th><th>Actions</th></tr></thead><tbody>${machineRows.map(machine => `<tr>
                     <td>${esc(machine.displayName)}</td>
                     <td><code>${esc(machine.clientId)}</code><br><small>${esc(machine.audience)}</small></td>
                     <td>${machine.ready ? '<span class="status active">Ready</span>' : '<span class="status inactive">Unavailable</span>'}</td>
@@ -3406,6 +3842,26 @@
                 </tr>`).join("")}</tbody></table></div>` : "<p>No machine clients yet.</p>"}
                 <p><a href="${esc(pathForRoute("fga-service-accounts"))}" data-dashboard-route="fga-service-accounts">Inspect service-account subjects and grant paths in FGA</a></p>
             </section>`;
+
+        bindRemotePicker({
+            searchId: "machine-org-picker-search",
+            selectId: "machine-org-picker",
+            loadMoreId: "machine-org-picker-more",
+            pagerKey: "auth-machine-org-picker",
+            pageSize: 25,
+            emptyLabel: "No organization binding",
+            initialResult: organizations,
+            itemValue: org => org.id,
+            itemLabel: org => org.name,
+            fetchPage: (pager, search) => {
+                const params = new URLSearchParams(pagerQuery(pager));
+                if (search) {
+                    params.set("search", search);
+                }
+                return fetchJson(`${authApiBasePath}/organizations?${params.toString()}`);
+            }
+        });
+        bindPagination("#machine-clients-pagination-top", "auth-machine-clients", machines, () => renderAuthMachineClients());
 
         bindForm("machine-client-form", async form => {
             const resourceId = String(form.get("resourceId") || "").trim();
@@ -3418,6 +3874,7 @@
                 grants: resourceId ? [{ resourceId, roleId, description: "Initial dashboard grant" }] : []
             }) });
             latestMachineClientSecret = { clientId: result.client.clientId, secret: result.clientSecret };
+            restartPagerWindow("auth-machine-clients");
             await renderAuthMachineClients();
         });
         document.getElementById("machine-secret-ack")?.addEventListener("click", async () => { latestMachineClientSecret = null; await renderAuthMachineClients(); });
@@ -3444,7 +3901,9 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading OIDC connections...");
 
-        const oidcConnections = await fetchJson(`${authApiBasePath}/oidc-connections`);
+        const pager = getPagerState("auth-oidc", 25);
+        const oidcResult = await fetchJson(`${authApiBasePath}/oidc-connections?${pagerQuery(pager)}`);
+        const oidcConnections = oidcResult.data || [];
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -3496,7 +3955,10 @@
                     </section>
                 </div>
                 <section class="panel">
-                    <h2>Configured Providers</h2>
+                    <div class="panel-actions">
+                        <h2>Configured Providers</h2>
+                        <div id="oidc-pagination-top">${renderPagination(pager, oidcResult)}</div>
+                    </div>
                     ${renderList(
                         oidcConnections,
                         item => `
@@ -3647,6 +4109,8 @@
                 }
             });
         });
+
+        bindPagination("#oidc-pagination-top", "auth-oidc", oidcResult, () => render());
     }
 
     async function renderAuthSso() {
@@ -3654,7 +4118,9 @@
         setHeader("Auth Server", config.title, config.description);
         renderLoading("Loading SSO data...");
 
-        const ssoConnections = await fetchJson(`${authApiBasePath}/sso-connections`);
+        const pager = getPagerState("auth-sso", 25);
+        const ssoResult = await fetchJson(`${authApiBasePath}/sso-connections?${pagerQuery(pager)}`);
+        const ssoConnections = ssoResult.data || [];
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -3695,7 +4161,10 @@
                     </section>
                 </div>
                 <section class="panel">
-                    <h2>SAML Connections</h2>
+                    <div class="panel-actions">
+                        <h2>SAML Connections</h2>
+                        <div id="sso-pagination-top">${renderPagination(pager, ssoResult)}</div>
+                    </div>
                     ${renderList(
                         ssoConnections,
                         item => `
@@ -3758,6 +4227,8 @@
                 await render();
             });
         });
+
+        bindPagination("#sso-pagination-top", "auth-sso", ssoResult, () => render());
     }
 
     async function renderAuthSecurity() {
@@ -4119,15 +4590,15 @@
         renderLoading("Loading sessions...");
 
         const pager = getPagerState("auth-sessions");
-        const sessions = await fetchJson(`${authApiBasePath}/sessions?page=${pager.page}&pageSize=${pager.pageSize}`);
+        const sessions = await fetchJson(`${authApiBasePath}/sessions?${pagerQuery(pager)}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
-            <section class="panel">
-                <div class="panel-actions">
-                    <h2>Sessions</h2>
-                    <div id="sessions-pagination-top">${renderPagination(sessions.page, sessions.totalPages, sessions.totalCount)}</div>
-                </div>
+            <section class="panel list-page">
+                ${renderListToolbar({
+                    title: "Sessions",
+                    pagerHtml: `<div id="sessions-pagination-top">${renderPagination(pager, sessions)}</div>`
+                })}
                 <form id="session-revocation-form" class="client-filter-form">
                     <input name="userId" placeholder="User ID (optional)">
                     <input name="organizationId" placeholder="Organization ID (optional)">
@@ -4136,35 +4607,26 @@
                     <button type="submit">Preview and revoke</button>
                 </form>
                 <p>Use one or more filters. Combined filters use AND semantics, and you will see the affected session and refresh-token count before confirmation.</p>
-                ${renderList(
+                ${renderListRows(
                     sessions.data,
-                    item => `
-                        <div class="list-item-header">
-                            <strong>${esc(item.user)}</strong>
-                            ${item.userId ? `<a class="inline-link" href="${esc(userDetailPath(item.userId, "sessions"))}">Open user</a>` : ""}
-                        </div>
-                        ${renderMetadataRows([
-                            { label: "Session ID", value: item.id },
-                            { label: "Authentication", value: item.authenticationMethod || "unknown" },
-                            { label: "Client", value: item.clientApplicationId || "n/a" },
-                            { label: "Created", value: formatDate(item.createdAt) },
-                            { label: "Idle expires", value: formatDate(item.idleExpiresAt) },
-                            { label: "Absolute expires", value: formatDate(item.absoluteExpiresAt) },
-                            { label: "Revoked", value: item.revokedAt ? formatDate(item.revokedAt) : "Active" },
-                            { label: "Revocation reason", value: item.revocationReason || "n/a" }
-                        ])}
-                        ${item.revokedAt ? "" : `<button type="button" class="js-revoke-session" data-session-id="${esc(item.id)}">Revoke session</button>`}
-                        ${item.revokedAt ? `<a class="inline-link" href="${esc(pathForRoute("auth-audit"))}">Open audit history</a>` : ""}
-                    `,
+                    item => renderListRow({
+                        href: item.revokedAt && item.userId ? userDetailPath(item.userId, "sessions") : "",
+                        title: item.user || "Unknown user",
+                        subtitle: [item.authenticationMethod, item.clientApplicationId, item.createdAt ? formatDate(item.createdAt) : ""].filter(Boolean).join(" · "),
+                        metaHtml: [
+                            item.revokedAt ? renderChip("Revoked") : renderChip("Active", "green"),
+                            renderIdChip(item.id)
+                        ].join(""),
+                        actionsHtml: item.revokedAt
+                            ? ""
+                            : `<button type="button" class="js-revoke-session" data-session-id="${esc(item.id)}">Revoke</button>`
+                    }),
                     "No sessions yet."
                 )}
             </section>
         `;
 
-        bindPagination("#sessions-pagination-top", async page => {
-            setPagerPage("auth-sessions", page);
-            await render();
-        });
+        bindPagination("#sessions-pagination-top", "auth-sessions", sessions, () => render());
 
         bindForm("session-revocation-form", async form => {
             const request = {
@@ -4213,12 +4675,11 @@
         return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
     }
 
-    function buildAuditQueryParams({ includePage = true, fixedSource = null } = {}) {
+    function buildAuditQueryParams({ includePager = true, fixedSource = null } = {}) {
         const params = new URLSearchParams();
-        if (includePage) {
+        if (includePager) {
             const pager = getPagerState("audit-logs", 25);
-            params.set("page", String(pager.page));
-            params.set("pageSize", String(pager.pageSize));
+            new URLSearchParams(pagerQuery(pager)).forEach((value, key) => params.set(key, value));
         }
 
         const values = {
@@ -4349,7 +4810,21 @@
             options.description || "Search, filter, inspect, and export structured SqlOS and application audit events.");
         renderLoading("Loading audit logs...");
 
-        const pager = getPagerState("audit-logs", 25);
+        const auditFilterKey = [
+            fixedSource || auditFilters.source,
+            auditFilters.organizationId,
+            auditFilters.application,
+            auditFilters.action,
+            auditFilters.actorType,
+            auditFilters.actorId,
+            auditFilters.targetType,
+            auditFilters.targetId,
+            auditFilters.result,
+            auditFilters.search,
+            auditFilters.from,
+            auditFilters.to
+        ].join("|");
+        const pager = resetPager("audit-logs", 25, auditFilterKey);
         const params = buildAuditQueryParams({ fixedSource });
         const auditResult = await fetchJson(`${auditApiBasePath}/events?${params.toString()}`);
         let selectedEvent = null;
@@ -4361,7 +4836,7 @@
             }
         }
 
-        const exportParams = buildAuditQueryParams({ includePage: false, fixedSource });
+        const exportParams = buildAuditQueryParams({ includePager: false, fixedSource });
         const exportHref = `${auditApiBasePath}/events/export.csv?${exportParams.toString()}`;
 
         content.innerHTML = `
@@ -4377,7 +4852,7 @@
                 <section class="panel">
                     <div class="panel-actions">
                         <h2>Events</h2>
-                        <div id="audit-pagination-top">${renderPagination(auditResult.page, auditResult.totalPages, auditResult.totalCount)}</div>
+                        <div id="audit-pagination-top">${renderPagination(pager, auditResult)}</div>
                     </div>
                     ${renderList(
                         auditResult.data,
@@ -4422,13 +4897,11 @@
             auditFilters.from = String(form.get("from") || "").trim();
             auditFilters.to = String(form.get("to") || "").trim();
             selectedAuditEventId = null;
-            setPagerPage("audit-logs", 1);
         });
 
         document.getElementById("audit-clear-filters")?.addEventListener("click", async () => {
             Object.keys(auditFilters).forEach(key => auditFilters[key] = "");
             selectedAuditEventId = null;
-            setPagerPage("audit-logs", 1);
             await render();
         });
 
@@ -4439,10 +4912,9 @@
             });
         });
 
-        bindPagination("#audit-pagination-top", async page => {
-            pager.page = Math.max(1, page);
+        bindPagination("#audit-pagination-top", "audit-logs", auditResult, () => {
             selectedAuditEventId = null;
-            await render();
+            return render();
         });
     }
 
@@ -4451,10 +4923,9 @@
         setHeader("Integrations", config.title, config.description);
         renderLoading("Loading calendar connections...");
 
-        const pager = getPagerState("calendar-connections", 25);
-        const params = new URLSearchParams();
-        params.set("page", String(pager.page));
-        params.set("pageSize", String(pager.pageSize));
+        const calendarFilterKey = `${calendarConnectionFilters.search}|${calendarConnectionFilters.includeRevoked ? "revoked" : "active"}`;
+        const pager = resetPager("calendar-connections", 25, calendarFilterKey);
+        const params = new URLSearchParams(pagerQuery(pager));
         params.set("includeRevoked", calendarConnectionFilters.includeRevoked ? "true" : "false");
         if (calendarConnectionFilters.search) {
             params.set("search", calendarConnectionFilters.search);
@@ -4486,7 +4957,7 @@
                 <section class="panel">
                     <div class="panel-actions">
                         <h2>Connections</h2>
-                        <div id="calendar-pagination-top">${renderPagination(result.page, result.totalPages, result.totalCount)}</div>
+                        <div id="calendar-pagination-top">${renderPagination(pager, result)}</div>
                     </div>
                     <form id="calendar-filter-form" class="inline-form">
                         <input name="search" value="${esc(calendarConnectionFilters.search)}" placeholder="Search by name, account, user, or organization">
@@ -4528,7 +4999,6 @@
             calendarConnectionFilters.search = String(form.get("search") || "").trim();
             calendarConnectionFilters.includeRevoked = form.get("includeRevoked") === "on";
             selectedCalendarConnectionId = null;
-            setPagerPage("calendar-connections", 1);
         });
 
         document.querySelectorAll("[data-calendar-connection-id]").forEach(button => {
@@ -4542,10 +5012,9 @@
         bindCalendarConnectionAction("[data-calendar-refresh]", "calendarRefresh", "refresh", "Calendar access token refreshed.");
         bindCalendarConnectionAction("[data-calendar-disconnect]", "calendarDisconnect", "disconnect", "Calendar connection disconnected.");
 
-        bindPagination("#calendar-pagination-top", async page => {
-            pager.page = Math.max(1, page);
+        bindPagination("#calendar-pagination-top", "calendar-connections", result, () => {
             selectedCalendarConnectionId = null;
-            await render();
+            return render();
         });
     }
 
@@ -4662,7 +5131,7 @@
     async function renderEmailTemplates() {
         renderLoading("Loading email templates...");
         const pager = getPagerState("email-templates", 10);
-        const templates = await fetchJson(`${emailApiBasePath}/templates?page=${pager.page}&pageSize=${pager.pageSize}`);
+        const templates = await fetchJson(`${emailApiBasePath}/templates?${pagerQuery(pager)}`);
 
         content.innerHTML = `
             ${consumeFlashHtml()}
@@ -4690,7 +5159,7 @@
                         "No email templates yet."
                     )}
                     <div class="email-template-pagination">
-                        ${renderPagination(templates.page, templates.totalPages, templates.totalCount)}
+                        ${renderPagination(pager, templates)}
                     </div>
                 </section>
             </div>
@@ -4702,7 +5171,7 @@
                 body: JSON.stringify(emailTemplatePayloadFromForm(form))
             });
             setFlash("success", "Email template created.");
-            setPagerPage("email-templates", 1);
+            restartPagerWindow("email-templates");
         });
 
         (templates.data || []).forEach(template => {
@@ -4727,10 +5196,7 @@
             });
         });
 
-        bindPagination(".email-template-pagination", page => {
-            setPagerPage("email-templates", page);
-            render();
-        });
+        bindPagination(".email-template-pagination", "email-templates", templates, () => render());
     }
 
     function renderEmailTemplateItem(template) {
@@ -4845,11 +5311,15 @@
 
     async function renderEmailMessages() {
         renderLoading("Loading email messages...");
-        const pager = getPagerState("email-messages", 25);
-        const params = new URLSearchParams({
-            page: String(pager.page),
-            pageSize: String(pager.pageSize)
-        });
+        const emailFilterKey = [
+            emailMessageFilters.status,
+            emailMessageFilters.templateKey,
+            emailMessageFilters.recipient,
+            emailMessageFilters.from,
+            emailMessageFilters.to
+        ].join("|");
+        const pager = resetPager("email-messages", 25, emailFilterKey);
+        const params = new URLSearchParams(pagerQuery(pager));
 
         Object.entries(emailMessageFilters).forEach(([key, value]) => {
             if (value) {
@@ -4895,7 +5365,7 @@
                     "No email messages match the current filters."
                 )}
                 <div class="email-message-pagination">
-                    ${renderPagination(messages.page, messages.totalPages, messages.totalCount)}
+                    ${renderPagination(pager, messages)}
                 </div>
             </section>
         `;
@@ -4906,13 +5376,9 @@
             emailMessageFilters.recipient = String(form.get("recipient") || "").trim();
             emailMessageFilters.from = String(form.get("from") || "");
             emailMessageFilters.to = String(form.get("to") || "");
-            setPagerPage("email-messages", 1);
         });
 
-        bindPagination(".email-message-pagination", page => {
-            setPagerPage("email-messages", page);
-            render();
-        });
+        bindPagination(".email-message-pagination", "email-messages", messages, () => render());
     }
 
     function renderEmailMessageItem(item) {

@@ -595,7 +595,8 @@ public sealed class SqlOSCalendarServiceTests
         summary.Should().NotBeNull();
         list.Should().NotBeNull();
         var listJson = System.Text.Json.JsonSerializer.Serialize(list);
-        listJson.Should().Contain("\"TotalCount\":1");
+        listJson.Should().Contain("\"HasNextPage\":false");
+        listJson.Should().Contain("\"Data\":");
         listJson.Should().NotContain("google-access|", "admin projections must never expose raw tokens");
         listJson.Should().NotContain("dp:", "admin projections must never expose encrypted token material");
     }

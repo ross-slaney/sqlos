@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuditLogs;
 
@@ -27,6 +28,7 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
             ISqlOSAuditLogService auditLogs,
             IOptions<SqlOSAuthServerOptions> options,
             IHostEnvironment environment,
+            string? cursor,
             int? page,
             int? pageSize,
             string? organizationId,
@@ -52,8 +54,9 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await auditLogs.ListAsync(
+            return await SqlOSCursorPagination.Ok(async () => (object)await auditLogs.ListAsync(
                 BuildListRequest(
+                    cursor,
                     page,
                     pageSize,
                     organizationId,
@@ -105,8 +108,9 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
             {
                 var export = await auditLogs.ExportCsvAsync(
                     BuildListRequest(
-                        1,
-                        SqlOSAuditLogService.MaxExportRows,
+                        cursor: null,
+                        page: 1,
+                        pageSize: SqlOSAuditLogService.MaxExportRows,
                         organizationId,
                         applicationId,
                         applicationKey,
@@ -152,8 +156,9 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
     }
 
     private static SqlOSAuditLogListRequest BuildListRequest(
-        int? Page,
-        int? PageSize,
+        string? cursor,
+        int? page,
+        int? pageSize,
         string? organizationId,
         string? applicationId,
         string? applicationKey,
@@ -169,22 +174,23 @@ public static class SqlOSAuditLogEndpointRouteBuilderExtensions
         DateTime? occurredAtFrom,
         DateTime? occurredAtTo)
         => new(
-            Page,
-            PageSize,
-            organizationId,
-            applicationId,
-            applicationKey,
-            application,
-            source,
-            action,
-            actorType,
-            actorId,
-            targetType,
-            targetId,
-            result,
-            search,
-            occurredAtFrom,
-            occurredAtTo);
+            Cursor: cursor,
+            Page: page,
+            PageSize: pageSize,
+            OrganizationId: organizationId,
+            ApplicationId: applicationId,
+            ApplicationKey: applicationKey,
+            Application: application,
+            Source: source,
+            Action: action,
+            ActorType: actorType,
+            ActorId: actorId,
+            TargetType: targetType,
+            TargetId: targetId,
+            Result: result,
+            Search: search,
+            OccurredAtFrom: occurredAtFrom,
+            OccurredAtTo: occurredAtTo);
 
     private static async Task<bool> IsAdminAuthorizedAsync(
         HttpContext context,

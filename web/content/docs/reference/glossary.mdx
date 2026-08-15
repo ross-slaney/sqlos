@@ -177,6 +177,10 @@ A public document containing the keys resource servers use to validate SqlOS JWT
 
 ## M
 
+### Machine client
+
+An AuthServer confidential OAuth client that uses the `client_credentials` grant and `client_secret_basic`. It authenticates a worker at the token endpoint and receives a short-lived access token. A machine client is not an FGA subject. `SeedMachineClient` and the dashboard Machine Clients page can bind one to an FGA service account, but either record can exist without the other. See [Machine Clients](/docs/authserver/machine-clients).
+
 ### Membership
 
 The AuthServer relationship between a user and an organization, including the user's organization role/context. Membership answers “does this person belong to this tenant?” It does not by itself create an FGA subject or resource grant; bridge the identity into FGA explicitly when authorizing domain data. See [Memberships](/docs/authserver/memberships) and [Syncing Auth to FGA](/docs/fga/syncing-auth-to-fga).
@@ -261,7 +265,7 @@ A string requested by an OAuth client and allowed by its registration, such as `
 
 ### Service account
 
-An FGA subject type for service-to-service authorization, with application-managed credentials/API-key patterns. It can receive roles and grants without being a human AuthServer user. See [Subject Types](/docs/fga/subject-types).
+An FGA subject type (`service_account` / `SqlOSFgaServiceAccount`) for non-human authorization. It can receive roles and grants without being an AuthServer user. It is not an OAuth client and has no token endpoint. A dashboard or `SeedMachineClient` workflow may link one to a machine client by `client_id`; provisioning a service account alone does not create that client. See [Subject Types](/docs/fga/subject-types) and [Machine Clients](/docs/authserver/machine-clients).
 
 ### SDK (.NET SDK)
 

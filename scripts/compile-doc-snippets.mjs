@@ -119,6 +119,13 @@ const snippetSpecs = [
     wrap: asMachineClientSeedProgram,
   },
   {
+    name: "machine-client reference seed",
+    relativePath: "web/content/docs/authserver/machine-clients.mdx",
+    heading: "## Seed the bound pair",
+    marker: "SeedMachineClient(",
+    wrap: asMachineClientSeedProgram,
+  },
+  {
     name: "3.24 machine-client release example",
     relativePath: "web/content/blog/sqlos-3-24-three-control-planes-one-auth-system.mdx",
     heading: "## One machine client instead of four disconnected records",

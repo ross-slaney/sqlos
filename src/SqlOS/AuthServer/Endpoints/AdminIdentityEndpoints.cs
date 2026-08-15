@@ -20,6 +20,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -27,14 +28,14 @@ public static partial class EndpointRouteBuilderExtensions
 {
     private static void MapAdminIdentityEndpoints(RouteGroupBuilder api)
     {
-        api.MapGet("/users", async (HttpContext context, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/users", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListUsersAsync(page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListUsersAsync(search, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/users/{userId}", async (HttpContext context, string userId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -47,24 +48,24 @@ public static partial class EndpointRouteBuilderExtensions
             return Results.Ok(await adminService.GetUserAsync(userId, cancellationToken));
         });
 
-        api.MapGet("/users/{userId}/memberships", async (HttpContext context, string userId, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/users/{userId}/memberships", async (HttpContext context, string userId, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListUserMembershipsAsync(userId, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListUserMembershipsAsync(userId, cursor, pageSize, page, cancellationToken));
         });
 
-        api.MapGet("/users/{userId}/sessions", async (HttpContext context, string userId, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/users/{userId}/sessions", async (HttpContext context, string userId, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListUserSessionsAsync(userId, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListUserSessionsAsync(userId, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/users/{userId}/applications", async (HttpContext context, string userId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -120,14 +121,14 @@ public static partial class EndpointRouteBuilderExtensions
             });
         });
 
-        api.MapGet("/organizations", async (HttpContext context, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/organizations", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListOrganizationsAsync(page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListOrganizationsAsync(search, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/organizations/{organizationId}", async (HttpContext context, string organizationId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -195,41 +196,34 @@ public static partial class EndpointRouteBuilderExtensions
             });
         });
 
-        api.MapGet("/memberships", async (HttpContext context, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/memberships", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListMembershipsAsync(page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListMembershipsAsync(search, cursor, pageSize, page, cancellationToken));
         });
 
-        api.MapGet("/organizations/{organizationId}/memberships", async (HttpContext context, string organizationId, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/organizations/{organizationId}/memberships", async (HttpContext context, string organizationId, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListOrganizationMembershipsAsync(organizationId, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListOrganizationMembershipsAsync(organizationId, search, cursor, pageSize, page, cancellationToken));
         });
 
-        api.MapGet("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, int? page, int? pageSize, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, string? cursor, int? pageSize, int? page, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            try
-            {
-                return Results.Ok(await invitationService.ListOrganizationInvitationsAsync(organizationId, page, pageSize, cancellationToken));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { message = ex.Message });
-            }
+            return await SqlOSCursorPagination.Ok(() => invitationService.ListOrganizationInvitationsAsync(organizationId, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapPost("/organizations/{organizationId}/invitations", async (HttpContext context, string organizationId, CreateOrganizationInvitationRequest request, SqlOSInvitationService invitationService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -339,14 +333,14 @@ public static partial class EndpointRouteBuilderExtensions
             });
         });
 
-        api.MapGet("/clients", async (HttpContext context, string? source, string? status, string? search, int? page, int? pageSize, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/clients", async (HttpContext context, string? source, string? status, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            return Results.Ok(await adminService.ListClientsAsync(source, status, search, page, pageSize, cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => adminService.ListClientsAsync(source, status, search, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapGet("/clients/{clientId}", async (HttpContext context, string clientId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -366,21 +360,14 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        api.MapGet("/clients/{clientId}/credentials", async (HttpContext context, string clientId, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/clients/{clientId}/credentials", async (HttpContext context, string clientId, string? cursor, int? pageSize, int? page, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            try
-            {
-                return Results.Ok(await clientAuthentication.ListCredentialsAsync(clientId, cancellationToken));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { message = ex.Message });
-            }
+            return await SqlOSCursorPagination.Ok(() => clientAuthentication.ListCredentialsAsync(clientId, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapPost("/clients/{clientId}/credentials", async (HttpContext context, string clientId, SqlOSCreateClientCredentialRequest request, SqlOSClientAuthenticationService clientAuthentication, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -422,21 +409,14 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        api.MapGet("/applications/{applicationId}/assignments", async (HttpContext context, string applicationId, bool? includeRevoked, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/applications/{applicationId}/assignments", async (HttpContext context, string applicationId, bool? includeRevoked, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            try
-            {
-                return Results.Ok(await adminService.ListApplicationAssignmentsAsync(applicationId, includeRevoked == true, cancellationToken));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { message = ex.Message });
-            }
+            return await SqlOSCursorPagination.Ok(() => adminService.ListApplicationAssignmentsAsync(applicationId, includeRevoked == true, cursor, pageSize, page, cancellationToken));
         });
 
         api.MapPost("/applications/{applicationId}/access-mode", async (HttpContext context, string applicationId, SqlOSSetApplicationAccessModeRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -642,10 +622,10 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
-        api.MapGet("/machine-clients", async (HttpContext context, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        api.MapGet("/machine-clients", async (HttpContext context, string? cursor, int? pageSize, int? page, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
-            return Results.Ok(await machines.ListAsync(cancellationToken));
+            return await SqlOSCursorPagination.Ok(() => machines.ListAsync(cursor, pageSize, page, cancellationToken));
         });
 
         api.MapPost("/machine-clients", async (HttpContext context, SqlOSCreateMachineClientRequest request, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

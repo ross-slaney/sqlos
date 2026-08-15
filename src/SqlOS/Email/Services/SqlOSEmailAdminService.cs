@@ -7,6 +7,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Contracts;
 using SqlOS.Email.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.Email.Services;
 
@@ -29,13 +30,12 @@ public sealed partial class SqlOSEmailAdminService
     public async Task<object> ListTemplatesAsync(
         string? search = null,
         bool includeInactive = true,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
         var query = _context.Set<SqlOSEmailTemplate>().AsNoTracking();
-
         if (!includeInactive)
         {
             query = query.Where(x => x.IsActive);
@@ -47,8 +47,17 @@ public sealed partial class SqlOSEmailAdminService
             query = query.Where(x => x.Key.Contains(trimmed) || x.DisplayName.Contains(trimmed));
         }
 
-        query = query.OrderBy(x => x.Key);
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, ToTemplateSummary, cancellationToken);
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSEmailTemplate>.Create().Ascending(x => x.Key).ThenAscending(x => x.Id),
+            "email.templates",
+            SqlOSCursorCodec.Fingerprint(search, includeInactive ? "all" : "active"),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(ToTemplateSummary);
     }
 
     public async Task EnsureBuiltInTemplatesAsync(CancellationToken cancellationToken = default)
@@ -201,11 +210,11 @@ public sealed partial class SqlOSEmailAdminService
         string? recipient = null,
         DateTime? from = null,
         DateTime? to = null,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
         var query = _context.Set<SqlOSEmailDelivery>().AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
@@ -236,8 +245,22 @@ public sealed partial class SqlOSEmailAdminService
             query = query.Where(x => x.CreatedAt <= to.Value);
         }
 
-        query = query.OrderByDescending(x => x.CreatedAt);
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, ToDeliveryListItem, cancellationToken);
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 25);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSEmailDelivery>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "email.messages",
+            SqlOSCursorCodec.Fingerprint(
+                status,
+                templateKey,
+                recipient,
+                from?.ToString("O"),
+                to?.ToString("O")),
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(ToDeliveryListItem);
     }
 
     private async Task<SqlOSEmailTemplate> GetRequiredTemplateAsync(
@@ -389,38 +412,6 @@ public sealed partial class SqlOSEmailAdminService
             OccurredAt = DateTime.UtcNow,
             DataJson = JsonSerializer.Serialize(data)
         });
-    }
-
-    private static (int Page, int PageSize) NormalizePagination(int? page, int? pageSize)
-    {
-        var resolvedPage = Math.Max(1, page.GetValueOrDefault(1));
-        var resolvedPageSize = Math.Clamp(pageSize.GetValueOrDefault(25), 1, 100);
-        return (resolvedPage, resolvedPageSize);
-    }
-
-    private static async Task<object> PaginateAsync<T>(
-        IQueryable<T> query,
-        int page,
-        int pageSize,
-        Func<T, object> selector,
-        CancellationToken cancellationToken)
-    {
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
-        var currentPage = Math.Min(page, totalPages);
-        var data = await query
-            .Skip((currentPage - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        return new
-        {
-            Data = data.Select(selector).ToList(),
-            Page = currentPage,
-            PageSize = pageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
-        };
     }
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$", RegexOptions.CultureInvariant)]

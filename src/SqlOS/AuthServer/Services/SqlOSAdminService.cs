@@ -11,6 +11,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Fga.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -1179,23 +1180,39 @@ public sealed partial class SqlOSAdminService
             .FirstOrDefaultAsync(cancellationToken)
         ?? throw new InvalidOperationException("User not found.");
 
-    public async Task<object> ListUsersAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListUsersAsync(
+        string? search = null,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSUser>()
-            .AsNoTracking()
-            .OrderBy(x => x.DisplayName)
-            .Select(x => new
-            {
-                x.Id,
-                x.DisplayName,
-                x.DefaultEmail,
-                x.IsActive,
-                x.CreatedAt,
-                MembershipCount = x.Memberships.Count(m => m.IsActive)
-            });
+        var query = _context.Set<SqlOSUser>().AsNoTracking().Select(x => new UserListRow
+        {
+            Id = x.Id,
+            DisplayName = x.DisplayName,
+            DefaultEmail = x.DefaultEmail,
+            IsActive = x.IsActive,
+            CreatedAt = x.CreatedAt,
+            MembershipCount = x.Memberships.Count(m => m.IsActive)
+        });
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var trimmed = search.Trim();
+            query = query.Where(x =>
+                x.DisplayName.Contains(trimmed)
+                || (x.DefaultEmail != null && x.DefaultEmail.Contains(trimmed)));
+        }
 
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        return await PaginateByCursorAsync(
+            query,
+            SqlOSKeyset<UserListRow>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "auth.users",
+            SqlOSCursorCodec.Fingerprint(search),
+            cursor,
+            pageSize,
+            page,
+            cancellationToken: cancellationToken);
     }
 
     public async Task<object> GetOrganizationAsync(string organizationId, CancellationToken cancellationToken = default)
@@ -1216,160 +1233,170 @@ public sealed partial class SqlOSAdminService
             .FirstOrDefaultAsync(cancellationToken)
         ?? throw new InvalidOperationException("Organization not found.");
 
-    public async Task<object> ListOrganizationsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListOrganizationsAsync(
+        string? search = null,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSOrganization>()
-            .AsNoTracking()
-            .OrderBy(x => x.Name)
-            .Select(x => new
-            {
-                x.Id,
-                x.Name,
-                x.Slug,
-                x.PrimaryDomain,
-                x.IsActive,
-                MembershipCount = x.Memberships.Count(m => m.IsActive),
-                EnabledSsoConnections = x.SsoConnections.Count(c => c.IsEnabled)
-            });
+        var query = _context.Set<SqlOSOrganization>().AsNoTracking().Select(x => new OrganizationListRow
+        {
+            Id = x.Id,
+            Name = x.Name,
+            Slug = x.Slug,
+            PrimaryDomain = x.PrimaryDomain,
+            IsActive = x.IsActive,
+            MembershipCount = x.Memberships.Count(m => m.IsActive),
+            EnabledSsoConnections = x.SsoConnections.Count(c => c.IsEnabled)
+        });
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var trimmed = search.Trim();
+            query = query.Where(x =>
+                x.Name.Contains(trimmed)
+                || x.Slug.Contains(trimmed)
+                || (x.PrimaryDomain != null && x.PrimaryDomain.Contains(trimmed)));
+        }
 
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        return await PaginateByCursorAsync(
+            query,
+            SqlOSKeyset<OrganizationListRow>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id),
+            "auth.organizations",
+            SqlOSCursorCodec.Fingerprint(search),
+            cursor,
+            pageSize,
+            page,
+            cancellationToken: cancellationToken);
     }
 
-    public async Task<object> ListMembershipsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListMembershipsAsync(
+        string? search = null,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSMembership>()
-            .AsNoTracking()
-            .Include(x => x.Organization)
-            .Include(x => x.User)
-            .OrderBy(x => x.Organization!.Name)
-            .ThenBy(x => x.User!.DisplayName)
-            .Select(x => new
-            {
-                x.OrganizationId,
-                Organization = x.Organization!.Name,
-                x.UserId,
-                User = x.User!.DisplayName,
-                UserEmail = x.User!.DefaultEmail,
-                x.Role,
-                x.IsActive,
-                x.CreatedAt
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        var query = ApplyMembershipSearch(
+            ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking()),
+            search);
+        return await PaginateByCursorAsync(
+            query,
+            SqlOSKeyset<MembershipListRow>.Create()
+                .Ascending(x => x.OrganizationName)
+                .ThenAscending(x => x.UserDisplayName)
+                .ThenAscending(x => x.OrganizationId)
+                .ThenAscending(x => x.UserId),
+            "auth.memberships",
+            SqlOSCursorCodec.Fingerprint(search),
+            cursor,
+            pageSize,
+            page,
+            MapMembershipListRow,
+            cancellationToken: cancellationToken);
     }
 
-    public async Task<object> ListOrganizationMembershipsAsync(string organizationId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListOrganizationMembershipsAsync(
+        string organizationId,
+        string? search = null,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSMembership>()
-            .AsNoTracking()
-            .Include(x => x.Organization)
-            .Include(x => x.User)
-            .Where(x => x.OrganizationId == organizationId)
-            .OrderBy(x => x.User!.DisplayName)
-            .Select(x => new
-            {
-                x.OrganizationId,
-                Organization = x.Organization!.Name,
-                x.UserId,
-                User = x.User!.DisplayName,
-                UserEmail = x.User!.DefaultEmail,
-                x.Role,
-                x.IsActive,
-                x.CreatedAt
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        var query = ApplyMembershipSearch(
+            ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking())
+                .Where(x => x.OrganizationId == organizationId),
+            search);
+        return await PaginateByCursorAsync(
+            query,
+            SqlOSKeyset<MembershipListRow>.Create()
+                .Ascending(x => x.UserDisplayName)
+                .ThenAscending(x => x.UserId),
+            "auth.organization-memberships",
+            SqlOSCursorCodec.Fingerprint(organizationId, search),
+            cursor,
+            pageSize,
+            page,
+            MapMembershipListRow,
+            cancellationToken: cancellationToken);
     }
 
-    public async Task<object> ListUserMembershipsAsync(string userId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListUserMembershipsAsync(
+        string userId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSMembership>()
-            .AsNoTracking()
-            .Include(x => x.Organization)
-            .Include(x => x.User)
-            .Where(x => x.UserId == userId)
-            .OrderBy(x => x.Organization!.Name)
-            .Select(x => new
-            {
-                x.OrganizationId,
-                Organization = x.Organization!.Name,
-                x.UserId,
-                User = x.User!.DisplayName,
-                UserEmail = x.User!.DefaultEmail,
-                x.Role,
-                x.IsActive,
-                x.CreatedAt
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
+        var query = ProjectMemberships(_context.Set<SqlOSMembership>().AsNoTracking())
+            .Where(x => x.UserId == userId);
+        return await PaginateByCursorAsync(
+            query,
+            SqlOSKeyset<MembershipListRow>.Create()
+                .Ascending(x => x.OrganizationName)
+                .ThenAscending(x => x.OrganizationId),
+            "auth.user-memberships",
+            SqlOSCursorCodec.Fingerprint(userId),
+            cursor,
+            pageSize,
+            page,
+            MapMembershipListRow,
+            cancellationToken: cancellationToken);
     }
 
     public async Task<object> ListClientsAsync(
         string? source = null,
         string? status = null,
         string? search = null,
-        int? page = null,
+        string? cursor = null,
         int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var resolvedPageSize = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
         var managedClientIds = GetStartupManagedClientIds();
+        var query = ApplyClientListFilters(_context.Set<SqlOSClientApplication>().AsNoTracking(), source, status, search);
+        var keyset = SqlOSKeyset<SqlOSClientApplication>.Create().Ascending(x => x.Name).ThenAscending(x => x.Id);
+        var fingerprint = SqlOSCursorCodec.Fingerprint(source, status, search);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            keyset,
+            "auth.clients",
+            fingerprint,
+            cursor,
+            resolvedPageSize,
+            cancellationToken);
 
-        var clients = await _context.Set<SqlOSClientApplication>()
-            .AsNoTracking()
-            .OrderBy(x => x.Name)
-            .ToListAsync(cancellationToken);
-
-        var duplicateFingerprints = clients
-            .Where(x => string.Equals(x.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
-            .Select(CalculateDuplicateFingerprint)
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .GroupBy(static value => value!, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-
-        var filtered = clients
-            .Select(x => FormatClientListItem(
-                x,
-                managedClientIds.Contains(x.ClientId),
-                duplicateFingerprints.TryGetValue(CalculateDuplicateFingerprint(x) ?? string.Empty, out var duplicateCount)
-                    ? duplicateCount
-                    : 0))
-            .Where(item => MatchesSourceFilter(item.RegistrationSource, source))
-            .Where(item => MatchesStatusFilter(item.IsActive, item.DisabledAt, status))
-            .Where(item => MatchesClientSearch(item, search))
-            .ToList();
-
-        var totalCount = filtered.Count;
-        var activeCount = filtered.Count(item => item.IsActive && item.DisabledAt == null);
-        var discoveredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "cimd", StringComparison.OrdinalIgnoreCase));
-        var registeredCount = filtered.Count(item => string.Equals(item.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase));
-        var disabledCount = filtered.Count(item => !item.IsActive || item.DisabledAt != null);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
-        var currentPage = Math.Min(resolvedPage, totalPages);
-        var data = filtered
-            .Skip((currentPage - 1) * resolvedPageSize)
-            .Take(resolvedPageSize)
+        var duplicateCounts = await CountClientDuplicatesForPageAsync(pageResult.Data, cancellationToken);
+        var data = pageResult.Data
+            .Select(client => FormatClientListItem(
+                client,
+                managedClientIds.Contains(client.ClientId),
+                duplicateCounts.GetValueOrDefault(CalculateDuplicateFingerprint(client) ?? string.Empty)))
             .Cast<object>()
             .ToList();
+
+        object? summary = null;
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            summary = await query.GroupBy(_ => 1).Select(g => new
+            {
+                ActiveCount = g.Count(x => x.IsActive && x.DisabledAt == null),
+                DiscoveredCount = g.Count(x => x.RegistrationSource == "cimd"),
+                RegisteredCount = g.Count(x => x.RegistrationSource == "dcr"),
+                DisabledCount = g.Count(x => !x.IsActive || x.DisabledAt != null)
+            }).FirstOrDefaultAsync(cancellationToken);
+        }
 
         return new
         {
             Data = data,
-            Page = currentPage,
-            PageSize = resolvedPageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages,
-            Summary = new
-            {
-                ActiveCount = activeCount,
-                DiscoveredCount = discoveredCount,
-                RegisteredCount = registeredCount,
-                DisabledCount = disabledCount
-            }
+            PageSize = pageResult.PageSize,
+            NextCursor = pageResult.NextCursor,
+            HasNextPage = pageResult.HasNextPage,
+            Summary = summary
         };
     }
 
@@ -1381,13 +1408,7 @@ public sealed partial class SqlOSAdminService
         var duplicateCount = 0;
         if (!string.IsNullOrWhiteSpace(duplicateFingerprint))
         {
-            var dcrClients = await _context.Set<SqlOSClientApplication>()
-                .AsNoTracking()
-                .Where(x => x.RegistrationSource == "dcr")
-                .ToListAsync(cancellationToken);
-            duplicateCount = dcrClients
-                .Select(CalculateDuplicateFingerprint)
-                .Count(value => string.Equals(value, duplicateFingerprint, StringComparison.Ordinal));
+            duplicateCount = await CountDuplicateClientsAsync(client, duplicateFingerprint, cancellationToken);
         }
 
         var recentAuditEvents = await _context.Set<SqlOSAuditEvent>()
@@ -1565,6 +1586,9 @@ public sealed partial class SqlOSAdminService
     public async Task<object> ListApplicationAssignmentsAsync(
         string clientApplicationId,
         bool includeRevoked = false,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
         CancellationToken cancellationToken = default)
     {
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
@@ -1572,15 +1596,31 @@ public sealed partial class SqlOSAdminService
             .AsNoTracking()
             .Include(x => x.Organization)
             .Where(x => x.ClientApplicationId == client.Id);
-
         if (!includeRevoked)
         {
             query = query.Where(x => x.RevokedAt == null);
         }
 
-        var assignments = await query
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSApplicationAssignment>.Create()
+                .Descending(x => x.CreatedAt)
+                .ThenDescending(x => x.Id),
+            "auth.application-assignments",
+            SqlOSCursorCodec.Fingerprint(client.Id, includeRevoked ? "revoked" : "active"),
+            cursor,
+            size,
+            cancellationToken);
+
+        return new
+        {
+            client.Id,
+            client.ClientId,
+            client.Name,
+            AccessMode = NormalizeAccessMode(client.AccessMode),
+            Data = pageResult.Data.Select(x => new
             {
                 x.Id,
                 x.ClientApplicationId,
@@ -1604,16 +1644,10 @@ public sealed partial class SqlOSAdminService
                 x.RevokedAt,
                 x.RevokedByActorType,
                 x.RevokedByActorId
-            })
-            .ToListAsync(cancellationToken);
-
-        return new
-        {
-            client.Id,
-            client.ClientId,
-            client.Name,
-            AccessMode = NormalizeAccessMode(client.AccessMode),
-            Assignments = assignments
+            }).ToList(),
+            PageSize = pageResult.PageSize,
+            NextCursor = pageResult.NextCursor,
+            HasNextPage = pageResult.HasNextPage
         };
     }
 
@@ -1939,14 +1973,20 @@ public sealed partial class SqlOSAdminService
         return removed;
     }
 
-    public async Task<List<object>> ListOidcConnectionsAsync(CancellationToken cancellationToken = default)
-    {
-        var connections = await _context.Set<SqlOSOidcConnection>()
-            .OrderBy(x => x.DisplayName)
-            .ToListAsync(cancellationToken);
-
-        return connections
-            .Select(x => new
+    public async Task<object> ListOidcConnectionsAsync(
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
+        => await PaginateByCursorAsync(
+            _context.Set<SqlOSOidcConnection>().AsNoTracking(),
+            SqlOSKeyset<SqlOSOidcConnection>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "auth.oidc-connections",
+            SqlOSCursorCodec.Fingerprint(),
+            cursor,
+            pageSize,
+            page,
+            x => new
             {
                 x.Id,
                 ProviderType = x.ProviderType.ToString(),
@@ -1979,20 +2019,23 @@ public sealed partial class SqlOSAdminService
                     x.ConfigurationOrphanedAt),
                 x.CreatedAt,
                 x.UpdatedAt
-            })
-            .Cast<object>()
-            .ToList();
-    }
+            },
+            cancellationToken: cancellationToken);
 
-    public async Task<List<object>> ListSsoConnectionsAsync(CancellationToken cancellationToken = default)
-    {
-        var connections = await _context.Set<SqlOSSsoConnection>()
-            .Include(x => x.Organization)
-            .OrderBy(x => x.DisplayName)
-            .ToListAsync(cancellationToken);
-
-        return connections
-            .Select(x => new
+    public async Task<object> ListSsoConnectionsAsync(
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
+        => await PaginateByCursorAsync(
+            _context.Set<SqlOSSsoConnection>().AsNoTracking().Include(x => x.Organization),
+            SqlOSKeyset<SqlOSSsoConnection>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "auth.sso-connections",
+            SqlOSCursorCodec.Fingerprint(),
+            cursor,
+            pageSize,
+            page,
+            x => new
             {
                 x.Id,
                 x.DisplayName,
@@ -2008,129 +2051,105 @@ public sealed partial class SqlOSAdminService
                 SetupStatus = GetSsoSetupStatus(x),
                 ServiceProviderEntityId = GetServiceProviderEntityId(),
                 AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)
-            })
-            .Cast<object>()
-            .ToList();
-    }
+            },
+            cancellationToken: cancellationToken);
 
-    public async Task<object> ListOrganizationSsoConnectionsAsync(string organizationId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListOrganizationSsoConnectionsAsync(
+        string organizationId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
         var query = _context.Set<SqlOSSsoConnection>()
             .AsNoTracking()
             .Include(x => x.Organization)
-            .Where(x => x.OrganizationId == organizationId)
-            .OrderBy(x => x.DisplayName)
-            .Select(x => new
+            .Where(x => x.OrganizationId == organizationId);
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 10);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            SqlOSKeyset<SqlOSSsoConnection>.Create().Ascending(x => x.DisplayName).ThenAscending(x => x.Id),
+            "auth.organization-sso-connections",
+            SqlOSCursorCodec.Fingerprint(organizationId),
+            cursor,
+            size,
+            cancellationToken);
+        var serviceProviderEntityId = GetServiceProviderEntityId();
+        return new
+        {
+            Data = pageResult.Data.Select(x => new
             {
                 x.Id,
                 x.DisplayName,
                 x.IdentityProviderEntityId,
                 x.SingleSignOnUrl,
                 x.IsEnabled,
-                OrganizationName = x.Organization!.Name,
+                Organization = x.Organization!.Name,
                 x.OrganizationId,
                 PrimaryDomain = x.Organization!.PrimaryDomain,
                 x.AutoProvisionUsers,
                 x.AutoLinkByEmail,
-                x.ConfigurationOwner,
-                x.ConfigurationSourceKey,
-                x.LastReconciledAt,
-                x.ConfigurationFingerprint,
-                x.ConfigurationOrphanedAt,
-                SetupStatus = string.IsNullOrWhiteSpace(x.IdentityProviderEntityId) || string.IsNullOrWhiteSpace(x.SingleSignOnUrl) || string.IsNullOrWhiteSpace(x.X509CertificatePem)
-                    ? "draft"
-                    : x.IsEnabled ? "active" : "ready_to_activate"
-            });
-
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)resolvedPageSize));
-        var data = await query
-            .Skip((resolvedPage - 1) * resolvedPageSize)
-            .Take(resolvedPageSize)
-            .ToListAsync(cancellationToken);
-        var serviceProviderEntityId = GetServiceProviderEntityId();
-
-        return new
-        {
-            Data = data.Select(x => new
-            {
-                x.Id,
-                x.DisplayName,
-                x.IdentityProviderEntityId,
-                x.SingleSignOnUrl,
-                x.IsEnabled,
-                Organization = x.OrganizationName,
-                x.OrganizationId,
-                PrimaryDomain = x.PrimaryDomain,
-                x.AutoProvisionUsers,
-                x.AutoLinkByEmail,
                 Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(x.ConfigurationOwner, x.ConfigurationSourceKey, x.LastReconciledAt, x.ConfigurationFingerprint, x.ConfigurationOrphanedAt),
-                x.SetupStatus,
+                SetupStatus = GetSsoSetupStatus(x),
                 ServiceProviderEntityId = serviceProviderEntityId,
                 AssertionConsumerServiceUrl = GetAssertionConsumerServiceUrl(x.Id)
             }).ToList(),
-            Page = resolvedPage,
-            PageSize = resolvedPageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
+            PageSize = pageResult.PageSize,
+            NextCursor = pageResult.NextCursor,
+            HasNextPage = pageResult.HasNextPage
         };
     }
 
-    public async Task<object> ListSessionsAsync(int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
+    public async Task<object> ListSessionsAsync(
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
+        => await PaginateByCursorAsync(
+            _context.Set<SqlOSSession>().AsNoTracking().Include(x => x.User),
+            SqlOSKeyset<SqlOSSession>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.sessions",
+            SqlOSCursorCodec.Fingerprint(),
+            cursor,
+            pageSize,
+            page,
+            MapSessionListRow,
+            cancellationToken: cancellationToken);
+
+    public async Task<object> ListUserSessionsAsync(
+        string userId,
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
+        => await PaginateByCursorAsync(
+            _context.Set<SqlOSSession>().AsNoTracking().Include(x => x.User).Where(x => x.UserId == userId),
+            SqlOSKeyset<SqlOSSession>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
+            "auth.user-sessions",
+            SqlOSCursorCodec.Fingerprint(userId),
+            cursor,
+            pageSize,
+            page,
+            MapSessionListRow,
+            cancellationToken: cancellationToken);
+
+    private static object MapSessionListRow(SqlOSSession x) => new
     {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSSession>()
-            .AsNoTracking()
-            .Include(x => x.User)
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new
-            {
-                x.Id,
-                x.AuthenticationMethod,
-                User = x.User!.DisplayName,
-                x.UserId,
-                x.ClientApplicationId,
-                x.CreatedAt,
-                x.LastSeenAt,
-                x.IdleExpiresAt,
-                x.AbsoluteExpiresAt,
-                x.RevokedAt,
-                x.RevocationReason,
-                x.UserAgent,
-                x.IpAddress
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
-    }
-
-    public async Task<object> ListUserSessionsAsync(string userId, int? page = null, int? pageSize = null, CancellationToken cancellationToken = default)
-    {
-        var (resolvedPage, resolvedPageSize) = NormalizePagination(page, pageSize);
-        var query = _context.Set<SqlOSSession>()
-            .AsNoTracking()
-            .Include(x => x.User)
-            .Where(x => x.UserId == userId)
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new
-            {
-                x.Id,
-                x.AuthenticationMethod,
-                User = x.User!.DisplayName,
-                x.UserId,
-                x.ClientApplicationId,
-                x.CreatedAt,
-                x.LastSeenAt,
-                x.IdleExpiresAt,
-                x.AbsoluteExpiresAt,
-                x.RevokedAt,
-                x.RevocationReason,
-                x.UserAgent,
-                x.IpAddress
-            });
-
-        return await PaginateAsync(query, resolvedPage, resolvedPageSize, cancellationToken);
-    }
+        x.Id,
+        x.AuthenticationMethod,
+        User = x.User?.DisplayName,
+        x.UserId,
+        x.ClientApplicationId,
+        x.CreatedAt,
+        x.LastSeenAt,
+        x.IdleExpiresAt,
+        x.AbsoluteExpiresAt,
+        x.RevokedAt,
+        x.RevocationReason,
+        x.UserAgent,
+        x.IpAddress
+    };
 
     public async Task<List<object>> ListAuditEventsAsync(CancellationToken cancellationToken = default)
         => await _context.Set<SqlOSAuditEvent>()
@@ -2164,32 +2183,209 @@ public sealed partial class SqlOSAdminService
             .Cast<object>()
             .ToListAsync(cancellationToken);
 
-    private static (int Page, int PageSize) NormalizePagination(int? page, int? pageSize)
+    private static IQueryable<MembershipListRow> ApplyMembershipSearch(
+        IQueryable<MembershipListRow> query,
+        string? search)
     {
-        var resolvedPage = page.GetValueOrDefault(1);
-        var resolvedPageSize = pageSize.GetValueOrDefault(10);
-        resolvedPage = Math.Max(1, resolvedPage);
-        resolvedPageSize = Math.Clamp(resolvedPageSize, 1, 100);
-        return (resolvedPage, resolvedPageSize);
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return query;
+        }
+
+        var trimmed = search.Trim();
+        return query.Where(x =>
+            x.OrganizationName.Contains(trimmed)
+            || x.UserDisplayName.Contains(trimmed)
+            || (x.UserEmail != null && x.UserEmail.Contains(trimmed))
+            || x.Role.Contains(trimmed));
     }
 
-    private static async Task<object> PaginateAsync<T>(IQueryable<T> query, int page, int pageSize, CancellationToken cancellationToken)
-    {
-        var totalCount = await query.CountAsync(cancellationToken);
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
-        var data = await query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        return new
+    private static IQueryable<MembershipListRow> ProjectMemberships(IQueryable<SqlOSMembership> query)
+        => query.Select(x => new MembershipListRow
         {
-            Data = data,
-            Page = page,
-            PageSize = pageSize,
-            TotalCount = totalCount,
-            TotalPages = totalPages
+            OrganizationId = x.OrganizationId,
+            OrganizationName = x.Organization!.Name,
+            UserId = x.UserId,
+            UserDisplayName = x.User!.DisplayName,
+            UserEmail = x.User!.DefaultEmail,
+            Role = x.Role,
+            IsActive = x.IsActive,
+            CreatedAt = x.CreatedAt
+        });
+
+    private static object MapMembershipListRow(MembershipListRow x) => new
+    {
+        x.OrganizationId,
+        Organization = x.OrganizationName,
+        x.UserId,
+        User = x.UserDisplayName,
+        UserEmail = x.UserEmail,
+        x.Role,
+        x.IsActive,
+        x.CreatedAt
+    };
+
+    private static async Task<object> PaginateByCursorAsync<T>(
+        IQueryable<T> query,
+        SqlOSKeyset<T> keyset,
+        string sortKey,
+        string filterFingerprint,
+        string? cursor,
+        int? pageSize,
+        int? page,
+        int defaultPageSize = 10,
+        CancellationToken cancellationToken = default)
+        where T : class
+    {
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, defaultPageSize);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            keyset,
+            sortKey,
+            filterFingerprint,
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse();
+    }
+
+    private static async Task<object> PaginateByCursorAsync<T>(
+        IQueryable<T> query,
+        SqlOSKeyset<T> keyset,
+        string sortKey,
+        string filterFingerprint,
+        string? cursor,
+        int? pageSize,
+        int? page,
+        Func<T, object> selector,
+        int defaultPageSize = 10,
+        CancellationToken cancellationToken = default)
+        where T : class
+    {
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, defaultPageSize);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            query,
+            keyset,
+            sortKey,
+            filterFingerprint,
+            cursor,
+            size,
+            cancellationToken);
+        return pageResult.ToResponse(selector);
+    }
+
+    private static IQueryable<SqlOSClientApplication> ApplyClientListFilters(
+        IQueryable<SqlOSClientApplication> query,
+        string? source,
+        string? status,
+        string? search)
+    {
+        var registrationSource = NormalizeClientSourceFilter(source);
+        if (registrationSource != null)
+        {
+            query = query.Where(x => x.RegistrationSource == registrationSource);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            switch (status.Trim().ToLowerInvariant())
+            {
+                case "active":
+                    query = query.Where(x => x.IsActive && x.DisabledAt == null);
+                    break;
+                case "disabled":
+                    query = query.Where(x => !x.IsActive || x.DisabledAt != null);
+                    break;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var needle = search.Trim().ToLower();
+            query = query.Where(x =>
+                (x.Name != null && x.Name.ToLower().Contains(needle))
+                || x.ClientId.ToLower().Contains(needle)
+                || (x.Description != null && x.Description.ToLower().Contains(needle))
+                || x.Audience.ToLower().Contains(needle)
+                || (x.SoftwareId != null && x.SoftwareId.ToLower().Contains(needle))
+                || (x.SoftwareVersion != null && x.SoftwareVersion.ToLower().Contains(needle))
+                || (x.MetadataDocumentUrl != null && x.MetadataDocumentUrl.ToLower().Contains(needle))
+                || (needle == "seeded" && x.RegistrationSource == "seeded")
+                || (needle == "manual" && x.RegistrationSource == "manual")
+                || (needle == "discovered" && x.RegistrationSource == "cimd")
+                || (needle == "registered" && x.RegistrationSource == "dcr"));
+        }
+
+        return query;
+    }
+
+    private static string? NormalizeClientSourceFilter(string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || string.Equals(filter, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return filter.Trim().ToLowerInvariant() switch
+        {
+            "discovered" => "cimd",
+            "registered" => "dcr",
+            var value => value
         };
+    }
+
+    private async Task<Dictionary<string, int>> CountClientDuplicatesForPageAsync(
+        IReadOnlyList<SqlOSClientApplication> page,
+        CancellationToken cancellationToken)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var client in page)
+        {
+            var fingerprint = CalculateDuplicateFingerprint(client);
+            if (string.IsNullOrWhiteSpace(fingerprint) || counts.ContainsKey(fingerprint))
+            {
+                continue;
+            }
+
+            counts[fingerprint] = await CountDuplicateClientsAsync(client, fingerprint, cancellationToken);
+        }
+
+        return counts;
+    }
+
+    private sealed class UserListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string? DefaultEmail { get; set; }
+        public bool IsActive { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int MembershipCount { get; set; }
+    }
+
+    private sealed class OrganizationListRow
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Slug { get; set; } = string.Empty;
+        public string? PrimaryDomain { get; set; }
+        public bool IsActive { get; set; }
+        public int MembershipCount { get; set; }
+        public int EnabledSsoConnections { get; set; }
+    }
+
+    private sealed class MembershipListRow
+    {
+        public string OrganizationId { get; set; } = string.Empty;
+        public string OrganizationName { get; set; } = string.Empty;
+        public string UserId { get; set; } = string.Empty;
+        public string UserDisplayName { get; set; } = string.Empty;
+        public string? UserEmail { get; set; }
+        public string Role { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     public async Task RecordAuditAsync(
@@ -3120,19 +3316,49 @@ public sealed partial class SqlOSAdminService
             : "fresh";
     }
 
-    private static string? CalculateDuplicateFingerprint(SqlOSClientApplication client)
+    private async Task<int> CountDuplicateClientsAsync(
+        SqlOSClientApplication client,
+        string fingerprint,
+        CancellationToken cancellationToken)
     {
-        if (!string.Equals(client.RegistrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
+        var candidates = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .Where(x => x.RegistrationSource == "dcr"
+                && x.SoftwareId == client.SoftwareId
+                && x.SoftwareVersion == client.SoftwareVersion
+                && x.ClientUri == client.ClientUri)
+            .Select(x => new { x.RegistrationSource, x.SoftwareId, x.SoftwareVersion, x.ClientUri, x.RedirectUrisJson })
+            .ToListAsync(cancellationToken);
+
+        return candidates.Count(x => string.Equals(
+            CalculateDuplicateFingerprint(x.RegistrationSource, x.SoftwareId, x.SoftwareVersion, x.ClientUri, x.RedirectUrisJson),
+            fingerprint,
+            StringComparison.Ordinal));
+    }
+
+    private static string? CalculateDuplicateFingerprint(SqlOSClientApplication client)
+        => CalculateDuplicateFingerprint(
+            client.RegistrationSource,
+            client.SoftwareId,
+            client.SoftwareVersion,
+            client.ClientUri,
+            client.RedirectUrisJson);
+
+    private static string? CalculateDuplicateFingerprint(
+        string? registrationSource,
+        string? softwareId,
+        string? softwareVersion,
+        string? clientUri,
+        string? redirectUrisJson)
+    {
+        if (!string.Equals(registrationSource, "dcr", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
-        var softwareId = client.SoftwareId ?? string.Empty;
-        var softwareVersion = client.SoftwareVersion ?? string.Empty;
-        var clientUri = client.ClientUri ?? string.Empty;
+        var redirectUris = DeserializeJsonList(redirectUrisJson);
         return string.Join("|", redirectUris.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
-            + $"|{softwareId}|{softwareVersion}|{clientUri}";
+            + $"|{softwareId ?? string.Empty}|{softwareVersion ?? string.Empty}|{clientUri ?? string.Empty}";
     }
 
     private HashSet<string> GetStartupManagedClientIds()

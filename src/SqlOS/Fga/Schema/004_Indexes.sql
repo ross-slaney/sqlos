@@ -19,7 +19,8 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_{RolePermissions}_PermissionId_RoleId]
-    ON [{Schema}].[{RolePermissions}]([PermissionId], [RoleId]);
+    ON [{Schema}].[{RolePermissions}]([PermissionId])
+    INCLUDE ([RoleId]);
 END
 GO
 
@@ -30,8 +31,8 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_{Grants}_ResourceId_SubjectId]
-    ON [{Schema}].[{Grants}]([ResourceId], [SubjectId])
-    INCLUDE ([RoleId], [EffectiveFrom], [EffectiveTo]);
+    ON [{Schema}].[{Grants}]([ResourceId])
+    INCLUDE ([SubjectId], [RoleId], [EffectiveFrom], [EffectiveTo]);
 END
 GO
 

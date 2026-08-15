@@ -302,7 +302,9 @@ public sealed class SqlOSTransactionalEmailTests
             PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
         });
 
-        json.GetProperty("totalCount").GetInt32().Should().Be(1);
+        json.GetProperty("data").GetArrayLength().Should().Be(1);
+        json.GetProperty("hasNextPage").GetBoolean().Should().BeFalse();
+        json.TryGetProperty("totalCount", out _).Should().BeFalse();
         var item = json.GetProperty("data")[0];
         item.GetProperty("templateKey").GetString().Should().Be("order-message-list");
         item.GetProperty("status").GetString().Should().Be(SqlOSEmailDeliveryStatuses.Queued);

@@ -20,6 +20,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -32,21 +33,14 @@ public static partial class EndpointRouteBuilderExtensions
     {
         setupApi.AddEndpointFilter<SqlOSSsoPortalSessionAvailabilityFilter>();
 
-        adminApi.MapGet("/organizations/{organizationId}/sso-portal/sessions", async (HttpContext context, string organizationId, int? page, int? pageSize, SqlOSSsoPortalService portalService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        adminApi.MapGet("/organizations/{organizationId}/sso-portal/sessions", async (HttpContext context, string organizationId, string? cursor, int? pageSize, int? page, SqlOSSsoPortalService portalService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
             {
                 return Results.NotFound();
             }
 
-            try
-            {
-                return Results.Ok(await portalService.ListOrganizationSessionsAsync(organizationId, page, pageSize, context, cancellationToken));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { message = ex.Message });
-            }
+            return await SqlOSCursorPagination.Ok(() => portalService.ListOrganizationSessionsAsync(organizationId, cursor, pageSize, page, context, cancellationToken));
         });
 
         adminApi.MapPost("/sso-portal/sessions", async (HttpContext context, SqlOSCreateSsoPortalSessionRequest request, SqlOSSsoPortalService portalService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

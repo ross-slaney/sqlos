@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 40;
+    private const int CurrentSchemaVersion = 41;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -84,6 +84,19 @@ public sealed class SchemaInitializerIntegrationTests
                 Assert.IsTrue(await ColumnExistsAsync(table, column), $"Column {table}.{column} should exist.");
             }
         }
+
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSUsers", "IX_SqlOSUsers_DisplayName_Id"),
+            "User lists need a DisplayName+Id keyset index.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSOrganizations", "IX_SqlOSOrganizations_Name_Id"),
+            "Organization lists need a Name+Id keyset index.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSClientApplications", "IX_SqlOSClientApplications_Name_Id"),
+            "Client lists need a Name+Id keyset index.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuditEvents", "IX_SqlOSAuditEvents_OccurredAt_IngestedAt_Id"),
+            "Audit lists need an OccurredAt+IngestedAt+Id keyset index.");
     }
 
     [TestMethod]

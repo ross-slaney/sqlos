@@ -13,7 +13,7 @@ A subject is the entity being authorized. Every grant links a subject to a role 
 | --- | --- | --- |
 | `user` | `SqlOSFgaUser` | Human users (synced from AuthServer) |
 | `agent` | `SqlOSFgaAgent` | AI agents, bots, automated processes |
-| `service_account` | `SqlOSFgaServiceAccount` | API keys for service-to-service access |
+| `service_account` | `SqlOSFgaServiceAccount` | Non-human FGA subject for jobs and integrations |
 | `group` | `SqlOSFgaUserGroup` | Logical groups of subjects |
 
 ## Provision subjects
@@ -76,12 +76,14 @@ Groups are subjects with type `group`, but groups cannot be members of other gro
 
 For the complete membership, grant, inherited-access, and removal workflow, follow [Authorize teams with FGA groups](/docs/guides/fga-groups). That guide also explains why `SqlOSFgaUserGroup.Id` is used for membership while `SubjectId` is used for grants.
 
+A service account is an FGA subject. It can receive grants without being an AuthServer user. It is not a machine client. A machine client is the AuthServer confidential OAuth client that exchanges a secret at `/sqlos/auth/token`. `SeedMachineClient` and **Auth Server > Machine Clients** can create both and link them; provisioning a service account here does not register that OAuth client. See [Machine Clients](/docs/authserver/machine-clients).
+
 ## Authentication by subject type
 
-Authentication is application code. A bearer token, API key, or agent token can map to a user, service account, or agent subject, but FGA receives only the resolved `subjectId`.
+Authentication is application code or AuthServer. A bearer token, API key, or agent token can map to a user, service account, or agent subject, but FGA receives only the resolved `subjectId`.
 
 All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `GetAuthorizationFilterAsync` calls work regardless of whether the subject is a user, agent, service account, or group.
 
 ## Dashboard
 
-Manage subjects under Fine-Grained Auth > Users / Agents / Service Accounts / User Groups.
+Manage subjects under Fine-Grained Auth > Users / Agents / Service Accounts / User Groups. Create or rotate OAuth worker credentials under Auth Server > Machine Clients.

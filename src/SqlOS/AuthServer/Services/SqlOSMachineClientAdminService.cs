@@ -9,6 +9,7 @@ using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Fga.Models;
+using SqlOS.Pagination;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -93,17 +94,52 @@ public sealed class SqlOSMachineClientAdminService
         return new SqlOSMachineClientCreated(ToDto(client, account, subject, normalized.Grants.Count), secret);
     }
 
-    public async Task<IReadOnlyList<SqlOSMachineClientDto>> ListAsync(CancellationToken cancellationToken = default)
+    public async Task<object> ListAsync(
+        string? cursor = null,
+        int? pageSize = null,
+        int? page = null,
+        CancellationToken cancellationToken = default)
     {
-        var rows = await _context.Set<SqlOSFgaServiceAccount>().AsNoTracking().Include(x => x.Subject)
-            .OrderBy(x => x.Subject!.DisplayName).ToListAsync(cancellationToken);
-        var clients = await _context.Set<SqlOSClientApplication>().AsNoTracking()
-            .Where(x => rows.Select(row => row.ClientId).Contains(x.ClientId)).ToDictionaryAsync(x => x.ClientId, cancellationToken);
-        var subjects = rows.Select(x => x.SubjectId).ToArray();
-        var counts = await _context.Set<SqlOSFgaGrant>().AsNoTracking().Where(x => subjects.Contains(x.SubjectId))
-            .GroupBy(x => x.SubjectId).Select(x => new { x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        return rows.Where(x => clients.ContainsKey(x.ClientId))
-            .Select(x => ToDto(clients[x.ClientId], x, x.Subject!, counts.GetValueOrDefault(x.SubjectId))).ToArray();
+        SqlOSCursorPagination.RejectLegacyOffset(page);
+        var size = SqlOSCursorPagination.NormalizePageSize(pageSize, 25);
+        var clientIdsWithApps = _context.Set<SqlOSClientApplication>().AsNoTracking().Select(x => x.ClientId);
+        var pageResult = await SqlOSCursorPagination.ToPageAsync(
+            _context.Set<SqlOSFgaServiceAccount>().AsNoTracking()
+                .Include(x => x.Subject)
+                .Where(x => clientIdsWithApps.Contains(x.ClientId)),
+            SqlOSKeyset<SqlOSFgaServiceAccount>.Create()
+                .Ascending(x => x.ClientId)
+                .ThenAscending(x => x.Id),
+            "auth.machine-clients",
+            SqlOSCursorCodec.Fingerprint(),
+            cursor,
+            size,
+            cancellationToken);
+        var clientIds = pageResult.Data.Select(x => x.ClientId).ToList();
+        var clients = clientIds.Count == 0
+            ? new Dictionary<string, SqlOSClientApplication>(StringComparer.Ordinal)
+            : await _context.Set<SqlOSClientApplication>().AsNoTracking()
+                .Where(x => clientIds.Contains(x.ClientId))
+                .ToDictionaryAsync(x => x.ClientId, cancellationToken);
+        var subjectIds = pageResult.Data.Select(x => x.SubjectId).ToList();
+        var counts = subjectIds.Count == 0
+            ? new Dictionary<string, int>(StringComparer.Ordinal)
+            : await _context.Set<SqlOSFgaGrant>().AsNoTracking()
+                .Where(x => subjectIds.Contains(x.SubjectId))
+                .GroupBy(x => x.SubjectId)
+                .Select(x => new { x.Key, Count = x.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        var data = pageResult.Data
+            .Where(x => x.Subject != null && clients.ContainsKey(x.ClientId))
+            .Select(x => ToDto(clients[x.ClientId], x, x.Subject!, counts.GetValueOrDefault(x.SubjectId)))
+            .ToList();
+        return new
+        {
+            Data = data,
+            PageSize = pageResult.PageSize,
+            NextCursor = pageResult.NextCursor,
+            HasNextPage = pageResult.HasNextPage
+        };
     }
 
     public async Task<SqlOSMachineClientCreated> RotateAsync(string clientId, CancellationToken cancellationToken = default)
