@@ -591,7 +591,15 @@ public sealed partial class SqlOSAdminService
             });
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (SqlOSSignupOrchestration.IsUniqueConstraintViolation(ex))
+        {
+            throw new InvalidOperationException($"Email '{request.Email}' already exists.", ex);
+        }
+
         return user;
     }
 

@@ -91,22 +91,64 @@ public sealed class SqlOSAuthService
             throw new InvalidOperationException("Password signup is disabled.");
         }
 
+        var input = SqlOSSignupOrchestration.NormalizePasswordSignup(
+            request.DisplayName,
+            request.Email,
+            request.Password,
+            request.OrganizationName);
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(request.OrganizationId);
-
-        var user = await _adminService.CreateUserAsync(new SqlOSCreateUserRequest(request.DisplayName, request.Email, request.Password), cancellationToken);
-
-        string? organizationId = null;
-        if (!string.IsNullOrWhiteSpace(request.OrganizationName))
-        {
-            var organization = await _adminService.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest(request.OrganizationName, null), cancellationToken);
-            organizationId = organization.Id;
-            await _adminService.CreateMembershipAsync(organization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        await _adminService.RecordAuditAsync("user.signup", "user", user.Id, userId: user.Id, organizationId: organizationId, ipAddress: GetIp(httpContext), cancellationToken: cancellationToken);
-
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
-        return await FinalizeClientLoginAsync(user, client, organizationId, "password", httpContext, cancellationToken);
+
+        SqlOSPasswordAuthenticationResult? signup = null;
+        try
+        {
+            return await SqlOSSignupOrchestration.ExecuteAsync(_context, async ct =>
+            {
+                signup = await SqlOSSignupOrchestration.CreatePasswordAccountAsync(
+                    _adminService,
+                    _context,
+                    input,
+                    ct);
+                var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                await _adminService.RecordAuditAsync(
+                    "user.signup",
+                    "user",
+                    signup.User.Id,
+                    userId: signup.User.Id,
+                    organizationId: organizationId,
+                    ipAddress: GetIp(httpContext),
+                    cancellationToken: ct);
+                return await FinalizeClientLoginAsync(
+                    signup.User,
+                    client,
+                    organizationId,
+                    "password",
+                    httpContext,
+                    ct);
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            if (!SupportsDatabaseTransactions())
+            {
+                await CleanupNonTransactionalSignupArtifactsAsync(
+                    signup,
+                    existingOrganizationId: null,
+                    input.OrganizationName,
+                    cancellationToken);
+            }
+            else
+            {
+                await PersistRolledBackSignupAccessDenialAsync(
+                    ex,
+                    client,
+                    signup,
+                    httpContext,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<SqlOSLoginResult> LoginWithPasswordAsync(SqlOSPasswordLoginRequest request, HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -2766,6 +2808,41 @@ public sealed class SqlOSAuthService
             user,
             Array.Empty<SqlOSOrganizationOption>(),
             "invitation");
+    }
+
+    private async Task PersistRolledBackSignupAccessDenialAsync(
+        Exception exception,
+        SqlOSClientApplication client,
+        SqlOSPasswordAuthenticationResult? signup,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (signup == null
+            || exception is not InvalidOperationException
+            || !string.Equals(exception.Message, "Application access is not allowed.", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_context is DbContext tracked)
+        {
+            tracked.ChangeTracker.Clear();
+        }
+
+        try
+        {
+            await _adminService.EnsureApplicationAccessAsync(
+                client,
+                signup.User.Id,
+                signup.Organizations.FirstOrDefault()?.Id,
+                "application.access.token_denied",
+                GetIp(httpContext),
+                cancellationToken);
+        }
+        catch (InvalidOperationException persistException)
+            when (string.Equals(persistException.Message, exception.Message, StringComparison.Ordinal))
+        {
+        }
     }
 
     private async Task CleanupNonTransactionalSignupArtifactsAsync(

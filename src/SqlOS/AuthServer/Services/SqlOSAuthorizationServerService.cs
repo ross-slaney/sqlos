@@ -368,24 +368,32 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Password signup is disabled.");
         }
 
+        var input = SqlOSSignupOrchestration.NormalizePasswordSignup(
+            displayName,
+            email,
+            password,
+            organizationName);
         SqlOSSignupJoinPolicy.RejectUnauthorizedOrganizationJoin(organizationId);
 
-        var user = await _adminService.CreateUserAsync(
-            new SqlOSCreateUserRequest(displayName, email, password),
+        return await SqlOSSignupOrchestration.ExecuteAsync(
+            _context,
+            cancellationToken => SqlOSSignupOrchestration.CreatePasswordAccountAsync(
+                _adminService,
+                _context,
+                input,
+                cancellationToken),
             cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(organizationName))
-        {
-            var createdOrganization = await _adminService.CreateOrganizationAsync(
-                new SqlOSCreateOrganizationRequest(organizationName, null),
-                cancellationToken);
-            await _adminService.CreateMembershipAsync(createdOrganization.Id, new SqlOSCreateMembershipRequest(user.Id, "owner"), cancellationToken);
-        }
-
-        var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
-
-        return new SqlOSPasswordAuthenticationResult(user, organizations, "password");
     }
+
+    public Task EnsureSignupAuthorizationContextAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        CancellationToken cancellationToken = default)
+        => SqlOSSignupOrchestration.EnsureAuthorizationSignupContextAsync(
+            _adminService,
+            _context,
+            _options,
+            authorizationRequest,
+            cancellationToken);
 
     public async Task<SqlOSPasswordAuthenticationResult> SignUpWithEmailOtpAsync(
         string displayName,

@@ -155,7 +155,13 @@ public static partial class EndpointRouteBuilderExtensions
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                SqlOSSignupOrchestration.RejectInvitationEmailMismatch(invitation?.Email, email);
                 email = invitation?.Email ?? email;
+                if (authorizationRequest != null)
+                {
+                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+                }
+
                 var ssoRedirect = await RedirectToSsoIfRequiredAsync(
                     authorizationRequest,
                     email,
@@ -261,16 +267,17 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                if (SupportsDatabaseTransactions(dbContext))
-                {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
-
                 var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken)
                     ?? throw new InvalidOperationException("Invitation is invalid or expired.");
+                SqlOSSignupOrchestration.RejectInvitationEmailMismatch(invitation.Email, email);
                 email = invitation.Email;
+                if (authorizationRequest != null)
+                {
+                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+                }
+
                 var ssoRedirect = await RedirectToSsoIfRequiredAsync(
                     authorizationRequest,
                     email,
@@ -280,12 +287,12 @@ public static partial class EndpointRouteBuilderExtensions
                     cancellationToken);
                 if (ssoRedirect != null)
                 {
-                    if (transaction != null)
-                    {
-                        await transaction.RollbackAsync(cancellationToken);
-                    }
-
                     return ssoRedirect;
+                }
+
+                if (SupportsDatabaseTransactions(dbContext))
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
                 }
 
                 var credentialSettings = await settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
@@ -377,6 +384,11 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
+                if (authorizationRequest != null)
+                {
+                    await authorizationServerService.EnsureSignupAuthorizationContextAsync(authorizationRequest, cancellationToken);
+                }
+
                 var ssoRedirect = await RedirectToSsoIfRequiredAsync(
                     authorizationRequest,
                     email,
