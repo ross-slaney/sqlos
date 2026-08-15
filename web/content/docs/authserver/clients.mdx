@@ -159,6 +159,13 @@ enter a primary credential again, but only for clients marked as first-party.
 Owned clients created with `SeedOwnedWebApp`, `SeedOwnedNativeApp`, or the
 single-application setup are first-party automatically.
 
+That reuse is the usual "I clicked Sign out, then Sign in, and skipped AuthPage"
+bug. Sign-out that only deletes access and refresh tokens leaves the
+`sqlos_auth_page` cookie. The next `/authorize` for a first-party client
+completes immediately unless you send `prompt=login` or first call
+`GET /sqlos/auth/logout`. `view=login` and `view=signup` do not override this.
+See [Refresh and Logout](/docs/authserver/refresh-and-logout).
+
 Before issuing a new authorization code, SqlOS always re-evaluates the current
 organization, membership, and MFA policy. A request bound to an organization
 uses that organization rather than the organization remembered by the browser

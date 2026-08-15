@@ -26,7 +26,7 @@ internal sealed class SqlOSBrowserSecurityHeaders
     {
         response.Headers["X-Frame-Options"] = "DENY";
         response.Headers["X-Content-Type-Options"] = "nosniff";
-        response.Headers["Referrer-Policy"] = "no-referrer";
+        response.Headers["Referrer-Policy"] = "same-origin";
     }
 
     public string PrepareHtml(HttpContext context, string html)

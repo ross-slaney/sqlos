@@ -166,7 +166,7 @@ public static partial class EndpointRouteBuilderExtensions
         {
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers.Pragma = "no-cache";
-            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Headers["Referrer-Policy"] = "same-origin";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             try
             {

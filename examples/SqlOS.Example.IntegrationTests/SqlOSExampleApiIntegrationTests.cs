@@ -240,7 +240,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         var verifyResponse = await client.GetAsync($"/sqlos/auth/email/verify?token={Uri.EscapeDataString(verificationToken)}");
         verifyResponse.EnsureSuccessStatusCode();
         verifyResponse.Headers.CacheControl!.NoStore.Should().BeTrue();
-        verifyResponse.Headers.GetValues("Referrer-Policy").Should().ContainSingle("no-referrer");
+        verifyResponse.Headers.GetValues("Referrer-Policy").Should().ContainSingle("same-origin");
         verifyResponse.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
         (await verifyResponse.Content.ReadAsStringAsync()).Should().Contain("Email verified");
         (await IsEmailVerifiedAsync(factory.Services, userId)).Should().BeTrue();

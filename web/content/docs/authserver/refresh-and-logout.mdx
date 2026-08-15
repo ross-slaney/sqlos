@@ -53,6 +53,25 @@ Concurrent refreshes inside the configured grace window can receive the cached t
 
 ## Logout
 
+A browser login creates **two** sessions. They do not share a lifetime.
+
+| Session | Where it lives | What it unlocks |
+| --- | --- | --- |
+| OAuth access and refresh tokens | Your app (`localStorage`, a BFF cookie, or a vault) | API calls |
+| AuthPage session | `sqlos_auth_page` cookie on the identity host | First-party `/authorize` without showing AuthPage |
+
+Clearing the app tokens is not sign-out. The AuthPage cookie can last days. The next first-party Sign in or Sign up then mints a code immediately, and the user never sees AuthPage.
+
+End the AuthPage session with a browser navigation so the cookie can be cleared:
+
+```http
+GET /sqlos/auth/logout?returnTo=/
+```
+
+`returnTo` (or `post_logout_redirect_uri`) must be a same-origin path or an origin already allowed by a registered redirect URI. After that, an explicit Sign in / Sign up should send `prompt=login` so a leftover cookie cannot silent-SSO. `view=signup` alone does not skip an existing AuthPage session.
+
+`LogoutAsync` and `POST /sqlos/auth/logout` revoke the OAuth session and refresh-token family. They do not clear the AuthPage cookie. Call both when the user clicks Sign out: revoke the refresh token, then send the browser to `GET /sqlos/auth/logout`.
+
 Revoke a session by refresh token:
 
 ```csharp
@@ -98,4 +117,4 @@ app.MapPost("/logout", async (
 }).RequireAuthorization();
 ```
 
-Protect a cookie-authenticated logout endpoint against CSRF using an antiforgery token or a strict same-origin policy. Clear the local application session even if remote revocation times out; the ASP.NET Core example demonstrates that `finally`-style cleanup.
+Protect a cookie-authenticated logout endpoint against CSRF using an antiforgery token or a strict same-origin policy. Clear the local application session even if remote revocation times out; the ASP.NET Core example demonstrates that `finally`-style cleanup. After the BFF session is gone, still send the browser to `GET /sqlos/auth/logout` if the user should have to complete AuthPage again.

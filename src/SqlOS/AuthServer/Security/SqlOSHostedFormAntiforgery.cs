@@ -152,6 +152,11 @@ internal sealed class SqlOSHostedFormAntiforgery
             return false;
         }
 
+        if (IsOpaqueBrowserSource(source))
+        {
+            return false;
+        }
+
         if (IsAbsentBrowserSource(source))
         {
             source = ReadSingleHeader(request.Headers.Referer);
@@ -159,11 +164,16 @@ internal sealed class SqlOSHostedFormAntiforgery
             {
                 return false;
             }
+
+            if (IsOpaqueBrowserSource(source))
+            {
+                return false;
+            }
         }
 
         if (IsAbsentBrowserSource(source))
         {
-            return true;
+            return HasTrustedFetchSiteWhenSourceAbsent(request);
         }
 
         if (!Uri.TryCreate(source!.Trim(), UriKind.Absolute, out var sourceUri))
@@ -185,9 +195,27 @@ internal sealed class SqlOSHostedFormAntiforgery
             StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsOpaqueBrowserSource(string? source)
+        => string.Equals(source?.Trim(), "null", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsAbsentBrowserSource(string? source)
-        => string.IsNullOrWhiteSpace(source)
-            || string.Equals(source.Trim(), "null", StringComparison.OrdinalIgnoreCase);
+        => string.IsNullOrWhiteSpace(source);
+
+    private static bool HasTrustedFetchSiteWhenSourceAbsent(HttpRequest request)
+    {
+        var fetchSite = ReadSingleHeader(request.Headers["Sec-Fetch-Site"]);
+        if (fetchSite == null && request.Headers["Sec-Fetch-Site"].Count > 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(fetchSite))
+        {
+            return true;
+        }
+
+        return string.Equals(fetchSite.Trim(), "same-origin", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? ReadSingleHeader(StringValues values)
         => values.Count switch

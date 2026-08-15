@@ -135,7 +135,7 @@ SqlOS applies browser security headers automatically to every hosted AuthPage, v
 - `Content-Security-Policy` with `frame-ancestors 'none'`;
 - nonce-bound first-party scripts and styles, with no `unsafe-inline` script permission;
 - `X-Content-Type-Options: nosniff`;
-- `Referrer-Policy: no-referrer`.
+- `Referrer-Policy: same-origin`.
 
 The default policy permits same-origin forms, scripts, styles, fonts, and API calls plus `data:` images/fonts used by embedded branding. Most applications should leave it alone. If a reviewed dashboard or AuthPage customization requires another trusted source, replace the policy prefix while retaining the per-response nonce placeholder:
 

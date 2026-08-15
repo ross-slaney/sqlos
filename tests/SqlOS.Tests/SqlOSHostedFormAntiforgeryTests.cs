@@ -119,15 +119,43 @@ public sealed class SqlOSHostedFormAntiforgeryTests
     }
 
     [TestMethod]
-    public async Task ValidateRequest_OriginNullWithValidCookieAndToken_IsAccepted()
+    public async Task ValidateRequest_OpaqueOriginWithValidCookieAndToken_IsRejected()
     {
         var antiforgery = CreateAntiforgery("/sqlos/auth");
         var issued = IssueToken(antiforgery);
 
         (await antiforgery.ValidateRequestAsync(CreateFormContext(antiforgery, issued, "null")))
-            .Should().BeTrue();
+            .Should().BeFalse();
+        (await antiforgery.ValidateRequestAsync(
+                CreateFormContext(antiforgery, issued, "null", referer: "https://auth.example.test/sqlos/auth/login")))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ValidateRequest_MissingOriginWithValidCookieAndToken_IsAccepted()
+    {
+        var antiforgery = CreateAntiforgery("/sqlos/auth");
+        var issued = IssueToken(antiforgery);
+
         (await antiforgery.ValidateRequestAsync(CreateFormContext(antiforgery, issued, origin: null)))
             .Should().BeTrue();
+        (await antiforgery.ValidateRequestAsync(
+                CreateFormContext(antiforgery, issued, origin: null, fetchSite: "same-origin")))
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ValidateRequest_MissingOriginFromCrossSiteFetch_IsRejected()
+    {
+        var antiforgery = CreateAntiforgery("/sqlos/auth");
+        var issued = IssueToken(antiforgery);
+
+        (await antiforgery.ValidateRequestAsync(
+                CreateFormContext(antiforgery, issued, origin: null, fetchSite: "cross-site")))
+            .Should().BeFalse();
+        (await antiforgery.ValidateRequestAsync(
+                CreateFormContext(antiforgery, issued, origin: null, fetchSite: "same-site")))
+            .Should().BeFalse();
     }
 
     [TestMethod]
@@ -207,7 +235,9 @@ public sealed class SqlOSHostedFormAntiforgeryTests
     private static DefaultHttpContext CreateFormContext(
         SqlOSHostedFormAntiforgery antiforgery,
         (string CookieSecret, string RequestToken) issued,
-        string? origin)
+        string? origin,
+        string? referer = null,
+        string? fetchSite = null)
     {
         var context = new DefaultHttpContext();
         context.Request.Scheme = "https";
@@ -218,6 +248,16 @@ public sealed class SqlOSHostedFormAntiforgeryTests
         if (origin != null)
         {
             context.Request.Headers.Origin = origin;
+        }
+
+        if (referer != null)
+        {
+            context.Request.Headers.Referer = referer;
+        }
+
+        if (fetchSite != null)
+        {
+            context.Request.Headers["Sec-Fetch-Site"] = fetchSite;
         }
 
         context.Features.Set<IFormFeature>(new FormFeature(new FormCollection(new Dictionary<string, StringValues>

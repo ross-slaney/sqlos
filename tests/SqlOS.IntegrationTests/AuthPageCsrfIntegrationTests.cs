@@ -100,7 +100,7 @@ public sealed class AuthPageCsrfIntegrationTests
     }
 
     [TestMethod]
-    public async Task HostedStandaloneLogin_NullOriginFromNoReferrerFormPost_SetsFreshSession()
+    public async Task HostedStandaloneLogin_OpaqueOrigin_IsRejectedAndDoesNotSetCookie()
     {
         await using var server = await AuthPageCsrfServer.CreateAsync();
         using var client = server.App.GetTestClient();
@@ -125,8 +125,8 @@ public sealed class AuthPageCsrfIntegrationTests
         login.Headers.TryAddWithoutValidation("Origin", "null");
         var response = await client.SendAsync(login);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        response.Headers.Location.Should().Be(new Uri("/sqlos/auth/login?status=signed-in", UriKind.Relative));
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await server.CountAuthPageSessionsAsync()).Should().Be(0);
     }
 
     [TestMethod]
@@ -145,7 +145,7 @@ public sealed class AuthPageCsrfIntegrationTests
 
         first.Headers.GetValues("X-Frame-Options").Should().ContainSingle("DENY");
         first.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
-        first.Headers.GetValues("Referrer-Policy").Should().ContainSingle("no-referrer");
+        first.Headers.GetValues("Referrer-Policy").Should().ContainSingle("same-origin");
         var policy = first.Headers.GetValues("Content-Security-Policy").Single();
         policy.Should().Contain("frame-ancestors 'none'");
         policy.Should().Contain($"'nonce-{firstNonce}'");

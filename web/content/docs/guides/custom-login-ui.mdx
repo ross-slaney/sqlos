@@ -465,6 +465,7 @@ Compare these source files before adapting the pattern:
 | Login succeeds but the UI stops | Render the returned `organization`, `mfa`, or `mfa-enroll` view. Primary credentials do not bypass later policy. |
 | SSO domain still shows password | Always call `/identify`; do not choose password locally before HRD runs. |
 | Invitation loses its organization | Preserve the invitation-bound request and token; do not restart ordinary signup from an invite tab. |
+| Sign out, then Sign in skips AuthPage | The AuthPage cookie is still set. Navigate to `GET /sqlos/auth/logout?returnTo=...` and send `prompt=login` on the next `/authorize`. |
 
 ## Production checklist
 
@@ -474,6 +475,7 @@ Compare these source files before adapting the pattern:
 - [ ] S256 PKCE and state generated with Web Crypto
 - [ ] State checked before code exchange
 - [ ] No browser client secret and no durable refresh token in `localStorage`
+- [ ] Sign out calls `GET /sqlos/auth/logout`; explicit Sign in / Sign up send `prompt=login`
 - [ ] Every enabled server-returned view rendered
 - [ ] Flow tokens excluded from URLs where optional, logs, analytics, and error telemetry
 - [ ] Integration tests cover HRD, organization, MFA, invitation, and callback boundaries used by the product

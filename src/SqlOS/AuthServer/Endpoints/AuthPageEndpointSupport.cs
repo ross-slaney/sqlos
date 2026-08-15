@@ -66,7 +66,7 @@ public static partial class EndpointRouteBuilderExtensions
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <meta name="referrer" content="no-referrer" />
+          <meta name="referrer" content="same-origin" />
           <title>Reset password</title>
           <style>
             body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
