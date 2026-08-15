@@ -1,0 +1,57 @@
+---
+title: "SqlOS 3.25: Issuance That Holds"
+description: "Organization MFA now gates every token and code, admin lists use keyset cursors, and password and MFA admission stay atomic across replicas."
+date: "2026-08-15"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "MFA", "FGA", "Dashboard", "Security", "SqlOS"]
+---
+
+SqlOS 3.25 is about authority that still holds when traffic is concurrent, policy changes mid-flow, or an operator list grows past a single page. It does not add a new identity product. It makes the existing server refuse to mint a session, code, or token unless the current organization MFA policy is satisfied, and it gives operators a pagination contract that does not drift as rows are inserted.
+
+The release also folds FGA into the unified dashboard document and closes several replica-edge races around password admission, MFA guesses, signup, and signing keys.
+
+## MFA is evaluated at every issuance boundary
+
+Organization MFA policy is no longer a check that only some login completions remember to call. Before SqlOS issues an OAuth authorization code, AuthPage session, access token, refresh token, or device approval, it re-evaluates the current organization requirement.
+
+That includes OIDC callbacks, SAML ACS, hosted signup, hosted and headless device approval, and token mint. If policy becomes stricter while a flow is in progress, the next issuance fails closed instead of completing on the earlier, weaker decision. Trusted upstream MFA and phone OTP still count only when those options are enabled.
+
+See [Require Authenticator MFA](/docs/guides/mfa-totp) and [MFA and TOTP](/docs/authserver/mfa-totp).
+
+## Admin lists no longer use OFFSET pages
+
+Auth, FGA, audit, email, and calendar admin lists now share one opaque keyset cursor envelope: `data`, `pageSize`, `nextCursor`, and `hasNextPage`. `page>1` is rejected with typed `invalid_cursor` instead of running `OFFSET` / `COUNT(*)`.
+
+The dashboard walks Previous/Next from in-memory cursor history. Nested tables load more. Pickers search remotely. Public SCIM `/Users` and `/Groups` stay RFC 7644 `startIndex` / `count`. CSV export stays a bounded download.
+
+If you call admin list APIs yourself, stop sending page numbers. Use the cursor returned by the previous window. [Admin cursor pagination](/docs/guides/admin-cursor-pagination) is the contract.
+
+## FGA is a first-class dashboard surface
+
+The nested FGA iframe is gone. The shared FGA UI mounts in the unified dashboard document, keeps the existing list and detail workflows, and uses canonical `/sqlos/admin/fga/...` URLs for refresh and back/forward. Operators no longer need a second browsing context or a framing policy to manage grants.
+
+## Replica-safe admission and fail-closed signup
+
+Password login and MFA verification now reserve capacity before the expensive comparison, under a short application lock that is not held during hashing. Abandoned comparisons stay fail-closed. Success releases only the reservation that succeeded, so one good login cannot erase a spray pattern on another replica.
+
+Public, hosted, and headless password signup validate the client, redirect, resource, invitation, and join policy before durable writes, then commit the account, membership, session or code, and audits in one transaction. An invalid client no longer leaves attacker-created users behind.
+
+Signing-key bootstrap and rotation run through the EF execution strategy with the existing custody lock. Replicas that see an unknown `kid` refresh once, coalesce stampedes, and keep validation fail-closed. Hosted login forms also accept a browser `Origin: null` from no-referrer standalone pages without weakening CSRF against attacker origins.
+
+Audit idempotency keys are now hashed inside a tenancy namespace. A retry from another organization or application cannot reuse an event.
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 3.25.0
+```
+
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test hosted login, MFA when you require it, token refresh, and the admin lists you use.
+
+Startup applies the new Auth and FGA schema scripts, including keyset indexes and MFA attempt buckets. Treat that as a forward-only canary upgrade. See [Production Readiness](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance).
+
+If you integrate with admin list APIs, switch to the cursor envelope before deploying callers that still send `page`. Organization MFA policy now blocks issuance on paths that previously completed after a primary factor alone—test those flows if you require MFA.
+
+This release is backed by real SQL coverage for issuance assurance, signup transactions, cursor pagination, signing-key retries, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
