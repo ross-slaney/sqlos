@@ -182,7 +182,7 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
 
         response.XFrameOptions.Should().Be("DENY");
         response.ContentTypeOptions.Should().Be("nosniff");
-        response.ReferrerPolicy.Should().Be("no-referrer");
+        response.ReferrerPolicy.Should().Be("same-origin");
         response.ContentSecurityPolicy.Should().Contain("frame-ancestors 'none'");
         response.ContentSecurityPolicy.Should().NotContain("unsafe-inline");
         response.Body.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\">");

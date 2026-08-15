@@ -34,6 +34,47 @@ public sealed class SqlOSClientAuthenticationService
         _admin = admin;
     }
 
+    /// <summary>
+    /// Resolves the OAuth client for a refresh-token grant.
+    /// </summary>
+    /// <remarks>
+    /// A refresh token is already bound to a client. Public clients
+    /// (<c>token_endpoint_auth_method=none</c>) therefore do not authenticate
+    /// at this gate: <c>client_id</c> is optional and, when sent, is only a
+    /// consistency check in <see cref="SqlOSAuthService.RefreshAsync"/>.
+    /// Confidential clients still must present <c>client_secret_basic</c>.
+    /// Presenting a secret or Authorization header always uses the same
+    /// authentication path as authorization-code exchange.
+    /// </remarks>
+    public async Task<string?> AuthenticateRefreshGrantClientAsync(
+        IFormCollection form,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var presented = ParsePresentedCredentials(form, httpContext.Request.Headers.Authorization);
+        var boundClient = await TryGetRefreshTokenBoundClientAsync(
+            form["refresh_token"].ToString(),
+            cancellationToken);
+        var publicBoundClient = IsActivePublicTokenEndpointClient(boundClient);
+        var presentedSecret = presented.HasAuthorizationHeader
+            || presented.HasBodySecret
+            || presented.HasBasicCredentials;
+
+        if (publicBoundClient && !presentedSecret)
+        {
+            if (!presented.IsUnambiguous)
+            {
+                await AuditAsync("oauth.client_authentication.failed", presented.BodyClientId, httpContext, cancellationToken);
+                throw new SqlOSClientAuthenticationException();
+            }
+
+            return FirstNonEmpty(presented.BodyClientId, presented.BasicClientId);
+        }
+
+        var authenticated = await AuthenticateTokenEndpointClientAsync(form, httpContext, cancellationToken);
+        return authenticated.ClientId;
+    }
+
     public async Task<SqlOSClientApplication> AuthenticateTokenEndpointClientAsync(
         IFormCollection form,
         HttpContext httpContext,
@@ -306,6 +347,43 @@ public sealed class SqlOSClientAuthenticationService
                 x => x.Id == clientApplicationId || x.ClientId == clientApplicationId,
                 cancellationToken)
             ?? throw new InvalidOperationException("OAuth client not found.");
+
+    private async Task<SqlOSClientApplication?> TryGetRefreshTokenBoundClientAsync(
+        string rawRefreshToken,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(rawRefreshToken))
+        {
+            return null;
+        }
+
+        var hashedToken = _crypto.HashToken(rawRefreshToken);
+        var refreshToken = await _context.Set<SqlOSRefreshToken>()
+            .AsNoTracking()
+            .Include(x => x.Session)
+            .ThenInclude(x => x!.ClientApplication)
+            .FirstOrDefaultAsync(x => x.TokenHash == hashedToken, cancellationToken);
+        return refreshToken?.Session?.ClientApplication;
+    }
+
+    private static bool IsActivePublicTokenEndpointClient(SqlOSClientApplication? client)
+        => client != null
+            && client.IsActive
+            && client.DisabledAt == null
+            && string.Equals(client.TokenEndpointAuthMethod, "none", StringComparison.Ordinal);
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
 
     private Task AuditAsync(
         string action,

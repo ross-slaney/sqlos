@@ -152,21 +152,31 @@ internal sealed class SqlOSHostedFormAntiforgery
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(source))
+        if (IsOpaqueBrowserSource(source))
+        {
+            return false;
+        }
+
+        if (IsAbsentBrowserSource(source))
         {
             source = ReadSingleHeader(request.Headers.Referer);
             if (source == null && request.Headers.Referer.Count > 0)
             {
                 return false;
             }
+
+            if (IsOpaqueBrowserSource(source))
+            {
+                return false;
+            }
         }
 
-        if (string.IsNullOrWhiteSpace(source))
+        if (IsAbsentBrowserSource(source))
         {
-            return true;
+            return HasTrustedFetchSiteWhenSourceAbsent(request);
         }
 
-        if (!Uri.TryCreate(source.Trim(), UriKind.Absolute, out var sourceUri))
+        if (!Uri.TryCreate(source!.Trim(), UriKind.Absolute, out var sourceUri))
         {
             return false;
         }
@@ -183,6 +193,28 @@ internal sealed class SqlOSHostedFormAntiforgery
             sourceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/'),
             trustedUri.GetLeftPart(UriPartial.Authority).TrimEnd('/'),
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOpaqueBrowserSource(string? source)
+        => string.Equals(source?.Trim(), "null", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAbsentBrowserSource(string? source)
+        => string.IsNullOrWhiteSpace(source);
+
+    private static bool HasTrustedFetchSiteWhenSourceAbsent(HttpRequest request)
+    {
+        var fetchSite = ReadSingleHeader(request.Headers["Sec-Fetch-Site"]);
+        if (fetchSite == null && request.Headers["Sec-Fetch-Site"].Count > 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(fetchSite))
+        {
+            return true;
+        }
+
+        return string.Equals(fetchSite.Trim(), "same-origin", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ReadSingleHeader(StringValues values)

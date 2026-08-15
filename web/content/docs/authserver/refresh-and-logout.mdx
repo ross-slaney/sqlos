@@ -28,6 +28,12 @@ await tokenVault.ReplaceTokensAsync(sessionId, tokens, ct);
 
 Keep refresh tokens out of browser JavaScript. Store them in a server-side session or, for native and desktop apps, the platform credential vault. The browser should receive only your application's encrypted `Secure`, `HttpOnly`, `SameSite` session cookie.
 
+### OAuth `/token` refresh
+
+In-process `RefreshAsync` already takes only the refresh token. The public OAuth token endpoint does the same for public clients: `grant_type=refresh_token` plus `refresh_token` is enough. The token is bound to a client and session, so SqlOS does not treat `client_id` as client authentication for this grant. Sending `client_id` is still allowed and must match the token's client.
+
+Confidential clients are different. Their refresh exchange still requires `client_secret_basic`. A missing or wrong secret returns generic `invalid_client` and does not consume the refresh token. See [Clients](/docs/authserver/clients) and the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
+
 ### Organization switching
 
 Switch organizations without re-authenticating by passing a different `organizationId`:
@@ -46,6 +52,25 @@ Reuse outside the grace window revokes the entire token family and session. This
 Concurrent refreshes inside the configured grace window can receive the cached token produced by the winning rotation. Before returning that cached result, SqlOS rechecks session deadlines, client access, the user lifecycle, and the exact organization represented by the cached token.
 
 ## Logout
+
+A browser login creates **two** sessions. They do not share a lifetime.
+
+| Session | Where it lives | What it unlocks |
+| --- | --- | --- |
+| OAuth access and refresh tokens | Your app (`localStorage`, a BFF cookie, or a vault) | API calls |
+| AuthPage session | `sqlos_auth_page` cookie on the identity host | First-party `/authorize` without showing AuthPage |
+
+Clearing the app tokens is not sign-out. The AuthPage cookie can last days. The next first-party Sign in or Sign up then mints a code immediately, and the user never sees AuthPage.
+
+End the AuthPage session with a browser navigation so the cookie can be cleared:
+
+```http
+GET /sqlos/auth/logout?returnTo=/
+```
+
+`returnTo` (or `post_logout_redirect_uri`) must be a same-origin path or an origin already allowed by a registered redirect URI. After that, an explicit Sign in / Sign up should send `prompt=login` so a leftover cookie cannot silent-SSO. `view=signup` alone does not skip an existing AuthPage session.
+
+`LogoutAsync` and `POST /sqlos/auth/logout` revoke the OAuth session and refresh-token family. They do not clear the AuthPage cookie. Call both when the user clicks Sign out: revoke the refresh token, then send the browser to `GET /sqlos/auth/logout`.
 
 Revoke a session by refresh token:
 
@@ -92,4 +117,4 @@ app.MapPost("/logout", async (
 }).RequireAuthorization();
 ```
 
-Protect a cookie-authenticated logout endpoint against CSRF using an antiforgery token or a strict same-origin policy. Clear the local application session even if remote revocation times out; the ASP.NET Core example demonstrates that `finally`-style cleanup.
+Protect a cookie-authenticated logout endpoint against CSRF using an antiforgery token or a strict same-origin policy. Clear the local application session even if remote revocation times out; the ASP.NET Core example demonstrates that `finally`-style cleanup. After the BFF session is gone, still send the browser to `GET /sqlos/auth/logout` if the user should have to complete AuthPage again.

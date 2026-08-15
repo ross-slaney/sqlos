@@ -100,6 +100,36 @@ public sealed class AuthPageCsrfIntegrationTests
     }
 
     [TestMethod]
+    public async Task HostedStandaloneLogin_OpaqueOrigin_IsRejectedAndDoesNotSetCookie()
+    {
+        await using var server = await AuthPageCsrfServer.CreateAsync();
+        using var client = server.App.GetTestClient();
+        client.BaseAddress = new Uri(TrustedOrigin);
+
+        var loginPage = await client.GetAsync("/sqlos/auth/login");
+        loginPage.EnsureSuccessStatusCode();
+        var html = await loginPage.Content.ReadAsStringAsync();
+        var requestToken = ExtractInputValue(html, "__RequestVerificationToken");
+        var antiforgeryCookie = ExtractCookie(loginPage, "sqlos_auth_page_csrf_");
+
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/login/password")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["email"] = server.Email,
+                ["password"] = Password,
+                ["__RequestVerificationToken"] = requestToken
+            })
+        };
+        login.Headers.TryAddWithoutValidation("Cookie", antiforgeryCookie);
+        login.Headers.TryAddWithoutValidation("Origin", "null");
+        var response = await client.SendAsync(login);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await server.CountAuthPageSessionsAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task HostedAuthPage_UsesLockedBrowserSecurityHeadersAndPerResponseNonce()
     {
         await using var server = await AuthPageCsrfServer.CreateAsync();
@@ -115,7 +145,7 @@ public sealed class AuthPageCsrfIntegrationTests
 
         first.Headers.GetValues("X-Frame-Options").Should().ContainSingle("DENY");
         first.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
-        first.Headers.GetValues("Referrer-Policy").Should().ContainSingle("no-referrer");
+        first.Headers.GetValues("Referrer-Policy").Should().ContainSingle("same-origin");
         var policy = first.Headers.GetValues("Content-Security-Policy").Single();
         policy.Should().Contain("frame-ancestors 'none'");
         policy.Should().Contain($"'nonce-{firstNonce}'");

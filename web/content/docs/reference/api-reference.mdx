@@ -75,7 +75,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
 | `login_hint` | No | Prefills or routes the hosted/headless login flow. |
-| `prompt` | No | `login` clears the reusable AuthPage session; `none` returns `login_required` when no reusable session exists. |
+| `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `none` returns `login_required` when no reusable session exists. |
 | `nonce` | No | Stored with the authorization request as client flow context. |
 
 SqlOS-specific presentation parameters include `view` (`invite`, `login`, `signup`, `password`, `forgot-password`, `email-otp`, `phone-otp`, or `phone-otp-signup`), `ui_context` for a headless UI, and `invitation_token`/`invitationToken` for an invitation-bound flow. Portable OAuth clients should rely only on discovery and standard parameters.
@@ -87,7 +87,7 @@ On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, 
 | `grant_type` | Required fields | Notes |
 | --- | --- | --- |
 | `authorization_code` | `code`, `client_id`; `code_verifier` when PKCE-bound | `redirect_uri`, when supplied, must match. `resource` must match the original request. |
-| `refresh_token` | `refresh_token` | `resource` is optional but cannot change the original resource binding. Public clients may still send `client_id`; SqlOS does not use it as client authentication for this grant. |
+| `refresh_token` | `refresh_token` | The refresh token identifies the client through its session. Public clients (`token_endpoint_auth_method=none`) do not authenticate at this gate; `client_id` is optional and, when sent, must match the token's client. Confidential clients still require `client_secret_basic`. `resource` is optional but cannot change the original resource binding. |
 | `urn:ietf:params:oauth:grant-type:device_code` | `client_id`, `device_code` | `resource` must match the device request. |
 
 Authorization-code exchange:
@@ -102,13 +102,22 @@ curl -X POST https://app.example.com/sqlos/auth/token \
   --data-urlencode 'code_verifier=...'
 ```
 
-Refresh:
+Public refresh — `client_id` is optional because the refresh token already names the client:
 
 ```bash
 curl -X POST https://app.example.com/sqlos/auth/token \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'grant_type=refresh_token' \
-  --data-urlencode 'client_id=acme-web' \
+  --data-urlencode 'refresh_token=...'
+```
+
+Confidential refresh still authenticates the client:
+
+```bash
+curl -X POST https://app.example.com/sqlos/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -u 'billing-server:$CLIENT_SECRET' \
+  --data-urlencode 'grant_type=refresh_token' \
   --data-urlencode 'refresh_token=...'
 ```
 
@@ -186,7 +195,7 @@ Every hosted `POST` requires the short-lived antiforgery field and matching brow
 | `GET` / `POST` | `/sqlos/auth/password/reset` and `/password/reset/submit` | Hosted password-reset form |
 | `GET` | `/sqlos/auth/invitations/accept?token=...` | Open an email invitation |
 | `GET` / `POST` | `/sqlos/auth/device` and child routes | Resolve, approve, or deny a device request |
-| `GET` | `/sqlos/auth/logout` | End the reusable AuthPage session and redirect safely |
+| `GET` | `/sqlos/auth/logout` | End the reusable AuthPage session cookie and redirect safely. This is the browser Sign out. Clearing app tokens alone is not enough. |
 | `GET` | `/sqlos/auth/logged-out` | Hosted post-logout page |
 
 Integrate through `/authorize`, `/token`, and the documented AuthPage configuration unless you are intentionally building a headless UI. `POST /sqlos/auth/signup` and `POST /sqlos/auth/logout` are JSON helpers described next; they are not hosted form handlers.

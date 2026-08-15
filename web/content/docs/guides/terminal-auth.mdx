@@ -202,14 +202,13 @@ Request `offline_access` when the CLI needs to stay signed in. Store the returne
 
 The Todo CLI deliberately stores readable JSON so its protocol is easy to inspect. Its local `logout` only deletes that file. Copy the flow, not that storage strategy, into a production CLI.
 
-Refresh through the discovered token endpoint and repeat the resource binding:
+Refresh through the discovered token endpoint and repeat the resource binding. `client_id` is optional for this public CLI client because the refresh token already identifies it:
 
 ```http
 POST /sqlos/auth/token
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token&
-client_id=forge-cli&
 refresh_token=<stored-refresh-token>&
 resource=https%3A%2F%2Fapi.forge.test
 ```

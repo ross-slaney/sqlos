@@ -79,7 +79,9 @@ Use a confidential client when the OAuth callback and refresh-token exchange run
 in server-side code that can protect a secret. SqlOS then requires
 `client_secret_basic` authentication for both the authorization-code and refresh
 grants. Public browser, native, and CLI clients continue to use PKCE without a
-secret.
+secret. Their refresh requests are identified by the refresh token itself;
+`client_id` is optional on `grant_type=refresh_token` and is not client
+authentication.
 
 The credential belongs to the OAuth client. Creating a confidential client for
 authorization-code or refresh does not create an FGA service account, and it
@@ -161,6 +163,13 @@ SqlOS can reuse an existing AuthPage browser session without asking the user to
 enter a primary credential again, but only for clients marked as first-party.
 Owned clients created with `SeedOwnedWebApp`, `SeedOwnedNativeApp`, or the
 single-application setup are first-party automatically.
+
+That reuse is the usual "I clicked Sign out, then Sign in, and skipped AuthPage"
+bug. Sign-out that only deletes access and refresh tokens leaves the
+`sqlos_auth_page` cookie. The next `/authorize` for a first-party client
+completes immediately unless you send `prompt=login` or first call
+`GET /sqlos/auth/logout`. `view=login` and `view=signup` do not override this.
+See [Refresh and Logout](/docs/authserver/refresh-and-logout).
 
 Before issuing a new authorization code, SqlOS always re-evaluates the current
 organization, membership, and MFA policy. A request bound to an organization
