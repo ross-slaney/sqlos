@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release SqlOS"
+  short_description: "Version PR, auto-merge, GitHub release, NuGet"
+  default_prompt: "Use $release-sqlos to cut the next SqlOS NuGet release from current main:"

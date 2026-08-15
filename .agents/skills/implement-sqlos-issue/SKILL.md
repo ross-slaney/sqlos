@@ -58,7 +58,7 @@ Use the narrowest applicable installed skill in addition to this workflow:
 - Use `model-shrbac-authorization` before writing code that changes SHRBAC, FGA, roles, permissions, grants, resource trees, or tenant access.
 - Use the appropriate Codex Security skill when the issue is a security finding or requires security-specific validation.
 - Use `create-sqlos-issue` only when the task is to draft or file a new issue; do not use it merely because implementation references an existing issue.
-- Follow a release skill or release procedure only when the user explicitly requests merge, versioning, publishing, or consumer rollout. A normal issue PR stops before those actions.
+- Use `release-sqlos` only when the user explicitly requests merge, versioning, publishing, or consumer rollout. A normal issue PR stops before those actions.
 
 ## 3. Create the isolated worktree
 
