@@ -46,7 +46,7 @@ Then open `http://localhost:5090/`. The Aspire AppHost starts SQL Server, the To
 You'll need **.NET 9**, **EF Core 9**, and a **SQL Server** database your application can reach.
 
 ```bash
-dotnet add package SqlOS --version 3.24.1
+dotnet add package SqlOS --version 3.25.0
 ```
 
 Derive your `DbContext` from `SqlOSDbContext<TContext>` so SqlOS can register its EF Core model, then declare your application:
@@ -114,7 +114,7 @@ SqlOS creates and upgrades its own tables at startup — your EF migrations keep
 A couple of notes worth knowing up front:
 
 - `AddSqlOS` doesn't auto-bind the `SqlOS` configuration section — read secrets from `builder.Configuration` and assign them in the options callback, as shown above.
-- If NuGet doesn't list 3.24.1 yet, run the repository examples from source rather than pairing these docs with an older package.
+- If NuGet doesn't list 3.25.0 yet, run the repository examples from source rather than pairing these docs with an older package.
 
 [Full add-to-app quickstart](https://sqlos.dev/docs/quickstarts/add-to-app)
 
