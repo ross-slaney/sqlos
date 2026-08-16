@@ -15,6 +15,9 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSMachineClientAdminService
 {
+    internal const string EmergencyDisabledReason = "machine_client_emergency_disabled";
+    internal const string RevokedReason = "machine_client_revoked";
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _admin;
     private readonly SqlOSCryptoService _crypto;
@@ -34,6 +37,12 @@ public sealed class SqlOSMachineClientAdminService
 
     public async Task UpsertSeededMachineClientsAsync(CancellationToken cancellationToken = default)
     {
+        if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+        {
+            await UpsertSeededMachineClientsCoreAsync(cancellationToken);
+            return;
+        }
+
         var strategy = _context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
@@ -56,42 +65,57 @@ public sealed class SqlOSMachineClientAdminService
         var normalized = await NormalizeCreateAsync(request, cancellationToken);
         var secret = GenerateSecret();
         var secretHash = _crypto.HashPassword(secret);
-        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        if (await _context.Set<SqlOSClientApplication>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken)
-            || await _context.Set<SqlOSFgaServiceAccount>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken))
+        var transaction = _context.Database.IsRelational() && _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
+        try
         {
-            throw new InvalidOperationException("A client with that client ID already exists.");
-        }
+            if (await _context.Set<SqlOSClientApplication>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken)
+                || await _context.Set<SqlOSFgaServiceAccount>().AnyAsync(x => x.ClientId == normalized.ClientId, cancellationToken))
+            {
+                throw new InvalidOperationException("A client with that client ID already exists.");
+            }
 
-        var now = DateTime.UtcNow;
-        var client = CreateClient(normalized, now);
-        var subject = new SqlOSFgaSubject
+            var now = DateTime.UtcNow;
+            var client = CreateClient(normalized, now);
+            var subject = new SqlOSFgaSubject
+            {
+                Id = _crypto.GenerateId("sub"), SubjectTypeId = "service_account", OrganizationId = normalized.OrganizationId,
+                DisplayName = normalized.DisplayName, ExternalRef = normalized.ClientId, CreatedAt = now, UpdatedAt = now
+            };
+            var account = new SqlOSFgaServiceAccount
+            {
+                Id = _crypto.GenerateId("sa"), SubjectId = subject.Id, ClientId = normalized.ClientId,
+                ClientSecretHash = secretHash, Description = normalized.Description, ExpiresAt = normalized.ExpiresAt,
+                ConfigurationOwner = SqlOSConfigurationOwners.Dashboard, CreatedAt = now, UpdatedAt = now
+            };
+            var credential = new SqlOSClientCredential
+            {
+                Id = _crypto.GenerateId("clcred"), ClientApplicationId = client.Id, SecretHash = secretHash,
+                DisplayName = "Machine client credential", CreatedAt = now,
+                ConfigurationOwner = SqlOSConfigurationOwners.Dashboard
+            };
+            _context.Set<SqlOSClientApplication>().Add(client);
+            _context.Set<SqlOSFgaSubject>().Add(subject);
+            _context.Set<SqlOSFgaServiceAccount>().Add(account);
+            _context.Set<SqlOSClientCredential>().Add(credential);
+            AddGrants(subject.Id, normalized.Grants, now, marker: null);
+            await _context.SaveChangesAsync(cancellationToken);
+            await _admin.RecordAuditAsync("machine_client.created", "admin", null, organizationId: normalized.OrganizationId,
+                data: new { normalized.ClientId, subjectId = subject.Id, grantCount = normalized.Grants.Count }, cancellationToken: cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            return new SqlOSMachineClientCreated(ToDto(client, account, subject, normalized.Grants.Count), secret);
+        }
+        finally
         {
-            Id = _crypto.GenerateId("sub"), SubjectTypeId = "service_account", OrganizationId = normalized.OrganizationId,
-            DisplayName = normalized.DisplayName, ExternalRef = normalized.ClientId, CreatedAt = now, UpdatedAt = now
-        };
-        var account = new SqlOSFgaServiceAccount
-        {
-            Id = _crypto.GenerateId("sa"), SubjectId = subject.Id, ClientId = normalized.ClientId,
-            ClientSecretHash = secretHash, Description = normalized.Description, ExpiresAt = normalized.ExpiresAt,
-            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard, CreatedAt = now, UpdatedAt = now
-        };
-        var credential = new SqlOSClientCredential
-        {
-            Id = _crypto.GenerateId("clcred"), ClientApplicationId = client.Id, SecretHash = secretHash,
-            DisplayName = "Machine client credential", CreatedAt = now,
-            ConfigurationOwner = SqlOSConfigurationOwners.Dashboard
-        };
-        _context.Set<SqlOSClientApplication>().Add(client);
-        _context.Set<SqlOSFgaSubject>().Add(subject);
-        _context.Set<SqlOSFgaServiceAccount>().Add(account);
-        _context.Set<SqlOSClientCredential>().Add(credential);
-        AddGrants(subject.Id, normalized.Grants, now, marker: null);
-        await _context.SaveChangesAsync(cancellationToken);
-        await _admin.RecordAuditAsync("machine_client.created", "admin", null, organizationId: normalized.OrganizationId,
-            data: new { normalized.ClientId, subjectId = subject.Id, grantCount = normalized.Grants.Count }, cancellationToken: cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return new SqlOSMachineClientCreated(ToDto(client, account, subject, normalized.Grants.Count), secret);
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     public async Task<object> ListAsync(
@@ -206,11 +230,12 @@ public sealed class SqlOSMachineClientAdminService
     public async Task RevokeAsync(string clientId, CancellationToken cancellationToken = default)
     {
         var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
+        EnsureDashboardOwned(account);
         account.ExpiresAt = DateTime.UtcNow;
         account.UpdatedAt = account.ExpiresAt.Value;
         client.IsActive = false;
         client.DisabledAt = account.ExpiresAt;
-        client.DisabledReason = "machine_client_revoked";
+        client.DisabledReason = RevokedReason;
         var credentials = await _context.Set<SqlOSClientCredential>()
             .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
             .ToListAsync(cancellationToken);
@@ -221,6 +246,58 @@ public sealed class SqlOSMachineClientAdminService
         await _context.SaveChangesAsync(cancellationToken);
         await _admin.RecordAuditAsync("machine_client.revoked", "admin", null, organizationId: subject.OrganizationId,
             data: new { clientId, subjectId = subject.Id }, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SqlOSMachineClientDto> EmergencyDisableAsync(string clientId, CancellationToken cancellationToken = default)
+    {
+        var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
+        if (IsEmergencyDisabled(client))
+        {
+            return await ToDtoAsync(client, account, subject, cancellationToken);
+        }
+
+        if (string.Equals(client.DisabledReason, RevokedReason, StringComparison.Ordinal))
+        {
+            return await ToDtoAsync(client, account, subject, cancellationToken);
+        }
+
+        var now = DateTime.UtcNow;
+        client.IsActive = false;
+        client.DisabledAt = now;
+        client.DisabledReason = EmergencyDisabledReason;
+        account.UpdatedAt = now;
+        await _context.SaveChangesAsync(cancellationToken);
+        await _admin.RecordAuditAsync("machine_client.emergency_disabled", "admin", null, organizationId: subject.OrganizationId,
+            data: new { clientId, subjectId = subject.Id, reason = EmergencyDisabledReason }, cancellationToken: cancellationToken);
+        return await ToDtoAsync(client, account, subject, cancellationToken);
+    }
+
+    public async Task<SqlOSMachineClientDto> EmergencyEnableAsync(string clientId, CancellationToken cancellationToken = default)
+    {
+        var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
+        if (client.IsActive && client.DisabledAt == null)
+        {
+            return await ToDtoAsync(client, account, subject, cancellationToken);
+        }
+
+        if (string.Equals(client.DisabledReason, RevokedReason, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("This machine client was revoked. Emergency enable cannot restore a structurally revoked client.");
+        }
+
+        if (client.DisabledAt == null)
+        {
+            throw new InvalidOperationException("This machine client is disabled in its seed. Set IsActive in source control to re-enable it.");
+        }
+
+        client.IsActive = true;
+        client.DisabledAt = null;
+        client.DisabledReason = null;
+        account.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        await _admin.RecordAuditAsync("machine_client.emergency_enabled", "admin", null, organizationId: subject.OrganizationId,
+            data: new { clientId, subjectId = subject.Id }, cancellationToken: cancellationToken);
+        return await ToDtoAsync(client, account, subject, cancellationToken);
     }
 
     public async Task AddGrantAsync(string clientId, SqlOSMachineClientGrantRequest request, CancellationToken cancellationToken = default)
@@ -367,6 +444,8 @@ public sealed class SqlOSMachineClientAdminService
             account.LastReconciledAt = now;
             account.ConfigurationOrphanedAt = null;
             account.UpdatedAt = now;
+            // Emergency disable lives on the OAuth client DisabledAt flag. Do not
+            // expire, revoke credentials, or otherwise mutate that runtime override here.
 
             _context.Set<SqlOSFgaGrant>().RemoveRange(old);
             AddGrants(account.SubjectId, grants, now, marker);
@@ -458,10 +537,32 @@ public sealed class SqlOSMachineClientAdminService
             throw new InvalidOperationException("This machine client is code-owned. Change its seed and secret resolver instead.");
     }
 
+    private static bool IsEmergencyDisabled(SqlOSClientApplication client)
+        => client.DisabledAt != null
+            && string.Equals(client.DisabledReason, EmergencyDisabledReason, StringComparison.Ordinal);
+
+    private async Task<SqlOSMachineClientDto> ToDtoAsync(
+        SqlOSClientApplication client,
+        SqlOSFgaServiceAccount account,
+        SqlOSFgaSubject subject,
+        CancellationToken cancellationToken)
+    {
+        var grantCount = await _context.Set<SqlOSFgaGrant>().CountAsync(x => x.SubjectId == subject.Id, cancellationToken);
+        return ToDto(client, account, subject, grantCount);
+    }
+
     private static SqlOSMachineClientDto ToDto(SqlOSClientApplication client, SqlOSFgaServiceAccount account, SqlOSFgaSubject subject, int grantCount)
         => new(client.ClientId, subject.DisplayName, account.Description, client.Audience, SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson), subject.OrganizationId,
             account.ExpiresAt, account.LastUsedAt, client.IsActive && client.DisabledAt == null && (account.ExpiresAt == null || account.ExpiresAt > DateTime.UtcNow),
-            account.ConfigurationOwner, account.ConfigurationSourceKey, account.ConfigurationOrphanedAt, grantCount);
+            account.ConfigurationOwner, account.ConfigurationSourceKey, account.ConfigurationOrphanedAt, grantCount,
+            SqlOSConfigurationOwnershipPolicy.ToDto(
+                account.ConfigurationOwner,
+                account.ConfigurationSourceKey,
+                account.LastReconciledAt,
+                account.ConfigurationFingerprint,
+                account.ConfigurationOrphanedAt),
+            IsEmergencyDisabled(client),
+            client.DisabledReason);
 
     private static string GenerateSecret() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
     private static bool IsSupportedPasswordHash(string hash)
@@ -489,6 +590,22 @@ public sealed class SqlOSMachineClientAdminService
 
 public sealed record SqlOSCreateMachineClientRequest(string ClientId, string DisplayName, string? Description, string Audience, IReadOnlyList<string> Scopes, string? OrganizationId, DateTime? ExpiresAt, IReadOnlyList<SqlOSMachineClientGrantSeedOptions> Grants);
 public sealed record SqlOSMachineClientGrantRequest(string ResourceId, string RoleId, string? Description = null);
-public sealed record SqlOSMachineClientDto(string ClientId, string DisplayName, string? Description, string Audience, IReadOnlyList<string> Scopes, string? OrganizationId, DateTime? ExpiresAt, DateTime? LastUsedAt, bool Ready, string ConfigurationOwner, string? ConfigurationSourceKey, DateTime? ConfigurationOrphanedAt, int GrantCount);
+public sealed record SqlOSMachineClientDto(
+    string ClientId,
+    string DisplayName,
+    string? Description,
+    string Audience,
+    IReadOnlyList<string> Scopes,
+    string? OrganizationId,
+    DateTime? ExpiresAt,
+    DateTime? LastUsedAt,
+    bool Ready,
+    string ConfigurationOwner,
+    string? ConfigurationSourceKey,
+    DateTime? ConfigurationOrphanedAt,
+    int GrantCount,
+    SqlOSConfigurationOwnershipDto Ownership,
+    bool EmergencyDisabled,
+    string? DisabledReason);
 public sealed record SqlOSMachineClientCreated(SqlOSMachineClientDto Client, string ClientSecret);
 public sealed record SqlOSMachineClientValidation(bool Valid, string Status);

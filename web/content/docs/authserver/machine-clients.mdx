@@ -28,7 +28,7 @@ Store that value in the worker's environment or secret manager. Later list and d
 
 Lost secret: use **Rotate**. Wrong secret: `401 invalid_client`. Do not put the secret in source control, logs, or queue payloads.
 
-Code-owned identities stay visible and testable, but rotation and grant edits are blocked so startup cannot overwrite an operator change. Update the seed or secret provider instead.
+Code-owned identities stay visible and testable, but rotation, grant edits, and ordinary revoke are blocked so startup cannot overwrite an operator change. Update the seed or secret provider instead. Operators can still emergency-disable a code-owned client during an incident; that runtime override is audited, idempotent, and survives restart. Re-enable from the dashboard or admin API. Setting `IsActive = false` in the seed can disable a client, but `true` does not undo an operator emergency disable.
 
 ## Exchange the secret for a token
 
@@ -89,7 +89,9 @@ Alternatively, provide `SecretHashResolver` when the pipeline already produces a
 | Atomic create and one-time secret | `POST /sqlos/admin/auth/api/machine-clients` |
 | Explicit rotation and one-time secret | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/rotate` |
 | Credential/audience/scope test without issuing a token | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/validate` |
-| Immediate OAuth and issued-token revocation | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/revoke` |
+| Immediate OAuth and issued-token revocation for dashboard-owned clients | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/revoke` |
+| Emergency runtime disable that survives restart | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/emergency-disable` |
+| Clear an emergency disable | `POST /sqlos/admin/auth/api/machine-clients/{clientId}/emergency-enable` |
 | Narrow grant changes | `POST`/`DELETE /sqlos/admin/auth/api/machine-clients/{clientId}/grants...` |
 
 The list endpoint returns only bound pairs: FGA service accounts that also have a `SqlOSClientApplication`. FGA-only subjects stay on the Service Accounts page.

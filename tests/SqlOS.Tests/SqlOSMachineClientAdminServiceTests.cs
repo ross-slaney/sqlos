@@ -119,11 +119,112 @@ public sealed class SqlOSMachineClientAdminServiceTests
         (await service.ValidateCredentialAsync("seeded-worker", secret, "https://api.example.test", ["jobs.run"])).Valid.Should().BeTrue();
         await FluentActions.Invoking(() => service.RotateAsync("seeded-worker"))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*code-owned*");
+        await FluentActions.Invoking(() => service.RevokeAsync("seeded-worker"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*code-owned*");
+        var accountAfterRejectedRevoke = await context.Set<SqlOSFgaServiceAccount>().SingleAsync();
+        accountAfterRejectedRevoke.ExpiresAt.Should().BeNull();
+        (await context.Set<SqlOSClientApplication>().SingleAsync()).IsActive.Should().BeTrue();
+        (await context.Set<SqlOSClientCredential>().SingleAsync(x => x.RevokedAt == null)).RevokedAt.Should().BeNull();
 
         optionsValue.ClientSeeds.Clear();
         await service.UpsertSeededMachineClientsAsync();
         account.ConfigurationOrphanedAt.Should().NotBeNull();
         account.ExpiresAt.Should().BeNull("orphan visibility must not silently revoke a worker");
+    }
+
+    [TestMethod]
+    public async Task CodeOwnedEmergencyDisable_IsIdempotentAuditedAndSurvivesReconciliation()
+    {
+        await using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        var secret = new string('s', 64);
+        var options = Options.Create(optionsValue);
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var (organization, resource, role) = await SeedDependenciesAsync(context, admin);
+        optionsValue.SeedMachineClient("seeded-worker", (client, machine) =>
+        {
+            client.Name = "Seeded worker";
+            client.Audience = "https://api.example.test";
+            client.AllowedScopes = ["jobs.run"];
+            machine.OrganizationId = organization.Id;
+            machine.SecretResolver = () => secret;
+            machine.Grant(resource.Id, role.Id, "Run jobs");
+        });
+        var service = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        await admin.UpsertSeededClientsAsync();
+        await service.UpsertSeededMachineClientsAsync();
+        var originalExpiry = (await context.Set<SqlOSFgaServiceAccount>().SingleAsync()).ExpiresAt;
+        var originalGrantId = await context.Set<SqlOSFgaGrant>().Select(x => x.Id).SingleAsync();
+        var originalHash = (await context.Set<SqlOSClientCredential>().SingleAsync()).SecretHash;
+
+        var disabled = await service.EmergencyDisableAsync("seeded-worker");
+        var repeated = await service.EmergencyDisableAsync("seeded-worker");
+        disabled.EmergencyDisabled.Should().BeTrue();
+        disabled.Ready.Should().BeFalse();
+        disabled.Ownership.IsEditable.Should().BeFalse();
+        disabled.Ownership.CanEmergencyDisable.Should().BeTrue();
+        repeated.EmergencyDisabled.Should().BeTrue();
+        (await service.ValidateCredentialAsync("seeded-worker", secret, "https://api.example.test", ["jobs.run"])).Valid.Should().BeFalse();
+
+        await admin.UpsertSeededClientsAsync();
+        await service.UpsertSeededMachineClientsAsync();
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync();
+        var account = await context.Set<SqlOSFgaServiceAccount>().SingleAsync();
+        client.IsActive.Should().BeFalse();
+        client.DisabledAt.Should().NotBeNull();
+        client.DisabledReason.Should().Be(SqlOSMachineClientAdminService.EmergencyDisabledReason);
+        account.ExpiresAt.Should().Be(originalExpiry);
+        account.ConfigurationOwner.Should().Be(SqlOSConfigurationOwners.Code);
+        (await context.Set<SqlOSFgaGrant>().Select(x => x.Id).SingleAsync()).Should().Be(originalGrantId);
+        (await context.Set<SqlOSClientCredential>().SingleAsync()).SecretHash.Should().Be(originalHash);
+        (await context.Set<SqlOSClientCredential>().SingleAsync()).RevokedAt.Should().BeNull();
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "machine_client.emergency_disabled")).Should().Be(1);
+
+        var enabled = await service.EmergencyEnableAsync("seeded-worker");
+        enabled.EmergencyDisabled.Should().BeFalse();
+        enabled.Ready.Should().BeTrue();
+        (await service.ValidateCredentialAsync("seeded-worker", secret, "https://api.example.test", ["jobs.run"])).Valid.Should().BeTrue();
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "machine_client.emergency_enabled")).Should().Be(1);
+        await service.EmergencyEnableAsync("seeded-worker");
+        (await context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "machine_client.emergency_enabled")).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task EmergencyEnable_RefusesStructuralRevokeAndSeedDisable()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var service = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        var (organization, resource, role) = await SeedDependenciesAsync(context, admin);
+        var created = await service.CreateAsync(new SqlOSCreateMachineClientRequest(
+            "nightly-worker", "Nightly worker", null, "https://api.example.test",
+            ["jobs.run"], organization.Id, null, [new(resource.Id, role.Id)]));
+
+        await service.RevokeAsync("nightly-worker");
+        await FluentActions.Invoking(() => service.EmergencyEnableAsync("nightly-worker"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*revoked*");
+        (await service.ValidateCredentialAsync("nightly-worker", created.ClientSecret, "https://api.example.test", ["jobs.run"])).Valid.Should().BeFalse();
+
+        var seedOptionsValue = new SqlOSAuthServerOptions();
+        var seedOptions = Options.Create(seedOptionsValue);
+        var seedCrypto = TestCryptoService.Create(context, seedOptions);
+        var seedAdmin = new SqlOSAdminService(context, seedOptions, seedCrypto);
+        seedOptionsValue.SeedMachineClient("seed-disabled", (client, machine) =>
+        {
+            client.Name = "Seed disabled";
+            client.Audience = "https://api.example.test";
+            client.AllowedScopes = ["jobs.run"];
+            client.IsActive = false;
+            machine.SecretResolver = () => new string('s', 64);
+        });
+        var seedService = new SqlOSMachineClientAdminService(context, seedAdmin, seedCrypto, seedOptions);
+        await seedAdmin.UpsertSeededClientsAsync();
+        await seedService.UpsertSeededMachineClientsAsync();
+        await FluentActions.Invoking(() => seedService.EmergencyEnableAsync("seed-disabled"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*seed*");
     }
 
     [TestMethod]
