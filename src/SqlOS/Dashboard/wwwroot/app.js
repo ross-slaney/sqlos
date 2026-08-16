@@ -296,8 +296,8 @@
     const fgaViews = {
         resources: { title: "Resources", description: "Inspect the resource hierarchy and navigate the authorization graph.", hash: "/resources" },
         grants: { title: "Grants", description: "Review and manage subject grants across the resource tree.", hash: "/grants" },
-        roles: { title: "Roles", description: "Maintain the role model used by authorization checks.", hash: "/roles" },
-        permissions: { title: "Permissions", description: "Manage permission keys and their resource associations.", hash: "/permissions" },
+        roles: { title: "Roles", description: "Inspect the role model used by authorization checks.", hash: "/roles" },
+        permissions: { title: "Permissions", description: "Inspect permission keys and their resource associations.", hash: "/permissions" },
         users: { title: "FGA Users", description: "Inspect user subjects in the authorization graph.", hash: "/users" },
         agents: { title: "Agents", description: "Inspect non-human agent subjects.", hash: "/agents" },
         "service-accounts": { title: "Service Accounts", description: "Inspect service account subjects and grants.", hash: "/service-accounts" },

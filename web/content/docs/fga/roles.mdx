@@ -28,7 +28,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-Roles defined in startup are reapplied on boot. Custom roles created through the dashboard are preserved.
+Roles defined in startup are the authorization model. Change them in `options.Fga.Seed` and restart. The dashboard does not create, edit, or delete roles.
 
 ## Dashboard
 
@@ -36,7 +36,7 @@ Roles defined in startup are reapplied on boot. Custom roles created through the
 
 ![Roles page](/docs/dashboard-roles.png)
 
-The Roles page lists all roles with their permission count. Create new roles or view the permissions linked to each role.
+The Roles page lists all roles with their permission count so you can inspect the seeded model. Assign those roles to subjects on the Grants page.
 
 ## Role model
 
