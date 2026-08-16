@@ -226,6 +226,46 @@ public sealed class SqlOSAuthPageRendererTests
         html.Should().NotContain("action=\"/sqlos/auth/login/magic-link/complete?token=");
     }
 
+    [TestMethod]
+    [DataRow("PrimaryColor", "</style><script>alert(1)</script>", "--primary: #4f46e5")]
+    [DataRow("AccentColor", "url(https://evil.example)", "--accent: #111827")]
+    [DataRow("BackgroundColor", "red;}</style><script>alert(1)</script>", "--page-bg: #f8fafc")]
+    public void RenderPage_LegacyInvalidColors_UseSafeDefaults(string field, string payload, string expectedDeclaration)
+    {
+        var settings = CreateSettings(
+            primary: field == "PrimaryColor" ? payload : "#0D9488",
+            accent: field == "AccentColor" ? payload : "#1A1A1A",
+            background: field == "BackgroundColor" ? payload : "#FAFAF8");
+
+        var html = SqlOSAuthPageRenderer.RenderPage(CreateModel(mode: "login", settings: settings));
+
+        html.Should().Contain(expectedDeclaration);
+        html.Should().NotContain(payload);
+        html.Should().NotContain("<script>alert(1)</script>");
+        html.Should().Contain($"<style {SqlOS.Security.SqlOSCspNonce.Attribute}>");
+        html.Should().Contain($"<script {SqlOS.Security.SqlOSCspNonce.Attribute}>");
+    }
+
+    private static SqlOSAuthPageSettingsDto CreateSettings(
+        string primary,
+        string accent,
+        string background)
+        => new(
+            LogoBase64: null,
+            PrimaryColor: primary,
+            AccentColor: accent,
+            BackgroundColor: background,
+            Layout: "split",
+            PageTitle: "Sign in",
+            PageSubtitle: "Test auth page",
+            EnablePasswordSignup: false,
+            EnabledCredentialTypes: ["password"],
+            UpdatedAt: DateTime.UtcNow,
+            ManagedByStartupSeed: false,
+            HeadlessCapabilityRegistered: false,
+            LocalPasswordRuntimeEnabled: true,
+            EmailOtpRuntimeConfigured: false);
+
     private static SqlOSAuthPageViewModel CreateModel(
         string mode,
         string? requestId = null,

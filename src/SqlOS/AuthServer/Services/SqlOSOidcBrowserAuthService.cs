@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Security;
 using SqlOS.AuthServer.Configuration;
+using SqlOS.Security;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Interfaces;
@@ -515,7 +516,7 @@ public sealed class SqlOSOidcBrowserAuthService
             <html>
               <head>
                 <title>SqlOS social login error</title>
-                <style>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
+                <style {{SqlOSCspNonce.Attribute}}>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
               </head>
               <body>
                 <h1>SqlOS social login error</h1>

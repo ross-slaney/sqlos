@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Cryptography;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
@@ -10,11 +9,6 @@ namespace SqlOS.Security;
 
 internal sealed class SqlOSBrowserSecurityHeaders
 {
-    private static readonly Regex InlineElementPattern = new(
-        "<(script|style)(?![^>]*\\bnonce\\s*=)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
-
     private readonly SqlOSBrowserSecurityOptions _options;
 
     public SqlOSBrowserSecurityHeaders(IOptions<SqlOSOptions> options)
@@ -41,8 +35,9 @@ internal sealed class SqlOSBrowserSecurityHeaders
             $"{policy.Trim().TrimEnd(';')}; frame-ancestors 'none'";
 
         var encodedNonce = WebUtility.HtmlEncode(nonce);
-        return InlineElementPattern.Replace(
-            html,
-            match => $"<{match.Groups[1].Value} nonce=\"{encodedNonce}\"");
+        return html.Replace(
+            SqlOSCspNonce.Attribute,
+            $"nonce=\"{encodedNonce}\"",
+            StringComparison.Ordinal);
     }
 }

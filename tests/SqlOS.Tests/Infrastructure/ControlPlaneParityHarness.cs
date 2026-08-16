@@ -22,6 +22,7 @@ internal static class DashboardAdminContracts
         => $"/sqlos/admin/auth/api/clients/{clientId}/credentials";
     public const string OidcConnections = "/sqlos/admin/auth/api/oidc-connections";
     public const string MfaSettings = "/sqlos/admin/auth/api/settings/mfa";
+    public const string AuthPageSettings = "/sqlos/admin/auth/api/settings/auth-page";
     public static string OrganizationScimConnections(string organizationId)
         => $"/sqlos/admin/auth/api/organizations/{organizationId}/scim-connections";
 }
@@ -180,6 +181,27 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             ["roles"] = CanonicalJsonArray(item.RequiredRolesJson),
             ["factors"] = CanonicalJsonArray(item.AvailableFactorsJson)
         }, item.ConfigurationOwner, ReadEditable(dashboardItem), item.Enabled, true);
+    }
+
+    public async Task<ParityProjection> ProjectAuthPageAsync()
+    {
+        var item = await Context.Set<SqlOSAuthPageSettings>().AsNoTracking().SingleAsync(x => x.Id == "default");
+        var dashboardItem = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.AuthPageSettings);
+        return new ParityProjection(
+            "auth_page_settings",
+            new Dictionary<string, string?>
+            {
+                ["primary"] = item.PrimaryColor,
+                ["accent"] = item.AccentColor,
+                ["background"] = item.BackgroundColor,
+                ["layout"] = item.Layout
+            },
+            dashboardItem.GetProperty("managedByStartupSeed").GetBoolean()
+                ? SqlOSConfigurationOwners.Code
+                : SqlOSConfigurationOwners.Dashboard,
+            !dashboardItem.GetProperty("managedByStartupSeed").GetBoolean(),
+            true,
+            true);
     }
 
     public async ValueTask DisposeAsync()

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -635,7 +636,7 @@ public static class SqlOSAuthPageRenderer
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>{{Html(title)}}</title>
-          <style>
+          <style {{SqlOSCspNonce.Attribute}}>
             :root {
               --page-bg: {{backgroundColor}};
               --primary: {{primaryColor}};
@@ -1213,7 +1214,7 @@ public static class SqlOSAuthPageRenderer
               </section>
             </main>
           </div>
-          <script>{{RenderClientScript()}}</script>
+          <script {{SqlOSCspNonce.Attribute}}>{{RenderClientScript()}}</script>
         </body>
         </html>
         """;
@@ -1537,51 +1538,19 @@ public static class SqlOSAuthPageRenderer
     }
 
     private static string Css(string? value, string fallback)
-        => string.IsNullOrWhiteSpace(value) ? fallback : value;
+        => SqlOSCssColor.Render(value, fallback);
 
     private static string Html(string value) => WebUtility.HtmlEncode(value);
 
     private static bool IsDarkColor(string? value)
-        => TryParseHexColor(value, out var red, out var green, out var blue) &&
+        => SqlOSCssColor.TryGetRgb(value, out var red, out var green, out var blue) &&
            RelativeLuminance(red, green, blue) < 0.42;
 
     private static string GetContrastingTextColor(string value)
-        => TryParseHexColor(value, out var red, out var green, out var blue) &&
+        => SqlOSCssColor.TryGetRgb(value, out var red, out var green, out var blue) &&
            RelativeLuminance(red, green, blue) > 0.52
             ? "#111827"
             : "#ffffff";
-
-    private static bool TryParseHexColor(string? value, out int red, out int green, out int blue)
-    {
-        red = 0;
-        green = 0;
-        blue = 0;
-
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var color = value.Trim();
-        if (color.StartsWith('#'))
-        {
-            color = color[1..];
-        }
-
-        if (color.Length == 3)
-        {
-            color = string.Concat(color.Select(character => new string(character, 2)));
-        }
-
-        if (color.Length != 6)
-        {
-            return false;
-        }
-
-        return int.TryParse(color.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out red) &&
-               int.TryParse(color.AsSpan(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out green) &&
-               int.TryParse(color.AsSpan(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out blue);
-    }
 
     private static double RelativeLuminance(int red, int green, int blue)
     {

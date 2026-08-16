@@ -155,6 +155,41 @@ public sealed class AuthPageCsrfIntegrationTests
         secondNonce.Should().NotBe(firstNonce, "every HTML response receives a fresh nonce");
     }
 
+    [TestMethod]
+    public async Task HostedAuthPage_LegacyInvalidPersistedColors_DoNotEscapeTheStyleBlock()
+    {
+        await using var server = await AuthPageCsrfServer.CreateAsync();
+        const string payload = "</style><script>alert(1)";
+        await using (var scope = server.App.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            var settings = await context.Set<SqlOS.AuthServer.Models.SqlOSAuthPageSettings>()
+                .SingleAsync(x => x.Id == "default");
+            settings.PrimaryColor = payload;
+            settings.AccentColor = "url(https://evil.example)";
+            settings.BackgroundColor = "red;}";
+            await context.SaveChangesAsync();
+        }
+
+        using var client = server.App.GetTestClient();
+        client.BaseAddress = new Uri(TrustedOrigin);
+        using var response = await client.GetAsync("/sqlos/auth/login");
+        response.EnsureSuccessStatusCode();
+        var html = await response.Content.ReadAsStringAsync();
+        var nonce = Regex.Match(html, "<style nonce=\"([A-Za-z0-9_-]+)\"").Groups[1].Value;
+
+        html.Should().Contain("--primary: #4f46e5");
+        html.Should().Contain("--accent: #111827");
+        html.Should().Contain("--page-bg: #f8fafc");
+        html.Should().NotContain(payload);
+        html.Should().NotContain("evil.example");
+        html.Should().NotContain("<script>alert(1)</script>");
+        nonce.Should().NotBeNullOrWhiteSpace();
+        html.Should().Contain($"<script nonce=\"{nonce}\">");
+        Regex.Matches(html, "<script").Count.Should().Be(1);
+        Regex.Matches(html, "<style").Count.Should().Be(1);
+    }
+
     private static string ExtractInputValue(string html, string name)
     {
         var match = Regex.Match(

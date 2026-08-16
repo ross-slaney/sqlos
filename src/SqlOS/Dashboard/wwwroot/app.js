@@ -4439,6 +4439,7 @@
                                     <option value="stacked" ${settings.layout === "stacked" ? "selected" : ""}>Stacked</option>
                                 </select>
                             </div>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Accepted colors: <code>#RGB</code>, <code>#RRGGBB</code>, <code>#RRGGBBAA</code>, <code>rgb()</code>/<code>rgba()</code>, <code>hsl()</code>/<code>hsla()</code>, or <code>transparent</code>. HTML, URLs, and CSS rules are rejected.</p>
                             ${settings.headlessCapabilityRegistered
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
@@ -4484,6 +4485,7 @@
                                 <input name="accentColor" placeholder="Accent color (#0f172a)" value="${esc(emailSettings.accentColor || "")}" required>
                             </div>
                             <input name="backgroundColor" placeholder="Background color (#f8fafc)" value="${esc(emailSettings.backgroundColor || "")}" required>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Accepted colors: <code>#RGB</code>, <code>#RRGGBB</code>, <code>#RRGGBBAA</code>, <code>rgb()</code>/<code>rgba()</code>, <code>hsl()</code>/<code>hsla()</code>, or <code>transparent</code>. HTML, URLs, and CSS rules are rejected.</p>
                             <label>Email logo upload<input id="auth-email-logo-file" type="file" accept="image/*"></label>
                             <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL. Leave blank to reuse the Auth Page logo.">${esc(emailSettings.logoBase64 || "")}</textarea>
                             <button type="submit">Save Email Branding</button>

@@ -23,7 +23,7 @@ For application-owned operational messages, follow [Send transactional email](/d
 | Accent color | Headings and primary text |
 | Background color | Email body background |
 
-Logo values are stored as data URLs, for example `data:image/png;base64,...`.
+Logo values are stored as data URLs, for example `data:image/png;base64,...`. Color fields use the same accepted formats as AuthPage branding: `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`/`rgba()`, `hsl()`/`hsla()`, or `transparent`. Invalid values are rejected on write; a legacy stored color that fails the grammar is replaced with the built-in default when the email is rendered.
 
 ## Dashboard
 

@@ -254,6 +254,69 @@ public sealed class SqlOSControlPlaneParityTests
     }
 
     [TestMethod]
+    public async Task AuthPageColors_CodeServiceAndDashboard_NormalizeAndRejectEquivalently()
+    {
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options => options.SeedAuthPage(ConfigureAuthPage));
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+        await code.Settings.UpsertSeededAuthPageSettingsAsync();
+        await service.Settings.UpdateAuthPageSettingsAsync(AuthPageRequest());
+        await dashboard.PutDashboardAsync(DashboardAdminContracts.AuthPageSettings, AuthPagePayload());
+
+        var codeProjection = await code.ProjectAuthPageAsync();
+        var serviceProjection = await service.ProjectAuthPageAsync();
+        var dashboardProjection = await dashboard.ProjectAuthPageAsync();
+        codeProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        dashboardProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        codeProjection.Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        serviceProjection.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        dashboardProjection.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+
+        foreach (var harness in new[] { code, service, dashboard })
+        {
+            using var login = await harness.Client.GetAsync("/sqlos/auth/login");
+            login.EnsureSuccessStatusCode();
+            var html = await login.Content.ReadAsStringAsync();
+            html.Should().Contain("--primary: #4f46e5");
+            html.Should().Contain("--accent: #111827");
+            html.Should().Contain("--page-bg: #f5f3ff");
+            html.Should().MatchRegex("<style nonce=\"[A-Za-z0-9_-]+\">");
+            html.Should().MatchRegex("<script nonce=\"[A-Za-z0-9_-]+\">");
+        }
+
+        await using var invalidCode = await ControlPlaneParityHarness.CreateAsync(options => options.SeedAuthPage(page =>
+        {
+            ConfigureAuthPage(page);
+            page.PrimaryColor = "</style><script>alert(1)</script>";
+        }));
+        var invalidSeed = () => invalidCode.Settings.UpsertSeededAuthPageSettingsAsync();
+        (await invalidSeed.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("PrimaryColor");
+
+        var serviceInvalid = () => service.Settings.UpdateAuthPageSettingsAsync(AuthPageRequest() with
+        {
+            PrimaryColor = "url(https://evil.example)"
+        });
+        (await serviceInvalid.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("PrimaryColor");
+
+        using var dashboardInvalid = await dashboard.Client.PutAsJsonAsync(
+            DashboardAdminContracts.AuthPageSettings,
+            new
+            {
+                logoBase64 = (string?)null,
+                pageTitle = "Sign in to Parity",
+                pageSubtitle = "Parity workspace",
+                primaryColor = "red;}</style><script>alert(1)</script>",
+                accentColor = "#111827",
+                backgroundColor = "#f5f3ff",
+                layout = "split",
+                enablePasswordSignup = true,
+                enabledCredentialTypes = new[] { "password" }
+            });
+        dashboardInvalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await dashboardInvalid.Content.ReadAsStringAsync()).Should().Contain("PrimaryColor");
+    }
+
+    [TestMethod]
     public async Task InvalidDuplicateClient_HasEquivalentServiceAndDashboardErrorSemantics()
     {
         await using var code = await ControlPlaneParityHarness.CreateAsync();
@@ -309,6 +372,11 @@ public sealed class SqlOSControlPlaneParityTests
             Section(javascript, "async function renderAuthMfa()", "async function renderAuthPage()"),
             "`${authApiBasePath}/settings/mfa`",
             "totpEnabled", "requireForOwnersAndAdmins");
+        AssertDashboardContract(
+            Section(javascript, "async function renderAuthPage()", "async function renderAuthSessions()"),
+            "`${authApiBasePath}/settings/auth-page`",
+            "primaryColor", "accentColor", "backgroundColor",
+            "#RGB", "#RRGGBB", "rgb()", "transparent");
         AssertDashboardContract(
             Section(javascript, "bindForm(\"create-scim-connection-form\"", "document.querySelectorAll(\".js-rotate-scim-token\")"),
             "`${authApiBasePath}/organizations/${organizationId}/scim-connections`",
@@ -433,6 +501,43 @@ public sealed class SqlOSControlPlaneParityTests
         authorizationEndpoint = (string?)null, tokenEndpoint = (string?)null, userInfoEndpoint = (string?)null,
         jwksUri = (string?)null, microsoftTenant = (string?)null, scopes = (string[]?)null, claimMapping = (object?)null,
         clientAuthMethod = (string?)null, useUserInfo = (bool?)null
+    };
+
+    private static void ConfigureAuthPage(SqlOSAuthPageSeedOptions page)
+    {
+        page.PageTitle = "Sign in to Parity";
+        page.PageSubtitle = "Parity workspace";
+        page.PrimaryColor = "#4F46E5";
+        page.AccentColor = "#111827";
+        page.BackgroundColor = "#F5F3FF";
+        page.Layout = "split";
+        page.EnablePasswordSignup = true;
+        page.EnabledCredentialTypes = ["password"];
+    }
+
+    private static SqlOSUpdateAuthPageSettingsRequest AuthPageRequest()
+        => new(
+            null,
+            "#4F46E5",
+            "#111827",
+            "#F5F3FF",
+            "split",
+            "Sign in to Parity",
+            "Parity workspace",
+            true,
+            ["password"]);
+
+    private static object AuthPagePayload() => new
+    {
+        logoBase64 = (string?)null,
+        pageTitle = "Sign in to Parity",
+        pageSubtitle = "Parity workspace",
+        primaryColor = "#4F46E5",
+        accentColor = "#111827",
+        backgroundColor = "#F5F3FF",
+        layout = "split",
+        enablePasswordSignup = true,
+        enabledCredentialTypes = new[] { "password" }
     };
 
     private static void ConfigureMfa(SqlOSMfaSeedOptions seed)
