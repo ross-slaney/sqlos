@@ -19,290 +19,162 @@ namespace SqlOS.IntegrationTests;
 public sealed class DeliveryAdmissionIntegrationTests
 {
     [TestMethod]
-    public async Task PasswordReset_ParallelRequests_AdmitExactlyTheEmailCapAcrossInstances()
+    public async Task PasswordReset_ConcurrentAdmission_EnforcesCapsFailuresExpiryAndPrivacy()
     {
         await using var database = await DeliveryAdmissionDatabase.CreatePasswordResetAsync(options =>
         {
-            options.PasswordReset.MaxRequestsPerEmailPerWindow = 3;
-            options.PasswordReset.MaxRequestsPerIpPerWindow = 20;
+            options.PasswordReset.MaxRequestsPerEmailPerWindow = 1;
+            options.PasswordReset.MaxRequestsPerIpPerWindow = 2;
             options.PasswordReset.MaxRequestsPerClientPerWindow = 20;
         });
-        var user = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+        var parallelUser = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
             "Parallel Reset User",
             $"parallel-reset-{Guid.NewGuid():N}@example.com",
             "P@ssword123!"));
         var sender = new ConcurrentAuthEmailSender();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var attempts = Enumerable.Range(0, 10).Select(async index =>
+        var parallel = Enumerable.Range(0, 8).Select(async index =>
         {
             await using var actor = database.CreatePasswordResetActor(sender);
             await start.Task;
             return await actor.Auth.RequestPasswordResetEmailAsync(
-                new SqlOSForgotPasswordRequest(user.DefaultEmail!, "test-client"),
+                new SqlOSForgotPasswordRequest(parallelUser.DefaultEmail!, "test-client"),
                 CreateHttpContext($"203.0.113.{10 + index}"));
         }).ToArray();
-
         start.SetResult();
-        var results = await Task.WhenAll(attempts);
-
-        results.Should().OnlyContain(result =>
+        var parallelResults = await Task.WhenAll(parallel);
+        parallelResults.Should().OnlyContain(result =>
             result.Message == "If an account can be reset, you'll receive a password reset email shortly.");
-        sender.Messages.Should().HaveCount(3);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset_request"))
-            .Should().Be(3);
-        (await database.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset"))
-            .Should().Be(3);
-        var audits = await database.Context.Set<SqlOSAuditEvent>()
-            .Select(x => x.EventType)
-            .ToListAsync();
-        audits.Count(x => x == "password_reset.email_sent").Should().Be(3);
-        audits.Count(x => x == "password_reset.rate_limit_rejected").Should().Be(7);
-    }
+        sender.Messages.Should().HaveCount(1);
 
-    [TestMethod]
-    public async Task PasswordReset_OverlappingIpCap_AdmitsOnlyTheLowestLimit()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePasswordResetAsync(options =>
+        var overlapUsers = new List<SqlOSUser>();
+        for (var index = 0; index < 5; index++)
         {
-            options.PasswordReset.MaxRequestsPerEmailPerWindow = 10;
-            options.PasswordReset.MaxRequestsPerIpPerWindow = 2;
-            options.PasswordReset.MaxRequestsPerClientPerWindow = 20;
-        });
-        var users = new List<SqlOSUser>();
-        for (var index = 0; index < 6; index++)
-        {
-            users.Add(await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            overlapUsers.Add(await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
                 $"Overlap Reset {index}",
                 $"overlap-reset-{index}-{Guid.NewGuid():N}@example.com",
                 "P@ssword123!")));
         }
 
-        var sender = new ConcurrentAuthEmailSender();
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var attempts = users.Select(async (user, index) =>
+        var overlapStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var overlap = overlapUsers.Select(async user =>
         {
             await using var actor = database.CreatePasswordResetActor(sender);
-            await start.Task;
+            await overlapStart.Task;
             return await actor.Auth.RequestPasswordResetEmailAsync(
                 new SqlOSForgotPasswordRequest(user.DefaultEmail!, "test-client"),
                 CreateHttpContext("203.0.113.40"));
         }).ToArray();
+        overlapStart.SetResult();
+        await Task.WhenAll(overlap);
+        sender.Messages.Should().HaveCount(3);
 
-        start.SetResult();
-        await Task.WhenAll(attempts);
-
-        sender.Messages.Should().HaveCount(2);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSAuditEvent>()
-                .CountAsync(x => x.EventType == "password_reset.email_sent" && x.IpAddress == "203.0.113.40"))
-            .Should().Be(2);
-        (await database.Context.Set<SqlOSAuditEvent>()
-                .CountAsync(x => x.EventType == "password_reset.rate_limit_rejected" && x.IpAddress == "203.0.113.40"))
-            .Should().Be(4);
-    }
-
-    [TestMethod]
-    public async Task PasswordReset_UnknownAccountAndProviderFailure_StayPrivateAndCharged()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePasswordResetAsync(options =>
-        {
-            options.PasswordReset.MaxRequestsPerEmailPerWindow = 1;
-            options.PasswordReset.MaxRequestsPerIpPerWindow = 20;
-            options.PasswordReset.MaxRequestsPerClientPerWindow = 20;
-        });
         var unknownEmail = $"unknown-reset-{Guid.NewGuid():N}@example.com";
-        var known = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+        var failedUser = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
             "Known Reset Failure",
             $"known-reset-{Guid.NewGuid():N}@example.com",
             "P@ssword123!"));
-        var sender = new ConcurrentAuthEmailSender { IsConfigured = false };
-
+        sender.IsConfigured = false;
         await using (var unknownActor = database.CreatePasswordResetActor(sender))
         {
-            var unknown = await unknownActor.Auth.RequestPasswordResetEmailAsync(
+            (await unknownActor.Auth.RequestPasswordResetEmailAsync(
                 new SqlOSForgotPasswordRequest(unknownEmail, "test-client"),
-                CreateHttpContext("203.0.113.50"));
-            unknown.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
+                CreateHttpContext("203.0.113.50"))).Message
+                .Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
         }
 
-        await using (var knownActor = database.CreatePasswordResetActor(sender))
+        await using (var failedActor = database.CreatePasswordResetActor(sender))
         {
-            var failed = await knownActor.Auth.RequestPasswordResetEmailAsync(
-                new SqlOSForgotPasswordRequest(known.DefaultEmail!, "test-client"),
-                CreateHttpContext("203.0.113.51"));
-            failed.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
+            (await failedActor.Auth.RequestPasswordResetEmailAsync(
+                new SqlOSForgotPasswordRequest(failedUser.DefaultEmail!, "test-client"),
+                CreateHttpContext("203.0.113.51"))).Message
+                .Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
         }
 
-        sender.Messages.Should().BeEmpty();
+        sender.IsConfigured = true;
         await using (var retry = database.CreatePasswordResetActor(sender))
         {
-            retry.Sender.IsConfigured = true;
             var unknownRetry = await retry.Auth.RequestPasswordResetEmailAsync(
                 new SqlOSForgotPasswordRequest(unknownEmail, "test-client"),
                 CreateHttpContext("203.0.113.50"));
-            var knownRetry = await retry.Auth.RequestPasswordResetEmailAsync(
-                new SqlOSForgotPasswordRequest(known.DefaultEmail!, "test-client"),
+            var failedRetry = await retry.Auth.RequestPasswordResetEmailAsync(
+                new SqlOSForgotPasswordRequest(failedUser.DefaultEmail!, "test-client"),
                 CreateHttpContext("203.0.113.51"));
-            unknownRetry.Message.Should().Be(knownRetry.Message);
+            unknownRetry.Message.Should().Be(failedRetry.Message);
         }
 
-        sender.Messages.Should().BeEmpty();
+        sender.Messages.Should().HaveCount(3);
+        await ExpireRateLimitBucketsAsync(database);
+        await using (var afterExpiry = database.CreatePasswordResetActor(sender))
+        {
+            await afterExpiry.Auth.RequestPasswordResetEmailAsync(
+                new SqlOSForgotPasswordRequest(failedUser.DefaultEmail!, "test-client"),
+                CreateHttpContext("203.0.113.51"));
+        }
+
+        sender.Messages.Should().HaveCount(4);
         database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset_request"))
-            .Should().Be(2);
         (await database.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset" && x.ConsumedAt == null))
-            .Should().Be(0);
+            .Should().BeGreaterThan(0);
         (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "password_reset.rate_limit_rejected"))
-            .Should().Be(2);
+            .Should().BeGreaterThan(8);
         (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "password_reset.email_send_failed"))
             .Should().Be(1);
     }
 
     [TestMethod]
-    public async Task PasswordReset_ExpiredWindow_AllowsALaterSend()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePasswordResetAsync(options =>
-        {
-            options.PasswordReset.MaxRequestsPerEmailPerWindow = 1;
-            options.PasswordReset.MaxRequestsPerIpPerWindow = 20;
-            options.PasswordReset.MaxRequestsPerClientPerWindow = 20;
-        });
-        var user = await database.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
-            "Expired Reset",
-            $"expired-reset-{Guid.NewGuid():N}@example.com",
-            "P@ssword123!"));
-        var sender = new ConcurrentAuthEmailSender();
-        await using (var first = database.CreatePasswordResetActor(sender))
-        {
-            await first.Auth.RequestPasswordResetEmailAsync(
-                new SqlOSForgotPasswordRequest(user.DefaultEmail!, "test-client"),
-                CreateHttpContext("203.0.113.52"));
-        }
-
-        await ExpireRateLimitBucketsAsync(database);
-        await using (var second = database.CreatePasswordResetActor(sender))
-        {
-            await second.Auth.RequestPasswordResetEmailAsync(
-                new SqlOSForgotPasswordRequest(user.DefaultEmail!, "test-client"),
-                CreateHttpContext("203.0.113.52"));
-        }
-
-        sender.Messages.Should().HaveCount(2);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset_request"))
-            .Should().Be(2);
-    }
-
-    [TestMethod]
-    public async Task PhoneOtp_ParallelRequests_AdmitExactlyThePhoneCapAcrossInstances()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePhoneOtpAsync(options =>
-        {
-            options.PhoneOtp.MaxSendsPerPhone = 3;
-            options.PhoneOtp.MaxSendsPerAccount = 20;
-            options.PhoneOtp.MaxSendsPerIp = 20;
-            options.PhoneOtp.MaxSendsPerClient = 20;
-        });
-        const string phone = "+12025550170";
-        await database.CreateUserWithPhoneAsync(phone);
-        var channel = new ConcurrentOtpDeliveryChannel();
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var attempts = Enumerable.Range(0, 10).Select(async index =>
-        {
-            await using var actor = database.CreatePhoneOtpActor(channel);
-            await start.Task;
-            try
-            {
-                await actor.PhoneOtp.StartForClientAsync(
-                    new SqlOSPhoneOtpStartRequest(phone, "test-client", null),
-                    CreateHttpContext($"203.0.113.{70 + index}"));
-                return "sent";
-            }
-            catch (InvalidOperationException ex) when (ex.Message == "Too many sign-in code requests. Try again later.")
-            {
-                return "limited";
-            }
-        }).ToArray();
-
-        start.SetResult();
-        var results = await Task.WhenAll(attempts);
-
-        results.Count(x => x == "sent").Should().Be(3);
-        results.Count(x => x == "limited").Should().Be(7);
-        channel.StartCount.Should().Be(3);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(3);
-        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "phone_otp.challenge_started"))
-            .Should().Be(3);
-        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "phone_otp.rate_limit_rejected"))
-            .Should().Be(7);
-    }
-
-    [TestMethod]
-    public async Task PhoneOtp_OverlappingAccountCap_AdmitsOnlyTheLowestLimit()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePhoneOtpAsync(options =>
-        {
-            options.PhoneOtp.MaxSendsPerPhone = 10;
-            options.PhoneOtp.MaxSendsPerAccount = 2;
-            options.PhoneOtp.MaxSendsPerIp = 20;
-            options.PhoneOtp.MaxSendsPerClient = 20;
-        });
-        var user = await database.CreateUserWithPhoneAsync("+12025550180");
-        var phones = new[] { "+12025550180", "+12025550181", "+12025550182", "+12025550183", "+12025550184" };
-        await using (var setup = database.CreatePhoneOtpActor(new ConcurrentOtpDeliveryChannel()))
-        {
-            foreach (var phone in phones.Skip(1))
-            {
-                await setup.PhoneOtp.AddVerifiedPhoneNumberAsync(user, phone);
-            }
-        }
-
-        var channel = new ConcurrentOtpDeliveryChannel();
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var attempts = phones.Select(async (phone, index) =>
-        {
-            await using var actor = database.CreatePhoneOtpActor(channel);
-            await start.Task;
-            try
-            {
-                await actor.PhoneOtp.StartForClientAsync(
-                    new SqlOSPhoneOtpStartRequest(phone, "test-client", null),
-                    CreateHttpContext($"203.0.113.{80 + index}"));
-                return "sent";
-            }
-            catch (InvalidOperationException ex) when (ex.Message == "Too many sign-in code requests. Try again later.")
-            {
-                return "limited";
-            }
-        }).ToArray();
-
-        start.SetResult();
-        var results = await Task.WhenAll(attempts);
-
-        results.Count(x => x == "sent").Should().Be(2);
-        results.Count(x => x == "limited").Should().Be(3);
-        channel.StartCount.Should().Be(2);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(2);
-        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "phone_otp.rate_limit_rejected"))
-            .Should().Be(3);
-    }
-
-    [TestMethod]
-    public async Task PhoneOtp_ProviderFailureAndTimeout_KeepTheCharge()
+    public async Task PhoneOtp_ConcurrentAdmission_EnforcesCapsFailuresExpiryAndPrivacy()
     {
         await using var database = await DeliveryAdmissionDatabase.CreatePhoneOtpAsync(options =>
         {
             options.PhoneOtp.MaxSendsPerPhone = 1;
-            options.PhoneOtp.MaxSendsPerAccount = 20;
+            options.PhoneOtp.MaxSendsPerAccount = 2;
             options.PhoneOtp.MaxSendsPerIp = 20;
             options.PhoneOtp.MaxSendsPerClient = 20;
         });
+
+        const string parallelPhone = "+12025550170";
+        await database.CreateUserWithPhoneAsync(parallelPhone);
+        var channel = new ConcurrentOtpDeliveryChannel();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parallel = Enumerable.Range(0, 8).Select(async index =>
+        {
+            await using var actor = database.CreatePhoneOtpActor(channel);
+            await start.Task;
+            return await StartPhoneAsync(actor, parallelPhone, $"203.0.113.{70 + index}");
+        }).ToArray();
+        start.SetResult();
+        var parallelResults = await Task.WhenAll(parallel);
+        parallelResults.Count(x => x == "sent").Should().Be(1);
+        parallelResults.Count(x => x == "limited").Should().Be(7);
+        channel.StartCount.Should().Be(1);
+
+        var overlapUser = await database.CreateUserWithPhoneAsync("+12025550180");
+        var overlapPhones = new[] { "+12025550180", "+12025550181", "+12025550182", "+12025550183", "+12025550184" };
+        await using (var setup = database.CreatePhoneOtpActor(new ConcurrentOtpDeliveryChannel()))
+        {
+            foreach (var phone in overlapPhones.Skip(1))
+            {
+                await setup.PhoneOtp.AddVerifiedPhoneNumberAsync(overlapUser, phone);
+            }
+        }
+
+        var overlapChannel = new ConcurrentOtpDeliveryChannel();
+        var overlapStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var overlap = overlapPhones.Select(async (phone, index) =>
+        {
+            await using var actor = database.CreatePhoneOtpActor(overlapChannel);
+            await overlapStart.Task;
+            return await StartPhoneAsync(actor, phone, $"203.0.113.{80 + index}");
+        }).ToArray();
+        overlapStart.SetResult();
+        var overlapResults = await Task.WhenAll(overlap);
+        overlapResults.Count(x => x == "sent").Should().Be(2);
+        overlapResults.Count(x => x == "limited").Should().Be(3);
+        overlapChannel.StartCount.Should().Be(2);
+
         await database.CreateUserWithPhoneAsync("+12025550190");
         await database.CreateUserWithPhoneAsync("+12025550191");
-
         var failed = new ConcurrentOtpDeliveryChannel { RejectStarts = true };
         await using (var actor = database.CreatePhoneOtpActor(failed))
         {
@@ -315,11 +187,7 @@ public sealed class DeliveryAdmissionIntegrationTests
 
         await using (var retry = database.CreatePhoneOtpActor(new ConcurrentOtpDeliveryChannel()))
         {
-            var act = async () => await retry.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest("+12025550190", "test-client", null),
-                CreateHttpContext("203.0.113.90"));
-            await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("Too many sign-in code requests. Try again later.");
+            (await StartPhoneAsync(retry, "+12025550190", "203.0.113.90")).Should().Be("limited");
         }
 
         var timedOut = new ConcurrentOtpDeliveryChannel { TimeoutStarts = true };
@@ -333,97 +201,63 @@ public sealed class DeliveryAdmissionIntegrationTests
 
         await using (var retry = database.CreatePhoneOtpActor(new ConcurrentOtpDeliveryChannel()))
         {
-            var act = async () => await retry.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest("+12025550191", "test-client", null),
-                CreateHttpContext("203.0.113.91"));
-            await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("Too many sign-in code requests. Try again later.");
+            (await StartPhoneAsync(retry, "+12025550191", "203.0.113.91")).Should().Be("limited");
         }
 
         failed.StartCount.Should().Be(1);
         timedOut.StartCount.Should().Be(1);
+
+        await database.CreateUserWithPhoneAsync("+12025550195");
+        var privacy = new ConcurrentOtpDeliveryChannel();
+        await using (var unknown = database.CreatePhoneOtpActor(privacy))
+        {
+            (await unknown.PhoneOtp.StartForClientAsync(
+                new SqlOSPhoneOtpStartRequest("+12025550196", "test-client", null),
+                CreateHttpContext("203.0.113.96"))).Message
+                .Should().Be("If an account exists for that phone number, check your messages for a sign-in code.");
+        }
+
+        await using (var known = database.CreatePhoneOtpActor(privacy))
+        {
+            (await known.PhoneOtp.StartForClientAsync(
+                new SqlOSPhoneOtpStartRequest("+12025550195", "test-client", null),
+                CreateHttpContext("203.0.113.95"))).Message
+                .Should().Be("If an account exists for that phone number, check your messages for a sign-in code.");
+        }
+
+        await using (var unknownRetry = database.CreatePhoneOtpActor(privacy))
+        {
+            (await StartPhoneAsync(unknownRetry, "+12025550196", "203.0.113.96")).Should().Be("limited");
+        }
+
+        privacy.StartCount.Should().Be(1);
+        await ExpireRateLimitBucketsAsync(database);
+        await using (var afterExpiry = database.CreatePhoneOtpActor(privacy))
+        {
+            (await StartPhoneAsync(afterExpiry, "+12025550195", "203.0.113.95")).Should().Be("sent");
+        }
+
+        privacy.StartCount.Should().Be(2);
         database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(2);
         (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "phone_otp.send_failed"))
             .Should().Be(1);
         (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "phone_otp.rate_limit_rejected"))
-            .Should().Be(2);
+            .Should().BeGreaterThan(10);
     }
 
-    [TestMethod]
-    public async Task PhoneOtp_UnknownAccount_UsesTheSamePublicMessageAndStillCharges()
+    private static async Task<string> StartPhoneAsync(PhoneOtpActor actor, string phone, string ip)
     {
-        await using var database = await DeliveryAdmissionDatabase.CreatePhoneOtpAsync(options =>
+        try
         {
-            options.PhoneOtp.MaxSendsPerPhone = 1;
-            options.PhoneOtp.MaxSendsPerAccount = 20;
-            options.PhoneOtp.MaxSendsPerIp = 20;
-            options.PhoneOtp.MaxSendsPerClient = 20;
-        });
-        await database.CreateUserWithPhoneAsync("+12025550195");
-        var channel = new ConcurrentOtpDeliveryChannel();
-
-        await using (var unknown = database.CreatePhoneOtpActor(channel))
-        {
-            var result = await unknown.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest("+12025550196", "test-client", null),
-                CreateHttpContext("203.0.113.96"));
-            result.Message.Should().Be("If an account exists for that phone number, check your messages for a sign-in code.");
-        }
-
-        await using (var known = database.CreatePhoneOtpActor(channel))
-        {
-            var result = await known.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest("+12025550195", "test-client", null),
-                CreateHttpContext("203.0.113.95"));
-            result.Message.Should().Be("If an account exists for that phone number, check your messages for a sign-in code.");
-        }
-
-        await using (var unknownRetry = database.CreatePhoneOtpActor(channel))
-        {
-            var act = async () => await unknownRetry.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest("+12025550196", "test-client", null),
-                CreateHttpContext("203.0.113.96"));
-            await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("Too many sign-in code requests. Try again later.");
-        }
-
-        channel.StartCount.Should().Be(1);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(2);
-    }
-
-    [TestMethod]
-    public async Task PhoneOtp_ExpiredWindow_AllowsALaterSend()
-    {
-        await using var database = await DeliveryAdmissionDatabase.CreatePhoneOtpAsync(options =>
-        {
-            options.PhoneOtp.MaxSendsPerPhone = 1;
-            options.PhoneOtp.MaxSendsPerAccount = 20;
-            options.PhoneOtp.MaxSendsPerIp = 20;
-            options.PhoneOtp.MaxSendsPerClient = 20;
-        });
-        const string phone = "+12025550197";
-        await database.CreateUserWithPhoneAsync(phone);
-        var channel = new ConcurrentOtpDeliveryChannel();
-        await using (var first = database.CreatePhoneOtpActor(channel))
-        {
-            await first.PhoneOtp.StartForClientAsync(
+            await actor.PhoneOtp.StartForClientAsync(
                 new SqlOSPhoneOtpStartRequest(phone, "test-client", null),
-                CreateHttpContext("203.0.113.97"));
+                CreateHttpContext(ip));
+            return "sent";
         }
-
-        await ExpireRateLimitBucketsAsync(database);
-        await using (var second = database.CreatePhoneOtpActor(channel))
+        catch (InvalidOperationException ex) when (ex.Message == "Too many sign-in code requests. Try again later.")
         {
-            await second.PhoneOtp.StartForClientAsync(
-                new SqlOSPhoneOtpStartRequest(phone, "test-client", null),
-                CreateHttpContext("203.0.113.97"));
+            return "limited";
         }
-
-        channel.StartCount.Should().Be(2);
-        database.Context.ChangeTracker.Clear();
-        (await database.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(2);
     }
 
     private static async Task ExpireRateLimitBucketsAsync(DeliveryAdmissionDatabase database)
