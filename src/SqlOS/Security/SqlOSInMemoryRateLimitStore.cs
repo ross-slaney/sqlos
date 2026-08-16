@@ -95,6 +95,59 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
         }
     }
 
+    public Task<SqlOSRateLimitReservationState> ReserveManyAsync(
+        IReadOnlyList<SqlOSRateLimitBucketRequest> buckets,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(buckets);
+        lock (_sync)
+        {
+            EvictExpired(now);
+            if (buckets.Count == 0)
+            {
+                return Task.FromResult(new SqlOSRateLimitReservationState([], null, null));
+            }
+
+            var active = new Bucket?[buckets.Count];
+            for (var index = 0; index < buckets.Count; index++)
+            {
+                var request = buckets[index];
+                var bucket = GetActiveBucket(request, now);
+                if (bucket?.LockedUntil is { } lockedUntil && lockedUntil > now)
+                {
+                    return Task.FromResult(new SqlOSRateLimitReservationState(
+                        new SqlOSRateLimitBucketState?[buckets.Count],
+                        index,
+                        lockedUntil));
+                }
+
+                active[index] = bucket;
+            }
+
+            var requiredCapacity = active.Count(static bucket => bucket == null);
+            if (!EnsureManyCapacity(buckets, requiredCapacity, now))
+            {
+                return Task.FromResult(new SqlOSRateLimitReservationState(
+                    new SqlOSRateLimitBucketState?[buckets.Count],
+                    0,
+                    now.Add(buckets[0].LockoutDuration)));
+            }
+
+            var states = new SqlOSRateLimitBucketState?[buckets.Count];
+            for (var index = 0; index < buckets.Count; index++)
+            {
+                var request = buckets[index];
+                var bucket = active[index] ?? AddBucket(request.Scope, request.Key, now);
+                IncrementBucket(bucket, request.LockThreshold, request.LockoutDuration, now);
+                states[index] = ToState(bucket);
+            }
+
+            return Task.FromResult(new SqlOSRateLimitReservationState(states, null, null));
+        }
+    }
+
     public Task<SqlOSRateLimitBucketState?> GetAsync(
         string scope,
         string key,
@@ -187,6 +240,34 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
         return Task.CompletedTask;
     }
 
+    public Task ReleaseManyAsync(
+        IReadOnlyList<SqlOSRateLimitReservationRelease> releases,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(releases);
+        lock (_sync)
+        {
+            foreach (var release in releases)
+            {
+                if (_buckets.TryGetValue((release.Scope, release.Key), out var bucket)
+                    && bucket.WindowStartedAt == release.WindowStartedAt)
+                {
+                    bucket.Count = Math.Max(0, bucket.Count - 1);
+                    bucket.LockedUntil = bucket.Count >= release.LockThreshold ? bucket.LockedUntil : null;
+                    bucket.UpdatedAt = now;
+                    if (bucket.Count == 0)
+                    {
+                        _buckets.Remove((release.Scope, release.Key));
+                    }
+                }
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     internal int BucketCount
     {
         get
@@ -252,6 +333,33 @@ internal sealed class SqlOSInMemoryRateLimitStore : ISqlOSRateLimitStore
                 .Where(entry => entry.Key != (first.Scope, first.Key)
                                 && entry.Key != (second.Scope, second.Key)
                                 && (entry.Value.LockedUntil is null || entry.Value.LockedUntil <= now))
+                .ToArray();
+            if (evictable.Length == 0)
+            {
+                return false;
+            }
+
+            var oldest = evictable.MinBy(entry => entry.Value.UpdatedAt);
+            _buckets.Remove(oldest.Key);
+        }
+
+        return true;
+    }
+
+    private bool EnsureManyCapacity(
+        IReadOnlyList<SqlOSRateLimitBucketRequest> buckets,
+        int requiredCapacity,
+        DateTimeOffset now)
+    {
+        var reserved = buckets
+            .Select(request => (request.Scope, request.Key))
+            .ToHashSet();
+        while (_buckets.Count + requiredCapacity > MaximumBuckets)
+        {
+            var evictable = _buckets
+                .Where(entry =>
+                    !reserved.Contains(entry.Key)
+                    && (entry.Value.LockedUntil is null || entry.Value.LockedUntil <= now))
                 .ToArray();
             if (evictable.Length == 0)
             {

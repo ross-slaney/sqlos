@@ -20,6 +20,7 @@ public sealed class SqlOSPhoneOtpService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSOtpDeliveryChannel _deliveryChannel;
+    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
     private readonly SqlOSPhoneOtpOptions _options;
     private readonly PhoneNumberUtil _phoneNumberUtil = PhoneNumberUtil.GetInstance();
 
@@ -29,13 +30,15 @@ public sealed class SqlOSPhoneOtpService
         SqlOSCryptoService cryptoService,
         SqlOSSettingsService settingsService,
         ISqlOSOtpDeliveryChannel deliveryChannel,
-        IOptions<SqlOSAuthServerOptions> options)
+        IOptions<SqlOSAuthServerOptions> options,
+        SqlOSDeliveryAdmissionService? deliveryAdmissionService = null)
     {
         _context = context;
         _adminService = adminService;
         _cryptoService = cryptoService;
         _settingsService = settingsService;
         _deliveryChannel = deliveryChannel;
+        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
         _options = options.Value.PhoneOtp;
     }
 
@@ -572,6 +575,7 @@ public sealed class SqlOSPhoneOtpService
             ipAddress,
             now,
             cancellationToken);
+        now = DateTime.UtcNow;
 
         var recentChallenges = await _context.Set<SqlOSPhoneOtpChallenge>()
             .Where(x => x.PhoneNumberHash == phoneHash && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
@@ -703,47 +707,28 @@ public sealed class SqlOSPhoneOtpService
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var since = now.Subtract(_options.RateLimitWindow);
-        var phoneCount = await _context.Set<SqlOSPhoneOtpChallenge>()
-            .CountAsync(x => x.PhoneNumberHash == phoneHash && x.CreatedAt >= since, cancellationToken);
-        if (phoneCount >= _options.MaxSendsPerPhone)
+        var admission = await _deliveryAdmission.ReservePhoneOtpAsync(
+            phoneHash,
+            userId,
+            ipAddress,
+            clientApplicationId,
+            _options,
+            now,
+            cancellationToken);
+        if (admission.Admitted)
         {
-            await RecordRateLimitAuditAsync("phone", maskedPhone, purpose, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(userId))
-        {
-            var accountCount = await _context.Set<SqlOSPhoneOtpChallenge>()
-                .CountAsync(x => x.UserId == userId && x.CreatedAt >= since, cancellationToken);
-            if (accountCount >= _options.MaxSendsPerAccount)
-            {
-                await RecordRateLimitAuditAsync("account", maskedPhone, purpose, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-                throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(ipAddress))
-        {
-            var ipCount = await _context.Set<SqlOSPhoneOtpChallenge>()
-                .CountAsync(x => x.IpAddress == ipAddress && x.CreatedAt >= since, cancellationToken);
-            if (ipCount >= _options.MaxSendsPerIp)
-            {
-                await RecordRateLimitAuditAsync("ip", maskedPhone, purpose, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-                throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientApplicationId))
-        {
-            var clientCount = await _context.Set<SqlOSPhoneOtpChallenge>()
-                .CountAsync(x => x.ClientApplicationId == clientApplicationId && x.CreatedAt >= since, cancellationToken);
-            if (clientCount >= _options.MaxSendsPerClient)
-            {
-                await RecordRateLimitAuditAsync("client", maskedPhone, purpose, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-                throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-            }
-        }
+        await RecordRateLimitAuditAsync(
+            admission.RejectedScope ?? "phone",
+            maskedPhone,
+            purpose,
+            ipAddress,
+            clientApplicationId,
+            requestedOrganizationId,
+            cancellationToken);
+        throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
     }
 
     private async Task RecordRateLimitAuditAsync(

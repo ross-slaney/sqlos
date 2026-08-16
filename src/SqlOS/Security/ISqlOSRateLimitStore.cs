@@ -17,6 +17,11 @@ internal interface ISqlOSRateLimitStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
+    Task<SqlOSRateLimitReservationState> ReserveManyAsync(
+        IReadOnlyList<SqlOSRateLimitBucketRequest> buckets,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
     Task<SqlOSRateLimitBucketState?> GetAsync(
         string scope,
         string key,
@@ -42,6 +47,11 @@ internal interface ISqlOSRateLimitStore
         DateTimeOffset windowStartedAt,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
+
+    Task ReleaseManyAsync(
+        IReadOnlyList<SqlOSRateLimitReservationRelease> releases,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }
 
 internal sealed record SqlOSRateLimitBucketState(
@@ -65,3 +75,17 @@ internal sealed record SqlOSRateLimitPairReservationState(
 {
     public bool Admitted => RejectedIndex == null;
 }
+
+internal sealed record SqlOSRateLimitReservationState(
+    IReadOnlyList<SqlOSRateLimitBucketState?> Buckets,
+    int? RejectedIndex,
+    DateTimeOffset? RejectedLockedUntil)
+{
+    public bool Admitted => RejectedIndex == null;
+}
+
+internal sealed record SqlOSRateLimitReservationRelease(
+    string Scope,
+    string Key,
+    int LockThreshold,
+    DateTimeOffset WindowStartedAt);

@@ -1725,6 +1725,37 @@ public sealed class SqlOSAuthServiceTests
     }
 
     [TestMethod]
+    public async Task PasswordResetEmail_DeliveryFailure_ConsumesTheAdmissionSlot()
+    {
+        using var harness = await PasswordResetHarness.CreateAsync(options =>
+        {
+            options.PasswordReset.MaxRequestsPerEmailPerWindow = 1;
+        });
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Failed Delivery Cap",
+            "failed-delivery-cap@example.com",
+            "OldPassword123!"));
+        harness.EmailSender.IsConfigured = false;
+
+        var first = await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
+            CreatePasswordHttpContext("203.0.113.199"));
+        var retry = await harness.Auth.RequestPasswordResetEmailAsync(
+            new SqlOSForgotPasswordRequest(user.DefaultEmail!),
+            CreatePasswordHttpContext("203.0.113.199"));
+
+        first.Message.Should().Be(retry.Message);
+        retry.Message.Should().Be("If an account can be reset, you'll receive a password reset email shortly.");
+        harness.EmailSender.Messages.Should().BeEmpty();
+        (await harness.Context.Set<SqlOSTemporaryToken>().CountAsync(x => x.Purpose == "password_reset_request"))
+            .Should().Be(1);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "password_reset.email_send_failed"))
+            .Should().Be(1);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "password_reset.rate_limit_rejected"))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task PasswordResetEmail_Request_SupersedesPriorActiveResetToken()
     {
         using var harness = await PasswordResetHarness.CreateAsync();
