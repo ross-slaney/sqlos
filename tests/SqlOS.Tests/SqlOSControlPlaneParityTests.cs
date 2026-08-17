@@ -43,6 +43,8 @@ public sealed class SqlOSControlPlaneParityTests
 
         codeProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
         dashboardProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        codeProjection.Configuration["scopes"].Should().Be("[\"openid\",\"profile\"]",
+            "AllowedScopes is the shared allowlist; empty means deny-all at grant time, not a separate operator policy");
         codeProjection.Owner.Should().Be(SqlOSConfigurationOwners.Code);
         codeProjection.IsEditable.Should().BeFalse();
         serviceProjection.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);

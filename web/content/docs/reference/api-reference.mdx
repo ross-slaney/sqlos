@@ -70,7 +70,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `client_id` | Yes | A stored client ID or, when CIMD is enabled, an allowed HTTPS metadata-document URL. |
 | `redirect_uri` | Yes for a usable browser flow | Must match one of the resolved client's redirect URIs. |
 | `state` | Yes | Returned unchanged to the client; length must be 1–2048 characters. |
-| `scope` | No | Space-separated. When a client has an allowed-scope list, SqlOS keeps only requested scopes from that list. |
+| `scope` | No | Space-separated. SqlOS always intersects requested scopes with the client's `AllowedScopes` allowlist and redirects with the granted subset, which may be empty. An empty allowlist grants no requested scopes; it is not a wildcard. |
 | `code_challenge` | For clients that require PKCE | Verified during token exchange. |
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
@@ -169,7 +169,7 @@ Honor `interval` while polling `/token`. Device errors use the OAuth-style `erro
 | `access_denied` | The user denied the request. |
 | `expired_token` | The device code expired. |
 | `unauthorized_client` / `invalid_client` | The client is not eligible for public device authorization. |
-| `invalid_scope` / `invalid_target` | A requested scope or resource is not allowed. |
+| `invalid_scope` / `invalid_target` | A requested scope is not on the client's allowlist (an empty allowlist rejects every requested scope), or the requested resource is not allowed. |
 | `invalid_grant` | The device code is invalid, mismatched, or already consumed. |
 
 ## Hosted AuthPage

@@ -72,6 +72,11 @@ The Admin API requires an operator session; see [Authenticate operator API calls
 | `name` | Yes | Display name |
 | `audience` | No | Token audience claim |
 | `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
+| `allowedScopes` | No | Scopes this client may be granted. An empty list grants nothing. |
+
+`AllowedScopes` is an allowlist on every grant. Authorization-code, device, and client-credentials requests grant a scope only when it appears in that list. Authorization-code still succeeds with the granted subset, which may be empty. Device and client-credentials reject any requested scope that is not listed with `invalid_scope`.
+
+An empty allowlist is deny-all, not a wildcard. Seeded and dashboard-created clients that omit the list therefore receive no requested scopes until an operator sets one. Dynamic Client Registration currently stores `[]` and does not copy scopes from the registration request; existing DCR rows with that empty list will no longer be granted any requested scopes until registration or an operator populates an allowlist.
 
 ## Confidential server-side clients
 
@@ -229,6 +234,7 @@ SqlOS keeps this path intentionally narrow in v1:
 - `token_endpoint_auth_method=none`
 - strict redirect validation
 - rate limiting and audit logging
+- an empty `AllowedScopes` list (`[]`), which grants no requested scopes until an operator or a later registration change populates an allowlist
 
 ## Multiple clients
 

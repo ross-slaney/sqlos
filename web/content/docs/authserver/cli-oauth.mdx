@@ -70,7 +70,7 @@ Start-time validation is strict:
 | --- | --- |
 | `unauthorized_client` | The client is not enabled for device authorization. |
 | `invalid_client` | The client is not public, or the client id is invalid. |
-| `invalid_scope` | One or more requested scopes are outside the client allow-list. |
+| `invalid_scope` | One or more requested scopes are outside the client allow-list. An empty allowlist rejects every requested scope. |
 | `invalid_target` | The requested resource does not match the client audience. |
 | `slow_down` | Start rate limits were exceeded for the client or IP address. |
 

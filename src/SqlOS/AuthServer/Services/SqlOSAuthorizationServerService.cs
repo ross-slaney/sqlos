@@ -173,12 +173,9 @@ public sealed class SqlOSAuthorizationServerService
 
         var requestedScopes = NormalizeRequestedScopes(input.Scope);
         var allowedScopes = ParseJsonArray(client.AllowedScopesJson);
-        if (allowedScopes.Count > 0)
-        {
-            requestedScopes = requestedScopes
-                .Where(scope => allowedScopes.Contains(scope, StringComparer.Ordinal))
-                .ToList();
-        }
+        requestedScopes = requestedScopes
+            .Where(scope => allowedScopes.Contains(scope, StringComparer.Ordinal))
+            .ToList();
 
         var normalizedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(input.Resource)
             ? input.Resource.Trim()
