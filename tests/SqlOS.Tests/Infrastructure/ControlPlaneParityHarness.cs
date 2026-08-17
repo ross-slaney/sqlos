@@ -23,8 +23,15 @@ internal static class DashboardAdminContracts
     public const string OidcConnections = "/sqlos/admin/auth/api/oidc-connections";
     public const string MfaSettings = "/sqlos/admin/auth/api/settings/mfa";
     public const string AuthPageSettings = "/sqlos/admin/auth/api/settings/auth-page";
+    public const string MachineClients = "/sqlos/admin/auth/api/machine-clients";
     public static string OrganizationScimConnections(string organizationId)
         => $"/sqlos/admin/auth/api/organizations/{organizationId}/scim-connections";
+    public static string MachineClientRevoke(string clientId)
+        => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/revoke";
+    public static string MachineClientEmergencyDisable(string clientId)
+        => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/emergency-disable";
+    public static string MachineClientEmergencyEnable(string clientId)
+        => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/emergency-enable";
 }
 
 internal sealed record ParityProjection(
@@ -57,6 +64,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         Settings = scope.ServiceProvider.GetRequiredService<SqlOSSettingsService>();
         Oidc = scope.ServiceProvider.GetRequiredService<SqlOSOidcAuthService>();
         Scim = scope.ServiceProvider.GetRequiredService<SqlOSScimService>();
+        Machines = scope.ServiceProvider.GetRequiredService<SqlOSMachineClientAdminService>();
+        ClientCredentials = scope.ServiceProvider.GetRequiredService<SqlOSClientCredentialsService>();
+        Crypto = scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
     }
 
     public HttpClient Client { get; }
@@ -67,6 +77,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public SqlOSSettingsService Settings { get; }
     public SqlOSOidcAuthService Oidc { get; }
     public SqlOSScimService Scim { get; }
+    public SqlOSMachineClientAdminService Machines { get; }
+    public SqlOSClientCredentialsService ClientCredentials { get; }
+    public SqlOSCryptoService Crypto { get; }
 
     public static async Task<ControlPlaneParityHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
     {
@@ -95,6 +108,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         await Settings.EnsureDefaultMfaSettingsAsync();
         await Settings.UpsertSeededMfaSettingsAsync();
         await Admin.UpsertSeededClientsAsync();
+        await Machines.UpsertSeededMachineClientsAsync();
         await Admin.UpsertSeededOidcConnectionsAsync();
         await Admin.UpsertSeededScimConnectionsAsync();
     }
@@ -165,6 +179,31 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             ["displayName"] = item.DisplayName
         }, item.ConfigurationOwner, ReadEditable(dashboardItem), item.IsEnabled,
             item.TokenHash != null && item.TokenPrefix != null);
+    }
+
+    public async Task<ParityProjection> ProjectMachineClientAsync(string clientId)
+    {
+        var account = await Context.Set<SqlOS.Fga.Models.SqlOSFgaServiceAccount>().AsNoTracking()
+            .Include(x => x.Subject)
+            .SingleAsync(x => x.ClientId == clientId);
+        var client = await Context.Set<SqlOSClientApplication>().AsNoTracking().SingleAsync(x => x.ClientId == clientId);
+        var grantCount = await Context.Set<SqlOS.Fga.Models.SqlOSFgaGrant>().AsNoTracking()
+            .CountAsync(x => x.SubjectId == account.SubjectId);
+        var response = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.MachineClients);
+        var dashboardItem = response.GetProperty("data").EnumerateArray().Single(x => x.GetProperty("clientId").GetString() == clientId);
+        return new ParityProjection("machine_client", new Dictionary<string, string?>
+        {
+            ["clientId"] = client.ClientId,
+            ["displayName"] = account.Subject!.DisplayName,
+            ["audience"] = client.Audience,
+            ["scopes"] = CanonicalJsonArray(client.AllowedScopesJson),
+            ["organization"] = account.Subject.OrganizationId,
+            ["grantCount"] = grantCount.ToString(),
+            ["emergencyDisabled"] = (client.DisabledAt != null
+                && string.Equals(client.DisabledReason, SqlOSMachineClientAdminService.EmergencyDisabledReason, StringComparison.Ordinal)).ToString()
+        }, account.ConfigurationOwner, ReadEditable(dashboardItem),
+            client.IsActive && client.DisabledAt == null && (account.ExpiresAt == null || account.ExpiresAt > DateTime.UtcNow),
+            true);
     }
 
     public async Task<ParityProjection> ProjectMfaAsync()

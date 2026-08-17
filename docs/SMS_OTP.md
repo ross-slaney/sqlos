@@ -99,7 +99,7 @@ Startup validation fails if `Enabled` is true without `TwilioAccountSid`, `Twili
 - Stored phone lookup uses a hash; display and challenge phone values are encrypted.
 - Unknown-account login starts return the same public message as known-account starts.
 - Signup rejects an already registered phone before sending another paid Verify challenge.
-- Local rate limits run before provider sends by phone, account, IP, and client.
+- Local rate limits reserve phone, account, IP, and client capacity atomically in the distributed rate-limit store before a challenge is created or Twilio is called. Concurrent requests and replicas cannot exceed the configured caps. A provider failure or timeout keeps the reserved slot so SMS cost stays bounded; capacity returns when the rate-limit window expires.
 - Phone enrollment or phone-number change requires an authenticated session.
 - Audit events are written for challenge start, provider send failure, verification success/failure, throttling, and phone enrollment.
 

@@ -352,7 +352,7 @@ options.AuthServer.ConfigurePhoneOtp(phone =>
 });
 ```
 
-Limits are counted from persisted challenge rows, so they work across application instances that share the SqlOS database. IP limits depend on `HttpContext.Connection.RemoteIpAddress`. Behind a reverse proxy, configure ASP.NET Core Forwarded Headers with trusted proxies or networks; otherwise every request can appear to come from the proxy or an untrusted client can spoof forwarding headers. See [Production Readiness](/docs/guides/production-readiness#reverse-proxies-and-forwarded-headers).
+SqlOS reserves every applicable phone, account, IP, and client bucket in one distributed rate-limit transaction before it creates a challenge or calls Twilio. Concurrent requests and replicas therefore cannot exceed the lowest overlapping cap. A provider failure or timeout keeps the reserved slot so SMS spend stays bounded; the window expiry restores capacity and prevents a permanent lockout. IP limits depend on `HttpContext.Connection.RemoteIpAddress`. Behind a reverse proxy, configure ASP.NET Core Forwarded Headers with trusted proxies or networks; otherwise every request can appear to come from the proxy or an untrusted client can spoof forwarding headers. See [Production Readiness](/docs/guides/production-readiness#reverse-proxies-and-forwarded-headers).
 
 Monitor these audit event types:
 

@@ -10,6 +10,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Models;
+using SqlOS.AuthServer.Services;
 using SqlOS.Tests.Infrastructure;
 
 namespace SqlOS.Tests;
@@ -317,6 +318,94 @@ public sealed class SqlOSControlPlaneParityTests
     }
 
     [TestMethod]
+    public async Task MachineClient_CodeServiceAndDashboard_ShareOwnershipAndEmergencyDisableSemantics()
+    {
+        const string codeSecret = "code-machine-secret-with-at-least-256-bits-123456789";
+        const string audience = "https://api.parity.test/jobs";
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options => options.SeedMachineClient("parity-worker", (client, machine) =>
+        {
+            client.Name = "Parity worker";
+            client.Audience = audience;
+            client.AllowedScopes = ["jobs.run"];
+            machine.SecretResolver = () => codeSecret;
+        }));
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+
+        await code.ReconcileStartupAsync();
+        var serviceCreated = await service.Machines.CreateAsync(new SqlOSCreateMachineClientRequest(
+            "parity-worker", "Parity worker", null, audience, ["jobs.run"], null, null, []));
+        var dashboardCreated = await dashboard.PostDashboardAsync(DashboardAdminContracts.MachineClients, new
+        {
+            clientId = "parity-worker",
+            displayName = "Parity worker",
+            description = (string?)null,
+            audience,
+            scopes = new[] { "jobs.run" },
+            organizationId = (string?)null,
+            expiresAt = (DateTime?)null,
+            grants = Array.Empty<object>()
+        });
+        var dashboardSecret = dashboardCreated.GetProperty("clientSecret").GetString();
+
+        var projections = new[]
+        {
+            await code.ProjectMachineClientAsync("parity-worker"),
+            await service.ProjectMachineClientAsync("parity-worker"),
+            await dashboard.ProjectMachineClientAsync("parity-worker")
+        };
+        projections[1].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[2].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[0].Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        projections[0].IsEditable.Should().BeFalse();
+        projections.Skip(1).Select(x => x.Owner).Should().OnlyContain(x => x == SqlOSConfigurationOwners.Dashboard);
+        projections.Should().OnlyContain(x => x.IsEnabled && x.SecretIsRedacted);
+
+        await FluentActions.Invoking(() => code.Machines.RevokeAsync("parity-worker"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*code-owned*");
+        using var dashboardRevokeCodeOwned = await code.Client.PostAsync(DashboardAdminContracts.MachineClientRevoke("parity-worker"), null);
+        dashboardRevokeCodeOwned.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await dashboardRevokeCodeOwned.Content.ReadAsStringAsync()).Should().Contain("code-owned");
+        (await code.ProjectMachineClientAsync("parity-worker")).IsEnabled.Should().BeTrue();
+
+        var issued = await IssueMachineClientTokenAsync(code, "parity-worker", codeSecret, audience);
+        await AssertMachineClientAuthenticatesAsync(code, "parity-worker", codeSecret, audience);
+        await AssertMachineClientAuthenticatesAsync(service, "parity-worker", serviceCreated.ClientSecret, audience);
+        await AssertMachineClientAuthenticatesAsync(dashboard, "parity-worker", dashboardSecret!, audience);
+
+        await code.Machines.EmergencyDisableAsync("parity-worker");
+        await service.Machines.EmergencyDisableAsync("parity-worker");
+        await dashboard.PostDashboardAsync(DashboardAdminContracts.MachineClientEmergencyDisable("parity-worker"), new { });
+        await code.ReconcileStartupAsync();
+
+        var disabled = new[]
+        {
+            await code.ProjectMachineClientAsync("parity-worker"),
+            await service.ProjectMachineClientAsync("parity-worker"),
+            await dashboard.ProjectMachineClientAsync("parity-worker")
+        };
+        disabled.Should().OnlyContain(x => !x.IsEnabled && x.Configuration["emergencyDisabled"] == bool.TrueString);
+        disabled[0].Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        await FluentActions.Invoking(() => AssertMachineClientAuthenticatesAsync(code, "parity-worker", codeSecret, audience))
+            .Should().ThrowAsync<SqlOSClientCredentialsException>();
+        (await code.Crypto.ValidateAccessTokenAsync(issued.AccessToken, audience)).Should().BeNull();
+
+        await code.Machines.EmergencyEnableAsync("parity-worker");
+        await service.Machines.EmergencyEnableAsync("parity-worker");
+        using var enabled = await dashboard.Client.PostAsync(DashboardAdminContracts.MachineClientEmergencyEnable("parity-worker"), null);
+        enabled.EnsureSuccessStatusCode();
+        await AssertMachineClientAuthenticatesAsync(code, "parity-worker", codeSecret, audience);
+
+        await service.Machines.RevokeAsync("parity-worker");
+        using var dashboardRevoke = await dashboard.Client.PostAsync(DashboardAdminContracts.MachineClientRevoke("parity-worker"), null);
+        dashboardRevoke.EnsureSuccessStatusCode();
+        (await service.ProjectMachineClientAsync("parity-worker")).IsEnabled.Should().BeFalse();
+        (await dashboard.ProjectMachineClientAsync("parity-worker")).IsEnabled.Should().BeFalse();
+        await FluentActions.Invoking(() => service.Machines.EmergencyEnableAsync("parity-worker"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*revoked*");
+    }
+
+    [TestMethod]
     public async Task InvalidDuplicateClient_HasEquivalentServiceAndDashboardErrorSemantics()
     {
         await using var code = await ControlPlaneParityHarness.CreateAsync();
@@ -381,6 +470,14 @@ public sealed class SqlOSControlPlaneParityTests
             Section(javascript, "bindForm(\"create-scim-connection-form\"", "document.querySelectorAll(\".js-rotate-scim-token\")"),
             "`${authApiBasePath}/organizations/${organizationId}/scim-connections`",
             "displayName", "enabled");
+        AssertDashboardContract(
+            Section(javascript, "async function renderAuthMachineClients()", "async function renderAuthOidc()"),
+            "`${authApiBasePath}/machine-clients`",
+            "`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineRevoke)}/revoke`",
+            "`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineEmergencyDisable)}/emergency-disable`",
+            "`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineEmergencyEnable)}/emergency-enable`",
+            "configurationOwner",
+            "emergencyDisabled");
     }
 
     private static void AssertDashboardContract(string section, params string[] expected)
@@ -455,6 +552,30 @@ public sealed class SqlOSControlPlaneParityTests
         allowDeviceAuthorization = false,
         clientType = "confidential"
     };
+
+    private static Task<SqlOSClientCredentialsTokenResult> IssueMachineClientTokenAsync(
+        ControlPlaneParityHarness harness,
+        string clientId,
+        string secret,
+        string audience)
+        => harness.ClientCredentials.ExchangeAsync(
+            clientId,
+            secret,
+            audience,
+            "jobs.run",
+            new DefaultHttpContext(),
+            default);
+
+    private static async Task AssertMachineClientAuthenticatesAsync(
+        ControlPlaneParityHarness harness,
+        string clientId,
+        string secret,
+        string audience)
+    {
+        var issued = await IssueMachineClientTokenAsync(harness, clientId, secret, audience);
+        issued.AccessToken.Should().NotBeNullOrWhiteSpace();
+        (await harness.Crypto.ValidateAccessTokenAsync(issued.AccessToken, audience)).Should().NotBeNull();
+    }
 
     private static async Task AssertClientAuthenticatesAsync(
         ControlPlaneParityHarness harness,

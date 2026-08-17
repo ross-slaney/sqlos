@@ -74,7 +74,7 @@ With callback dashboard auth, authenticate through the host's configured operato
 | Users | `/sqlos/admin/auth/users` | Create users with an optional initial password; send reset email for password users |
 | Memberships | `/sqlos/admin/auth/memberships` | Link users to organizations with roles and manage invitations |
 | Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs |
-| Machine clients | `/sqlos/admin/auth/machine-clients` | Create confidential `client_credentials` clients, copy the one-time secret, rotate, revoke, and optionally bind an FGA service account |
+| Machine clients | `/sqlos/admin/auth/machine-clients` | Create confidential `client_credentials` clients, copy the one-time secret, rotate or revoke dashboard-owned clients, emergency-disable code-owned clients, and optionally bind an FGA service account |
 | OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |
 | SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO and delegated org-admin setup links |
 | Auth Page | `/sqlos/admin/auth/settings` | Configure hosted/headless credential types, AuthPage branding, and email branding |
@@ -135,8 +135,8 @@ FGA pages are native routes in the unified dashboard document. They mount the sa
 | --- | --- | --- |
 | Resources | `/sqlos/admin/fga/resources` | Browse the resource hierarchy |
 | Grants | `/sqlos/admin/fga/grants` | Manage subject-role-resource assignments |
-| Roles | `/sqlos/admin/fga/roles` | Define roles and link permissions |
-| Permissions | `/sqlos/admin/fga/permissions` | View permission keys by resource type |
+| Roles | `/sqlos/admin/fga/roles` | Inspect seeded roles and their permissions |
+| Permissions | `/sqlos/admin/fga/permissions` | Inspect permission keys by resource type |
 | Subjects | `/sqlos/admin/fga/users` | Manage FGA users, agents, service accounts, and groups. A service account is an FGA subject, not an OAuth client. |
 | Access Tester | `/sqlos/admin/fga/access-tester` | Test access decisions with a detailed trace |
 

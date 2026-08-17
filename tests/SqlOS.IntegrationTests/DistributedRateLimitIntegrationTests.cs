@@ -173,6 +173,46 @@ public class DistributedRateLimitIntegrationTests
         await cleanup.DeleteAsync("dashboard-global", "all");
     }
 
+    [TestMethod]
+    public async Task ReserveMany_AdmitsExactCapAcrossApplicationInstances()
+    {
+        var connectionString = GetConnectionString();
+        var authOptions = Options.Create(new SqlOSAuthServerOptions());
+        var email = new SqlOSRateLimitBucketRequest(
+            "password-reset-email",
+            $"email-{Guid.NewGuid():N}",
+            3,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(5));
+        var ip = new SqlOSRateLimitBucketRequest(
+            "password-reset-ip",
+            $"ip-{Guid.NewGuid():N}",
+            10,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(5));
+        var now = DateTimeOffset.UtcNow;
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var attempts = Enumerable.Range(0, 12).Select(async _ =>
+        {
+            await using var context = CreateContext(connectionString);
+            var store = new SqlOSDistributedRateLimitStore(context, authOptions);
+            await start.Task;
+            return await store.ReserveManyAsync([email, ip], now);
+        }).ToArray();
+
+        start.SetResult();
+        var results = await Task.WhenAll(attempts);
+
+        results.Count(x => x.Admitted).Should().Be(3);
+        results.Count(x => !x.Admitted).Should().Be(9);
+
+        await using var cleanupContext = CreateContext(connectionString);
+        var cleanup = new SqlOSDistributedRateLimitStore(cleanupContext, authOptions);
+        await cleanup.DeleteAsync(email.Scope, email.Key);
+        await cleanup.DeleteAsync(ip.Scope, ip.Key);
+    }
+
     private static string GetConnectionString()
         => AspireFixture.SharedContext?.Database.GetConnectionString()
            ?? throw new InvalidOperationException("The integration database has no connection string.");

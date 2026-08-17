@@ -192,6 +192,9 @@ public sealed class SqlOSClientCredentialsService
         CancellationToken cancellationToken = default)
     {
         var account = await RequireServiceAccountAsync(clientId, cancellationToken);
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(
+            account.ConfigurationOwner,
+            $"Machine client '{clientId}'");
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleAsync(x => x.ClientId == clientId, cancellationToken);
         account.ExpiresAt = DateTime.UtcNow;

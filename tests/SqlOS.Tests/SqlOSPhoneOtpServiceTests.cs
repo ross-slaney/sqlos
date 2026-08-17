@@ -306,6 +306,53 @@ public sealed class SqlOSPhoneOtpServiceTests
         throttleAuditTypes.Should().Contain("phone_otp.rate_limit_rejected");
     }
 
+    [TestMethod]
+    public async Task PhoneOtp_ProviderFailureOrTimeout_ConsumesTheAdmissionSlot()
+    {
+        var rejectChannel = new FakeOtpDeliveryChannel { RejectStarts = true };
+        using var failed = await PhoneOtpHarness.CreateAsync(
+            options =>
+            {
+                options.PhoneOtp.ResendCooldown = TimeSpan.Zero;
+                options.PhoneOtp.MaxSendsPerPhone = 1;
+            },
+            rejectChannel);
+        await failed.CreateUserWithPhoneAsync("+12025550160");
+        var failAct = async () => await failed.Service.StartForClientAsync(
+            new SqlOSPhoneOtpStartRequest("+12025550160", "test-client", null),
+            CreateHttpContext("203.0.113.60"));
+        await failAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("We couldn't send a sign-in code right now.");
+        var failedRetry = async () => await failed.Service.StartForClientAsync(
+            new SqlOSPhoneOtpStartRequest("+12025550160", "test-client", null),
+            CreateHttpContext("203.0.113.60"));
+        await failedRetry.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in code requests. Try again later.");
+        rejectChannel.StartRequests.Should().HaveCount(1);
+        (await failed.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(1);
+
+        var timeoutChannel = new FakeOtpDeliveryChannel { TimeoutStarts = true };
+        using var timedOut = await PhoneOtpHarness.CreateAsync(
+            options =>
+            {
+                options.PhoneOtp.ResendCooldown = TimeSpan.Zero;
+                options.PhoneOtp.MaxSendsPerPhone = 1;
+            },
+            timeoutChannel);
+        await timedOut.CreateUserWithPhoneAsync("+12025550161");
+        var timeoutAct = async () => await timedOut.Service.StartForClientAsync(
+            new SqlOSPhoneOtpStartRequest("+12025550161", "test-client", null),
+            CreateHttpContext("203.0.113.61"));
+        await timeoutAct.Should().ThrowAsync<TimeoutException>();
+        var timeoutRetry = async () => await timedOut.Service.StartForClientAsync(
+            new SqlOSPhoneOtpStartRequest("+12025550161", "test-client", null),
+            CreateHttpContext("203.0.113.61"));
+        await timeoutRetry.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Too many sign-in code requests. Try again later.");
+        timeoutChannel.StartRequests.Should().HaveCount(1);
+        (await timedOut.Context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(1);
+    }
+
     private static DefaultHttpContext CreateHttpContext(string? ipAddress = null)
     {
         var context = new DefaultHttpContext();
@@ -403,6 +450,7 @@ public sealed class SqlOSPhoneOtpServiceTests
         public List<(string PhoneNumber, string Code, SqlOSOtpDeliveryContext Context)> CheckRequests { get; } = [];
         public string ApprovedCode { get; set; } = "123456";
         public bool RejectStarts { get; set; }
+        public bool TimeoutStarts { get; set; }
 
         public Task<SqlOSOtpDeliveryStartResult> StartAsync(
             string e164PhoneNumber,
@@ -410,6 +458,11 @@ public sealed class SqlOSPhoneOtpServiceTests
             CancellationToken cancellationToken = default)
         {
             StartRequests.Add((e164PhoneNumber, context));
+            if (TimeoutStarts)
+            {
+                throw new TimeoutException("Twilio Verify timed out.");
+            }
+
             return Task.FromResult(RejectStarts
                 ? new SqlOSOtpDeliveryStartResult(false, "test_verify", null, "failed", "provider_unavailable")
                 : new SqlOSOtpDeliveryStartResult(true, "test_verify", $"ve-{StartRequests.Count}", "pending"));

@@ -342,7 +342,7 @@
     }
 
     function renderSeedNotice() {
-        return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, roles, and permissions defined in startup code are reapplied on boot. Custom roles and permissions created later are preserved.</div>`;
+        return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, roles, and permissions are defined in startup code with <code>options.Fga.Seed</code>. This dashboard inspects that model and manages grants.</div>`;
     }
 
     // --- Resource Tree (cursor-paginated roots, lazy children) ---
@@ -1067,7 +1067,6 @@
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('roles-search', 'Search roles...')}</div>
-                <button class="btn-primary btn-sm" id="create-role-btn">Create Role</button>
             </div>
             <table><thead><tr>
                 <th>Name</th><th>Key</th><th>Permissions</th><th>Virtual</th>
@@ -1079,7 +1078,6 @@
             <div id="roles-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
-        $('#create-role-btn')?.addEventListener('click', openCreateRoleModal);
         root.querySelectorAll('.role-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/roles/' + encodeURIComponent(row.dataset.id)));
         });
@@ -1118,22 +1116,15 @@
                     <dt>Description</dt><dd>${esc(role.description) || '-'}</dd>
                     <dt>Virtual</dt><dd>${role.isVirtual ? 'Yes' : 'No'}</dd>
                 </dl>
-                <div style="margin-top:1rem">
-                    <button class="btn-danger btn-sm" id="delete-role-btn">Delete Role</button>
-                </div>
             </div>
             <div class="card detail-sidebar">
-                <h3 style="display:flex;align-items:center;gap:1rem">
-                    Permissions
-                    <button class="btn-primary btn-sm" id="add-perm-btn">Add Permission</button>
-                </h3>
+                <h3>Permissions</h3>
                 <div id="role-perms-list" style="margin-top:0.75rem">
                     ${perms.length === 0
                         ? '<p style="color:#888;font-size:0.9rem">No permissions assigned.</p>'
                         : perms.map(p => `<div class="role-perm-item" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
                             <span class="badge badge-blue">${esc(p.key)}</span>
                             <span style="flex:1;font-size:0.85rem;color:#666">${esc(p.name)}</span>
-                            <button class="btn-danger btn-sm remove-perm-btn" data-perm-id="${esc(p.id)}">Remove</button>
                         </div>`).join('')
                     }
                 </div>
@@ -1143,129 +1134,6 @@
         content.innerHTML = html;
 
         $('#back-to-roles').addEventListener('click', () => navigate('#/roles'));
-        $('#delete-role-btn').addEventListener('click', async () => {
-            if (!confirm('Delete this role? This cannot be undone.')) return;
-            try {
-                const resp = await apiDelete(`roles/${encodeURIComponent(roleId)}`);
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Failed to delete role');
-                }
-                loadStats();
-                navigate('#/roles');
-            } catch (e) {
-                alert('Error: ' + (e.message || 'Unknown error'));
-            }
-        });
-        $('#add-perm-btn').addEventListener('click', () => openAddPermissionToRoleModal(roleId, perms));
-        root.querySelectorAll('.remove-perm-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const permId = btn.dataset.permId;
-                if (!confirm('Remove this permission from the role?')) return;
-                try {
-                    const resp = await apiDelete(`roles/${encodeURIComponent(roleId)}/permissions/${encodeURIComponent(permId)}`);
-                    if (!resp.ok) throw new Error('Failed to remove permission');
-                    loadRoleDetail(roleId);
-                } catch (e) {
-                    alert('Error: ' + (e.message || 'Unknown error'));
-                }
-            });
-        });
-    }
-
-    function openCreateRoleModal() {
-        let html = `<h3>Create Role</h3>
-            <div class="modal-field">
-                <label>Key</label>
-                <input type="text" id="role-key" placeholder="e.g. admin, viewer">
-            </div>
-            <div class="modal-field">
-                <label>Name</label>
-                <input type="text" id="role-name" placeholder="Display name">
-            </div>
-            <div class="modal-field">
-                <label>Description</label>
-                <input type="text" id="role-desc" placeholder="Optional description">
-            </div>
-            <div class="modal-actions">
-                <button class="btn-secondary" id="role-cancel">Cancel</button>
-                <button class="btn-primary" id="role-submit">Create</button>
-            </div>`;
-
-        $('#modal').innerHTML = html;
-        $('#modal-overlay').hidden = false;
-
-        $('#role-cancel').addEventListener('click', closeModal);
-        $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
-
-        $('#role-submit').addEventListener('click', async () => {
-            const key = $('#role-key').value.trim();
-            const name = $('#role-name').value.trim();
-            const desc = $('#role-desc').value.trim();
-            if (!key || !name) {
-                alert('Key and Name are required.');
-                return;
-            }
-            try {
-                const resp = await apiPost('roles', { key, name, description: desc || null });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Failed to create role');
-                }
-                closeModal();
-                loadStats();
-                navigate('#/roles');
-            } catch (e) {
-                alert('Error: ' + (e.message || 'Unknown error'));
-            }
-        });
-    }
-
-    function openAddPermissionToRoleModal(roleId, existingPerms) {
-        const existingIds = new Set(existingPerms.map(p => p.id));
-
-        let html = `<h3>Add Permission to Role</h3>
-            <div class="modal-field">
-                <label>Permission</label>
-                ${renderRemotePicker('add-perm-picker', 'Search permissions...')}
-            </div>
-            <div class="modal-actions">
-                <button class="btn-secondary" id="add-perm-cancel">Cancel</button>
-                <button class="btn-primary" id="add-perm-submit">Add</button>
-            </div>`;
-
-        $('#modal').innerHTML = html;
-        $('#modal-overlay').hidden = false;
-
-        const picker = bindRemotePicker('add-perm-picker', {
-            endpoint: 'permissions',
-            pageSize: 25,
-            getValue: p => p.id,
-            getLabel: p => `${p.key} - ${p.name}`,
-            filter: p => !existingIds.has(p.id)
-        });
-
-        $('#add-perm-cancel').addEventListener('click', closeModal);
-        $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
-
-        $('#add-perm-submit').addEventListener('click', async () => {
-            const permId = picker.getValue();
-            if (!permId) {
-                alert('Please select a permission.');
-                return;
-            }
-            try {
-                const resp = await apiPost(`roles/${encodeURIComponent(roleId)}/permissions`, { permissionId: permId });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Failed to add permission');
-                }
-                closeModal();
-                loadRoleDetail(roleId);
-            } catch (e) {
-                alert('Error: ' + (e.message || 'Unknown error'));
-            }
-        });
     }
 
     async function loadPermissions(opts = {}) {
@@ -1278,7 +1146,6 @@
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('perm-search', 'Search permissions...')}</div>
-                <button class="btn-primary btn-sm" id="create-perm-btn">Create Permission</button>
             </div>
             <table><thead><tr><th>Key</th><th>Name</th><th>Resource Type</th></tr></thead>
             <tbody>${rows.map(p => `<tr>
@@ -1288,7 +1155,6 @@
             <div id="perms-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
-        $('#create-perm-btn')?.addEventListener('click', () => openCreatePermissionModal());
         bindPagination('#perms-pagination', pager, result, () => loadPermissions({ pager, search }));
         const searchInput = $('#perm-search');
         if (searchInput) {
@@ -1299,66 +1165,6 @@
                 debounce = setTimeout(() => loadPermissions({ search: e.target.value }), 300);
             });
         }
-    }
-
-    function openCreatePermissionModal() {
-        let html = `<h3>Create Permission</h3>
-            <div class="modal-field">
-                <label>Key</label>
-                <input type="text" id="perm-key" placeholder="e.g. read, write, delete">
-            </div>
-            <div class="modal-field">
-                <label>Name</label>
-                <input type="text" id="perm-name" placeholder="Display name">
-            </div>
-            <div class="modal-field">
-                <label>Description</label>
-                <input type="text" id="perm-desc" placeholder="Optional description">
-            </div>
-            <div class="modal-field">
-                <label>Resource Type (optional)</label>
-                ${renderRemotePicker('perm-resource-type-picker', 'Search resource types...')}
-            </div>
-            <div class="modal-actions">
-                <button class="btn-secondary" id="perm-cancel">Cancel</button>
-                <button class="btn-primary" id="perm-submit">Create</button>
-            </div>`;
-
-        $('#modal').innerHTML = html;
-        $('#modal-overlay').hidden = false;
-
-        const typePicker = bindRemotePicker('perm-resource-type-picker', {
-            endpoint: 'resource-types',
-            pageSize: 25,
-            getValue: rt => rt.id,
-            getLabel: rt => `${rt.name} (${rt.key})`
-        });
-
-        $('#perm-cancel').addEventListener('click', closeModal);
-        $('#modal-overlay').onclick = (e) => { if (e.target === $('#modal-overlay')) closeModal(); };
-
-        $('#perm-submit').addEventListener('click', async () => {
-            const key = $('#perm-key').value.trim();
-            const name = $('#perm-name').value.trim();
-            const desc = $('#perm-desc').value.trim();
-            const resourceTypeId = typePicker.getValue();
-            if (!key || !name) {
-                alert('Key and Name are required.');
-                return;
-            }
-            try {
-                const resp = await apiPost('permissions', { key, name, description: desc || null, resourceTypeId });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Failed to create permission');
-                }
-                closeModal();
-                loadStats();
-                handleRoute();
-            } catch (e) {
-                alert('Error: ' + (e.message || 'Unknown error'));
-            }
-        });
     }
 
     // --- Access Tester ---
