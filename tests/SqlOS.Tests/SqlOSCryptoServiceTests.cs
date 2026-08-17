@@ -304,6 +304,43 @@ public sealed class SqlOSCryptoServiceTests
         validated!.UserId.Should().Be(user.Id);
         jwksJson.Should().Contain(key.Kid);
         key.KeyReference.Should().NotContain("BEGIN PRIVATE KEY");
+        parsed.Claims.Should().NotContain(claim => claim.Type == "scope");
+        parsed.Payload.ContainsKey("scope").Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task CreateAccessToken_DoesNotIncludeScopeClaim()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+
+        var rawToken = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+        var parsed = new JwtSecurityTokenHandler().ReadJwtToken(rawToken);
+
+        parsed.Claims.Should().NotContain(claim => claim.Type == "scope");
+        parsed.Payload.ContainsKey("scope").Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task CreateServiceAccessToken_IncludesScopeAndTokenKindClaims()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (_, _, client) = await SeedTokenContextAsync(context);
+
+        var rawToken = await service.CreateServiceAccessTokenAsync(
+            "service_account::ledger-worker",
+            client,
+            "https://api.example.test/ledger",
+            ["ledger.read", "jobs.run"],
+            "org_test");
+        var parsed = new JwtSecurityTokenHandler().ReadJwtToken(rawToken);
+
+        parsed.Claims.Should().ContainSingle(claim => claim.Type == "scope" && claim.Value == "ledger.read jobs.run");
+        parsed.Claims.Should().ContainSingle(claim => claim.Type == "token_kind" && claim.Value == "service");
+        parsed.Payload["scope"].Should().Be("ledger.read jobs.run");
+        parsed.Payload["token_kind"].Should().Be("service");
     }
 
     [TestMethod]

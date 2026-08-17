@@ -42,8 +42,25 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
         storedClient.MetadataJson.Should().Contain("ChatGPT Client");
         storedClient.SoftwareId.Should().Be("chatgpt");
         storedClient.SoftwareVersion.Should().Be("2026.03");
+        storedClient.AllowedScopesJson.Should().Be("[]");
         var audit = await context.Set<SqlOSAuditEvent>().SingleAsync();
         audit.EventType.Should().Be("client.dcr.registered");
+    }
+
+    [TestMethod]
+    public async Task RegisterAsync_PersistsEmptyAllowedScopesJson()
+    {
+        using var context = CreateContext();
+        var service = CreateService(context, CreateOptions(), new SqlOSDynamicClientRegistrationRateLimiter());
+
+        await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Empty Allowlist Client",
+            RedirectUris = ["https://client.example.test/callback"]
+        }, CreateHttpContext("10.0.0.8"));
+
+        var storedClient = await context.Set<SqlOSClientApplication>().SingleAsync();
+        storedClient.AllowedScopesJson.Should().Be("[]");
     }
 
     [TestMethod]

@@ -30,6 +30,7 @@ public sealed class SqlOSClientCredentialsServiceTests
         jwt.Audiences.Should().ContainSingle("https://api.example.test/ledger");
         jwt.Claims.Should().ContainSingle(x => x.Type == "client_id" && x.Value == "ledger-worker");
         jwt.Claims.Should().ContainSingle(x => x.Type == "token_kind" && x.Value == "service");
+        jwt.Claims.Should().ContainSingle(x => x.Type == "scope" && x.Value == "ledger.read");
         jwt.Claims.Should().NotContain(x => x.Type == "sid");
         jwt.Claims.Should().NotContain(x => x.Type == JwtRegisteredClaimNames.Email);
         result.Scopes.Should().Equal("ledger.read");
