@@ -312,6 +312,9 @@ public sealed record SqlOSDynamicClientRegistrationRequest
 
     [JsonPropertyName("software_version")]
     public string? SoftwareVersion { get; init; }
+
+    [JsonPropertyName("scope")]
+    public string? Scope { get; init; }
 }
 
 public sealed record SqlOSDynamicClientRegistrationResponse
@@ -352,6 +355,14 @@ public sealed record SqlOSDynamicClientRegistrationResponse
     [JsonPropertyName("software_version")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SoftwareVersion { get; init; }
+
+    /// <summary>
+    /// Space-delimited registered allow-list. Always present so a client can predict
+    /// later grants from the registration response alone. An omitted request
+    /// <c>scope</c> registers an empty allow-list and is echoed as an empty string.
+    /// </summary>
+    [JsonPropertyName("scope")]
+    public required string Scope { get; init; }
 }
 
 public sealed record SqlOSCreateSsoConnectionRequest(

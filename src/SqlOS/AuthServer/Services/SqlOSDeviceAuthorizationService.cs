@@ -51,17 +51,7 @@ public sealed class SqlOSDeviceAuthorizationService
         EnsureClientAllowsDeviceAuthorization(client);
         await EnforceStartRateLimitsAsync(client.Id, GetIp(httpContext), cancellationToken);
 
-        var requestedScopes = NormalizeRequestedScopes(request.Scope);
-        var allowedScopes = SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson);
-        var unsupportedScopes = requestedScopes
-            .Where(scope => !allowedScopes.Contains(scope, StringComparer.Ordinal))
-            .ToList();
-        if (unsupportedScopes.Count > 0)
-        {
-            throw new SqlOSDeviceAuthorizationException(
-                "invalid_scope",
-                $"Unsupported scope(s): {string.Join(", ", unsupportedScopes)}.");
-        }
+        var requestedScopes = SqlOSScopePolicy.Grant(request.Scope, client.AllowedScopesJson);
 
         var requestedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
             ? request.Resource.Trim()
@@ -677,13 +667,6 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.Status,
             requiresOrganizationSelection,
             organizations);
-
-    private static List<string> NormalizeRequestedScopes(string? scope)
-        => string.IsNullOrWhiteSpace(scope)
-            ? []
-            : scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
 
     public static string NormalizeUserCode(string? code)
         => string.IsNullOrWhiteSpace(code)

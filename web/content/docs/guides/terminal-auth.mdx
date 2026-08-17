@@ -252,9 +252,9 @@ Audience validation proves that SqlOS minted the token for the Forge API. It doe
 
 The client is missing, confidential, or not enabled for device authorization. Use `SeedCliClient` or the **CLI / Device OAuth** dashboard preset.
 
-### `invalid_scope`
+### Granted scopes are smaller than requested
 
-The requested scopes are not a subset of the registered allow-list. Compare the CLI bootstrap configuration with the client record. Include `offline_access` in both places when refresh tokens are required.
+Device authorization intersects the request with the client allow-list and continues with the overlap, including an empty grant. Compare the CLI bootstrap configuration with the client record if a needed scope is missing from the token. Include `offline_access` in both places when refresh tokens are required.
 
 ### `invalid_target`
 

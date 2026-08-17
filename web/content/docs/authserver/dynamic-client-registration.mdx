@@ -55,11 +55,35 @@ SqlOS intentionally keeps `DCR` narrow:
 - PKCE required
 - `token_endpoint_auth_method=none`
 - HTTPS redirects or loopback localhost redirects
+- optional `scope`, persisted as the client's allow-list and echoed on the registration response
 
 SqlOS does **not** use `DCR` for:
 
 - confidential client secrets
 - RFC 7592 self-service management APIs
+
+## Scope
+
+Honor the RFC 7591 `scope` member. SqlOS persists the registered set as `AllowedScopesJson` and always echoes `scope` on the `201` response so the client can predict later grants from that response alone.
+
+- When `scope` is omitted, SqlOS registers an empty allow-list and echoes `scope` as an empty string. Later authorize, device, and `client_credentials` grants then intersect to nothing.
+- When `ClientRegistration.Dcr.AllowedScopes` is non-empty, it is the operator ceiling. Requested scopes outside that set are `invalid_client_metadata`.
+- When the ceiling list is empty, requested scopes are registered as-is, still bounded by `MaxScopeCount` (default 32) and `MaxScopeLength` (default 128). Exceeding those limits is a registration error.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.EnableChatGptCompatibility(dcr =>
+    {
+        dcr.AllowedScopes.Add("openid");
+        dcr.AllowedScopes.Add("profile");
+        dcr.AllowedScopes.Add("offline_access");
+        dcr.MaxScopeCount = 16;
+    });
+});
+```
+
+`openid` is stored and granted as an ordinary allow-listed string. It does not mint an `id_token`; issue #118 will decide always-allowed vs warning behavior.
 
 ## Operational controls
 
@@ -68,6 +92,7 @@ SqlOS does **not** use `DCR` for:
 SqlOS includes:
 
 - rate limiting
+- an optional `AllowedScopes` ceiling plus count/length bounds
 - audit logs for accepted and rejected attempts
 - disable and re-enable actions
 - revoke active sessions

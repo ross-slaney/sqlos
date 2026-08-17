@@ -171,11 +171,7 @@ public sealed class SqlOSAuthorizationServerService
             }
         }
 
-        var requestedScopes = NormalizeRequestedScopes(input.Scope);
-        var allowedScopes = ParseJsonArray(client.AllowedScopesJson);
-        requestedScopes = requestedScopes
-            .Where(scope => allowedScopes.Contains(scope, StringComparer.Ordinal))
-            .ToList();
+        var requestedScopes = SqlOSScopePolicy.Grant(input.Scope, client.AllowedScopesJson);
 
         var normalizedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(input.Resource)
             ? input.Resource.Trim()
@@ -1361,19 +1357,6 @@ public sealed class SqlOSAuthorizationServerService
 
     private static List<string> ParseJsonArray(string json)
         => JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
-
-    private static List<string> NormalizeRequestedScopes(string? scope)
-    {
-        if (string.IsNullOrWhiteSpace(scope))
-        {
-            return new List<string>();
-        }
-
-        return scope
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-    }
 
     private sealed record PendingAuthorizationPayload(string AuthorizationRequestId, string AuthenticationMethod);
 
