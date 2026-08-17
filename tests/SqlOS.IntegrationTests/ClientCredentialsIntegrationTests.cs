@@ -193,21 +193,27 @@ public sealed class ClientCredentialsIntegrationTests
             });
             await context.SaveChangesAsync();
 
-            var service = new SqlOSClientCredentialsService(
-                context,
-                crypto,
-                new SqlOSAdminService(context, options, crypto),
-                options);
+            var admin = new SqlOSAdminService(context, options, crypto);
+            var service = new SqlOSClientCredentialsService(context, crypto, admin, options);
+            var machines = new SqlOSMachineClientAdminService(context, admin, crypto, options);
             await FluentActions.Invoking(() => service.RotateSecretAsync(
                     clientId,
                     "replacement-code-owned-secret-with-at-least-256-bits-123456789",
                     "admin-1"))
                 .Should().ThrowAsync<InvalidOperationException>()
                 .WithMessage("*owned by the 'code' configuration source*");
+            await FluentActions.Invoking(() => service.RevokeAsync(clientId, "admin-1"))
+                .Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*owned by the 'code' configuration source*");
+            await FluentActions.Invoking(() => machines.RevokeAsync(clientId))
+                .Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*code-owned*");
 
             context.ChangeTracker.Clear();
             var retained = await context.Set<SqlOSClientCredential>().SingleAsync();
+            var retainedAccount = await context.Set<SqlOSFgaServiceAccount>().SingleAsync();
             retained.RevokedAt.Should().BeNull();
+            retainedAccount.ExpiresAt.Should().BeNull();
             crypto.VerifyPassword(retained.SecretHash, secret).Should().BeTrue();
         }
         finally
@@ -246,6 +252,14 @@ public sealed class ClientCredentialsIntegrationTests
         var rotated = await machines.RotateAsync(clientId);
         await FluentActions.Invoking(() => protocol.ExchangeAsync(clientId, created.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default))
             .Should().ThrowAsync<SqlOSClientCredentialsException>();
+        (await protocol.ExchangeAsync(clientId, rotated.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default)).AccessToken.Should().NotBeNullOrWhiteSpace();
+
+        var emergency = await machines.EmergencyDisableAsync(clientId);
+        emergency.EmergencyDisabled.Should().BeTrue();
+        await FluentActions.Invoking(() => protocol.ExchangeAsync(clientId, rotated.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default))
+            .Should().ThrowAsync<SqlOSClientCredentialsException>();
+        (await crypto.ValidateAccessTokenAsync(issued.AccessToken, audience)).Should().BeNull();
+        await machines.EmergencyEnableAsync(clientId);
         (await protocol.ExchangeAsync(clientId, rotated.ClientSecret, audience, "jobs.run", new DefaultHttpContext(), default)).AccessToken.Should().NotBeNullOrWhiteSpace();
 
         await machines.RevokeAsync(clientId);

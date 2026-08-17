@@ -55,7 +55,10 @@ public class SqlOSAuthEndpointRouteInventoryTests
             "GET /sqlos/admin/auth/api/otp/readiness",
             "POST /sqlos/admin/auth/api/otp/test-delivery",
             "GET /sqlos/admin/auth/api/machine-clients",
-            "POST /sqlos/admin/auth/api/machine-clients"
+            "POST /sqlos/admin/auth/api/machine-clients",
+            "POST /sqlos/admin/auth/api/machine-clients/{clientId}/revoke",
+            "POST /sqlos/admin/auth/api/machine-clients/{clientId}/emergency-disable",
+            "POST /sqlos/admin/auth/api/machine-clients/{clientId}/emergency-enable"
         };
 
         actual.Should().Contain(expected);
