@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -11,7 +10,6 @@ using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
-using SqlOS.Fga.Services;
 using SqlOS.Pagination;
 using SqlOS.Security;
 
@@ -204,7 +202,7 @@ public class SqlOSFgaDashboardMiddleware
             }
             if (context.Request.Method == "POST")
             {
-                await HandleAddRolePermission(context, dbContext, roleId);
+                await RejectSchemaWriteAsync(context);
                 return;
             }
         }
@@ -215,9 +213,7 @@ public class SqlOSFgaDashboardMiddleware
             var parts = endpoint[6..].Split('/'); // after "roles/"
             if (parts.Length == 3 && parts[1].Equals("permissions", StringComparison.OrdinalIgnoreCase))
             {
-                var roleId = parts[0];
-                var permId = parts[2];
-                await HandleRemoveRolePermission(context, dbContext, roleId, permId);
+                await RejectSchemaWriteAsync(context);
                 return;
             }
         }
@@ -225,7 +221,7 @@ public class SqlOSFgaDashboardMiddleware
         // Handle roles (POST) and roles/{id} (GET, PUT, DELETE)
         if (endpoint.Equals("roles", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
         {
-            await HandleCreateRole(context, dbContext);
+            await RejectSchemaWriteAsync(context);
             return;
         }
         if (endpoint.StartsWith("roles/", StringComparison.OrdinalIgnoreCase) && !endpoint[6..].Contains('/'))
@@ -236,14 +232,9 @@ public class SqlOSFgaDashboardMiddleware
                 await HandleGetRoleDetail(context, dbContext, roleId);
                 return;
             }
-            if (context.Request.Method == "PUT")
+            if (context.Request.Method == "PUT" || context.Request.Method == "DELETE")
             {
-                await HandleUpdateRole(context, dbContext, roleId);
-                return;
-            }
-            if (context.Request.Method == "DELETE")
-            {
-                await HandleDeleteRole(context, dbContext, roleId);
+                await RejectSchemaWriteAsync(context);
                 return;
             }
         }
@@ -251,7 +242,7 @@ public class SqlOSFgaDashboardMiddleware
         // Handle POST permissions
         if (endpoint.Equals("permissions", StringComparison.OrdinalIgnoreCase) && context.Request.Method == "POST")
         {
-            await HandleCreatePermission(context, dbContext);
+            await RejectSchemaWriteAsync(context);
             return;
         }
 
@@ -1113,6 +1104,16 @@ public class SqlOSFgaDashboardMiddleware
         _ => "application/octet-stream"
     };
 
+    internal const string SchemaWriteError =
+        "FGA roles and permissions are defined in startup configuration. Use options.Fga.Seed to change the authorization model.";
+
+    private static async Task RejectSchemaWriteAsync(HttpContext context)
+    {
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        context.Response.Headers.Allow = "GET";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = SchemaWriteError }, JsonOptions));
+    }
+
     private static async Task HandleCreateGrant(HttpContext context, ISqlOSFgaDbContext dbContext)
     {
         var body = await JsonSerializer.DeserializeAsync<CreateGrantRequest>(context.Request.Body, JsonOptions);
@@ -1200,68 +1201,6 @@ public class SqlOSFgaDashboardMiddleware
         context.Response.StatusCode = 204;
     }
 
-    private static async Task HandleAddRolePermission(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId)
-    {
-        var body = await JsonSerializer.DeserializeAsync<AddRolePermissionRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrEmpty(body.PermissionId))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"permissionId is required\"}");
-            return;
-        }
-
-        var roleExists = await dbContext.Set<SqlOSFgaRole>().AnyAsync(r => r.Id == roleId);
-        if (!roleExists)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
-            return;
-        }
-
-        var permExists = await dbContext.Set<SqlOSFgaPermission>().AnyAsync(p => p.Id == body.PermissionId);
-        if (!permExists)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Permission not found\"}");
-            return;
-        }
-
-        var exists = await dbContext.Set<SqlOSFgaRolePermission>()
-            .AnyAsync(rp => rp.RoleId == roleId && rp.PermissionId == body.PermissionId);
-        if (exists)
-        {
-            context.Response.StatusCode = 409;
-            await context.Response.WriteAsync("{\"error\":\"Permission already in role\"}");
-            return;
-        }
-
-        dbContext.Set<SqlOSFgaRolePermission>().Add(new SqlOSFgaRolePermission
-        {
-            RoleId = roleId,
-            PermissionId = body.PermissionId
-        });
-        await dbContext.SaveChangesAsync();
-
-        context.Response.StatusCode = 204;
-    }
-
-    private static async Task HandleRemoveRolePermission(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId, string permId)
-    {
-        var rp = await dbContext.Set<SqlOSFgaRolePermission>()
-            .FirstOrDefaultAsync(x => x.RoleId == roleId && x.PermissionId == permId);
-        if (rp == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Role-permission link not found\"}");
-            return;
-        }
-
-        dbContext.Set<SqlOSFgaRolePermission>().Remove(rp);
-        await dbContext.SaveChangesAsync();
-
-        context.Response.StatusCode = 204;
-    }
-
     private static async Task HandleGetRoleDetail(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId)
     {
         var role = await dbContext.Set<SqlOSFgaRole>()
@@ -1282,152 +1221,6 @@ public class SqlOSFgaDashboardMiddleware
         }
 
         await context.Response.WriteAsync(JsonSerializer.Serialize(role, JsonOptions));
-    }
-
-    private static async Task HandleCreateRole(HttpContext context, ISqlOSFgaDbContext dbContext)
-    {
-        var body = await JsonSerializer.DeserializeAsync<CreateRoleRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrWhiteSpace(body.Key) || string.IsNullOrWhiteSpace(body.Name))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
-            return;
-        }
-
-        var roleId = $"role_{Guid.NewGuid():N}"[..30];
-        var role = new SqlOSFgaRole
-        {
-            Id = roleId,
-            Key = body.Key,
-            Name = body.Name,
-            Description = body.Description,
-            IsVirtual = body.IsVirtual ?? false
-        };
-        dbContext.Set<SqlOSFgaRole>().Add(role);
-        await dbContext.SaveChangesAsync();
-
-        var created = await dbContext.Set<SqlOSFgaRole>()
-            .Where(r => r.Id == roleId)
-            .Select(r => new { r.Id, r.Key, r.Name, r.Description, r.IsVirtual, PermissionCount = 0 })
-            .FirstOrDefaultAsync();
-
-        context.Response.StatusCode = 201;
-        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
-    }
-
-    private static async Task HandleUpdateRole(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId)
-    {
-        var role = await dbContext.Set<SqlOSFgaRole>().FirstOrDefaultAsync(r => r.Id == roleId);
-        if (role == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
-            return;
-        }
-
-        var body = await JsonSerializer.DeserializeAsync<UpdateRoleRequest>(context.Request.Body, JsonOptions);
-        if (body == null)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Invalid body\"}");
-            return;
-        }
-
-        if (body.Name != null) role.Name = body.Name;
-        if (body.Description != null) role.Description = body.Description;
-        if (body.IsVirtual.HasValue) role.IsVirtual = body.IsVirtual.Value;
-
-        await dbContext.SaveChangesAsync();
-
-        var updated = await dbContext.Set<SqlOSFgaRole>()
-            .Where(r => r.Id == roleId)
-            .Select(r => new { r.Id, r.Key, r.Name, r.Description, r.IsVirtual, PermissionCount = r.RolePermissions.Count })
-            .FirstOrDefaultAsync();
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(updated, JsonOptions));
-    }
-
-    private static async Task HandleDeleteRole(HttpContext context, ISqlOSFgaDbContext dbContext, string roleId)
-    {
-        var role = await dbContext.Set<SqlOSFgaRole>()
-            .Include(r => r.Grants)
-            .Include(r => r.RolePermissions)
-            .FirstOrDefaultAsync(r => r.Id == roleId);
-        if (role == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
-            return;
-        }
-
-        if (role.Grants.Count > 0)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"Cannot delete role with existing grants. Revoke grants first.\"}");
-            return;
-        }
-
-        dbContext.Set<SqlOSFgaRolePermission>().RemoveRange(role.RolePermissions);
-        dbContext.Set<SqlOSFgaRole>().Remove(role);
-        await dbContext.SaveChangesAsync();
-
-        context.Response.StatusCode = 204;
-    }
-
-    private static async Task HandleCreatePermission(HttpContext context, ISqlOSFgaDbContext dbContext)
-    {
-        var body = await JsonSerializer.DeserializeAsync<CreatePermissionRequest>(context.Request.Body, JsonOptions);
-        if (body == null || string.IsNullOrWhiteSpace(body.Key) || string.IsNullOrWhiteSpace(body.Name))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("{\"error\":\"key and name are required\"}");
-            return;
-        }
-
-        var permissionKey = body.Key.Trim();
-        if (permissionKey.Length > SqlOSFgaPermission.MaxKeyLength)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync($"{{\"error\":\"Permission keys cannot exceed {SqlOSFgaPermission.MaxKeyLength} characters.\"}}");
-            return;
-        }
-
-        if (await dbContext.Set<SqlOSFgaPermission>().AnyAsync(p => p.Key == permissionKey))
-        {
-            context.Response.StatusCode = StatusCodes.Status409Conflict;
-            await context.Response.WriteAsync("{\"error\":\"A permission with this key already exists. Permission keys must be unique.\"}");
-            return;
-        }
-
-        var permId = $"perm_{Guid.NewGuid():N}"[..30];
-        var perm = new SqlOSFgaPermission
-        {
-            Id = permId,
-            Key = permissionKey,
-            Name = body.Name.Trim(),
-            Description = body.Description,
-            ResourceTypeId = body.ResourceTypeId
-        };
-        dbContext.Set<SqlOSFgaPermission>().Add(perm);
-        try
-        {
-            await dbContext.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex) when (ex.GetBaseException() is SqlException { Number: 2601 or 2627 })
-        {
-            context.Response.StatusCode = StatusCodes.Status409Conflict;
-            await context.Response.WriteAsync("{\"error\":\"A permission with this key already exists. Permission keys must be unique.\"}");
-            return;
-        }
-
-        var created = await dbContext.Set<SqlOSFgaPermission>()
-            .Include(p => p.ResourceType)
-            .Where(p => p.Id == permId)
-            .Select(p => new { p.Id, p.Key, p.Name, p.Description, ResourceType = p.ResourceType != null ? p.ResourceType.Name : (string?)null })
-            .FirstOrDefaultAsync();
-
-        context.Response.StatusCode = 201;
-        await context.Response.WriteAsync(JsonSerializer.Serialize(created, JsonOptions));
     }
 
     private sealed class ResourceTreeRow
@@ -1564,8 +1357,4 @@ public class SqlOSFgaDashboardMiddleware
 
     private record TraceRequest(string SubjectId, string ResourceId, string PermissionKey);
     private record CreateGrantRequest(string SubjectId, string RoleId, string ResourceId, DateTime? EffectiveFrom, DateTime? EffectiveTo);
-    private record AddRolePermissionRequest(string PermissionId);
-    private record CreateRoleRequest(string Key, string Name, string? Description, bool? IsVirtual);
-    private record UpdateRoleRequest(string? Name, string? Description, bool? IsVirtual);
-    private record CreatePermissionRequest(string Key, string Name, string? Description, string? ResourceTypeId);
 }

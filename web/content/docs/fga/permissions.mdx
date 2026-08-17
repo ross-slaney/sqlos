@@ -7,7 +7,7 @@ section: fga
 
 A permission is a capability key scoped to a resource type. Permissions define what actions can be performed on which kinds of resources.
 
-Permission keys are globally unique and limited to 450 characters. Startup seeding rejects duplicates and oversized keys immediately, while the database constraint protects dashboard and concurrent writes.
+Permission keys are globally unique and limited to 450 characters. Startup seeding rejects duplicates and oversized keys immediately, while the database constraint protects concurrent writes. Define permissions in `options.Fga.Seed`; the dashboard does not create them.
 
 ## Define permissions in startup
 

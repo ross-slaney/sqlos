@@ -320,6 +320,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         using var fgaReader = new StreamReader(fgaStream, Encoding.UTF8);
         var fgaSource = await fgaReader.ReadToEndAsync();
 
+        dashboardSource.Should().Contain("Inspect the role model used by authorization checks.");
+        dashboardSource.Should().Contain("Inspect permission keys and their resource associations.");
+        dashboardSource.Should().NotContain("Maintain the role model used by authorization checks.");
         dashboardSource.Should().Contain("window.SqlOSFgaDashboard.mount");
         dashboardSource.Should().Contain("initialRoute: route.componentRoute");
         dashboardSource.Should().Contain("Showing ${count}");
@@ -338,6 +341,17 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
         fgaSource.Should().Contain("loadGrants()");
         fgaSource.Should().Contain("loadRoles()");
         fgaSource.Should().Contain("loadPermissions()");
+        fgaSource.Should().Contain("options.Fga.Seed");
+        fgaSource.Should().Contain("manages grants");
+        fgaSource.Should().NotContain("create-role-btn");
+        fgaSource.Should().NotContain("create-perm-btn");
+        fgaSource.Should().NotContain("add-perm-btn");
+        fgaSource.Should().NotContain("delete-role-btn");
+        fgaSource.Should().NotContain("remove-perm-btn");
+        fgaSource.Should().NotContain("Create Role");
+        fgaSource.Should().NotContain("Create Permission");
+        fgaSource.Should().Contain("add-grant-btn");
+        fgaSource.Should().Contain("grant-revoke-btn");
         fgaSource.Should().Contain("loadUsers()");
         fgaSource.Should().Contain("loadAgents()");
         fgaSource.Should().Contain("loadServiceAccounts()");
