@@ -1,0 +1,53 @@
+---
+title: "SqlOS 3.26: Code-Owned Stays Code-Owned"
+description: "Configuration ownership now covers branding and OAuth client lifecycle, FGA roles stay a startup contract, and public auth-page colors fail closed."
+date: "2026-08-17"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "FGA", "Dashboard", "Security", "SqlOS"]
+---
+
+SqlOS 3.26 is about configuration that keeps a visible owner. A seed that declares an OAuth client, a machine client, or AuthPage branding must not be overwritten by a dashboard click, and a dashboard-owned record must not be silently reclaimed on the next restart. Operators can still see code-owned records, test them, and take an audited emergency action when an incident requires it.
+
+The release also closes two public-surface gaps: auth-page colors are validated before they reach HTML, and password-reset and phone-OTP delivery admission is reserved atomically across replicas.
+
+## Branding now has two owners
+
+AuthPage chrome and transactional email branding share one settings row, but they are independently owned. Seeding `SeedAuthPage` claims the hosted login surface. Seeding `SeedAuthEmails` claims the email templates. The first dashboard write on an unclaimed surface claims that surface for the operator.
+
+A later code seed does not overwrite dashboard-owned values, and a dashboard save does not mutate a code-owned surface. Removing a seed orphans the record; it does not revert colors, copy, or logos. Logo bytes stay write-only after upload.
+
+See [Brand the hosted login page](/docs/guides/auth-branding) and [Email branding](/docs/authserver/email-branding).
+
+## Client lifecycle follows the same rule
+
+Ordinary disable and enable stay available for dashboard-owned and dynamically registered OAuth clients. Code-owned clients reject those actions so a restart cannot fight an operator toggle. Incident response uses a separate emergency disable that is audited, idempotent, and survives seed reconciliation. Re-enable is only from that emergency reason. A seed that creates the client as inactive still cannot be flipped on from the dashboard; change the seed.
+
+Machine clients already followed this pattern for revoke. 3.26 keeps ordinary revoke blocked on code-owned identities and keeps emergency disable as the incident path.
+
+See [Clients](/docs/authserver/clients) and [Machine clients](/docs/authserver/machine-clients).
+
+## FGA roles and permissions stay a startup contract
+
+The dashboard can still create, preview, and revoke grants. Role and permission definitions are application schema: dashboard create, update, and delete now return 405. Change those records in source and let startup reconcile them. That keeps the three control planes on one authorization model instead of letting the UI invent a second catalog.
+
+## Public colors and delivery admission fail closed
+
+Auth-page colors must be real CSS—hex, `rgb()` / `rgba()`, named colors, or `transparent`—before SqlOS embeds them in hosted HTML. Structural style and script tags now carry CSP nonces, so a rejected color cannot become an injection gadget.
+
+Password-reset and phone-OTP delivery now reserve admission atomically before the message is sent, the same way password login and MFA guesses already reserve capacity across replicas.
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 3.26.0
+```
+
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test hosted login, a dashboard branding save, and the client disable path you actually use.
+
+Startup applies the Auth schema that stores AuthPage and email ownership. Treat that as a forward-only canary upgrade. See [Production Readiness](/docs/guides/production-readiness#6-roll-schema-changes-forward-through-one-instance).
+
+If you disable code-owned OAuth or machine clients from automation, switch those callers to the emergency routes. If you edited FGA roles or permissions from the dashboard, move those definitions into startup seeds. Custom auth-page colors that are not valid CSS will now be rejected instead of rendered.
+
+This release is backed by control-plane parity coverage for branding ownership, OAuth and machine-client emergency disable, color grammar, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
