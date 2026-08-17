@@ -26,6 +26,7 @@ public sealed class SqlOSClientCredentialsServiceTests
             new DefaultHttpContext(), default);
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(result.AccessToken);
+        jwt.Header.Typ.Should().Be("at+jwt");
         jwt.Subject.Should().Be("service_account::ledger-worker");
         jwt.Audiences.Should().ContainSingle("https://api.example.test/ledger");
         jwt.Claims.Should().ContainSingle(x => x.Type == "client_id" && x.Value == "ledger-worker");

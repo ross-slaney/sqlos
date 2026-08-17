@@ -913,6 +913,7 @@ public sealed class AuthServerSigningKeyResilienceIntegrationTests
             new SigningCredentials(
                 new RsaSecurityKey(attackerRsa) { KeyId = kid },
                 SecurityAlgorithms.RsaSha256));
+        token.Header[JwtHeaderParameterNames.Typ] = "at+jwt";
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
