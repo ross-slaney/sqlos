@@ -49,7 +49,7 @@ public sealed class SqlOSOtpAdminServiceTests
         (await context.Set<SqlOSSession>().CountAsync()).Should().Be(0);
         (await context.Set<SqlOSEmailOtpChallenge>().CountAsync()).Should().Be(0);
         (await context.Set<SqlOSPhoneOtpChallenge>().CountAsync()).Should().Be(0);
-        var audits = await context.Set<SqlOSAuditEvent>().ToListAsync();
+        var audits = await context.Set<SqlOSAuditEvent>().Where(x => x.EventType == "otp.admin_test.succeeded").ToListAsync();
         audits.Should().HaveCount(2);
         JsonSerializer.Serialize(audits).Should().NotContain("operator@example.test");
         JsonSerializer.Serialize(audits).Should().NotContain("+14155550123");

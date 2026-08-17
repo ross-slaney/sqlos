@@ -820,6 +820,16 @@ public sealed class SqlOSAuthPageSettings
     public string EmailPrimaryColor { get; set; } = "#2563eb";
     public string EmailAccentColor { get; set; } = "#0f172a";
     public string EmailBackgroundColor { get; set; } = "#f8fafc";
+    public string AuthPageConfigurationOwner { get; set; } = "system";
+    public string? AuthPageConfigurationSourceKey { get; set; }
+    public string? AuthPageConfigurationFingerprint { get; set; }
+    public DateTime? AuthPageLastReconciledAt { get; set; }
+    public DateTime? AuthPageConfigurationOrphanedAt { get; set; }
+    public string EmailConfigurationOwner { get; set; } = "system";
+    public string? EmailConfigurationSourceKey { get; set; }
+    public string? EmailConfigurationFingerprint { get; set; }
+    public DateTime? EmailLastReconciledAt { get; set; }
+    public DateTime? EmailConfigurationOrphanedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
 

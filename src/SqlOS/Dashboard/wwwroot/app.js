@@ -4432,7 +4432,7 @@
                     <section class="panel">
                         <h2>Auth Page Settings</h2>
                         <p>These values control the hosted login and signup experience. The page is served directly from the SqlOS auth server, so changes show up without app-specific frontend work.</p>
-                        ${settings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                        ${settings.ownership && !settings.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Change hosted AuthPage branding in the <span class="inline-code">SeedAuthPage</span> startup configuration. Dashboard edits are rejected while this seed remains.</div>` : ""}
                         <form id="auth-page-settings-form">
                             <input name="pageTitle" placeholder="Page title" value="${esc(settings.pageTitle || "")}" required>
                             <input name="pageSubtitle" placeholder="Subtitle" value="${esc(settings.pageSubtitle || "")}" required>
@@ -4485,7 +4485,7 @@
                     <section class="panel">
                         <h2>Email Branding</h2>
                         <p>These settings style built-in AuthServer emails. Use Communications templates for copy and layout, or SDK message builders for advanced custom behavior.</p>
-                        ${emailSettings.managedByStartupSeed ? `<div class="callout"><strong>Startup managed:</strong> These email values are seeded from application startup and will be reapplied on restart.</div>` : ""}
+                        ${emailSettings.ownership && !emailSettings.ownership.isEditable ? `<div class="callout"><strong>Code owned:</strong> Change email branding in the <span class="inline-code">SeedAuthEmails</span> startup configuration. Dashboard edits are rejected while this seed remains.</div>` : ""}
                         <form id="auth-email-settings-form">
                             <input name="applicationName" placeholder="Application name" value="${esc(emailSettings.applicationName || "")}" required>
                             <div class="panel-grid">
@@ -4502,6 +4502,13 @@
                 </div>
             </div>
         `;
+
+        if (settings.ownership && !settings.ownership.isEditable) {
+            content.querySelectorAll("#auth-page-settings-form input, #auth-page-settings-form select, #auth-page-settings-form textarea, #auth-page-settings-form button").forEach(field => { field.disabled = true; });
+        }
+        if (emailSettings.ownership && !emailSettings.ownership.isEditable) {
+            content.querySelectorAll("#auth-email-settings-form input, #auth-email-settings-form select, #auth-email-settings-form textarea, #auth-email-settings-form button").forEach(field => { field.disabled = true; });
+        }
 
         bindForm("auth-page-settings-form", async form => {
             await fetchJson(`${authApiBasePath}/settings/auth-page`, {

@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 41;
+    private const int CurrentSchemaVersion = 42;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -83,6 +83,23 @@ public sealed class SchemaInitializerIntegrationTests
             {
                 Assert.IsTrue(await ColumnExistsAsync(table, column), $"Column {table}.{column} should exist.");
             }
+        }
+
+        foreach (var column in new[]
+                 {
+                     "AuthPageConfigurationOwner",
+                     "AuthPageConfigurationSourceKey",
+                     "AuthPageConfigurationFingerprint",
+                     "AuthPageLastReconciledAt",
+                     "AuthPageConfigurationOrphanedAt",
+                     "EmailConfigurationOwner",
+                     "EmailConfigurationSourceKey",
+                     "EmailConfigurationFingerprint",
+                     "EmailLastReconciledAt",
+                     "EmailConfigurationOrphanedAt"
+                 })
+        {
+            Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthPageSettings", column), $"Column SqlOSAuthPageSettings.{column} should exist.");
         }
 
         Assert.IsTrue(

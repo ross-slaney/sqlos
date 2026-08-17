@@ -627,7 +627,8 @@ public sealed record SqlOSAuthPageSettingsDto(
     bool LocalPasswordRuntimeEnabled,
     bool EmailOtpRuntimeConfigured,
     bool MagicLinkRuntimeConfigured = false,
-    bool PhoneOtpRuntimeConfigured = false);
+    bool PhoneOtpRuntimeConfigured = false,
+    SqlOSConfigurationOwnershipDto? Ownership = null);
 
 public sealed record SqlOSAuthEmailBrandingSettingsDto(
     string ApplicationName,
@@ -636,7 +637,8 @@ public sealed record SqlOSAuthEmailBrandingSettingsDto(
     string AccentColor,
     string BackgroundColor,
     DateTime UpdatedAt,
-    bool ManagedByStartupSeed);
+    bool ManagedByStartupSeed,
+    SqlOSConfigurationOwnershipDto? Ownership = null);
 
 public sealed record SqlOSUpdateAuthPageSettingsRequest(
     string? LogoBase64,

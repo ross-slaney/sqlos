@@ -23,6 +23,7 @@ internal static class DashboardAdminContracts
     public const string OidcConnections = "/sqlos/admin/auth/api/oidc-connections";
     public const string MfaSettings = "/sqlos/admin/auth/api/settings/mfa";
     public const string AuthPageSettings = "/sqlos/admin/auth/api/settings/auth-page";
+    public const string AuthEmailSettings = "/sqlos/admin/auth/api/settings/email";
     public const string MachineClients = "/sqlos/admin/auth/api/machine-clients";
     public static string OrganizationScimConnections(string organizationId)
         => $"/sqlos/admin/auth/api/organizations/{organizationId}/scim-connections";
@@ -107,6 +108,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     {
         await Settings.EnsureDefaultMfaSettingsAsync();
         await Settings.UpsertSeededMfaSettingsAsync();
+        await Settings.EnsureDefaultAuthPageSettingsAsync();
+        await Settings.UpsertSeededAuthPageSettingsAsync();
+        await Settings.UpsertSeededAuthEmailSettingsAsync();
         await Admin.UpsertSeededClientsAsync();
         await Machines.UpsertSeededMachineClientsAsync();
         await Admin.UpsertSeededOidcConnectionsAsync();
@@ -226,21 +230,32 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     {
         var item = await Context.Set<SqlOSAuthPageSettings>().AsNoTracking().SingleAsync(x => x.Id == "default");
         var dashboardItem = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.AuthPageSettings);
-        return new ParityProjection(
-            "auth_page_settings",
-            new Dictionary<string, string?>
-            {
-                ["primary"] = item.PrimaryColor,
-                ["accent"] = item.AccentColor,
-                ["background"] = item.BackgroundColor,
-                ["layout"] = item.Layout
-            },
-            dashboardItem.GetProperty("managedByStartupSeed").GetBoolean()
-                ? SqlOSConfigurationOwners.Code
-                : SqlOSConfigurationOwners.Dashboard,
-            !dashboardItem.GetProperty("managedByStartupSeed").GetBoolean(),
-            true,
-            true);
+        return new ParityProjection("auth_page_settings", new Dictionary<string, string?>
+        {
+            ["primaryColor"] = item.PrimaryColor,
+            ["accentColor"] = item.AccentColor,
+            ["backgroundColor"] = item.BackgroundColor,
+            ["layout"] = item.Layout,
+            ["pageTitle"] = item.PageTitle,
+            ["pageSubtitle"] = item.PageSubtitle,
+            ["enablePasswordSignup"] = item.EnablePasswordSignup.ToString(),
+            ["credentialTypes"] = CanonicalJsonArray(item.EnabledCredentialTypesJson),
+            ["hasLogo"] = (!string.IsNullOrWhiteSpace(item.LogoBase64)).ToString()
+        }, item.AuthPageConfigurationOwner, ReadEditable(dashboardItem), true, true);
+    }
+
+    public async Task<ParityProjection> ProjectAuthEmailAsync()
+    {
+        var item = await Context.Set<SqlOSAuthPageSettings>().AsNoTracking().SingleAsync(x => x.Id == "default");
+        var dashboardItem = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.AuthEmailSettings);
+        return new ParityProjection("auth_email_settings", new Dictionary<string, string?>
+        {
+            ["applicationName"] = item.EmailApplicationName,
+            ["primaryColor"] = item.EmailPrimaryColor,
+            ["accentColor"] = item.EmailAccentColor,
+            ["backgroundColor"] = item.EmailBackgroundColor,
+            ["hasLogo"] = (!string.IsNullOrWhiteSpace(item.EmailLogoBase64)).ToString()
+        }, item.EmailConfigurationOwner, ReadEditable(dashboardItem), true, true);
     }
 
     public async ValueTask DisposeAsync()

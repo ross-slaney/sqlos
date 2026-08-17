@@ -12,6 +12,9 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSSettingsService
 {
+    internal const string AuthPageSourceKey = "auth-page:default";
+    internal const string AuthEmailSourceKey = "auth-email:default";
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly ISqlOSAuthEmailSender _emailSender;
@@ -67,6 +70,8 @@ public sealed class SqlOSSettingsService
             EmailPrimaryColor = "#2563eb",
             EmailAccentColor = "#0f172a",
             EmailBackgroundColor = "#f8fafc",
+            AuthPageConfigurationOwner = SqlOSConfigurationOwners.System,
+            EmailConfigurationOwner = SqlOSConfigurationOwners.System,
             UpdatedAt = DateTime.UtcNow,
         });
         await _context.SaveChangesAsync(cancellationToken);
@@ -76,11 +81,19 @@ public sealed class SqlOSSettingsService
     {
         if (_options.AuthPageSeed == null)
         {
+            await OrphanAuthPageSurfaceAsync(cancellationToken);
             return;
         }
 
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        ClaimOrEnsureCode(
+            settings.AuthPageConfigurationOwner,
+            settings.AuthPageConfigurationSourceKey,
+            AuthPageSourceKey,
+            "AuthPage branding settings",
+            owner => settings.AuthPageConfigurationOwner = owner,
+            key => settings.AuthPageConfigurationSourceKey = key);
 
         if (!string.Equals(_options.AuthPageSeed.Layout, "split", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(_options.AuthPageSeed.Layout, "stacked", StringComparison.OrdinalIgnoreCase))
@@ -99,6 +112,8 @@ public sealed class SqlOSSettingsService
             enabledCredentialTypes = ["password"];
         }
 
+        var previousFingerprint = settings.AuthPageConfigurationFingerprint;
+        var wasOrphaned = settings.AuthPageConfigurationOrphanedAt != null;
         settings.LogoBase64 = string.IsNullOrWhiteSpace(_options.AuthPageSeed.LogoBase64) ? null : _options.AuthPageSeed.LogoBase64.Trim();
         settings.PrimaryColor = RequireColor(_options.AuthPageSeed.PrimaryColor, nameof(_options.AuthPageSeed.PrimaryColor));
         settings.AccentColor = RequireColor(_options.AuthPageSeed.AccentColor, nameof(_options.AuthPageSeed.AccentColor));
@@ -108,28 +123,59 @@ public sealed class SqlOSSettingsService
         settings.PageSubtitle = RequireText(_options.AuthPageSeed.PageSubtitle, nameof(_options.AuthPageSeed.PageSubtitle));
         settings.EnablePasswordSignup = _options.AuthPageSeed.EnablePasswordSignup;
         settings.EnabledCredentialTypesJson = JsonSerializer.Serialize(enabledCredentialTypes);
-
-        settings.UpdatedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        settings.UpdatedAt = now;
+        settings.AuthPageLastReconciledAt = now;
+        settings.AuthPageConfigurationOrphanedAt = null;
+        settings.AuthPageConfigurationFingerprint = FingerprintAuthPage(settings);
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordBrandingReconcileAsync(
+            "auth_page_settings",
+            AuthPageSourceKey,
+            previousFingerprint,
+            settings.AuthPageConfigurationFingerprint,
+            wasOrphaned,
+            cancellationToken);
     }
 
     public async Task UpsertSeededAuthEmailSettingsAsync(CancellationToken cancellationToken = default)
     {
         if (_options.AuthEmailSeed == null)
         {
+            await OrphanAuthEmailSurfaceAsync(cancellationToken);
             return;
         }
 
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        ClaimOrEnsureCode(
+            settings.EmailConfigurationOwner,
+            settings.EmailConfigurationSourceKey,
+            AuthEmailSourceKey,
+            "auth email branding settings",
+            owner => settings.EmailConfigurationOwner = owner,
+            key => settings.EmailConfigurationSourceKey = key);
 
+        var previousFingerprint = settings.EmailConfigurationFingerprint;
+        var wasOrphaned = settings.EmailConfigurationOrphanedAt != null;
         settings.EmailApplicationName = RequireText(_options.AuthEmailSeed.ApplicationName, nameof(_options.AuthEmailSeed.ApplicationName));
         settings.EmailLogoBase64 = string.IsNullOrWhiteSpace(_options.AuthEmailSeed.LogoBase64) ? null : _options.AuthEmailSeed.LogoBase64.Trim();
         settings.EmailPrimaryColor = RequireColor(_options.AuthEmailSeed.PrimaryColor, nameof(_options.AuthEmailSeed.PrimaryColor));
         settings.EmailAccentColor = RequireColor(_options.AuthEmailSeed.AccentColor, nameof(_options.AuthEmailSeed.AccentColor));
         settings.EmailBackgroundColor = RequireColor(_options.AuthEmailSeed.BackgroundColor, nameof(_options.AuthEmailSeed.BackgroundColor));
-        settings.UpdatedAt = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        settings.UpdatedAt = now;
+        settings.EmailLastReconciledAt = now;
+        settings.EmailConfigurationOrphanedAt = null;
+        settings.EmailConfigurationFingerprint = FingerprintAuthEmail(settings);
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordBrandingReconcileAsync(
+            "auth_email_settings",
+            AuthEmailSourceKey,
+            previousFingerprint,
+            settings.EmailConfigurationFingerprint,
+            wasOrphaned,
+            cancellationToken);
     }
 
     public async Task EnsureDefaultMfaSettingsAsync(CancellationToken cancellationToken = default)
@@ -483,12 +529,18 @@ public sealed class SqlOSSettingsService
             settings.EnablePasswordSignup,
             DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
             settings.UpdatedAt,
-            _options.AuthPageSeed != null,
+            string.Equals(settings.AuthPageConfigurationOwner, SqlOSConfigurationOwners.Code, StringComparison.OrdinalIgnoreCase),
             _options.Headless.BuildUiUrl != null,
             _options.EnableLocalPasswordAuth,
             IsAuthEmailRuntimeConfigured,
             IsMagicLinkRuntimeConfigured,
-            _options.PhoneOtp.IsConfigured);
+            _options.PhoneOtp.IsConfigured,
+            BrandingOwnership(
+                settings.AuthPageConfigurationOwner,
+                settings.AuthPageConfigurationSourceKey,
+                settings.AuthPageLastReconciledAt,
+                settings.AuthPageConfigurationFingerprint,
+                settings.AuthPageConfigurationOrphanedAt));
     }
 
     private bool IsAuthEmailRuntimeConfigured
@@ -507,6 +559,14 @@ public sealed class SqlOSSettingsService
 
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        ClaimDashboardOrReject(
+            settings.AuthPageConfigurationOwner,
+            "AuthPage branding settings",
+            owner =>
+            {
+                settings.AuthPageConfigurationOwner = owner;
+                settings.AuthPageConfigurationSourceKey = null;
+            });
         settings.LogoBase64 = string.IsNullOrWhiteSpace(request.LogoBase64) ? null : request.LogoBase64;
         settings.PrimaryColor = RequireColor(request.PrimaryColor, nameof(request.PrimaryColor));
         settings.AccentColor = RequireColor(request.AccentColor, nameof(request.AccentColor));
@@ -540,13 +600,27 @@ public sealed class SqlOSSettingsService
             resolved.AccentColor,
             resolved.BackgroundColor,
             settings.UpdatedAt,
-            _options.AuthEmailSeed != null);
+            string.Equals(settings.EmailConfigurationOwner, SqlOSConfigurationOwners.Code, StringComparison.OrdinalIgnoreCase),
+            BrandingOwnership(
+                settings.EmailConfigurationOwner,
+                settings.EmailConfigurationSourceKey,
+                settings.EmailLastReconciledAt,
+                settings.EmailConfigurationFingerprint,
+                settings.EmailConfigurationOrphanedAt));
     }
 
     public async Task<SqlOSAuthEmailBrandingSettingsDto> UpdateAuthEmailBrandingSettingsAsync(SqlOSUpdateAuthEmailBrandingSettingsRequest request, CancellationToken cancellationToken = default)
     {
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
+        ClaimDashboardOrReject(
+            settings.EmailConfigurationOwner,
+            "auth email branding settings",
+            owner =>
+            {
+                settings.EmailConfigurationOwner = owner;
+                settings.EmailConfigurationSourceKey = null;
+            });
 
         settings.EmailApplicationName = RequireText(request.ApplicationName, nameof(request.ApplicationName));
         settings.EmailLogoBase64 = string.IsNullOrWhiteSpace(request.LogoBase64) ? null : request.LogoBase64.Trim();
@@ -671,6 +745,153 @@ public sealed class SqlOSSettingsService
             DeserializeStringArray(policy?.RequiredRolesJson ?? global.RequiredRolesJson, ["owner", "admin"]),
             DeserializeStringArray(policy?.AvailableFactorsJson ?? global.AvailableFactorsJson, [SqlOSMfaFactorTypes.Totp, SqlOSMfaFactorTypes.RecoveryCode]),
             policy?.UpdatedAt ?? global.UpdatedAt);
+
+    private static SqlOSConfigurationOwnershipDto BrandingOwnership(
+        string owner,
+        string? sourceKey,
+        DateTime? lastReconciledAt,
+        string? fingerprint,
+        DateTime? orphanedAt)
+    {
+        var ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+            owner, sourceKey, lastReconciledAt, fingerprint, orphanedAt, canEmergencyDisable: false);
+        return string.Equals(owner, SqlOSConfigurationOwners.System, StringComparison.OrdinalIgnoreCase)
+            ? ownership with { IsEditable = true }
+            : ownership;
+    }
+
+    private static void ClaimOrEnsureCode(
+        string owner,
+        string? sourceKey,
+        string expectedSourceKey,
+        string resource,
+        Action<string> setOwner,
+        Action<string> setSourceKey)
+    {
+        if (string.Equals(owner, SqlOSConfigurationOwners.System, StringComparison.OrdinalIgnoreCase))
+        {
+            setOwner(SqlOSConfigurationOwners.Code);
+            setSourceKey(expectedSourceKey);
+            return;
+        }
+
+        SqlOSConfigurationOwnershipPolicy.EnsureCodeOwnership(owner, sourceKey, expectedSourceKey, resource);
+    }
+
+    private static void ClaimDashboardOrReject(string owner, string resource, Action<string> setOwner)
+    {
+        if (string.Equals(owner, SqlOSConfigurationOwners.System, StringComparison.OrdinalIgnoreCase))
+        {
+            setOwner(SqlOSConfigurationOwners.Dashboard);
+            return;
+        }
+
+        SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(owner, resource);
+    }
+
+    private async Task OrphanAuthPageSurfaceAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstOrDefaultAsync(
+            x => x.Id == "default" && x.AuthPageConfigurationOwner == SqlOSConfigurationOwners.Code, cancellationToken);
+        if (settings == null || settings.AuthPageConfigurationOrphanedAt != null)
+        {
+            return;
+        }
+
+        settings.AuthPageConfigurationOrphanedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordBrandingReconcileAsync(
+            "auth_page_settings",
+            settings.AuthPageConfigurationSourceKey ?? AuthPageSourceKey,
+            settings.AuthPageConfigurationFingerprint,
+            settings.AuthPageConfigurationFingerprint,
+            wasOrphaned: false,
+            cancellationToken,
+            outcome: "orphaned");
+    }
+
+    private async Task OrphanAuthEmailSurfaceAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _context.Set<SqlOSAuthPageSettings>().FirstOrDefaultAsync(
+            x => x.Id == "default" && x.EmailConfigurationOwner == SqlOSConfigurationOwners.Code, cancellationToken);
+        if (settings == null || settings.EmailConfigurationOrphanedAt != null)
+        {
+            return;
+        }
+
+        settings.EmailConfigurationOrphanedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordBrandingReconcileAsync(
+            "auth_email_settings",
+            settings.EmailConfigurationSourceKey ?? AuthEmailSourceKey,
+            settings.EmailConfigurationFingerprint,
+            settings.EmailConfigurationFingerprint,
+            wasOrphaned: false,
+            cancellationToken,
+            outcome: "orphaned");
+    }
+
+    private static string FingerprintAuthPage(SqlOSAuthPageSettings settings)
+        => SqlOSConfigurationOwnershipPolicy.Fingerprint(new
+        {
+            settings.PrimaryColor,
+            settings.AccentColor,
+            settings.BackgroundColor,
+            settings.Layout,
+            settings.PageTitle,
+            settings.PageSubtitle,
+            settings.EnablePasswordSignup,
+            CredentialTypes = DeserializeCredentialTypes(settings.EnabledCredentialTypesJson),
+            HasLogo = !string.IsNullOrWhiteSpace(settings.LogoBase64)
+        });
+
+    private static string FingerprintAuthEmail(SqlOSAuthPageSettings settings)
+        => SqlOSConfigurationOwnershipPolicy.Fingerprint(new
+        {
+            settings.EmailApplicationName,
+            settings.EmailPrimaryColor,
+            settings.EmailAccentColor,
+            settings.EmailBackgroundColor,
+            HasLogo = !string.IsNullOrWhiteSpace(settings.EmailLogoBase64)
+        });
+
+    private async Task RecordBrandingReconcileAsync(
+        string resourceType,
+        string sourceKey,
+        string? previousFingerprint,
+        string? fingerprint,
+        bool wasOrphaned,
+        CancellationToken cancellationToken,
+        string? outcome = null)
+    {
+        if (_cryptoService == null)
+        {
+            return;
+        }
+
+        var resolvedOutcome = outcome
+            ?? (previousFingerprint == null ? "created" : wasOrphaned || previousFingerprint != fingerprint ? "updated" : null);
+        if (resolvedOutcome == null)
+        {
+            return;
+        }
+
+        var audit = new SqlOSAuditLogService(_context, _cryptoService);
+        await audit.RecordAsync(new SqlOSAuditLogRecordRequest(
+            Action: "configuration.reconciled",
+            Source: "authserver",
+            Actor: new SqlOSAuditActor("system", "startup"),
+            Targets: [new SqlOSAuditTarget(resourceType, "default")],
+            Metadata: new Dictionary<string, object?>
+            {
+                ["resourceType"] = resourceType,
+                ["resourceId"] = "default",
+                ["owner"] = SqlOSConfigurationOwners.Code,
+                ["sourceKey"] = sourceKey,
+                ["outcome"] = resolvedOutcome,
+                ["fingerprint"] = fingerprint
+            }), cancellationToken);
+    }
 
     private static string RequireColor(string value, string name)
         => SqlOSCssColor.Require(value, name);
