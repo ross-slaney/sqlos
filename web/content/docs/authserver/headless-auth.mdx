@@ -56,7 +56,7 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-The browser hits `/sqlos/auth/authorize` on SqlOS first. SqlOS then redirects to the URL from `BuildUiUrl`. Your app shows the login UI. Preserve `ui_context` values on the page model when present, but do not invent separate auth lifecycles for invitations or CLI device flow; SqlOS binds those to the normal request id.
+The browser hits `/sqlos/auth/authorize` on SqlOS first. Include `scope` on that first request (typically `openid profile email`) and put the same values on the client's `AllowedScopes`. Headless still issues a normal user access token without a `scope` claim; the query parameter is the grant, not API authorization. Preserve `ui_context` values on the page model when present, but do not invent separate auth lifecycles for invitations or CLI device flow; SqlOS binds those to the normal request id.
 
 ## How SqlOS picks the UI
 

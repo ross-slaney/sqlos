@@ -50,6 +50,8 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
+`SeedOwnedWebApp` and `SeedBrowserClient` register redirect URIs only. They leave `AllowedScopes` empty. Set the allowlist explicitly with `SeedClient` (or the dashboard / Admin API) when the app will send a `scope` query on `/authorize`. Headless and hosted first-party apps should do both: put `openid profile email` on the client, and send the same `scope` on the authorize request. User access tokens do not carry a `scope` claim today; the pair still matters so a later OpenID Provider mode can mint an ID token instead of silently omitting it.
+
 ### Admin API
 
 ```bash
@@ -72,11 +74,11 @@ The Admin API requires an operator session; see [Authenticate operator API calls
 | `name` | Yes | Display name |
 | `audience` | No | Token audience claim |
 | `redirectUris` | Yes | Allowed callback URIs for OAuth flows |
-| `allowedScopes` | No | Scopes this client may be granted. An empty list grants nothing. |
+| `allowedScopes` | No | Scopes this client may be granted. Set this to the same values the app sends on `/authorize`. An empty list grants nothing. |
 
-`AllowedScopes` is an allowlist on every grant. Authorization-code, device, and client-credentials requests grant a scope only when it appears in that list. Authorization-code still succeeds with the granted subset, which may be empty. Device and client-credentials reject any requested scope that is not listed with `invalid_scope`.
+`AllowedScopes` is an allowlist on every grant. Authorization-code, device, and client-credentials requests grant only the intersection of the requested scopes and this list. Unknown requested scopes are dropped, not rejected. The grant may be empty.
 
-An empty allowlist is deny-all, not a wildcard. Seeded and dashboard-created clients that omit the list therefore receive no requested scopes until an operator sets one. Dynamic Client Registration currently stores `[]` and does not copy scopes from the registration request; existing DCR rows with that empty list will no longer be granted any requested scopes until registration or an operator populates an allowlist.
+An empty allowlist is deny-all, not a wildcard. Seeded and dashboard-created clients that omit the list therefore receive no requested scopes until an operator sets one. Dynamic Client Registration stores `[]` unless the registration request includes `scope`.
 
 ## Confidential server-side clients
 
