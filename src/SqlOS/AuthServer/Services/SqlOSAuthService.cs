@@ -43,6 +43,7 @@ public sealed class SqlOSAuthService
     private readonly SqlOSInvitationService? _invitationService;
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
     private readonly SqlOSMfaAttemptAdmissionService _mfaAttemptAdmissionService;
+    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly ISqlOSAuthEmailSender? _authEmailSender;
 
@@ -61,7 +62,8 @@ public sealed class SqlOSAuthService
         SqlOSMfaPolicyService? mfaPolicyService = null,
         SqlOSTotpMfaService? totpMfaService = null,
         SqlOSMagicLinkService? magicLinkService = null,
-        SqlOSMfaAttemptAdmissionService? mfaAttemptAdmissionService = null)
+        SqlOSMfaAttemptAdmissionService? mfaAttemptAdmissionService = null,
+        SqlOSDeliveryAdmissionService? deliveryAdmissionService = null)
     {
         _context = context;
         _options = options.Value;
@@ -77,6 +79,7 @@ public sealed class SqlOSAuthService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
         _mfaAttemptAdmissionService = mfaAttemptAdmissionService
             ?? new SqlOSMfaAttemptAdmissionService(context, cryptoService, options);
+        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
         _transactionalEmailService = transactionalEmailService;
         _authEmailSender = authEmailSender;
         _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
@@ -1167,16 +1170,18 @@ public sealed class SqlOSAuthService
             .Include(x => x.User)
             .FirstOrDefaultAsync(x => x.NormalizedEmail == normalizedEmail, cancellationToken);
 
-        var rateLimit = await CheckPasswordResetRateLimitAsync(
+        var rateLimit = await _deliveryAdmission.ReservePasswordResetAsync(
             normalizedEmail,
             email?.UserId,
             ipAddress,
             clientKey,
+            _passwordResetOptions,
             now,
             cancellationToken);
 
-        if (rateLimit.IsLimited)
+        if (!rateLimit.Admitted)
         {
+            var retryAfter = rateLimit.RetryAfter?.UtcDateTime;
             await RecordPasswordResetAuditAsync(
                 "password_reset.rate_limit_rejected",
                 "system",
@@ -1186,12 +1191,12 @@ public sealed class SqlOSAuthService
                 ipAddress,
                 new
                 {
-                    scope = rateLimit.Scope,
-                    retryAfter = rateLimit.RetryAfter,
+                    scope = rateLimit.RejectedScope,
+                    retryAfter,
                     clientKey
                 },
                 cancellationToken);
-            return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now, rateLimit.RetryAfter);
+            return BuildPasswordResetRequestResult(trimmedEmail, maskedEmail, now, retryAfter);
         }
 
         await RecordPasswordResetRequestMarkerAsync(
@@ -2517,76 +2522,6 @@ public sealed class SqlOSAuthService
             cancellationToken: cancellationToken);
     }
 
-    private async Task<PasswordResetRateLimitResult> CheckPasswordResetRateLimitAsync(
-        string normalizedEmail,
-        string? userId,
-        string? ipAddress,
-        string? clientKey,
-        DateTime now,
-        CancellationToken cancellationToken)
-    {
-        var windowStart = now.Subtract(_passwordResetOptions.RateLimitWindow);
-        var recentRequests = await _context.Set<SqlOSTemporaryToken>()
-            .AsNoTracking()
-            .Where(x => x.Purpose == PasswordResetRequestPurpose && x.CreatedAt >= windowStart)
-            .OrderBy(x => x.CreatedAt)
-            .ToListAsync(cancellationToken);
-
-        var requests = recentRequests
-            .Select(token => new
-            {
-                token.CreatedAt,
-                token.UserId,
-                token.ClientApplicationId,
-                Payload = _cryptoService.DeserializePayload<PasswordResetRequestPayload>(token)
-            })
-            .Where(x => x.Payload != null)
-            .ToList();
-
-        var emailMatches = requests
-            .Where(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
-            .ToList();
-        if (emailMatches.Count >= _passwordResetOptions.MaxRequestsPerEmailPerWindow)
-        {
-            return PasswordResetRateLimitResult.Limited("email", emailMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
-        }
-
-        if (!string.IsNullOrWhiteSpace(userId))
-        {
-            var userMatches = requests
-                .Where(x => string.Equals(x.UserId, userId, StringComparison.Ordinal))
-                .ToList();
-            if (userMatches.Count >= _passwordResetOptions.MaxRequestsPerEmailPerWindow)
-            {
-                return PasswordResetRateLimitResult.Limited("user", userMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(ipAddress))
-        {
-            var ipMatches = requests
-                .Where(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal))
-                .ToList();
-            if (ipMatches.Count >= _passwordResetOptions.MaxRequestsPerIpPerWindow)
-            {
-                return PasswordResetRateLimitResult.Limited("ip", ipMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientKey))
-        {
-            var clientMatches = requests
-                .Where(x => string.Equals(x.Payload!.ClientKey, clientKey, StringComparison.Ordinal))
-                .ToList();
-            if (clientMatches.Count >= _passwordResetOptions.MaxRequestsPerClientPerWindow)
-            {
-                return PasswordResetRateLimitResult.Limited("client", clientMatches[0].CreatedAt.Add(_passwordResetOptions.RateLimitWindow));
-            }
-        }
-
-        return PasswordResetRateLimitResult.Allowed();
-    }
-
     private async Task InvalidateActivePasswordResetTokensAsync(string userId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
@@ -3162,11 +3097,6 @@ public sealed class SqlOSAuthService
         string? IpAddress,
         string? ClientKey,
         string Surface);
-    private sealed record PasswordResetRateLimitResult(bool IsLimited, string? Scope, DateTime? RetryAfter)
-    {
-        public static PasswordResetRateLimitResult Allowed() => new(false, null, null);
-        public static PasswordResetRateLimitResult Limited(string scope, DateTime retryAfter) => new(true, scope, retryAfter);
-    }
     private sealed record EmailVerificationPayload(string EmailId);
 
     private SqlOSInvitationService RequireInvitationService()

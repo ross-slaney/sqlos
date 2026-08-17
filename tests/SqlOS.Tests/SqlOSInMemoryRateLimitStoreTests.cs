@@ -85,4 +85,57 @@ public class SqlOSInMemoryRateLimitStoreTests
         result.RejectedLockedUntil.Should().NotBeNull();
         store.BucketCount.Should().Be(SqlOSInMemoryRateLimitStore.MaximumBuckets);
     }
+
+    [TestMethod]
+    public async Task ReserveMany_RejectsWithoutChargingEarlierBuckets()
+    {
+        var store = new SqlOSInMemoryRateLimitStore();
+        var now = DateTimeOffset.UtcNow;
+        var email = new SqlOSRateLimitBucketRequest(
+            "password-reset-email", "user@example.com", 5, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        var ip = new SqlOSRateLimitBucketRequest(
+            "password-reset-ip", "203.0.113.10", 1, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+
+        var first = await store.ReserveManyAsync([email, ip], now);
+        first.Admitted.Should().BeTrue();
+
+        var second = await store.ReserveManyAsync(
+            [
+                new SqlOSRateLimitBucketRequest(
+                    "password-reset-email", "other@example.com", 5, TimeSpan.FromHours(1), TimeSpan.FromHours(1)),
+                ip
+            ],
+            now.AddSeconds(1));
+
+        second.Admitted.Should().BeFalse();
+        second.RejectedIndex.Should().Be(1);
+        (await store.GetAsync(email.Scope, email.Key, now.AddSeconds(2), email.Window))!.Count.Should().Be(1);
+        (await store.GetAsync("password-reset-email", "other@example.com", now.AddSeconds(2), email.Window))
+            .Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ReserveMany_ReleaseRestoresCapacityInTheSameWindow()
+    {
+        var store = new SqlOSInMemoryRateLimitStore();
+        var now = DateTimeOffset.UtcNow;
+        var request = new SqlOSRateLimitBucketRequest(
+            "phone-otp-phone", "+12025550100", 1, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+
+        var reserved = await store.ReserveManyAsync([request], now);
+        reserved.Admitted.Should().BeTrue();
+        (await store.ReserveManyAsync([request], now.AddSeconds(1))).Admitted.Should().BeFalse();
+
+        await store.ReleaseManyAsync(
+            [
+                new SqlOSRateLimitReservationRelease(
+                    request.Scope,
+                    request.Key,
+                    request.LockThreshold,
+                    reserved.Buckets[0]!.WindowStartedAt!.Value)
+            ],
+            now.AddSeconds(2));
+
+        (await store.ReserveManyAsync([request], now.AddSeconds(3))).Admitted.Should().BeTrue();
+    }
 }
