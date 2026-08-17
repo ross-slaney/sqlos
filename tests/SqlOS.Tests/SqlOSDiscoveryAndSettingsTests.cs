@@ -189,6 +189,45 @@ public sealed class SqlOSDiscoveryAndSettingsTests
             .WithMessage("*cleanup must not run before the JWKS grace window ends*");
     }
 
+    [TestMethod]
+    public async Task AuthPageSettings_NormalizeValidColors_AndRejectAdversarialPayloads()
+    {
+        await using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var settingsService = new SqlOSSettingsService(context, options, new TestAuthEmailSender());
+
+        var updated = await settingsService.UpdateAuthPageSettingsAsync(new SqlOSUpdateAuthPageSettingsRequest(
+            null,
+            "#4F46E5",
+            " rgb(17, 24, 39) ",
+            "transparent",
+            "split",
+            "Sign in",
+            "Workspace",
+            true,
+            ["password"]));
+
+        updated.PrimaryColor.Should().Be("#4f46e5");
+        updated.AccentColor.Should().Be("rgb(17,24,39)");
+        updated.BackgroundColor.Should().Be("transparent");
+
+        foreach (var field in new[] { "PrimaryColor", "AccentColor", "BackgroundColor" })
+        {
+            var request = new SqlOSUpdateAuthPageSettingsRequest(
+                null,
+                field == "PrimaryColor" ? "</style><script>alert(1)</script>" : "#4f46e5",
+                field == "AccentColor" ? "url(https://evil.example)" : "#111827",
+                field == "BackgroundColor" ? new string('a', 33) : "#f8fafc",
+                "split",
+                "Sign in",
+                "Workspace",
+                true,
+                ["password"]);
+            var act = () => settingsService.UpdateAuthPageSettingsAsync(request);
+            (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain(field);
+        }
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
