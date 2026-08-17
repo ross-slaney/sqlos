@@ -56,7 +56,6 @@ public sealed class SqlOSAuthorizationServerService
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
     {
-        var credentialSettings = await _settingsService.GetResolvedCredentialSettingsAsync(cancellationToken);
         var configuredScopes = await _context.Set<SqlOSClientApplication>()
             .AsNoTracking()
             .Select(x => x.AllowedScopesJson)
@@ -64,7 +63,7 @@ public sealed class SqlOSAuthorizationServerService
 
         var scopes = configuredScopes
             .SelectMany(ParseJsonArray)
-            .Concat(credentialSettings.EnabledCredentialTypes.Select(x => $"auth:{x}"))
+            .Where(IsAdvertisedGrantableScope)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
@@ -1357,6 +1356,25 @@ public sealed class SqlOSAuthorizationServerService
 
     private static List<string> ParseJsonArray(string json)
         => JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+
+    /// <summary>
+    /// Reserved OpenID Connect scope names. Until OIDC Provider mode ships, these stay
+    /// off <c>scopes_supported</c> because SqlOS does not issue an id_token and does not
+    /// gate refresh tokens on <c>offline_access</c>. Client allowlists may still include
+    /// them; requested-but-unadvertised scopes are silently intersected.
+    /// </summary>
+    private static readonly HashSet<string> ReservedOidcScopeNames = new(StringComparer.Ordinal)
+    {
+        "openid",
+        "profile",
+        "email",
+        "offline_access"
+    };
+
+    private static bool IsAdvertisedGrantableScope(string scope)
+        => !string.IsNullOrWhiteSpace(scope)
+            && !scope.StartsWith("auth:", StringComparison.Ordinal)
+            && !ReservedOidcScopeNames.Contains(scope);
 
     private sealed record PendingAuthorizationPayload(string AuthorizationRequestId, string AuthenticationMethod);
 
