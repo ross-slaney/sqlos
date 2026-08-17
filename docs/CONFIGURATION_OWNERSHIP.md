@@ -10,7 +10,7 @@ SqlOS configuration can come from code-first startup seeds, the authenticated ad
 - `system`: an internal default that a first explicit operator edit may claim.
 - `external`: reserved for configurations whose source of truth is outside SqlOS.
 
-OAuth clients use their client ID as the seed key. SCIM connections use the required key passed to `SeedScimConnection`. Custom OIDC connections should use `SeedOidcConnection(key, configure)`; provider helpers assign deterministic keys automatically. Global MFA uses `mfa:default`.
+OAuth clients use their client ID as the seed key. SCIM connections use the required key passed to `SeedScimConnection`. Custom OIDC connections should use `SeedOidcConnection(key, configure)`; provider helpers assign deterministic keys automatically. Global MFA uses `mfa:default`. AuthPage branding uses `auth-page:default`. Email branding uses `auth-email:default`. Those two surfaces share one `SqlOSAuthPageSettings` row but are owned independently.
 
 Reconciliation stores a SHA-256 fingerprint of canonical non-secret configuration and the last successful reconciliation time. Secret values are never part of the fingerprint or diagnostics. Re-running an unchanged seed is idempotent. A seed may update only a record with the same `code` owner and stable source key; a dashboard-owned collision fails startup with a clear conflict instead of adopting or overwriting it.
 
@@ -22,4 +22,4 @@ Code-owned resources keep a narrow emergency enable/disable control. The dashboa
 
 ## Migrated resource families
 
-The shared model is applied to startup-seeded OAuth clients, social/OIDC connections, SCIM directory connections, and global MFA settings. Operational rows such as sessions, tokens, challenges, and audit events are intentionally outside this model.
+The shared model is applied to startup-seeded OAuth clients, social/OIDC connections, SCIM directory connections, global MFA settings, hosted AuthPage branding, and auth email branding. Operational rows such as sessions, tokens, challenges, and audit events are intentionally outside this model. AuthPage and email branding have no emergency disable control; change a code-owned surface in its seed.

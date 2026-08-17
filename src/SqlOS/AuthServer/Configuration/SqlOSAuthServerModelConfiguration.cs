@@ -792,6 +792,12 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.EmailPrimaryColor).HasMaxLength(32);
             entity.Property(x => x.EmailAccentColor).HasMaxLength(32);
             entity.Property(x => x.EmailBackgroundColor).HasMaxLength(32);
+            entity.Property(x => x.AuthPageConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.AuthPageConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.AuthPageConfigurationFingerprint).HasMaxLength(64);
+            entity.Property(x => x.EmailConfigurationOwner).HasMaxLength(40);
+            entity.Property(x => x.EmailConfigurationSourceKey).HasMaxLength(160);
+            entity.Property(x => x.EmailConfigurationFingerprint).HasMaxLength(64);
         });
 
         modelBuilder.Entity<SqlOSEmailOtpChallenge>(entity =>

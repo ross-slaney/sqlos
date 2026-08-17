@@ -254,6 +254,54 @@ public sealed class SqlOSControlPlaneParityTests
     }
 
     [TestMethod]
+    public async Task AuthPageAndEmailBranding_CodeServiceAndDashboard_NormalizeAndKeepOwnershipExplicit()
+    {
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options =>
+        {
+            ConfigureAuthPage(options.SeedAuthPage);
+            ConfigureAuthEmail(options.SeedAuthEmails);
+        });
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+        await code.ReconcileStartupAsync();
+        await service.Settings.UpdateAuthPageSettingsAsync(AuthPageRequest());
+        await service.Settings.UpdateAuthEmailBrandingSettingsAsync(AuthEmailRequest());
+        await dashboard.PutDashboardAsync(DashboardAdminContracts.AuthPageSettings, AuthPagePayload());
+        await dashboard.PutDashboardAsync(DashboardAdminContracts.AuthEmailSettings, AuthEmailPayload());
+
+        var codePage = await code.ProjectAuthPageAsync();
+        var servicePage = await service.ProjectAuthPageAsync();
+        var dashboardPage = await dashboard.ProjectAuthPageAsync();
+        codePage.Configuration.Should().BeEquivalentTo(servicePage.Configuration);
+        dashboardPage.Configuration.Should().BeEquivalentTo(servicePage.Configuration);
+        codePage.Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        codePage.IsEditable.Should().BeFalse();
+        servicePage.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        dashboardPage.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+
+        var codeEmail = await code.ProjectAuthEmailAsync();
+        var serviceEmail = await service.ProjectAuthEmailAsync();
+        var dashboardEmail = await dashboard.ProjectAuthEmailAsync();
+        codeEmail.Configuration.Should().BeEquivalentTo(serviceEmail.Configuration);
+        dashboardEmail.Configuration.Should().BeEquivalentTo(serviceEmail.Configuration);
+        codeEmail.Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        serviceEmail.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        dashboardEmail.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+
+        using var codeLogin = await code.Client.GetAsync("/sqlos/auth/login");
+        using var serviceLogin = await service.Client.GetAsync("/sqlos/auth/login");
+        using var dashboardLogin = await dashboard.Client.GetAsync("/sqlos/auth/login");
+        foreach (var login in new[] { codeLogin, serviceLogin, dashboardLogin })
+        {
+            login.IsSuccessStatusCode.Should().BeTrue();
+            (await login.Content.ReadAsStringAsync()).Should().Contain("#0f766e");
+        }
+
+        var codeMutate = () => code.Settings.UpdateAuthPageSettingsAsync(AuthPageRequest(pageTitle: "Dashboard overwrite"));
+        await codeMutate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+    }
+
+    [TestMethod]
     public async Task InvalidDuplicateClient_HasEquivalentServiceAndDashboardErrorSemantics()
     {
         await using var code = await ControlPlaneParityHarness.CreateAsync();
@@ -309,6 +357,13 @@ public sealed class SqlOSControlPlaneParityTests
             Section(javascript, "async function renderAuthMfa()", "async function renderAuthPage()"),
             "`${authApiBasePath}/settings/mfa`",
             "totpEnabled", "requireForOwnersAndAdmins");
+        AssertDashboardContract(
+            Section(javascript, "async function renderAuthPage()", "async function revokeSessionsWithPreview(request)"),
+            "`${authApiBasePath}/settings/auth-page`",
+            "`${authApiBasePath}/settings/email`",
+            "ownership.isEditable",
+            "SeedAuthPage",
+            "SeedAuthEmails");
         AssertDashboardContract(
             Section(javascript, "bindForm(\"create-scim-connection-form\"", "document.querySelectorAll(\".js-rotate-scim-token\")"),
             "`${authApiBasePath}/organizations/${organizationId}/scim-connections`",
@@ -454,6 +509,56 @@ public sealed class SqlOSControlPlaneParityTests
         enabled = true, totpEnabled = true, userSelfEnrollmentEnabled = true, recoveryCodesEnabled = true,
         requireForAllUsers = false, requireForOwnersAndAdmins = true,
         requiredRoles = new[] { "owner", "admin" }, availableFactors = new[] { "totp", "recovery_code" }
+    };
+
+    private static void ConfigureAuthPage(Func<Action<SqlOSAuthPageSeedOptions>, SqlOSAuthServerOptions> seed)
+        => seed(page =>
+        {
+            page.PageTitle = "Parity Sign in";
+            page.PageSubtitle = "Parity workspace";
+            page.PrimaryColor = "#0f766e";
+            page.AccentColor = "#111827";
+            page.BackgroundColor = "#f5f3ff";
+            page.Layout = "stacked";
+            page.EnablePasswordSignup = true;
+            page.EnabledCredentialTypes = ["password"];
+        });
+
+    private static void ConfigureAuthEmail(Func<Action<SqlOSAuthEmailSeedOptions>, SqlOSAuthServerOptions> seed)
+        => seed(email =>
+        {
+            email.ApplicationName = "Parity Mail";
+            email.PrimaryColor = "#0f766e";
+            email.AccentColor = "#111827";
+            email.BackgroundColor = "#f5f3ff";
+        });
+
+    private static SqlOSUpdateAuthPageSettingsRequest AuthPageRequest(string pageTitle = "Parity Sign in")
+        => new(null, "#0f766e", "#111827", "#f5f3ff", "stacked", pageTitle, "Parity workspace", true, ["password"]);
+
+    private static SqlOSUpdateAuthEmailBrandingSettingsRequest AuthEmailRequest()
+        => new("Parity Mail", null, "#0f766e", "#111827", "#f5f3ff");
+
+    private static object AuthPagePayload() => new
+    {
+        logoBase64 = (string?)null,
+        primaryColor = "#0f766e",
+        accentColor = "#111827",
+        backgroundColor = "#f5f3ff",
+        layout = "stacked",
+        pageTitle = "Parity Sign in",
+        pageSubtitle = "Parity workspace",
+        enablePasswordSignup = true,
+        enabledCredentialTypes = new[] { "password" }
+    };
+
+    private static object AuthEmailPayload() => new
+    {
+        applicationName = "Parity Mail",
+        logoBase64 = (string?)null,
+        primaryColor = "#0f766e",
+        accentColor = "#111827",
+        backgroundColor = "#f5f3ff"
     };
 
     private static async Task AssertScimAuthenticatesAsync(ControlPlaneParityHarness harness, string token)

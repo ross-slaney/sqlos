@@ -42,11 +42,13 @@ SqlOS supports two durable operating models:
 | Application startup | `SeedAuthPage(...)` and `SeedAuthEmails(...)` | repeatable local, preview, and production environments controlled by code/configuration |
 | Dashboard operator | **Auth Page** and **Email Branding** | installations where authorized operators own product presentation at runtime |
 
-Startup seeds are reconciled into the database whenever the host starts. If a seed remains configured, a dashboard edit to the same settings is temporary and will be replaced on restart. The dashboard displays a **Startup managed** callout when that applies.
+Startup seeds claim the matching surface as **code owned** on first reconcile (`auth-page:default` or `auth-email:default`). While that seed remains, dashboard and admin API writes to the same surface are rejected. Removing the seed orphans the record and leaves the last values in place; it does not hand ownership to the dashboard or revert colors, copy, or logos.
 
-Choose one owner per environment. A common rollout is to seed initial values, remove the seeds after the first deployment, and then deliberately hand ownership to dashboard operators. If you use `UseSingleApplication`, also disable its implicit branding seeds during that handoff, as shown in [Use the dashboard instead](#5-use-the-dashboard-instead). Do not alternate owners unintentionally.
+AuthPage and email branding are owned independently. You can keep hosted page branding in source control while operators own email branding, or the reverse.
 
-`UseSingleApplication("Acme", ...)` creates startup-managed AuthPage and email seeds by default, even when you do not call `SeedAuthPage` or `SeedAuthEmails`. Add explicit seed configuration when you want deliberate colors, layout, copy, or logo values.
+Choose one owner per surface per environment. A common rollout is to seed initial values, remove the seeds after the first deployment, and then let the next dashboard save claim that orphaned or unclaimed surface. If you use `UseSingleApplication`, also disable its implicit branding seeds during that handoff, as shown in [Use the dashboard instead](#5-use-the-dashboard-instead). Do not leave a seed configured if operators should own the surface.
+
+`UseSingleApplication("Acme", ...)` creates code-owned AuthPage and email seeds by default, even when you do not call `SeedAuthPage` or `SeedAuthEmails`. Add explicit seed configuration when you want deliberate colors, layout, copy, or logo values.
 
 ## 2. Store the logo as a data URL
 
@@ -176,6 +178,8 @@ Open:
 ```
 
 Use **Auth Page** to edit the hosted title, subtitle, logo, colors, layout, signup, and credential list. Use **Email Branding** to edit the application name and email-specific logo/colors. Each **Logo upload** control reads the selected image into the adjacent data-URL field; save the form after choosing the file. Clear the email logo field when email should reuse the AuthPage logo.
+
+The dashboard shows a **Code owned** callout and disables the form for any surface still claimed by a startup seed. First dashboard save on an unclaimed `system` default claims that surface for operators.
 
 Dashboard changes are persisted immediately. They affect newly rendered pages and messages; they do not rewrite email already submitted to a provider.
 

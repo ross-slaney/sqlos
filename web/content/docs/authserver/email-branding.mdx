@@ -57,7 +57,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-The bootstrapper applies seeded values on startup. If you want admins to control branding in the dashboard, do not seed these values after the initial setup period.
+The bootstrapper claims `auth-email:default` as code-owned and reapplies non-secret branding on startup. Dashboard and admin API writes are rejected while that seed remains. Remove the seed when operators should own email branding; the last values stay until the next dashboard save. AuthPage branding is a separate owner and is not overwritten by this seed.
 
 ## Advanced templates
 
