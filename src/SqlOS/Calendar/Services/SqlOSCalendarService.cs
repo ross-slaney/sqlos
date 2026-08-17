@@ -17,6 +17,7 @@ using SqlOS.Calendar.Interfaces;
 using SqlOS.Calendar.Models;
 using SqlOS.Configuration;
 using SqlOS.Pagination;
+using SqlOS.Security;
 
 namespace SqlOS.Calendar.Services;
 
@@ -893,7 +894,7 @@ public sealed class SqlOSCalendarService
             <html>
               <head>
                 <title>SqlOS calendar connect error</title>
-                <style>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
+                <style {{SqlOSCspNonce.Attribute}}>body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 32px; }</style>
               </head>
               <body>
                 <h1>SqlOS calendar connect error</h1>

@@ -375,7 +375,14 @@ public static partial class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await settingsService.UpdateAuthPageSettingsAsync(request, cancellationToken));
+            try
+            {
+                return Results.Ok(await settingsService.UpdateAuthPageSettingsAsync(request, cancellationToken));
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
         });
 
         api.MapGet("/settings/email", async (HttpContext context, SqlOSSettingsService settingsService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
@@ -395,7 +402,14 @@ public static partial class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            return Results.Ok(await settingsService.UpdateAuthEmailBrandingSettingsAsync(request, cancellationToken));
+            try
+            {
+                return Results.Ok(await settingsService.UpdateAuthEmailBrandingSettingsAsync(request, cancellationToken));
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
         });
 
         api.MapGet("/sessions", async (HttpContext context, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>

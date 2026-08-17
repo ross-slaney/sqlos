@@ -1337,7 +1337,7 @@ public sealed class SqlOSAuthServiceTests
         message.To.Should().Be(user.DefaultEmail);
         message.Subject.Should().Be("Reset your Reset App password");
         message.TextBody.Should().Contain("/sqlos/auth/password/reset?token=");
-        message.HtmlBody.Should().Contain("#0D9488");
+        message.HtmlBody.Should().Contain("#0d9488");
     }
 
     [TestMethod]

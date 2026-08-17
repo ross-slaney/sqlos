@@ -499,13 +499,6 @@ public sealed class SqlOSSettingsService
 
     public async Task<SqlOSAuthPageSettingsDto> UpdateAuthPageSettingsAsync(SqlOSUpdateAuthPageSettingsRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.PrimaryColor) ||
-            string.IsNullOrWhiteSpace(request.AccentColor) ||
-            string.IsNullOrWhiteSpace(request.BackgroundColor))
-        {
-            throw new InvalidOperationException("Auth page colors are required.");
-        }
-
         if (!string.Equals(request.Layout, "split", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(request.Layout, "stacked", StringComparison.OrdinalIgnoreCase))
         {
@@ -515,9 +508,9 @@ public sealed class SqlOSSettingsService
         await EnsureDefaultAuthPageSettingsAsync(cancellationToken);
         var settings = await _context.Set<SqlOSAuthPageSettings>().FirstAsync(x => x.Id == "default", cancellationToken);
         settings.LogoBase64 = string.IsNullOrWhiteSpace(request.LogoBase64) ? null : request.LogoBase64;
-        settings.PrimaryColor = request.PrimaryColor.Trim();
-        settings.AccentColor = request.AccentColor.Trim();
-        settings.BackgroundColor = request.BackgroundColor.Trim();
+        settings.PrimaryColor = RequireColor(request.PrimaryColor, nameof(request.PrimaryColor));
+        settings.AccentColor = RequireColor(request.AccentColor, nameof(request.AccentColor));
+        settings.BackgroundColor = RequireColor(request.BackgroundColor, nameof(request.BackgroundColor));
         settings.Layout = request.Layout.Trim().ToLowerInvariant();
         settings.PageTitle = request.PageTitle.Trim();
         settings.PageSubtitle = request.PageSubtitle.Trim();
@@ -680,14 +673,7 @@ public sealed class SqlOSSettingsService
             policy?.UpdatedAt ?? global.UpdatedAt);
 
     private static string RequireColor(string value, string name)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"{name} is required for SqlOS auth page seeding.");
-        }
-
-        return value.Trim();
-    }
+        => SqlOSCssColor.Require(value, name);
 
     private static string RequireText(string value, string name)
     {
