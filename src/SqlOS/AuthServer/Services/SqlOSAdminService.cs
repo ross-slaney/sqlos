@@ -1471,9 +1471,12 @@ public sealed partial class SqlOSAdminService
         };
     }
 
+    internal const string OAuthClientEmergencyDisabledReason = "oauth_client_emergency_disabled";
+
     public async Task<SqlOSClientApplication> DisableClientAsync(string clientApplicationId, string? reason = null, CancellationToken cancellationToken = default)
     {
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        EnsureOrdinaryClientLifecycle(client, "disable");
         if (!client.IsActive && client.DisabledAt != null)
         {
             return client;
@@ -1502,6 +1505,12 @@ public sealed partial class SqlOSAdminService
     public async Task<SqlOSClientApplication> EnableClientAsync(string clientApplicationId, CancellationToken cancellationToken = default)
     {
         var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        EnsureOrdinaryClientLifecycle(client, "enable");
+        if (!client.IsActive && client.DisabledAt == null)
+        {
+            throw new InvalidOperationException($"OAuth client '{client.ClientId}' is disabled in its seed. Set IsActive in source control to re-enable it.");
+        }
+
         client.IsActive = true;
         client.DisabledAt = null;
         client.DisabledReason = null;
@@ -1517,6 +1526,96 @@ public sealed partial class SqlOSAdminService
             },
             cancellationToken: cancellationToken);
         return client;
+    }
+
+    public async Task<SqlOSClientApplication> EmergencyDisableClientAsync(string clientApplicationId, CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        EnsureCodeOwnedClient(client, "emergency disable");
+        if (IsEmergencyDisabled(client))
+        {
+            return client;
+        }
+
+        client.IsActive = false;
+        client.DisabledAt = DateTime.UtcNow;
+        client.DisabledReason = OAuthClientEmergencyDisabledReason;
+        await RevokeClientSessionsInternalAsync(client.Id, "client_emergency_disabled", cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "client.emergency_disabled",
+            "client",
+            client.Id,
+            ipAddress: null,
+            data: new
+            {
+                client_id = client.ClientId,
+                source = client.RegistrationSource,
+                reason = client.DisabledReason
+            },
+            cancellationToken: cancellationToken);
+        return client;
+    }
+
+    public async Task<SqlOSClientApplication> EmergencyEnableClientAsync(string clientApplicationId, CancellationToken cancellationToken = default)
+    {
+        var client = await GetRequiredClientByIdAsync(clientApplicationId, cancellationToken);
+        EnsureCodeOwnedClient(client, "emergency enable");
+        if (client.IsActive && client.DisabledAt == null)
+        {
+            return client;
+        }
+
+        if (!client.IsActive && client.DisabledAt == null)
+        {
+            throw new InvalidOperationException($"OAuth client '{client.ClientId}' is disabled in its seed. Set IsActive in source control to re-enable it.");
+        }
+
+        if (!IsEmergencyDisabled(client))
+        {
+            throw new InvalidOperationException($"OAuth client '{client.ClientId}' can only be emergency-enabled from '{OAuthClientEmergencyDisabledReason}'.");
+        }
+
+        client.IsActive = true;
+        client.DisabledAt = null;
+        client.DisabledReason = null;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordAuditAsync(
+            "client.emergency_enabled",
+            "client",
+            client.Id,
+            data: new
+            {
+                client_id = client.ClientId,
+                source = client.RegistrationSource
+            },
+            cancellationToken: cancellationToken);
+        return client;
+    }
+
+    private static bool AllowsOrdinaryClientLifecycle(string owner)
+        => string.Equals(owner, SqlOSConfigurationOwners.Dashboard, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(owner, SqlOSConfigurationOwners.Dynamic, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEmergencyDisabled(SqlOSClientApplication client)
+        => client.DisabledAt != null
+            && string.Equals(client.DisabledReason, OAuthClientEmergencyDisabledReason, StringComparison.Ordinal);
+
+    private static void EnsureOrdinaryClientLifecycle(SqlOSClientApplication client, string action)
+    {
+        if (!AllowsOrdinaryClientLifecycle(client.ConfigurationOwner))
+        {
+            throw new InvalidOperationException(
+                $"OAuth client '{client.ClientId}' is owned by the '{client.ConfigurationOwner}' configuration source. Use emergency {action} for incidents, or change its seed.");
+        }
+    }
+
+    private static void EnsureCodeOwnedClient(SqlOSClientApplication client, string action)
+    {
+        if (!string.Equals(client.ConfigurationOwner, SqlOSConfigurationOwners.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"OAuth client '{client.ClientId}' is not code-owned. Use ordinary {action} instead.");
+        }
     }
 
     public async Task<int> RevokeClientSessionsAsync(string clientApplicationId, string reason = "client_revoked", CancellationToken cancellationToken = default)

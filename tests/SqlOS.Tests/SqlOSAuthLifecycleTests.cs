@@ -414,7 +414,7 @@ public sealed class SqlOSAuthLifecycleTests
         var subject = await harness.CreateOrganizationSubjectAsync("client-disable");
         var tokens = await harness.IssueTokensAsync(subject);
 
-        await harness.Admin.DisableClientAsync(subject.Client.Id);
+        await harness.Admin.EmergencyDisableClientAsync(subject.Client.Id);
 
         (await harness.Auth.ValidateAccessTokenAsync(tokens.AccessToken, subject.Client.Audience)).Should().BeNull();
         var refresh = async () => await harness.Auth.RefreshAsync(

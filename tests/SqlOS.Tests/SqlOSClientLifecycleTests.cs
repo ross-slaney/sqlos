@@ -47,7 +47,10 @@ public sealed class SqlOSClientLifecycleTests
         });
         await context.SaveChangesAsync();
 
-        await admin.DisableClientAsync(client.Id, "manual review");
+        var ordinary = () => admin.DisableClientAsync(client.Id, "manual review");
+        await ordinary.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+
+        await admin.EmergencyDisableClientAsync(client.Id);
         await admin.UpsertSeededClientsAsync();
 
         var updatedClient = await context.Set<SqlOSClientApplication>().SingleAsync();
@@ -55,11 +58,39 @@ public sealed class SqlOSClientLifecycleTests
         var refreshToken = await context.Set<SqlOSRefreshToken>().SingleAsync();
         updatedClient.IsActive.Should().BeFalse();
         updatedClient.DisabledAt.Should().NotBeNull();
-        updatedClient.DisabledReason.Should().Be("manual review");
+        updatedClient.DisabledReason.Should().Be(SqlOSAdminService.OAuthClientEmergencyDisabledReason);
         updatedClient.RegistrationSource.Should().Be("seeded");
         session.RevokedAt.Should().NotBeNull();
         refreshToken.RevokedAt.Should().NotBeNull();
-        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.disabled")).Should().BeTrue();
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.emergency_disabled")).Should().BeTrue();
+
+        var ordinaryEnable = () => admin.EnableClientAsync(client.Id);
+        await ordinaryEnable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+        await admin.EmergencyEnableClientAsync(client.Id);
+        updatedClient.IsActive.Should().BeTrue();
+        updatedClient.DisabledAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task EnableClientAsync_SeedInactiveCodeOwnedClient_FailsClosed()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedBrowserClient("seeded-client", "Seeded Client", "https://client.example.test/callback");
+        optionsValue.ClientSeeds.Single(x => x.ClientId == "seeded-client").IsActive = false;
+        var options = Options.Create(optionsValue);
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        await admin.UpsertSeededClientsAsync();
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync();
+        client.IsActive.Should().BeFalse();
+        client.DisabledAt.Should().BeNull();
+
+        var ordinary = () => admin.EnableClientAsync(client.Id);
+        await ordinary.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+        var emergency = () => admin.EmergencyEnableClientAsync(client.Id);
+        await emergency.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disabled in its seed*");
     }
 
     [TestMethod]

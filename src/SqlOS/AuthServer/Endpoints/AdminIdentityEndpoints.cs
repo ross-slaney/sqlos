@@ -604,6 +604,56 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapPost("/clients/{clientId}/emergency-disable", async (HttpContext context, string clientId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var client = await adminService.EmergencyDisableClientAsync(clientId, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.IsActive,
+                    client.DisabledAt,
+                    client.DisabledReason
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPost("/clients/{clientId}/emergency-enable", async (HttpContext context, string clientId, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var client = await adminService.EmergencyEnableClientAsync(clientId, cancellationToken);
+                return Results.Ok(new
+                {
+                    client.Id,
+                    client.ClientId,
+                    client.IsActive,
+                    client.DisabledAt,
+                    client.DisabledReason
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapPost("/clients/{clientId}/revoke", async (HttpContext context, string clientId, ClientLifecycleRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))

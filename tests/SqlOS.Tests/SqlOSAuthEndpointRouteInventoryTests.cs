@@ -45,6 +45,8 @@ public class SqlOSAuthEndpointRouteInventoryTests
             "GET /sqlos/admin/auth/api/organizations",
             "GET /sqlos/admin/auth/api/users",
             "GET /sqlos/admin/auth/api/clients",
+            "POST /sqlos/admin/auth/api/clients/{clientId}/emergency-disable",
+            "POST /sqlos/admin/auth/api/clients/{clientId}/emergency-enable",
             "GET /sqlos/admin/auth/api/clients/{clientId}/credentials",
             "POST /sqlos/admin/auth/api/clients/{clientId}/credentials",
             "DELETE /sqlos/admin/auth/api/clients/{clientId}/credentials/{credentialId}",

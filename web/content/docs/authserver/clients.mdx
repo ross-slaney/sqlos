@@ -240,6 +240,14 @@ auth.SeedOwnedWebApp("example-angular", "Example Angular", "http://localhost:420
 auth.SeedOwnedNativeApp("example-expo", "Example Expo", "sqlos-expo://auth-callback");
 ```
 
+## Disable and enable
+
+Dashboard-created and dynamically registered clients keep ordinary **Disable** / **Enable** on the Clients page and `POST /sqlos/admin/auth/api/clients/{id}/disable|enable`.
+
+A startup-seeded client is code-owned. Ordinary disable/enable is rejected. Use **Emergency disable** / **Emergency enable**, which persist `oauth_client_emergency_disabled` and survive the next seed reconcile. That override is not the same as `disabled_by_operator` or `application_access_disabled`. If the seed created the client inactive, change `IsActive` in source control; emergency enable will not override that.
+
+Session revoke remains available for every owner.
+
 ## Next client guides
 
 - [Machine Clients](/docs/authserver/machine-clients)
