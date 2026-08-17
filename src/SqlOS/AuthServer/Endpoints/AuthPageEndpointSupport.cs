@@ -20,6 +20,7 @@ using SqlOS.AuthServer.Services;
 using SqlOS.AuthServer.Security;
 using SqlOS.Configuration;
 using SqlOS.Dashboard;
+using SqlOS.Security;
 
 namespace SqlOS.AuthServer.Extensions;
 
@@ -68,7 +69,7 @@ public static partial class EndpointRouteBuilderExtensions
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <meta name="referrer" content="same-origin" />
           <title>Reset password</title>
-          <style>
+          <style {{SqlOSCspNonce.Attribute}}>
             body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
             main { width:min(440px, calc(100vw - 32px)); background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:28px; box-shadow:0 24px 70px rgba(15,23,42,.10); }
             h1 { margin:0 0 8px; font-size:28px; line-height:1.1; }
@@ -112,7 +113,7 @@ public static partial class EndpointRouteBuilderExtensions
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>{{title}}</title>
-          <style>
+          <style {{SqlOSCspNonce.Attribute}}>
             body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f8fafc; color:#0f172a; font-family:Segoe UI,Arial,sans-serif; }
             main { width:min(440px, calc(100vw - 32px)); background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:28px; box-shadow:0 24px 70px rgba(15,23,42,.10); }
             h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }

@@ -12,7 +12,7 @@ public static class SqlOSSsoPortalPageRenderer
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>SSO Setup Portal</title>
-            <style>
+            <style nonce="__SQLOS_CSP_NONCE__">
                 :root {
                     color-scheme: light;
                     --bg: #f7f7f8;
@@ -197,7 +197,7 @@ public static class SqlOSSsoPortalPageRenderer
                     </div>
                 </div>
             </main>
-            <script>
+            <script nonce="__SQLOS_CSP_NONCE__">
                 const api = "./api";
                 let state = null;
 
@@ -444,7 +444,7 @@ public static class SqlOSSsoPortalPageRenderer
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>SSO Setup Portal</title>
-            <style>
+            <style nonce="__SQLOS_CSP_NONCE__">
                 body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f7f7f8; color: #171717; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
                 main { width: min(520px, calc(100vw - 32px)); background: #fff; border: 1px solid #dedfe3; border-radius: 8px; padding: 22px; }
                 h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: 0; }

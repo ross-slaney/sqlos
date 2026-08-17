@@ -108,7 +108,7 @@ The visual fields control:
 | `Layout = "split"` | form plus secondary brand panel |
 | `Layout = "stacked"` | compact centered presentation without the secondary panel |
 
-Only `split` and `stacked` are valid layouts. Use six-digit `#RRGGBB` colors so the values render consistently in both the hosted page and built-in email.
+Only `split` and `stacked` are valid layouts. Color fields accept `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`/`rgba()`, `hsl()`/`hsla()`, or `transparent`. SqlOS rejects HTML, URLs, CSS rule delimiters, and any other executable content on the code seed, API, and dashboard write paths. Use six-digit `#RRGGBB` when the same value should render consistently in both the hosted page and built-in email. A legacy stored value that is no longer valid is ignored at render time and replaced with the built-in default for that field.
 
 <Callout type="warning" title="Credentials are behavior, not decoration">
   `EnabledCredentialTypes` and `EnablePasswordSignup` change which authentication journeys users may start. Configure and test each provider before adding it to the list. Do not enable Email OTP, phone OTP, or a social button merely to change page appearance.

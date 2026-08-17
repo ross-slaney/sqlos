@@ -706,6 +706,20 @@ public static partial class EndpointRouteBuilderExtensions
             catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
         });
 
+        api.MapPost("/machine-clients/{clientId}/emergency-disable", async (HttpContext context, string clientId, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await machines.EmergencyDisableAsync(clientId, cancellationToken)); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
+        api.MapPost("/machine-clients/{clientId}/emergency-enable", async (HttpContext context, string clientId, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await machines.EmergencyEnableAsync(clientId, cancellationToken)); }
+            catch (InvalidOperationException exception) { return Results.BadRequest(new { message = exception.Message }); }
+        });
+
         api.MapPost("/machine-clients/{clientId}/grants", async (HttpContext context, string clientId, SqlOSMachineClientGrantRequest request, SqlOSMachineClientAdminService machines, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();

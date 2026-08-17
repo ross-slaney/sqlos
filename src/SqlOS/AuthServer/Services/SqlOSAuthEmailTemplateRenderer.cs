@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using SqlOS.AuthServer.Configuration;
 
@@ -125,7 +124,7 @@ internal static class SqlOSAuthEmailTemplateRenderer
     }
 
     private static string Css(string? value, string fallback)
-        => IsHexColor(value) ? value!.Trim() : fallback;
+        => SqlOSCssColor.Render(value, fallback);
 
     private static string Tint(string value)
         => string.Equals(Css(value, "#2563eb"), "#2563eb", StringComparison.OrdinalIgnoreCase) ? "#eff6ff" : "#f8fafc";
@@ -136,32 +135,13 @@ internal static class SqlOSAuthEmailTemplateRenderer
     private static string ButtonText(string value)
         => IsDarkColor(value) ? "#ffffff" : "#0f172a";
 
-    private static bool IsHexColor(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var trimmed = value.Trim();
-        if (trimmed.Length != 7 || trimmed[0] != '#')
-        {
-            return false;
-        }
-
-        return trimmed.Skip(1).All(Uri.IsHexDigit);
-    }
-
     private static bool IsDarkColor(string? value)
     {
-        if (!IsHexColor(value))
+        if (!SqlOSCssColor.TryGetRgb(value, out var red, out var green, out var blue))
         {
             return true;
         }
 
-        var red = int.Parse(value!.AsSpan(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        var green = int.Parse(value.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        var blue = int.Parse(value.AsSpan(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
         return ((red * 299) + (green * 587) + (blue * 114)) / 1000 < 140;
     }
 }

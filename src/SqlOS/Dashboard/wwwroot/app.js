@@ -3861,7 +3861,7 @@
                         { label: "Authentication", value: "HTTP Basic (client_secret_basic)" },
                         { label: "Grant", value: "client_credentials" }
                     ])}
-                    <p>Code-owned clients should use <code>SeedMachineClient</code> and a host secret resolver. Dashboard-owned clients reveal a generated secret only at creation and rotation.</p>
+                    <p>Code-owned clients should use <code>SeedMachineClient</code> and a host secret resolver. Dashboard-owned clients reveal a generated secret only at creation and rotation. Ordinary revoke cannot change code-owned structural configuration; use emergency disable for a runtime override that survives restart.</p>
                 </section>
             </div>
             <section class="panel">
@@ -3872,10 +3872,10 @@
                 ${machineRows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Client / audience</th><th>Status</th><th>Ownership</th><th>Grants</th><th>Last use</th><th>Actions</th></tr></thead><tbody>${machineRows.map(machine => `<tr>
                     <td>${esc(machine.displayName)}</td>
                     <td><code>${esc(machine.clientId)}</code><br><small>${esc(machine.audience)}</small></td>
-                    <td>${machine.ready ? '<span class="status active">Ready</span>' : '<span class="status inactive">Unavailable</span>'}</td>
-                    <td>${esc(machine.configurationOwner)}${machine.configurationSourceKey ? `<br><small>${esc(machine.configurationSourceKey)}</small>` : ""}${machine.configurationOrphanedAt ? '<br><span class="status warning">Orphaned</span>' : ""}</td>
+                    <td>${machine.emergencyDisabled ? '<span class="status warning">Emergency disabled</span>' : machine.ready ? '<span class="status active">Ready</span>' : '<span class="status inactive">Unavailable</span>'}</td>
+                    <td>${esc(machine.configurationOwner)}${machine.configurationSourceKey ? `<br><small>${esc(machine.configurationSourceKey)}</small>` : ""}${machine.configurationOrphanedAt ? '<br><span class="status warning">Orphaned</span>' : ""}${machine.ownership && !machine.ownership.isEditable ? '<br><small>Change seed in source control</small>' : ""}</td>
                     <td>${esc(machine.grantCount)}</td><td>${machine.lastUsedAt ? esc(formatDate(machine.lastUsedAt)) : "Never"}</td>
-                    <td><button type="button" data-machine-test="${esc(machine.clientId)}" data-resource="${esc(machine.audience)}" data-scopes="${esc(machine.scopes.join(" "))}">Test</button> ${machine.configurationOwner === "dashboard" ? `<button type="button" data-machine-rotate="${esc(machine.clientId)}">Rotate</button>` : ""} <button type="button" data-machine-revoke="${esc(machine.clientId)}">Revoke</button></td>
+                    <td><button type="button" data-machine-test="${esc(machine.clientId)}" data-resource="${esc(machine.audience)}" data-scopes="${esc(machine.scopes.join(" "))}">Test</button> ${machine.configurationOwner === "dashboard" ? `<button type="button" data-machine-rotate="${esc(machine.clientId)}">Rotate</button> <button type="button" data-machine-revoke="${esc(machine.clientId)}">Revoke</button>` : machine.emergencyDisabled ? `<button type="button" data-machine-emergency-enable="${esc(machine.clientId)}">Re-enable</button>` : `<button type="button" data-machine-emergency-disable="${esc(machine.clientId)}">Emergency disable</button>`}</td>
                 </tr>`).join("")}</tbody></table></div>` : "<p>No machine clients yet.</p>"}
                 <p><a href="${esc(pathForRoute("fga-service-accounts"))}" data-dashboard-route="fga-service-accounts">Inspect service-account subjects and grant paths in FGA</a></p>
             </section>`;
@@ -3929,6 +3929,14 @@
         document.querySelectorAll("[data-machine-revoke]").forEach(button => button.addEventListener("click", async () => {
             if (!window.confirm(`Immediately revoke ${button.dataset.machineRevoke}? Existing database-validated service tokens will stop working.`)) return;
             await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineRevoke)}/revoke`, { method: "POST" }); setFlash("success", "Machine client revoked."); await renderAuthMachineClients();
+        }));
+        document.querySelectorAll("[data-machine-emergency-disable]").forEach(button => button.addEventListener("click", async () => {
+            if (!window.confirm(`Emergency-disable ${button.dataset.machineEmergencyDisable}? New and existing service tokens stop working. Startup will not silently re-enable this client.`)) return;
+            await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineEmergencyDisable)}/emergency-disable`, { method: "POST" }); setFlash("success", "Machine client emergency-disabled."); await renderAuthMachineClients();
+        }));
+        document.querySelectorAll("[data-machine-emergency-enable]").forEach(button => button.addEventListener("click", async () => {
+            if (!window.confirm(`Re-enable ${button.dataset.machineEmergencyEnable}? This clears the emergency disable only. Seeded IsActive=false still wins on the next restart.`)) return;
+            await fetchJson(`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineEmergencyEnable)}/emergency-enable`, { method: "POST" }); setFlash("success", "Machine client re-enabled."); await renderAuthMachineClients();
         }));
     }
 
@@ -4476,6 +4484,7 @@
                                     <option value="stacked" ${settings.layout === "stacked" ? "selected" : ""}>Stacked</option>
                                 </select>
                             </div>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Accepted colors: <code>#RGB</code>, <code>#RRGGBB</code>, <code>#RRGGBBAA</code>, <code>rgb()</code>/<code>rgba()</code>, <code>hsl()</code>/<code>hsla()</code>, or <code>transparent</code>. HTML, URLs, and CSS rules are rejected.</p>
                             ${settings.headlessCapabilityRegistered
                                 ? `<div class="callout"><strong>Headless auth is enabled.</strong> <code>/authorize</code> redirects into your app because <code>UseHeadlessAuthPage()</code> registered a UI callback.</div>`
                                 : `<div class="callout"><strong>Hosted auth is enabled.</strong> SqlOS serves the login and signup pages because no headless UI callback is registered.</div>`}
@@ -4521,6 +4530,7 @@
                                 <input name="accentColor" placeholder="Accent color (#0f172a)" value="${esc(emailSettings.accentColor || "")}" required>
                             </div>
                             <input name="backgroundColor" placeholder="Background color (#f8fafc)" value="${esc(emailSettings.backgroundColor || "")}" required>
+                            <p class="muted" style="margin-top:-4px;font-size:12px;line-height:1.5;">Accepted colors: <code>#RGB</code>, <code>#RRGGBB</code>, <code>#RRGGBBAA</code>, <code>rgb()</code>/<code>rgba()</code>, <code>hsl()</code>/<code>hsla()</code>, or <code>transparent</code>. HTML, URLs, and CSS rules are rejected.</p>
                             <label>Email logo upload<input id="auth-email-logo-file" type="file" accept="image/*"></label>
                             <textarea name="logoBase64" placeholder="Optional base64 image payload or data URL. Leave blank to reuse the Auth Page logo.">${esc(emailSettings.logoBase64 || "")}</textarea>
                             <button type="submit">Save Email Branding</button>
