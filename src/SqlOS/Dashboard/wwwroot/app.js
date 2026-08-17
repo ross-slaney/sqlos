@@ -786,6 +786,28 @@
         return badges.join("");
     }
 
+    function isCodeOwnedClient(client) {
+        return client?.ownership?.owner === "code" || !!client?.managedByStartupSeed;
+    }
+
+    function clientLifecycleAction(client) {
+        const active = client.isActive && !client.disabledAt;
+        if (isCodeOwnedClient(client)) {
+            return active ? "emergency-disable" : "emergency-enable";
+        }
+
+        return active ? "disable" : "enable";
+    }
+
+    function clientLifecycleLabel(client) {
+        const active = client.isActive && !client.disabledAt;
+        if (isCodeOwnedClient(client)) {
+            return active ? "Emergency disable" : "Emergency enable";
+        }
+
+        return active ? "Disable" : "Enable";
+    }
+
     function currentClientPreset() {
         return clientPresetDefinitions[clientViewState.preset] || clientPresetDefinitions["owned-web"];
     }
@@ -3291,12 +3313,13 @@
                                     </div>
                                     <div class="client-action-row">
                                         <a class="inline-link" href="${esc(pathForRoute("auth-clients"))}" data-dashboard-route="auth-clients">Close inspect</a>
-                                        <button type="button" data-client-action="${clientDetail.isActive && !clientDetail.disabledAt ? "disable" : "enable"}" data-client-id="${esc(clientDetail.id)}">
-                                            ${clientDetail.isActive && !clientDetail.disabledAt ? "Disable" : "Enable"}
+                                        <button type="button" data-client-action="${clientLifecycleAction(clientDetail)}" data-client-id="${esc(clientDetail.id)}">
+                                            ${clientLifecycleLabel(clientDetail)}
                                         </button>
                                         <button type="button" data-client-action="revoke" data-client-id="${esc(clientDetail.id)}">Revoke sessions</button>
                                     </div>
                                 </div>
+                                ${isCodeOwnedClient(clientDetail) ? `<div class="callout"><strong>Code owned:</strong> Ordinary disable/enable is rejected. Emergency disable stops runtime use and survives the next seed reconcile. Change <span class="inline-code">IsActive</span> in the client seed to turn the client off permanently.</div>` : ""}
                                 ${!selectedClientVisible ? `
                                     <div class="callout">
                                         <strong>Selected client is outside the current list view.</strong>
@@ -3461,8 +3484,8 @@
                                     </div>
                                     <div class="client-action-row">
                                         <button type="button" data-client-action="inspect" data-client-id="${esc(item.id)}">Inspect</button>
-                                        <button type="button" data-client-action="${item.isActive && !item.disabledAt ? "disable" : "enable"}" data-client-id="${esc(item.id)}">
-                                            ${item.isActive && !item.disabledAt ? "Disable" : "Enable"}
+                                        <button type="button" data-client-action="${clientLifecycleAction(item)}" data-client-id="${esc(item.id)}">
+                                            ${clientLifecycleLabel(item)}
                                         </button>
                                         <button type="button" data-client-action="revoke" data-client-id="${esc(item.id)}">Revoke sessions</button>
                                     </div>
@@ -3655,6 +3678,20 @@
                             body: JSON.stringify({ reason })
                         });
                         setFlash("success", "Client disabled.");
+                    } else if (action === "emergency-disable") {
+                        if (!window.confirm("Emergency-disable this code-owned client? New sign-in and token use stop until you emergency-enable it or correct the seed.")) {
+                            return;
+                        }
+
+                        await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-disable`, {
+                            method: "POST"
+                        });
+                        setFlash("success", "Client emergency-disabled.");
+                    } else if (action === "emergency-enable") {
+                        await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-enable`, {
+                            method: "POST"
+                        });
+                        setFlash("success", "Client emergency-enabled.");
                     } else if (action === "enable") {
                         await fetchJson(`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/enable`, {
                             method: "POST",

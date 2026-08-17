@@ -56,14 +56,23 @@ public sealed class SqlOSControlPlaneParityTests
 
         var codeClient = await code.Context.Set<SqlOSClientApplication>().SingleAsync();
         var serviceClient = await service.Context.Set<SqlOSClientApplication>().SingleAsync();
-        await code.Admin.DisableClientAsync(codeClient.Id, "parity_disable");
-        await service.Admin.DisableClientAsync(serviceClient.Id, "parity_disable");
         var dashboardClient = await dashboard.Context.Set<SqlOSClientApplication>().SingleAsync();
+        var codeOrdinaryDisable = () => code.Admin.DisableClientAsync(codeClient.Id, "parity_disable");
+        await codeOrdinaryDisable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+        await service.Admin.DisableClientAsync(serviceClient.Id, "parity_disable");
         await dashboard.PostDashboardAsync($"{DashboardAdminContracts.Clients}/{dashboardClient.Id}/disable", new { reason = "parity_disable" });
+        (await code.ProjectClientAsync("parity-client")).IsEnabled.Should().BeTrue("ordinary disable is rejected for code-owned clients");
+        (await service.ProjectClientAsync("parity-client")).IsEnabled.Should().BeFalse();
+        (await dashboard.ProjectClientAsync("parity-client")).IsEnabled.Should().BeFalse();
+
+        await code.PostDashboardAsync($"{DashboardAdminContracts.Clients}/{codeClient.Id}/emergency-disable", new { });
         new[] { await code.ProjectClientAsync("parity-client"), await service.ProjectClientAsync("parity-client"), await dashboard.ProjectClientAsync("parity-client") }
             .Should().OnlyContain(x => !x.IsEnabled);
 
-        await code.Admin.EnableClientAsync(codeClient.Id);
+        var codeOrdinaryEnable = () => code.Admin.EnableClientAsync(codeClient.Id);
+        await codeOrdinaryEnable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*owned by the 'code'*");
+        using var emergencyEnabled = await code.Client.PostAsync($"{DashboardAdminContracts.Clients}/{codeClient.Id}/emergency-enable", null);
+        emergencyEnabled.EnsureSuccessStatusCode();
         await service.Admin.EnableClientAsync(serviceClient.Id);
         using var enabled = await dashboard.Client.PostAsync($"{DashboardAdminContracts.Clients}/{dashboardClient.Id}/enable", null);
         enabled.EnsureSuccessStatusCode();
@@ -290,6 +299,8 @@ public sealed class SqlOSControlPlaneParityTests
             Section(javascript, "async function renderAuthClients(route)", "async function renderAuthOidc()"),
             "`${authApiBasePath}/clients`",
             "`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`",
+            "`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-disable`",
+            "`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-enable`",
             "clientId", "redirectUris", "allowedScopes", "confidential", "clientSecret");
         AssertDashboardContract(
             Section(javascript, "function buildOidcPayload(form)", "function renderStatsGroup"),

@@ -73,7 +73,7 @@ With callback dashboard auth, authenticate through the host's configured operato
 | Organizations | `/sqlos/admin/auth/organizations` | Create tenants, set primary domains for SSO |
 | Users | `/sqlos/admin/auth/users` | Create users with an optional initial password; send reset email for password users |
 | Memberships | `/sqlos/admin/auth/memberships` | Link users to organizations with roles and manage invitations |
-| Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs |
+| Clients | `/sqlos/admin/auth/clients` | Register OAuth clients with redirect URIs. Dashboard and DCR/CIMD clients keep ordinary disable/enable; code-owned clients expose emergency disable only |
 | Machine clients | `/sqlos/admin/auth/machine-clients` | Create confidential `client_credentials` clients, copy the one-time secret, rotate, revoke, and optionally bind an FGA service account |
 | OIDC | `/sqlos/admin/auth/oidc` | Configure social login providers |
 | SSO | `/sqlos/admin/auth/sso` | Set up SAML enterprise SSO and delegated org-admin setup links |

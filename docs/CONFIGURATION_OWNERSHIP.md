@@ -20,6 +20,8 @@ Removing a seed marks its record as orphaned but does not delete, disable, or cl
 
 Code-owned resources keep a narrow emergency enable/disable control. The dashboard cannot edit their controlled fields, rotate their code-supplied material, or change ownership. Restore normal service by correcting the startup configuration; ownership transfer is intentionally explicit rather than inferred.
 
+Ordinary OAuth client disable/enable stays available for `dashboard` and `dynamic` clients. Code-owned clients reject those routes and use `POST /clients/{id}/emergency-disable` with reason `oauth_client_emergency_disabled`. Emergency enable only clears that incident flag. A seed that created the client as inactive (`IsActive = false` and no `DisabledAt`) cannot be enabled from the dashboard; change the seed.
+
 ## Migrated resource families
 
 The shared model is applied to startup-seeded OAuth clients, social/OIDC connections, SCIM directory connections, and global MFA settings. Operational rows such as sessions, tokens, challenges, and audit events are intentionally outside this model.
