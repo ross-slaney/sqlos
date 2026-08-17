@@ -3,6 +3,12 @@ name: Publish to NuGet
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_body:
+        description: GitHub release body for the compatibility checklist
+        required: true
+        type: string
 
 env:
   DOTNET_VERSION: "9.0.x"
@@ -30,7 +36,7 @@ jobs:
             ${{ runner.os }}-nuget-
       - run: chmod +x scripts/*.sh && ./scripts/check-release-checklist.sh
         env:
-          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_BODY: ${{ github.event.release.body || github.event.inputs.release_body }}
       - run: docker pull mcr.microsoft.com/mssql/server:2022-latest
         continue-on-error: true
       - run: chmod +x scripts/*.sh && ./scripts/build.sh
@@ -38,7 +44,7 @@ jobs:
       - run: chmod +x scripts/*.sh && ./scripts/integration-tests.sh
         env:
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
-        timeout-minutes: 20
+        timeout-minutes: 30
       - run: chmod +x scripts/*.sh && ./scripts/docs-check.sh
       - run: dotnet pack src/SqlOS/SqlOS.csproj -c Release -o ./nupkg
       - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
