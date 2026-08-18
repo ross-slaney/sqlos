@@ -19,6 +19,8 @@ namespace SqlOS.AuthServer.Services;
 
 public sealed class SqlOSCryptoService
 {
+    internal const string AccessTokenJwtType = "at+jwt";
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSValidationSigningKeyCache _validationSigningKeyCache;
@@ -522,7 +524,7 @@ public sealed class SqlOSCryptoService
         var header = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
-            [JwtHeaderParameterNames.Typ] = "JWT",
+            [JwtHeaderParameterNames.Typ] = AccessTokenJwtType,
             [JwtHeaderParameterNames.Kid] = key.Kid
         };
         var encodedHeader = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(header));
@@ -567,7 +569,7 @@ public sealed class SqlOSCryptoService
         var header = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
-            [JwtHeaderParameterNames.Typ] = "JWT",
+            [JwtHeaderParameterNames.Typ] = AccessTokenJwtType,
             [JwtHeaderParameterNames.Kid] = key.Kid
         };
         var encodedHeader = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(header));
@@ -614,7 +616,7 @@ public sealed class SqlOSCryptoService
         {
             var jwt = handler.ReadJwtToken(rawToken);
             if (!string.Equals(jwt.Header.Alg, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal)
-                || !string.Equals(jwt.Header.Typ, "JWT", StringComparison.Ordinal)
+                || !string.Equals(jwt.Header.Typ, AccessTokenJwtType, StringComparison.Ordinal)
                 || string.IsNullOrWhiteSpace(jwt.Header.Kid))
             {
                 return null;
@@ -649,7 +651,7 @@ public sealed class SqlOSCryptoService
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = ToSecurityKey(matchingKeys[0]),
                 ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
-                ValidTypes = ["JWT"],
+                ValidTypes = [AccessTokenJwtType],
                 RequireSignedTokens = true,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromMinutes(1)

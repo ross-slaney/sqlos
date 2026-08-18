@@ -3,6 +3,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -298,7 +299,7 @@ public sealed class SqlOSCryptoServiceTests
             service.GetJwksDocument(await service.GetValidationSigningKeysAsync()));
 
         parsed.Header.Alg.Should().Be(SecurityAlgorithms.RsaSha256);
-        parsed.Header.Typ.Should().Be("JWT");
+        parsed.Header.Typ.Should().Be("at+jwt");
         parsed.Header.Kid.Should().Be(key.Kid);
         validated.Should().NotBeNull();
         validated!.UserId.Should().Be(user.Id);
@@ -341,6 +342,50 @@ public sealed class SqlOSCryptoServiceTests
         parsed.Claims.Should().ContainSingle(claim => claim.Type == "token_kind" && claim.Value == "service");
         parsed.Payload["scope"].Should().Be("ledger.read jobs.run");
         parsed.Payload["token_kind"].Should().Be("service");
+    }
+
+    [TestMethod]
+    public async Task CreateAccessToken_UserAndServiceTokens_StampRfc9068AccessTokenType()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+
+        var userToken = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+        var serviceToken = await service.CreateServiceAccessTokenAsync(
+            client.ClientId,
+            client,
+            client.Audience,
+            ["ledger.read"],
+            "org_test");
+
+        new JwtSecurityTokenHandler().ReadJwtToken(userToken).Header.Typ.Should().Be("at+jwt");
+        new JwtSecurityTokenHandler().ReadJwtToken(serviceToken).Header.Typ.Should().Be("at+jwt");
+        (await service.ValidateAccessTokenAsync(userToken, client.Audience)).Should().NotBeNull();
+        (await service.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(userToken)).Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task ValidateAccessToken_MissingGenericOrIncorrectJwtType_IsRejectedOnNormalAndIntrospectionPaths()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        var rawToken = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+
+        (await service.ValidateAccessTokenAsync(rawToken, client.Audience)).Should().NotBeNull();
+        (await service.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(rawToken)).Should().NotBeNull();
+
+        foreach (var typ in new string?[] { null, "JWT", "id+jwt" })
+        {
+            var rewritten = WithJwtType(rawToken, typ);
+            new JwtSecurityTokenHandler().ReadJwtToken(rewritten).Header.Typ.Should().Be(typ);
+
+            (await service.ValidateAccessTokenAsync(rewritten, client.Audience)).Should().BeNull(
+                $"access-token validation must reject typ '{typ ?? "<missing>"}'");
+            (await service.ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(rewritten)).Should().BeNull(
+                $"introspection validation must reject typ '{typ ?? "<missing>"}'");
+        }
     }
 
     [TestMethod]
@@ -817,7 +862,33 @@ public sealed class SqlOSCryptoServiceTests
             signingCredentials: new SigningCredentials(
                 new RsaSecurityKey(attackerRsa) { KeyId = kid },
                 SecurityAlgorithms.RsaSha256));
+        token.Header[JwtHeaderParameterNames.Typ] = "at+jwt";
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static string WithJwtType(string rawToken, string? typ)
+    {
+        var parts = rawToken.Split('.');
+        parts.Should().HaveCount(3);
+        var header = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(parts[0])))!;
+        var rewritten = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in header)
+        {
+            if (key.Equals("typ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            rewritten[key] = value.ValueKind == JsonValueKind.String ? value.GetString() : value.Clone();
+        }
+
+        if (typ is not null)
+        {
+            rewritten["typ"] = typ;
+        }
+
+        return $"{Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(rewritten))}.{parts[1]}.{parts[2]}";
     }
 
     private static SqlOSSigningKeyDescriptor ToDescriptor(SqlOSSigningKey key)
