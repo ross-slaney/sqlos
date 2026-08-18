@@ -1321,10 +1321,9 @@ public sealed class SqlOSAuthorizationServerService
             return null;
         }
 
-        if (Uri.TryCreate(requestedUrl, UriKind.Relative, out var relativeUri) && !relativeUri.IsAbsoluteUri)
+        if (SqlOSLocalRedirectDestination.TryResolve(requestedUrl, GetPublicOrigin(httpContext), out var localDestination))
         {
-            var relativeValue = requestedUrl.Trim();
-            return relativeValue.StartsWith("/", StringComparison.Ordinal) ? relativeValue : $"/{relativeValue}";
+            return localDestination;
         }
 
         if (!Uri.TryCreate(requestedUrl, UriKind.Absolute, out var absoluteUri))
