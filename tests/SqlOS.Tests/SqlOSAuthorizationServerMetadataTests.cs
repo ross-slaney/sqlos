@@ -130,20 +130,64 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         after.TokenEndpointAuthMethodsSupported.Should().Contain("client_secret_basic");
     }
 
-    private static async Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(
+    [TestMethod]
+    public async Task GetMetadataAsync_ComposesScopesSupportedFromClientAllowlistsAndAuthCredentialTypes()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.SeedClient(client =>
+        {
+            client.ClientId = "metadata-web";
+            client.Name = "Metadata Web";
+            client.RedirectUris = ["https://app.example.test/callback"];
+            client.ClientType = "public_pkce";
+            client.RequirePkce = true;
+            client.AllowedScopes = ["openid", "profile", "custom.read"];
+        });
+        optionsValue.SeedAuthPage(page => page.EnabledCredentialTypes = ["password", "email_otp"]);
+        var emailSender = new TestAuthEmailSender { IsConfigured = true };
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue, emailSender);
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+
+        metadata.ResponseTypesSupported.Should().Equal("code");
+        metadata.ScopesSupported.Should().Equal(
+            "auth:email_otp",
+            "auth:password",
+            "custom.read",
+            "openid",
+            "profile");
+        metadata.ScopesSupported.Should().Contain("auth:password");
+        metadata.ScopesSupported.Should().Contain("auth:email_otp");
+    }
+
+    private static Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(
         TestSqlOSInMemoryDbContext context,
         SqlOSAuthServerOptions optionsValue)
+        => CreateAuthorizationServerServiceAsync(context, optionsValue, new TestAuthEmailSender());
+
+    private static async Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(
+        TestSqlOSInMemoryDbContext context,
+        SqlOSAuthServerOptions optionsValue,
+        TestAuthEmailSender emailSender)
     {
         var options = Options.Create(optionsValue);
         var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
-        var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
         var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
         var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
         var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
 
         await settings.EnsureDefaultAuthPageSettingsAsync();
+        if (optionsValue.AuthPageSeed != null)
+        {
+            await settings.UpsertSeededAuthPageSettingsAsync();
+        }
         await admin.UpsertSeededClientsAsync();
 
         return new SqlOSAuthorizationServerService(

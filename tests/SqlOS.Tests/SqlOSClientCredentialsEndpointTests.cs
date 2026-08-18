@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -57,6 +58,9 @@ public sealed class SqlOSClientCredentialsEndpointTests
         json.RootElement.TryGetProperty("access_token", out _).Should().BeTrue();
         json.RootElement.TryGetProperty("refresh_token", out _).Should().BeFalse();
         json.RootElement.GetProperty("scope").GetString().Should().Be("jobs.run");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(json.RootElement.GetProperty("access_token").GetString());
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == "scope" && claim.Value == "jobs.run");
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == "token_kind" && claim.Value == "service");
 
         using var wrongAudience = TokenRequest("https://api.example.test/other", Secret);
         (await host.GetTestClient().SendAsync(wrongAudience)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
