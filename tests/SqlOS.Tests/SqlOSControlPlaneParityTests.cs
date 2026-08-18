@@ -503,7 +503,8 @@ public sealed class SqlOSControlPlaneParityTests
             "`${authApiBasePath}/clients/${encodeURIComponent(clientDetail.id)}/credentials`",
             "`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-disable`",
             "`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-enable`",
-            "clientId", "redirectUris", "allowedScopes", "confidential", "clientSecret");
+            "clientId", "redirectUris", "allowedScopes", "confidential", "clientSecret",
+            "emptyAllowlistWarning", "data-empty-allowlist-warning", "Empty allowlist grants nothing.");
         AssertDashboardContract(
             Section(javascript, "function buildOidcPayload(form)", "function renderStatsGroup"),
             "providerType", "clientSecret", "displayName");
