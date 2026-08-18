@@ -1,0 +1,47 @@
+---
+title: "SqlOS 3.27: Scopes Mean What They Say"
+description: "Empty allowlists grant nothing, every grant uses the same silent intersection, and first-party hosts can see the result."
+date: "2026-08-18"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "Dashboard", "Security", "SqlOS"]
+---
+
+SqlOS 3.27 makes OAuth scope grants deterministic and visible. An empty `AllowedScopes` list is deny-all on authorize, device, and client-credentials. Requested scopes are intersected with that allowlist and unknown names are dropped, not rejected. Authorization-server metadata advertises only grantable scopes. First-party and headless apps that send `scope` must put the same values on the client.
+
+The dashboard and Admin API now warn when a user-facing client will grant nothing, and when an allowlist omits `openid`. Custom login UIs can read the granted string from the headless view model. Access tokens use RFC 9068 `typ: at+jwt`. Protocol-relative logout `returnTo` values are rejected.
+
+## Empty is not a wildcard
+
+`SeedBrowserClient` and `SeedOwnedWebApp` still register redirect URIs only. They leave `AllowedScopes` empty. After this release that empty list grants no scopes, even if `/authorize` asks for `openid profile email`. Set the allowlist with `SeedClient`, the Admin API, or the dashboard, and send the same `scope` on the authorize request.
+
+See [Clients](/docs/authserver/clients) and [Headless authentication](/docs/authserver/headless-auth).
+
+## One grant policy
+
+Authorize, device authorization, and client-credentials use the same silent intersection. Dynamic client registration stores an empty allowlist unless the registration includes `scope`. `scopes_supported` lists only scopes a registered client can actually be granted; reserved OpenID Connect names stay off that list until SqlOS issues ID tokens.
+
+`openid` is never always-allowed. Omitting it on `/authorize` remains valid OAuth. Hosted and headless pages set a non-blocking info signal when the client allowlists `openid` but the grant does not. ID token issuance remains a later OpenID Provider change.
+
+## Operators and custom UIs can see the grant
+
+The dashboard inspects an empty allowlist as deny-all, not `n/a`. Code-owned clients show the same warning and must be fixed in the seed. The headless view model exposes the post-allowlist grant as `scope` so a custom UI can render it. That string is the grant, not API authorization; user access tokens still have no `scope` claim.
+
+See [Build your own login and signup UI](/docs/guides/custom-login-ui).
+
+## Token and logout hardening
+
+User access tokens now carry and require RFC 9068 `typ: at+jwt`. Logout `returnTo` values that are protocol-relative are rejected so a crafted destination cannot bounce the browser to a different host.
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 3.27.0
+```
+
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test a first-party authorize request.
+
+If a first-party or headless app used `SeedBrowserClient` or an empty dashboard allowlist, set `AllowedScopes` to the same values the app sends on `/authorize` before upgrading, or those requests will complete with an empty grant. Do not treat an omitted `scope` query as “use the allowlist.”
+
+This release is backed by hosted authorize-to-token pins, control-plane parity for the dashboard warnings, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
