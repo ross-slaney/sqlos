@@ -55,6 +55,8 @@ The unified dashboard shell and the FGA component API/assets are middleware inst
 
 Discovery is the authoritative source for endpoint URLs and advertised capabilities. Do not synthesize endpoint URLs in portable clients when discovery is available.
 
+`scopes_supported` is the sorted union of scopes that at least one registered client can be granted. It omits reserved OpenID Connect names (`openid`, `profile`, `email`, `offline_access`) until SqlOS issues ID tokens, and it never includes internal `auth:*` credential-type strings. A client's allowlist may still contain those reserved names; requesting them is accepted by silent intersection. A deployment with no clients advertises an empty list. Operator-defined API scopes such as `x.read` appear when a client allowlist includes them.
+
 ## Authorization code and refresh tokens
 
 | Method | Route | Content type | Purpose |

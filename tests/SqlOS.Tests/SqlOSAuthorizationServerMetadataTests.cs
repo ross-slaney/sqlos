@@ -131,7 +131,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
     }
 
     [TestMethod]
-    public async Task GetMetadataAsync_ComposesScopesSupportedFromClientAllowlistsAndAuthCredentialTypes()
+    public async Task GetMetadataAsync_ZeroClients_AdvertisesStableEmptyScopes()
     {
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions
@@ -139,30 +139,96 @@ public sealed class SqlOSAuthorizationServerMetadataTests
             PublicOrigin = "https://app.example.com",
             Issuer = "https://app.example.com/sqlos/auth"
         };
-        optionsValue.SeedClient(client =>
-        {
-            client.ClientId = "metadata-web";
-            client.Name = "Metadata Web";
-            client.RedirectUris = ["https://app.example.test/callback"];
-            client.ClientType = "public_pkce";
-            client.RequirePkce = true;
-            client.AllowedScopes = ["openid", "profile", "custom.read"];
-        });
-        optionsValue.SeedAuthPage(page => page.EnabledCredentialTypes = ["password", "email_otp"]);
-        var emailSender = new TestAuthEmailSender { IsConfigured = true };
-        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue, emailSender);
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Should().BeEmpty();
 
         var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        metadata.ScopesSupported.Should().BeEmpty();
+        metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
 
-        metadata.ResponseTypesSupported.Should().Equal("code");
-        metadata.ScopesSupported.Should().Equal(
-            "auth:email_otp",
-            "auth:password",
-            "custom.read",
-            "openid",
-            "profile");
-        metadata.ScopesSupported.Should().Contain("auth:password");
-        metadata.ScopesSupported.Should().Contain("auth:email_otp");
+        var json = JsonSerializer.Serialize(metadata);
+        json.Should().Be(
+            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":[],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true}""");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_DefaultSingleApplication_MakesNoOidcClaimAndKeepsSeededAllowlist()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.UseSingleApplication("Acme", app => app.Origin = "https://app.example.com");
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var client = await context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().SingleAsync();
+        JsonSerializer.Deserialize<List<string>>(client.AllowedScopesJson)
+            .Should().BeEquivalentTo("openid", "profile", "email", "offline_access");
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        metadata.ScopesSupported.Should().BeEmpty();
+        metadata.ScopesSupported.Should().NotIntersectWith(["openid", "profile", "email", "offline_access"]);
+        metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
+
+        var json = JsonSerializer.Serialize(metadata);
+        json.Should().NotContain("openid");
+        json.Should().NotContain("id_token");
+        json.Should().NotContain("\"auth:");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_AdvertisesOperatorApiScopes_AndExcludesReservedOidcAndAuthPseudoScopes()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.UseSingleApplication("Acme", app =>
+        {
+            app.Origin = "https://app.example.com";
+            app.AllowedScopes = ["openid", "profile", "email", "offline_access", "auth:password", "x.read", "y.write"];
+        });
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        metadata.ScopesSupported.Should().Equal("x.read", "y.write");
+        metadata.ScopesSupported.Should().NotIntersectWith(["openid", "profile", "email", "offline_access"]);
+        metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_AddingClientWithApiScope_SurfacesThatScope()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+        var before = await service.GetMetadataAsync(new DefaultHttpContext());
+        before.ScopesSupported.Should().BeEmpty();
+
+        context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Add(new()
+        {
+            Id = "api-app",
+            ClientId = "api",
+            Name = "API",
+            ClientType = "public_pkce",
+            TokenEndpointAuthMethod = "none",
+            AllowedScopesJson = "[\"x.read\"]",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        var after = await service.GetMetadataAsync(new DefaultHttpContext());
+        after.ScopesSupported.Should().Equal("x.read");
     }
 
     private static Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(
