@@ -183,6 +183,39 @@ public sealed class SqlOSAdminDashboardTests
         detail.GetProperty("metadataJson").GetString().Should().Contain("Detail Client One");
         detail.GetProperty("recentAuditEvents").GetArrayLength().Should().BeGreaterThan(0);
         detail.GetProperty("recentAuditEvents")[0].GetProperty("eventType").GetString().Should().Be("client.disabled");
+        detail.GetProperty("emptyAllowlistWarning").GetProperty("code").GetString()
+            .Should().Be(SqlOSClientAllowlistWarnings.EmptyAllowlistCode);
+        detail.GetProperty("emptyAllowlistWarning").GetProperty("message").GetString()
+            .Should().Be(SqlOSClientAllowlistWarnings.UserFacingEmptyAllowlistMessage);
+    }
+
+    [TestMethod]
+    public async Task GetClientDetailAsync_PopulatedAllowlist_DoesNotWarn()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_populated_scopes",
+            ClientId = "populated-scopes-client",
+            Name = "Populated Scopes Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+            AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]",
+            RegistrationSource = "seeded",
+            IsFirstParty = true,
+            ConfigurationOwner = "code",
+            ConfigurationSourceKey = "populated-scopes-client",
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_populated_scopes"));
+        detail.TryGetProperty("emptyAllowlistWarning", out var warning).Should().BeTrue();
+        warning.ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [TestMethod]

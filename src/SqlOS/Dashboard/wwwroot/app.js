@@ -775,6 +775,10 @@
             badges.push(renderClientBadge("Metadata fresh", "info"));
         }
 
+        if (client.emptyAllowlistWarning) {
+            badges.push(renderClientBadge("Empty allowlist", "warning"));
+        }
+
         if (client.metadataCacheState === "stale") {
             badges.push(renderClientBadge("Metadata stale", "warning"));
         }
@@ -3288,7 +3292,7 @@
                                 <summary>Advanced fields</summary>
                                 <div class="client-advanced-grid">
                                     <textarea name="description" placeholder="Optional description">${esc(draft.description)}</textarea>
-                                    <textarea name="allowedScopes" placeholder="Optional scopes, one per line">${esc(draft.allowedScopes)}</textarea>
+                                    <textarea name="allowedScopes" placeholder="Scopes this client may be granted, one per line">${esc(draft.allowedScopes)}</textarea>
                                     <label class="checkbox-row"><input name="requirePkce" type="checkbox" ${draft.requirePkce ? "checked" : ""}> Require PKCE</label>
                                     <label class="checkbox-row"><input name="allowDeviceAuthorization" type="checkbox" ${draft.allowDeviceAuthorization ? "checked" : ""}> Allow device authorization</label>
                                     <label class="checkbox-row"><input name="confidential" type="checkbox" ${draft.confidential ? "checked" : ""}> Confidential client (issue a client secret)</label>
@@ -3296,6 +3300,7 @@
                             </details>
                             <button type="submit">Create manual client</button>
                         </form>
+                        ${!String(draft.allowedScopes || "").trim() ? `<div class="callout" data-empty-allowlist-warning="empty_allowlist"><strong>Empty allowlist grants nothing.</strong> First-party and headless apps that send scope on /authorize need those values on the client. An empty list is not a wildcard.</div>` : ""}
                         <div class="callout">
                             <strong>This form creates manual client records.</strong>
                             <div>Use owned templates for first-party apps you control. Use portable or compatibility templates for manual local testing of third-party-style clients.</div>
@@ -3320,6 +3325,7 @@
                                     </div>
                                 </div>
                                 ${isCodeOwnedClient(clientDetail) ? `<div class="callout"><strong>Code owned:</strong> Ordinary disable/enable is rejected. Emergency disable stops runtime use and survives the next seed reconcile. Change <span class="inline-code">IsActive</span> in the client seed to turn the client off permanently.</div>` : ""}
+                                ${clientDetail.emptyAllowlistWarning ? `<div class="callout" data-empty-allowlist-warning="${esc(clientDetail.emptyAllowlistWarning.code)}"><strong>Empty allowlist.</strong> ${esc(clientDetail.emptyAllowlistWarning.message)}</div>` : ""}
                                 ${!selectedClientVisible ? `
                                     <div class="callout">
                                         <strong>Selected client is outside the current list view.</strong>
@@ -3368,7 +3374,7 @@
                                     },
                                     {
                                         label: "Allowed scopes",
-                                        value: clientDetail.allowedScopes.length ? clientDetail.allowedScopes.join(", ") : "n/a"
+                                        value: clientDetail.allowedScopes.length ? clientDetail.allowedScopes.join(", ") : "none (deny-all)"
                                     }
                                 ])}
                                 <div>

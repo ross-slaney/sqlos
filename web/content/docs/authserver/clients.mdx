@@ -52,6 +52,8 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 `SeedOwnedWebApp` and `SeedBrowserClient` register redirect URIs only. They leave `AllowedScopes` empty. Set the allowlist explicitly with `SeedClient` (or the dashboard / Admin API) when the app will send a `scope` query on `/authorize`. Headless and hosted first-party apps should do both: put `openid profile email` on the client, and send the same `scope` on the authorize request. User access tokens do not carry a `scope` claim today; the pair still matters so a later OpenID Provider mode can mint an ID token instead of silently omitting it.
 
+The dashboard and Admin API surface a computed `emptyAllowlistWarning` when a user-facing client has an empty allowlist. Code-owned records show the same warning and must be fixed in the seed, not by overwriting ownership from the dashboard.
+
 ### Admin API
 
 ```bash

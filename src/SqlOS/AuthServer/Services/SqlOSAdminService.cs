@@ -1466,6 +1466,7 @@ public sealed partial class SqlOSAdminService
             item.DuplicateCount,
             item.LifecycleState,
             item.Ownership,
+            item.EmptyAllowlistWarning,
             client.MetadataJson,
             RecentAuditEvents = recentAuditEvents
         };
@@ -3342,7 +3343,14 @@ public sealed partial class SqlOSAdminService
                 || string.Equals(client.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase),
             duplicateFingerprint,
             duplicateCount,
-            client.DisabledAt != null || !client.IsActive ? "disabled" : "active");
+            client.DisabledAt != null || !client.IsActive ? "disabled" : "active",
+            SqlOSClientAllowlistWarnings.ForEmptyAllowlist(
+                allowedScopes,
+                client.IsFirstParty,
+                client.AllowNativeHeadlessAuth,
+                client.AllowDeviceAuthorization,
+                redirectUris,
+                grantTypes));
     }
 
     private static bool MatchesSourceFilter(string registrationSource, string? filter)
@@ -3703,7 +3711,8 @@ public sealed partial class SqlOSAdminService
         bool CoreMetadataEditable,
         string? DuplicateFingerprint,
         int DuplicateCount,
-        string LifecycleState);
+        string LifecycleState,
+        SqlOSClientAllowlistWarning? EmptyAllowlistWarning);
 
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,
