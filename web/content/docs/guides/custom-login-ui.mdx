@@ -174,7 +174,7 @@ async function startSignIn(): Promise<void> {
 }
 ```
 
-That `scope` value must also appear on the client's `AllowedScopes`. An empty allowlist does not mean "any scope." Omit `scope` on `/authorize` and the grant is empty even when the rest of headless login succeeds. User access tokens still authorize APIs by audience and session, not by this string.
+That `scope` value must also appear on the client's `AllowedScopes`. An empty allowlist does not mean "any scope." Omit `scope` on `/authorize` and the grant is empty even when the rest of headless login succeeds. The headless view model includes that granted string as `scope` so the custom UI can show it. User access tokens still authorize APIs by audience and session, not by this string.
 
 The 48 random bytes become a verifier within the RFC 7636 length range. SqlOS accepts `S256`, not `plain`. Do not put the verifier in the URL or durable storage, and do not add a client secret to browser code.
 

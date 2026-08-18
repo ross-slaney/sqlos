@@ -115,8 +115,67 @@ public sealed class HeadlessAuthIntegrationTests
         viewModel.View.Should().Be("signup");
         viewModel.HeadlessApiBasePath.Should().Be("/sqlos/auth/custom-headless");
         viewModel.ClientId.Should().Be(fixture.ClientId);
+        viewModel.Scope.Should().BeEmpty();
         viewModel.Providers.Should().ContainSingle(x => x.ProviderType == "Custom");
         viewModel.UiContext?["lng"]?.GetValue<string>().Should().Be("en");
+    }
+
+    [TestMethod]
+    public async Task GetRequestAsync_ExposesGrantedScope_AndOmittingScopeStillReturnsAView()
+    {
+        await using var fixture = await CreateFixtureAsync(configureOptions: options =>
+        {
+            options.ClientSeeds[0].AllowedScopes = ["openid", "profile", "email"];
+        });
+
+        var granted = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-granted-scope",
+                "openid profile email",
+                ValidPkceCodeChallenge,
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var grantedView = await fixture.HeadlessAuthService.GetRequestAsync(
+            granted.Id,
+            "login",
+            error: null,
+            pendingToken: null,
+            email: null,
+            displayName: null);
+        grantedView.Scope.Should().Be("openid profile email");
+
+        var omitted = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-omitted-scope",
+                null,
+                ValidPkceCodeChallenge,
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var omittedView = await fixture.HeadlessAuthService.GetRequestAsync(
+            omitted.Id,
+            "login",
+            error: null,
+            pendingToken: null,
+            email: null,
+            displayName: null);
+        omittedView.RequestId.Should().Be(omitted.Id);
+        omittedView.Scope.Should().BeEmpty();
     }
 
     [TestMethod]

@@ -26,6 +26,7 @@ export type HeadlessViewModel = {
   requiresMfaEnrollment?: boolean;
   mfaMethods?: string[] | null;
   totpEnrollment?: HeadlessTotpEnrollment | null;
+  scope?: string | null;
 };
 
 export type HeadlessTotpEnrollment = {
