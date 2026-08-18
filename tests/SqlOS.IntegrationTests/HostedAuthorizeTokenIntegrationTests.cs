@@ -44,14 +44,14 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     }
 
     [TestMethod]
-    public async Task HostedAuthorizeToToken_EmptyAllowedScopes_GrantsRequestedScopes()
+    public async Task HostedAuthorizeToToken_EmptyAllowedScopes_GrantsNoRequestedScopes()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
         await fixture.SetClientAllowedScopesAsync();
 
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid profile custom.read");
 
-        tokens.RootElement.GetProperty("scope").GetString().Should().Be("openid profile custom.read");
+        tokens.RootElement.GetProperty("scope").GetString().Should().Be("");
     }
 
     [TestMethod]
@@ -110,7 +110,7 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     public async Task HostedAuthorizeToToken_DuplicateScopeEntries_DeduplicatesGrantedScope()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
-        await fixture.SetClientAllowedScopesAsync();
+        await fixture.SetClientAllowedScopesAsync("openid", "profile", "email");
 
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid openid profile profile email");
 
@@ -122,7 +122,7 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     {
         var thousandCharacterScope = new string('a', 1000);
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
-        await fixture.SetClientAllowedScopesAsync();
+        await fixture.SetClientAllowedScopesAsync(thousandCharacterScope);
 
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync(thousandCharacterScope);
 
