@@ -33,6 +33,21 @@ public sealed class SqlOSAuthPageRendererTests
     }
 
     [TestMethod]
+    public void RenderPage_OmittedOpenId_MarksTheInfoCallout()
+    {
+        var model = CreateModel(mode: "login", requestId: "req_openid") with
+        {
+            Info = SqlOSOpenIdScopeWarnings.OmittedGrantedOpenIdMessage,
+            OmittedOpenId = true
+        };
+
+        var html = SqlOSAuthPageRenderer.RenderPage(model);
+
+        html.Should().Contain($"data-omitted-openid-warning=\"{SqlOSOpenIdScopeWarnings.OmittedGrantedOpenIdCode}\"");
+        html.Should().Contain(SqlOSOpenIdScopeWarnings.OmittedGrantedOpenIdMessage);
+    }
+
+    [TestMethod]
     public void RenderPage_PasswordMode_UsesMountedBasePathForPasswordPostAndProviders()
     {
         var model = CreateModel(

@@ -187,6 +187,10 @@ public sealed class SqlOSAdminDashboardTests
             .Should().Be(SqlOSClientAllowlistWarnings.EmptyAllowlistCode);
         detail.GetProperty("emptyAllowlistWarning").GetProperty("message").GetString()
             .Should().Be(SqlOSClientAllowlistWarnings.UserFacingEmptyAllowlistMessage);
+        detail.GetProperty("omittedOpenIdWarning").GetProperty("code").GetString()
+            .Should().Be(SqlOSOpenIdScopeWarnings.MissingAllowlistedOpenIdCode);
+        detail.GetProperty("omittedOpenIdWarning").GetProperty("message").GetString()
+            .Should().Be(SqlOSOpenIdScopeWarnings.MissingAllowlistedOpenIdMessage);
     }
 
     [TestMethod]
@@ -214,7 +218,72 @@ public sealed class SqlOSAdminDashboardTests
         await context.SaveChangesAsync();
 
         var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_populated_scopes"));
-        detail.TryGetProperty("emptyAllowlistWarning", out var warning).Should().BeTrue();
+        detail.TryGetProperty("emptyAllowlistWarning", out var emptyWarning).Should().BeTrue();
+        emptyWarning.ValueKind.Should().Be(JsonValueKind.Null);
+        detail.TryGetProperty("omittedOpenIdWarning", out var openIdWarning).Should().BeTrue();
+        openIdWarning.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [TestMethod]
+    public async Task GetClientDetailAsync_OmittedOpenIdWarning_ClearsWhenOpenIdIsAllowlisted()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_openid_warn",
+            ClientId = "openid-warn-client",
+            Name = "OpenID Warn Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+            AllowedScopesJson = "[\"profile\",\"email\"]",
+            RegistrationSource = "manual",
+            IsFirstParty = true,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var missing = SerializeForDashboard(await admin.GetClientDetailAsync("cli_openid_warn"));
+        missing.GetProperty("omittedOpenIdWarning").GetProperty("code").GetString()
+            .Should().Be(SqlOSOpenIdScopeWarnings.MissingAllowlistedOpenIdCode);
+
+        var stored = await context.Set<SqlOSClientApplication>().SingleAsync(x => x.Id == "cli_openid_warn");
+        stored.AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]";
+        await context.SaveChangesAsync();
+
+        var cleared = SerializeForDashboard(await admin.GetClientDetailAsync("cli_openid_warn"));
+        cleared.TryGetProperty("omittedOpenIdWarning", out var warning).Should().BeTrue();
+        warning.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [TestMethod]
+    public async Task GetClientDetailAsync_MachineOnlyClient_DoesNotWarnAboutMissingOpenId()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_machine_openid",
+            ClientId = "machine-openid-client",
+            Name = "Machine Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[]",
+            AllowedScopesJson = "[\"ledger.export\"]",
+            GrantTypesJson = "[\"client_credentials\"]",
+            RegistrationSource = "manual",
+            IsFirstParty = false,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_machine_openid"));
+        detail.TryGetProperty("omittedOpenIdWarning", out var warning).Should().BeTrue();
         warning.ValueKind.Should().Be(JsonValueKind.Null);
     }
 

@@ -72,7 +72,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `client_id` | Yes | A stored client ID or, when CIMD is enabled, an allowed HTTPS metadata-document URL. |
 | `redirect_uri` | Yes for a usable browser flow | Must match one of the resolved client's redirect URIs. |
 | `state` | Yes | Returned unchanged to the client; length must be 1–2048 characters. |
-| `scope` | No | Space-separated. SqlOS always intersects the request with the client's registered allow-list and keeps only the overlap (RFC 6749 §3.3). An empty allow-list grants nothing. Unknown requested scopes are dropped, not rejected. `openid` is an ordinary allow-listed string today and does not mint an `id_token`; issue #118 will decide always-allowed vs warning behavior. |
+| `scope` | No | Space-separated. SqlOS always intersects the request with the client's registered allow-list and keeps only the overlap (RFC 6749 §3.3). An empty allow-list grants nothing. Unknown requested scopes are dropped, not rejected. `openid` is never always-allowed and does not mint an `id_token` yet. Hosted and headless warn when an allowlisted `openid` is omitted from the grant; issue #118 will add ID token issuance. |
 | `code_challenge` | For clients that require PKCE | Verified during token exchange. |
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
