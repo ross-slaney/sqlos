@@ -29,6 +29,17 @@ public sealed class SqlOSDynamicClientRegistrationOptions
     public int MaxRegistrationsPerWindow { get; set; } = 25;
     public bool EnableAutomaticCleanup { get; set; } = true;
     public TimeSpan StaleClientRetention { get; set; } = TimeSpan.FromDays(30);
+    /// <summary>
+    /// Optional operator ceiling for dynamically registered <c>scope</c> values.
+    /// When non-empty, requested scopes outside this set are a registration error.
+    /// When empty, requested scopes are registered as-is, bounded by
+    /// <see cref="MaxScopeCount"/> and <see cref="MaxScopeLength"/>.
+    /// </summary>
+    public List<string> AllowedScopes { get; } = [];
+    /// <summary>Maximum number of scope tokens a registration request may include.</summary>
+    public int MaxScopeCount { get; set; } = 32;
+    /// <summary>Maximum length of a single scope token in a registration request.</summary>
+    public int MaxScopeLength { get; set; } = 128;
     public Func<SqlOSDynamicClientRegistrationPolicyContext, CancellationToken, Task<SqlOSClientRegistrationPolicyDecision>>? Policy { get; set; }
 }
 
@@ -66,6 +77,7 @@ public sealed class SqlOSDynamicClientRegistrationPolicyContext
     public IReadOnlyList<string> RedirectUris { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> GrantTypes { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> ResponseTypes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> Scopes { get; init; } = Array.Empty<string>();
     public string? TokenEndpointAuthMethod { get; init; }
     public string? SoftwareId { get; init; }
     public string? SoftwareVersion { get; init; }

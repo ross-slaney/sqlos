@@ -66,7 +66,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                 GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                 ResponseTypesJson = JsonSerializer.Serialize(normalized.ResponseTypes),
                 RequirePkce = _options.ClientRegistration.Dcr.RequirePkce,
-                AllowedScopesJson = "[]",
+                AllowedScopesJson = JsonSerializer.Serialize(normalized.Scopes),
                 IsFirstParty = false,
                 RedirectUrisJson = JsonSerializer.Serialize(normalized.RedirectUris),
                 MetadataJson = JsonSerializer.Serialize(request),
@@ -93,6 +93,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                     redirect_uris = normalized.RedirectUris,
                     grant_types = normalized.GrantTypes,
                     response_types = normalized.ResponseTypes,
+                    scope = SqlOSScopePolicy.Join(normalized.Scopes),
                     token_endpoint_auth_method = normalized.TokenEndpointAuthMethod,
                     software_id = normalized.SoftwareId,
                     software_version = normalized.SoftwareVersion
@@ -111,7 +112,8 @@ public sealed class SqlOSDynamicClientRegistrationService
                 ClientUri = normalized.ClientUri,
                 LogoUri = normalized.LogoUri,
                 SoftwareId = normalized.SoftwareId,
-                SoftwareVersion = normalized.SoftwareVersion
+                SoftwareVersion = normalized.SoftwareVersion,
+                Scope = SqlOSScopePolicy.Join(normalized.Scopes)
             };
         }
         catch (SqlOSClientRegistrationException ex)
@@ -129,6 +131,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                     redirect_uris = request.RedirectUris,
                     grant_types = request.GrantTypes,
                     response_types = request.ResponseTypes,
+                    scope = request.Scope,
                     token_endpoint_auth_method = request.TokenEndpointAuthMethod,
                     software_id = request.SoftwareId,
                     software_version = request.SoftwareVersion
@@ -192,6 +195,7 @@ public sealed class SqlOSDynamicClientRegistrationService
         var logoUri = NormalizeOptionalUrl(request.LogoUri, nameof(request.LogoUri));
         var softwareId = NormalizeOptionalText(request.SoftwareId);
         var softwareVersion = NormalizeOptionalText(request.SoftwareVersion);
+        var scopes = NormalizeScopes(request.Scope);
 
         var policy = _options.ClientRegistration.Dcr.Policy;
         if (policy != null)
@@ -204,6 +208,7 @@ public sealed class SqlOSDynamicClientRegistrationService
                     RedirectUris = redirectUris,
                     GrantTypes = grantTypes,
                     ResponseTypes = responseTypes,
+                    Scopes = scopes,
                     TokenEndpointAuthMethod = tokenEndpointAuthMethod,
                     SoftwareId = softwareId,
                     SoftwareVersion = softwareVersion
@@ -223,11 +228,69 @@ public sealed class SqlOSDynamicClientRegistrationService
             redirectUris,
             grantTypes,
             responseTypes,
+            scopes,
             tokenEndpointAuthMethod,
             clientUri,
             logoUri,
             softwareId,
             softwareVersion);
+    }
+
+    private List<string> NormalizeScopes(string? scope)
+    {
+        var requested = SqlOSScopePolicy.Split(scope);
+        var dcr = _options.ClientRegistration.Dcr;
+        if (requested.Count > dcr.MaxScopeCount)
+        {
+            throw new SqlOSClientRegistrationException(
+                "invalid_client_metadata",
+                $"scope cannot contain more than {dcr.MaxScopeCount} values.");
+        }
+
+        foreach (var token in requested)
+        {
+            if (token.Length > dcr.MaxScopeLength || !IsValidScopeToken(token))
+            {
+                throw new SqlOSClientRegistrationException(
+                    "invalid_client_metadata",
+                    "scope contains an invalid or oversized value.");
+            }
+        }
+
+        var ceiling = dcr.AllowedScopes
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ceiling.Count == 0)
+        {
+            return requested;
+        }
+
+        var outside = requested
+            .Where(token => !ceiling.Contains(token, StringComparer.Ordinal))
+            .ToList();
+        if (outside.Count > 0)
+        {
+            throw new SqlOSClientRegistrationException(
+                "invalid_client_metadata",
+                $"scope contains values outside the operator-configured DCR allow-list: {string.Join(", ", outside)}.");
+        }
+
+        return requested;
+    }
+
+    private static bool IsValidScopeToken(string token)
+    {
+        foreach (var ch in token)
+        {
+            if (ch is < (char)0x21 or > (char)0x7E or '"' or '\\')
+            {
+                return false;
+            }
+        }
+
+        return token.Length > 0;
     }
 
     private List<string> NormalizeRedirectUris(List<string> redirectUris)
@@ -362,6 +425,7 @@ public sealed class SqlOSDynamicClientRegistrationService
         List<string> RedirectUris,
         List<string> GrantTypes,
         List<string> ResponseTypes,
+        List<string> Scopes,
         string TokenEndpointAuthMethod,
         string? ClientUri,
         string? LogoUri,

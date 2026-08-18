@@ -414,8 +414,10 @@ public sealed class SqlOSCimdClientService
             .SequenceEqual(parsed.GrantTypes, StringComparer.Ordinal);
         var responseTypesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.ResponseTypesJson)
             .SequenceEqual(parsed.ResponseTypes, StringComparer.Ordinal);
+        var scopesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.AllowedScopesJson)
+            .SequenceEqual(parsed.Scopes, StringComparer.Ordinal);
 
-        return redirectsChanged || authMethodChanged || grantTypesChanged || responseTypesChanged;
+        return redirectsChanged || authMethodChanged || grantTypesChanged || responseTypesChanged || scopesChanged;
     }
 
     private async Task RevokeActiveSessionsAsync(string clientApplicationId, CancellationToken cancellationToken)
@@ -501,7 +503,7 @@ public sealed class SqlOSCimdClientService
         var normalizedResponseTypes = responseTypes.Count > 0
             ? responseTypes
             : new List<string> { "code" };
-        var scopes = SplitScope(GetOptionalString(root, "scope"));
+        var scopes = SqlOSScopePolicy.Split(GetOptionalString(root, "scope"));
 
         return new ParsedCimdDocument(
             documentClientId,
@@ -693,13 +695,6 @@ public sealed class SqlOSCimdClientService
             .Distinct(StringComparer.Ordinal)
             .ToList();
     }
-
-    private static List<string> SplitScope(string? scope)
-        => string.IsNullOrWhiteSpace(scope)
-            ? []
-            : scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
 
     private static bool HasJsonMediaType(string? mediaType)
     {

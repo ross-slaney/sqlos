@@ -108,15 +108,7 @@ public sealed class SqlOSClientCredentialsService
             throw new SqlOSClientCredentialsException("invalid_target", "An authorized resource is required.");
         }
 
-        var allowed = SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson);
-        var scopes = (requestedScope ?? string.Empty)
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (scopes.Any(scope => !allowed.Contains(scope, StringComparer.Ordinal)))
-        {
-            throw new SqlOSClientCredentialsException("invalid_scope", "The requested scope is not authorized.");
-        }
+        var scopes = SqlOSScopePolicy.Grant(requestedScope, client.AllowedScopesJson);
 
         var tokenSubject = account?.SubjectId ?? client.ClientId;
         var token = await _crypto.CreateServiceAccessTokenAsync(

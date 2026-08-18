@@ -56,15 +56,16 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
     }
 
     [TestMethod]
-    public async Task StartAsync_RejectsUnsupportedScopesAndResources()
+    public async Task StartAsync_IntersectsUnknownScopes_AndRejectsMismatchedResources()
     {
         await using var harness = await Harness.CreateAsync();
 
-        var invalidScope = await Assert.ThrowsExceptionAsync<SqlOSDeviceAuthorizationException>(() =>
-            harness.Device.StartAsync(
-                new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid todos.delete", "https://api.example.com/todos"),
-                harness.Http));
-        invalidScope.Error.Should().Be("invalid_scope");
+        var started = await harness.Device.StartAsync(
+            new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid todos.delete", "https://api.example.com/todos"),
+            harness.Http);
+        started.DeviceCode.Should().NotBeNullOrWhiteSpace();
+        var stored = await harness.Context.Set<SqlOSDeviceAuthorization>().SingleAsync();
+        stored.Scope.Should().Be("openid");
 
         var invalidResource = await Assert.ThrowsExceptionAsync<SqlOSDeviceAuthorizationException>(() =>
             harness.Device.StartAsync(
@@ -74,18 +75,19 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
     }
 
     [TestMethod]
-    public async Task StartAsync_EmptyAllowlistRejectsEveryRequestedScope()
+    public async Task StartAsync_EmptyAllowlistGrantsNoRequestedScopes()
     {
         await using var harness = await Harness.CreateAsync();
         var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "todo-cli");
         client.AllowedScopesJson = "[]";
         await harness.Context.SaveChangesAsync();
 
-        var emptyAllowlist = await Assert.ThrowsExceptionAsync<SqlOSDeviceAuthorizationException>(() =>
-            harness.Device.StartAsync(
-                new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid todos.read", "https://api.example.com/todos"),
-                harness.Http));
-        emptyAllowlist.Error.Should().Be("invalid_scope");
+        var started = await harness.Device.StartAsync(
+            new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid todos.read", "https://api.example.com/todos"),
+            harness.Http);
+        started.DeviceCode.Should().NotBeNullOrWhiteSpace();
+        var stored = await harness.Context.Set<SqlOSDeviceAuthorization>().SingleAsync();
+        stored.Scope.Should().BeEmpty();
     }
 
     [TestMethod]

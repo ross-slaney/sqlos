@@ -70,7 +70,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `client_id` | Yes | A stored client ID or, when CIMD is enabled, an allowed HTTPS metadata-document URL. |
 | `redirect_uri` | Yes for a usable browser flow | Must match one of the resolved client's redirect URIs. |
 | `state` | Yes | Returned unchanged to the client; length must be 1–2048 characters. |
-| `scope` | No | Space-separated. SqlOS always intersects requested scopes with the client's `AllowedScopes` allowlist and redirects with the granted subset, which may be empty. An empty allowlist grants no requested scopes; it is not a wildcard. |
+| `scope` | No | Space-separated. SqlOS always intersects the request with the client's registered allow-list and keeps only the overlap (RFC 6749 §3.3). An empty allow-list grants nothing. Unknown requested scopes are dropped, not rejected. `openid` is an ordinary allow-listed string today and does not mint an `id_token`; issue #118 will decide always-allowed vs warning behavior. |
 | `code_challenge` | For clients that require PKCE | Verified during token exchange. |
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
@@ -80,7 +80,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 
 SqlOS-specific presentation parameters include `view` (`invite`, `login`, `signup`, `password`, `forgot-password`, `email-otp`, `phone-otp`, or `phone-otp-signup`), `ui_context` for a headless UI, and `invitation_token`/`invitationToken` for an invitation-bound flow. Portable OAuth clients should rely only on discovery and standard parameters.
 
-On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, `state`, and the granted `scope`. Errors that occur after a valid authorization request can redirect to the client; malformed requests handled before that point render the hosted error page or redirect to the configured headless UI. Do not assume every `/authorize` failure has a JSON body.
+On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, `state`, and the granted `scope` when that grant is non-empty. The `scope` query parameter is an intentional SqlOS extension: RFC 6749 §4.1.2 permits extra parameters, and clients can read the actual grant before exchanging the code. Errors that occur after a valid authorization request can redirect to the client; malformed requests handled before that point render the hosted error page or redirect to the configured headless UI. Do not assume every `/authorize` failure has a JSON body.
 
 ### Token request
 
@@ -121,7 +121,7 @@ curl -X POST https://app.example.com/sqlos/auth/token \
   --data-urlencode 'refresh_token=...'
 ```
 
-Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, and `expires_in`. OAuth errors use an `error` code and may include `error_description`.
+Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, `expires_in`, and `scope`. `scope` is the granted set after the same silent intersection used by `/authorize`, device authorization, and `client_credentials`. An empty grant is returned as an empty string rather than `invalid_scope`. OAuth errors use an `error` code and may include `error_description`.
 
 ## Device authorization
 
@@ -169,7 +169,7 @@ Honor `interval` while polling `/token`. Device errors use the OAuth-style `erro
 | `access_denied` | The user denied the request. |
 | `expired_token` | The device code expired. |
 | `unauthorized_client` / `invalid_client` | The client is not eligible for public device authorization. |
-| `invalid_scope` / `invalid_target` | A requested scope is not on the client's allowlist (an empty allowlist rejects every requested scope), or the requested resource is not allowed. |
+| `invalid_target` | The requested resource is not allowed for this client. Unknown scopes are dropped by silent intersection rather than rejected. |
 | `invalid_grant` | The device code is invalid, mismatched, or already consumed. |
 
 ## Hosted AuthPage
@@ -330,7 +330,7 @@ Prefer canonical `/sqlos/auth/authorize` plus `/sqlos/auth/token` over invoking 
 
 ## Dynamic client registration
 
-`POST /sqlos/auth/register` is mapped only when `AuthServer.ClientRegistration.Dcr.Enabled` is `true`. It accepts a `SqlOSDynamicClientRegistrationRequest` JSON document and applies the configured DCR redirect, client-type, rate-limit, and policy constraints.
+`POST /sqlos/auth/register` is mapped only when `AuthServer.ClientRegistration.Dcr.Enabled` is `true`. It accepts a `SqlOSDynamicClientRegistrationRequest` JSON document and applies the configured DCR redirect, client-type, rate-limit, scope-ceiling, and policy constraints.
 
 | Request field | Behavior |
 | --- | --- |
@@ -339,10 +339,13 @@ Prefer canonical `/sqlos/auth/authorize` plus `/sqlos/auth/token` over invoking 
 | `grant_types` | Limited to the supported public-client grant set |
 | `response_types` | `code` for authorization-code clients |
 | `token_endpoint_auth_method` | `none`; confidential client secrets are not issued |
+| `scope` | Optional space-delimited allow-list persisted as the client's `AllowedScopesJson`. Later grants intersect requested scopes with this registered set. When omitted, SqlOS registers an empty allow-list. The response always echoes `scope` (an empty string when none were registered) so the client can predict later grants from the response alone. |
 | `client_uri` / `logo_uri` | Optional client presentation metadata |
 | `software_id` / `software_version` | Optional software metadata |
 
-Success returns `201 Created` with `SqlOSDynamicClientRegistrationResponse`. Rejections use `{ error, error_description }` with the status selected by `SqlOSClientRegistrationException`. SqlOS does not implement an RFC 7592 client-management endpoint.
+When `AuthServer.ClientRegistration.Dcr.AllowedScopes` is non-empty, it is the operator ceiling: requested scopes outside that set are `invalid_client_metadata`. When the ceiling list is empty, requested scopes are registered as-is, still bounded by `MaxScopeCount` (default 32) and `MaxScopeLength` (default 128). Exceeding those limits is a registration error.
+
+Success returns `201 Created` with `SqlOSDynamicClientRegistrationResponse`, including `scope`. Rejections use `{ error, error_description }` with the status selected by `SqlOSClientRegistrationException`. SqlOS does not implement an RFC 7592 client-management endpoint.
 
 CIMD does not add a registration route. When enabled, SqlOS resolves URL-shaped client IDs through client metadata documents subject to its trust configuration. See [Preregistration vs CIMD vs DCR](/docs/authserver/preregistration-vs-cimd-vs-dcr).
 

@@ -328,6 +328,22 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenDcrScopeCeilingsAreNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ClientRegistration.Dcr.MaxScopeCount = 0;
+            options.AuthServer.ClientRegistration.Dcr.MaxScopeLength = 0;
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer.ClientRegistration.Dcr.MaxScopeCount must be greater than zero.*")
+            .WithMessage("*AuthServer.ClientRegistration.Dcr.MaxScopeLength must be greater than zero.*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_Throws_WhenCalendarConnectSessionLifetimeIsNotPositive()
     {
         var services = new ServiceCollection();

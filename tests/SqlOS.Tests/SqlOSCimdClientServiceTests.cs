@@ -680,6 +680,78 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_WidenedScope_RevokesSessionsAndAuditsMetadataChange()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_scope_changed",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            AllowedScopesJson = "[\"openid\"]",
+            RedirectUrisJson = "[\"https://client.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        context.Set<SqlOSSession>().Add(new SqlOSSession
+        {
+            Id = "sess_scope_changed",
+            UserId = "usr_1",
+            ClientApplicationId = existing.Id,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+            LastSeenAt = DateTime.UtcNow.AddMinutes(-1),
+            IdleExpiresAt = DateTime.UtcNow.AddHours(1),
+            AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
+        context.Set<SqlOSRefreshToken>().Add(new SqlOSRefreshToken
+        {
+            Id = "rt_scope_changed",
+            SessionId = "sess_scope_changed",
+            TokenHash = "hash_scope_changed",
+            FamilyId = "fam_scope_changed",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
+        await context.SaveChangesAsync();
+
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Example MCP Client",
+              "redirect_uris": ["https://client.example.test/callback"],
+              "token_endpoint_auth_method": "none",
+              "scope": "openid profile"
+            }
+            """));
+
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/callback");
+
+        resolved.RequiresFreshConsent.Should().BeTrue();
+        resolved.Client.AllowedScopesJson.Should().Contain("profile");
+        var session = await context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_scope_changed");
+        var refreshToken = await context.Set<SqlOSRefreshToken>().SingleAsync(x => x.Id == "rt_scope_changed");
+        session.RevokedAt.Should().NotBeNull();
+        session.RevocationReason.Should().Be("cimd_metadata_changed");
+        refreshToken.RevokedAt.Should().NotBeNull();
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.metadata-changed")).Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_RejectsInvalidContentType()
     {
         using var context = CreateContext();

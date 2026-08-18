@@ -36,13 +36,14 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
 
         result.ClientId.Should().StartWith("dcrcli_");
         result.TokenEndpointAuthMethod.Should().Be("none");
+        result.Scope.Should().BeEmpty();
         var storedClient = await context.Set<SqlOSClientApplication>().SingleAsync();
         storedClient.RegistrationSource.Should().Be("dcr");
         storedClient.TokenEndpointAuthMethod.Should().Be("none");
+        storedClient.AllowedScopesJson.Should().Be("[]");
         storedClient.MetadataJson.Should().Contain("ChatGPT Client");
         storedClient.SoftwareId.Should().Be("chatgpt");
         storedClient.SoftwareVersion.Should().Be("2026.03");
-        storedClient.AllowedScopesJson.Should().Be("[]");
         var audit = await context.Set<SqlOSAuditEvent>().SingleAsync();
         audit.EventType.Should().Be("client.dcr.registered");
     }
@@ -53,14 +54,96 @@ public sealed class SqlOSDynamicClientRegistrationServiceTests
         using var context = CreateContext();
         var service = CreateService(context, CreateOptions(), new SqlOSDynamicClientRegistrationRateLimiter());
 
-        await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        var result = await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
         {
             ClientName = "Empty Allowlist Client",
             RedirectUris = ["https://client.example.test/callback"]
         }, CreateHttpContext("10.0.0.8"));
 
+        result.Scope.Should().BeEmpty();
         var storedClient = await context.Set<SqlOSClientApplication>().SingleAsync();
         storedClient.AllowedScopesJson.Should().Be("[]");
+    }
+
+    [TestMethod]
+    public async Task RegisterAsync_PersistsAndEchoesRequestedScope()
+    {
+        using var context = CreateContext();
+        var service = CreateService(context, CreateOptions(), new SqlOSDynamicClientRegistrationRateLimiter());
+
+        var result = await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Scoped Client",
+            RedirectUris = ["https://client.example.test/callback"],
+            Scope = "openid profile offline_access"
+        }, CreateHttpContext("10.0.0.10"));
+
+        result.Scope.Should().Be("openid profile offline_access");
+        var storedClient = await context.Set<SqlOSClientApplication>().SingleAsync();
+        storedClient.AllowedScopesJson.Should().Be("[\"openid\",\"profile\",\"offline_access\"]");
+    }
+
+    [TestMethod]
+    public async Task RegisterAsync_RejectsScopesOutsideOperatorCeiling()
+    {
+        using var context = CreateContext();
+        var optionsValue = CreateOptions();
+        optionsValue.ClientRegistration.Dcr.AllowedScopes.Add("openid");
+        optionsValue.ClientRegistration.Dcr.AllowedScopes.Add("profile");
+        var service = CreateService(context, optionsValue, new SqlOSDynamicClientRegistrationRateLimiter());
+
+        var act = () => service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Ceiling Client",
+            RedirectUris = ["https://client.example.test/callback"],
+            Scope = "openid admin.superuser"
+        }, CreateHttpContext("10.0.0.11"));
+
+        var ex = await act.Should().ThrowAsync<SqlOSClientRegistrationException>();
+        ex.Which.Error.Should().Be("invalid_client_metadata");
+        ex.Which.Message.Should().Contain("admin.superuser");
+        (await context.Set<SqlOSClientApplication>().CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task RegisterAsync_HonorsSubsetOfOperatorCeiling()
+    {
+        using var context = CreateContext();
+        var optionsValue = CreateOptions();
+        optionsValue.ClientRegistration.Dcr.AllowedScopes.Add("openid");
+        optionsValue.ClientRegistration.Dcr.AllowedScopes.Add("profile");
+        var service = CreateService(context, optionsValue, new SqlOSDynamicClientRegistrationRateLimiter());
+
+        var result = await service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Ceiling Subset",
+            RedirectUris = ["https://client.example.test/callback"],
+            Scope = "openid"
+        }, CreateHttpContext("10.0.0.12"));
+
+        result.Scope.Should().Be("openid");
+        (await context.Set<SqlOSClientApplication>().SingleAsync())
+            .AllowedScopesJson.Should().Be("[\"openid\"]");
+    }
+
+    [TestMethod]
+    public async Task RegisterAsync_RejectsScopeCountAboveMax()
+    {
+        using var context = CreateContext();
+        var optionsValue = CreateOptions();
+        optionsValue.ClientRegistration.Dcr.MaxScopeCount = 2;
+        var service = CreateService(context, optionsValue, new SqlOSDynamicClientRegistrationRateLimiter());
+
+        var act = () => service.RegisterAsync(new SqlOSDynamicClientRegistrationRequest
+        {
+            ClientName = "Too Many Scopes",
+            RedirectUris = ["https://client.example.test/callback"],
+            Scope = "one two three"
+        }, CreateHttpContext("10.0.0.13"));
+
+        var ex = await act.Should().ThrowAsync<SqlOSClientRegistrationException>();
+        ex.Which.Error.Should().Be("invalid_client_metadata");
+        (await context.Set<SqlOSClientApplication>().CountAsync()).Should().Be(0);
     }
 
     [TestMethod]

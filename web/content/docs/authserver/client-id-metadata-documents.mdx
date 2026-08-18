@@ -15,7 +15,7 @@ Use `CIMD` when:
 
 - a client should work across many auth-server deployments
 - the client already has a stable HTTPS home
-- you want the client to own its redirect URIs and display metadata
+- you want the client to own its redirect URIs, display metadata, and self-declared `scope`
 
 Do **not** start here if you are just wiring your own first-party web app. Seed a client first and keep the first version simple.
 
@@ -60,13 +60,18 @@ SqlOS expects:
 - `client_name`
 - `redirect_uris`
 - `token_endpoint_auth_method=none` in v1
+- optional `scope`, stored as the client's registered allow-list
 
 SqlOS also:
 
 - validates redirect URIs from the document, not the dashboard
+- accepts the document's self-declared `scope` as registered metadata (there is no separate CIMD ceiling; later grants still intersect requested scopes with that stored allow-list)
+- treats a republished document that changes `scope` as a security-sensitive metadata change, the same as a redirect, grant-type, response-type, or token-endpoint auth-method change: active sessions are revoked and SqlOS records `client.cimd.metadata-changed`
 - respects HTTP cache headers when possible
 - uses a fallback TTL when needed
 - records fetch and validation failures in audit events
+
+`openid` in a CIMD document is an ordinary allow-listed string. It does not mint an `id_token`.
 
 ## Trust policy
 

@@ -436,6 +436,16 @@ internal static class SqlOSOptionsValidator
         {
             errors.Add("AuthServer.ClientRegistration.Dcr.StaleClientRetention must be greater than zero.");
         }
+
+        if (options.ClientRegistration.Dcr.MaxScopeCount <= 0)
+        {
+            errors.Add("AuthServer.ClientRegistration.Dcr.MaxScopeCount must be greater than zero.");
+        }
+
+        if (options.ClientRegistration.Dcr.MaxScopeLength <= 0)
+        {
+            errors.Add("AuthServer.ClientRegistration.Dcr.MaxScopeLength must be greater than zero.");
+        }
     }
 
     private static void ValidateEmailOtpOptions(SqlOSEmailOtpOptions options, List<string> errors)

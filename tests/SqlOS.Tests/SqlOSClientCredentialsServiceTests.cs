@@ -45,7 +45,7 @@ public sealed class SqlOSClientCredentialsServiceTests
     }
 
     [TestMethod]
-    public async Task WrongAudienceScopeOrSecret_IsRejectedWithoutTokenIssuance()
+    public async Task WrongAudienceOrSecret_IsRejected_AndUnknownScopeIsDropped()
     {
         await using var harness = await CreateHarnessAsync();
 
@@ -55,28 +55,28 @@ public sealed class SqlOSClientCredentialsServiceTests
         await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
             "ledger-worker", harness.Secret, "https://api.example.test/other", "ledger.read",
             new DefaultHttpContext(), default));
-        await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() => harness.Service.ExchangeAsync(
+        var unknownScope = await harness.Service.ExchangeAsync(
             "ledger-worker", harness.Secret, "https://api.example.test/ledger", "ledger.write",
-            new DefaultHttpContext(), default));
+            new DefaultHttpContext(), default);
+        unknownScope.Scopes.Should().BeEmpty();
     }
 
     [TestMethod]
-    public async Task EmptyAllowlist_RejectsEveryRequestedScope()
+    public async Task EmptyAllowlist_GrantsNoRequestedScopes()
     {
         await using var harness = await CreateHarnessAsync();
         var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync();
         client.AllowedScopesJson = "[]";
         await harness.Context.SaveChangesAsync();
 
-        var emptyAllowlist = await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() =>
-            harness.Service.ExchangeAsync(
-                "ledger-worker",
-                harness.Secret,
-                "https://api.example.test/ledger",
-                "ledger.read",
-                new DefaultHttpContext(),
-                default));
-        emptyAllowlist.Error.Should().Be("invalid_scope");
+        var emptyAllowlist = await harness.Service.ExchangeAsync(
+            "ledger-worker",
+            harness.Secret,
+            "https://api.example.test/ledger",
+            "ledger.read",
+            new DefaultHttpContext(),
+            default);
+        emptyAllowlist.Scopes.Should().BeEmpty();
     }
 
     [TestMethod]
