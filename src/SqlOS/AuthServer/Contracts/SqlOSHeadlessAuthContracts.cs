@@ -43,7 +43,8 @@ public sealed record SqlOSHeadlessViewModel(
     bool RequiresMfaEnrollment = false,
     IReadOnlyList<string>? MfaMethods = null,
     SqlOSTotpEnrollmentStartResult? TotpEnrollment = null,
-    string Scope = "");
+    string Scope = "",
+    bool OmittedOpenId = false);
 
 public sealed record SqlOSHeadlessActionResult(
     string Type,

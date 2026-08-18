@@ -1669,6 +1669,8 @@ public sealed class SqlOSHeadlessAuthService
         var deviceAuthorization = string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId) || _deviceAuthorizationService == null
             ? null
             : ToHeadlessDeviceAuthorization(await _deviceAuthorizationService.ResolveAsync(authorizationRequest, user: null, cancellationToken));
+        var allowedScopes = SqlOSAdminService.DeserializeJsonList(authorizationRequest.ClientApplication?.AllowedScopesJson);
+        var requestWarning = SqlOSOpenIdScopeWarnings.ApplyRequestWarning(info, allowedScopes, authorizationRequest.Scope);
 
         return new SqlOSHeadlessViewModel(
             NormalizeView(requestedView),
@@ -1681,7 +1683,7 @@ public sealed class SqlOSHeadlessAuthService
             email ?? authorizationRequest.LoginHintEmail,
             displayName,
             error,
-            info,
+            requestWarning.Info,
             fieldErrors ?? new Dictionary<string, string>(StringComparer.Ordinal),
             challengeToken,
             signupToken,
@@ -1696,7 +1698,8 @@ public sealed class SqlOSHeadlessAuthService
             RequiresMfaEnrollment: requiresMfaEnrollment,
             MfaMethods: mfaMethods ?? Array.Empty<string>(),
             TotpEnrollment: totpEnrollment,
-            Scope: authorizationRequest.Scope);
+            Scope: authorizationRequest.Scope,
+            OmittedOpenId: requestWarning.OmittedOpenId);
     }
 
     private async Task<string> PublicViewErrorMessageAsync(
@@ -2019,6 +2022,13 @@ public sealed class SqlOSHeadlessAuthService
         {
             ["deviceUserCode"] = resolved.UserCode
         };
+        var client = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ClientId == resolved.ClientId, cancellationToken);
+        var requestWarning = SqlOSOpenIdScopeWarnings.ApplyRequestWarning(
+            info,
+            SqlOSAdminService.DeserializeJsonList(client?.AllowedScopesJson),
+            resolved.Scope);
 
         return new SqlOSHeadlessViewModel(
             NormalizeView(view),
@@ -2031,7 +2041,7 @@ public sealed class SqlOSHeadlessAuthService
             Email: null,
             DisplayName: null,
             Error: error,
-            Info: info,
+            Info: requestWarning.Info,
             FieldErrors: new Dictionary<string, string>(StringComparer.Ordinal),
             ChallengeToken: null,
             SignupToken: null,
@@ -2041,7 +2051,8 @@ public sealed class SqlOSHeadlessAuthService
             Invitation: null,
             UiContext: uiContext,
             DeviceAuthorization: ToHeadlessDeviceAuthorization(resolved),
-            Scope: resolved.Scope);
+            Scope: resolved.Scope,
+            OmittedOpenId: requestWarning.OmittedOpenId);
     }
 
     private static SqlOSHeadlessDeviceAuthorizationDto ToHeadlessDeviceAuthorization(SqlOSDeviceAuthorizationResolveResult resolved)

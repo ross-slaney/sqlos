@@ -779,6 +779,10 @@
             badges.push(renderClientBadge("Empty allowlist", "warning"));
         }
 
+        if (client.omittedOpenIdWarning) {
+            badges.push(renderClientBadge("No openid", "warning"));
+        }
+
         if (client.metadataCacheState === "stale") {
             badges.push(renderClientBadge("Metadata stale", "warning"));
         }
@@ -792,6 +796,11 @@
 
     function isCodeOwnedClient(client) {
         return client?.ownership?.owner === "code" || !!client?.managedByStartupSeed;
+    }
+
+    function draftOmitsOpenId(draft) {
+        const scopes = String(draft?.allowedScopes || "").split(/[\s,]+/).filter(Boolean);
+        return scopes.length > 0 && !scopes.includes("openid");
     }
 
     function clientLifecycleAction(client) {
@@ -3301,6 +3310,7 @@
                             <button type="submit">Create manual client</button>
                         </form>
                         ${!String(draft.allowedScopes || "").trim() ? `<div class="callout" data-empty-allowlist-warning="empty_allowlist"><strong>Empty allowlist grants nothing.</strong> First-party and headless apps that send scope on /authorize need those values on the client. An empty list is not a wildcard.</div>` : ""}
+                        ${draftOmitsOpenId(draft) ? `<div class="callout" data-omitted-openid-warning="missing_allowlisted_openid"><strong>Allowlist omits openid.</strong> SqlOS does not issue an id_token yet. When OpenID Provider mode ships, this client cannot receive one until openid is allowlisted.</div>` : ""}
                         <div class="callout">
                             <strong>This form creates manual client records.</strong>
                             <div>Use owned templates for first-party apps you control. Use portable or compatibility templates for manual local testing of third-party-style clients.</div>
@@ -3326,6 +3336,7 @@
                                 </div>
                                 ${isCodeOwnedClient(clientDetail) ? `<div class="callout"><strong>Code owned:</strong> Ordinary disable/enable is rejected. Emergency disable stops runtime use and survives the next seed reconcile. Change <span class="inline-code">IsActive</span> in the client seed to turn the client off permanently.</div>` : ""}
                                 ${clientDetail.emptyAllowlistWarning ? `<div class="callout" data-empty-allowlist-warning="${esc(clientDetail.emptyAllowlistWarning.code)}"><strong>Empty allowlist.</strong> ${esc(clientDetail.emptyAllowlistWarning.message)}</div>` : ""}
+                                ${clientDetail.omittedOpenIdWarning ? `<div class="callout" data-omitted-openid-warning="${esc(clientDetail.omittedOpenIdWarning.code)}"><strong>Allowlist omits openid.</strong> ${esc(clientDetail.omittedOpenIdWarning.message)}</div>` : ""}
                                 ${!selectedClientVisible ? `
                                     <div class="callout">
                                         <strong>Selected client is outside the current list view.</strong>

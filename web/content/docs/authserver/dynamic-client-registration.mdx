@@ -83,7 +83,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`openid` is stored and granted as an ordinary allow-listed string. It does not mint an `id_token`; issue #118 will decide always-allowed vs warning behavior.
+`openid` is stored and granted as an ordinary allow-listed string. It is never always-allowed and does not mint an `id_token` yet. Issue #118 will add ID token issuance; the warning when an OIDC-capable client omits `openid` is already on the admin, dashboard, hosted, and headless surfaces.
 
 ## Operational controls
 

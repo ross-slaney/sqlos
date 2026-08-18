@@ -274,15 +274,22 @@ public static partial class EndpointRouteBuilderExtensions
             email ??= invitation.Email;
         }
 
-        if (invitation == null && invitationService != null && !string.IsNullOrWhiteSpace(authorizationRequestId))
+        SqlOSAuthorizationRequest? authorizationRequest = null;
+        if (!string.IsNullOrWhiteSpace(authorizationRequestId))
         {
-            var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
-            if (authorizationRequest != null)
+            authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+            if (invitation == null && invitationService != null && authorizationRequest != null)
             {
                 invitation = await invitationService.GetBoundInvitationAsync(authorizationRequest, cancellationToken);
                 email ??= invitation?.Email;
             }
         }
+
+        var requestWarning = SqlOSOpenIdScopeWarnings.ApplyRequestWarning(
+            info,
+            SqlOSAdminService.DeserializeJsonList(authorizationRequest?.ClientApplication?.AllowedScopesJson),
+            authorizationRequest?.Scope ?? deviceAuthorization?.Scope);
+        info = requestWarning.Info;
 
         var providerBasePath = authorizationRequestId == null
             ? null
@@ -330,7 +337,8 @@ public static partial class EndpointRouteBuilderExtensions
             enrollmentToken,
             totpSecret,
             totpProvisioningUri,
-            totpQrCodeDataUrl);
+            totpQrCodeDataUrl,
+            OmittedOpenId: requestWarning.OmittedOpenId);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)

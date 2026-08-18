@@ -118,6 +118,101 @@ public sealed class HeadlessAuthIntegrationTests
         viewModel.Scope.Should().BeEmpty();
         viewModel.Providers.Should().ContainSingle(x => x.ProviderType == "Custom");
         viewModel.UiContext?["lng"]?.GetValue<string>().Should().Be("en");
+        viewModel.OmittedOpenId.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task GetRequestAsync_AllowlistedOpenIdWithOmittedScope_SetsNonBlockingWarning()
+    {
+        await using var fixture = await CreateFixtureAsync(configureOptions: options =>
+        {
+            options.ClientSeeds[0].AllowedScopes = ["openid", "profile", "email"];
+        });
+
+        var omitted = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-omitted-openid",
+                null,
+                ValidPkceCodeChallenge,
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        omitted.Scope.Should().BeEmpty();
+
+        var omittedView = await fixture.HeadlessAuthService.GetRequestAsync(
+            omitted.Id,
+            "login",
+            error: null,
+            pendingToken: null,
+            email: null,
+            displayName: null);
+        omittedView.RequestId.Should().Be(omitted.Id);
+        omittedView.OmittedOpenId.Should().BeTrue();
+        omittedView.Info.Should().Be(SqlOSOpenIdScopeWarnings.OmittedGrantedOpenIdMessage);
+
+        var granted = await fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                "state-granted-openid",
+                "openid profile email",
+                ValidPkceCodeChallenge,
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+        var grantedView = await fixture.HeadlessAuthService.GetRequestAsync(
+            granted.Id,
+            "login",
+            error: null,
+            pendingToken: null,
+            email: null,
+            displayName: null);
+        grantedView.OmittedOpenId.Should().BeFalse();
+        grantedView.Info.Should().BeNull();
+
+        var oauthOnly = await CreateFixtureAsync(configureOptions: options =>
+        {
+            options.ClientSeeds[0].AllowedScopes = ["profile", "email"];
+        });
+        await using (oauthOnly)
+        {
+            var oauthRequest = await oauthOnly.AuthorizationServerService.CreateAuthorizationRequestAsync(
+                new SqlOSAuthorizeRequestInput(
+                    "code",
+                    oauthOnly.ClientId,
+                    oauthOnly.RedirectUri,
+                    "state-oauth-only",
+                    null,
+                    ValidPkceCodeChallenge,
+                    "S256",
+                    null,
+                    null,
+                    null,
+                    null,
+                    "headless",
+                    null));
+            var oauthView = await oauthOnly.HeadlessAuthService.GetRequestAsync(
+                oauthRequest.Id,
+                "login",
+                error: null,
+                pendingToken: null,
+                email: null,
+                displayName: null);
+            oauthView.RequestId.Should().Be(oauthRequest.Id);
+            oauthView.OmittedOpenId.Should().BeFalse();
+        }
     }
 
     [TestMethod]

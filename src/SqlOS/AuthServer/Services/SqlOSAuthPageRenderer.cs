@@ -95,7 +95,10 @@ public static class SqlOSAuthPageRenderer
         var signInAgainLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login"))}\">Sign in again</a>";
         var signOutLink = $"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/logout"))}\">Sign out</a>";
         var errorMarkup = BuildCallout("error", model.Error);
-        var infoMarkup = BuildCallout("info", model.Info);
+        var infoMarkup = BuildCallout(
+            "info",
+            model.Info,
+            model.OmittedOpenId ? SqlOSOpenIdScopeWarnings.OmittedGrantedOpenIdCode : null);
         var invitationMarkup = RenderInvitationSummary(model.Invitation);
         var organizationField = model.Invitation == null
             ? """
@@ -1344,7 +1347,7 @@ public static class SqlOSAuthPageRenderer
             : $"<div class=\"footer-links\">{string.Join("", activeLinks)}</div>";
     }
 
-    private static string BuildCallout(string kind, string? message)
+    private static string BuildCallout(string kind, string? message, string? warningCode = null)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
@@ -1352,8 +1355,11 @@ public static class SqlOSAuthPageRenderer
         }
 
         var icon = string.Equals(kind, "error", StringComparison.OrdinalIgnoreCase) ? "!" : "i";
+        var warningAttr = string.IsNullOrWhiteSpace(warningCode)
+            ? string.Empty
+            : $" data-omitted-openid-warning=\"{Html(warningCode)}\"";
         return $$"""
-            <div class="callout {{Html(kind)}}">
+            <div class="callout {{Html(kind)}}"{{warningAttr}}>
               <span class="callout-icon">{{icon}}</span>
               <span>{{Html(message)}}</span>
             </div>
@@ -1588,6 +1594,7 @@ public sealed record SqlOSAuthPageViewModel(
     string? EnrollmentToken = null,
     string? TotpSecret = null,
     string? TotpProvisioningUri = null,
-    string? TotpQrCodeDataUrl = null);
+    string? TotpQrCodeDataUrl = null,
+    bool OmittedOpenId = false);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

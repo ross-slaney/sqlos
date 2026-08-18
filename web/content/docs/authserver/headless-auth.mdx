@@ -56,7 +56,7 @@ var app = builder.Build();
 app.MapSqlOS();
 ```
 
-The browser hits `/sqlos/auth/authorize` on SqlOS first. Include `scope` on that first request (typically `openid profile email`) and put the same values on the client's `AllowedScopes`. The headless view model exposes that post-allowlist grant as `scope` (an empty string when nothing was granted) so a custom UI can render it. That string is the grant, not API authorization; user access tokens still have no `scope` claim. `scope` on `SqlOSHeadlessStartRequest` and on `/authorize` stays optional. Preserve `ui_context` values on the page model when present, but do not invent separate auth lifecycles for invitations or CLI device flow; SqlOS binds those to the normal request id.
+The browser hits `/sqlos/auth/authorize` on SqlOS first. Include `scope` on that first request (typically `openid profile email`) and put the same values on the client's `AllowedScopes`. The headless view model exposes that post-allowlist grant as `scope` (an empty string when nothing was granted) so a custom UI can render it. That string is the grant, not API authorization; user access tokens still have no `scope` claim. `scope` on `SqlOSHeadlessStartRequest` and on `/authorize` stays optional. `openid` is never always-allowed and does not mint an `id_token` yet. When the client allowlists `openid` but the grant does not include it, the view model sets `omittedOpenId` and a non-blocking `info` message so first-party UIs can tell the user that an ID token will not be issued once OpenID Provider mode ships. Preserve `ui_context` values on the page model when present, but do not invent separate auth lifecycles for invitations or CLI device flow; SqlOS binds those to the normal request id.
 
 ## How SqlOS picks the UI
 

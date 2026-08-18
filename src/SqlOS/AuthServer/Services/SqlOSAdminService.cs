@@ -1467,6 +1467,7 @@ public sealed partial class SqlOSAdminService
             item.LifecycleState,
             item.Ownership,
             item.EmptyAllowlistWarning,
+            item.OmittedOpenIdWarning,
             client.MetadataJson,
             RecentAuditEvents = recentAuditEvents
         };
@@ -3350,6 +3351,13 @@ public sealed partial class SqlOSAdminService
                 client.AllowNativeHeadlessAuth,
                 client.AllowDeviceAuthorization,
                 redirectUris,
+                grantTypes),
+            SqlOSOpenIdScopeWarnings.ForMissingAllowlistedOpenId(
+                allowedScopes,
+                client.IsFirstParty,
+                client.AllowNativeHeadlessAuth,
+                client.AllowDeviceAuthorization,
+                redirectUris,
                 grantTypes));
     }
 
@@ -3712,7 +3720,8 @@ public sealed partial class SqlOSAdminService
         string? DuplicateFingerprint,
         int DuplicateCount,
         string LifecycleState,
-        SqlOSClientAllowlistWarning? EmptyAllowlistWarning);
+        SqlOSClientAllowlistWarning? EmptyAllowlistWarning,
+        SqlOSOpenIdScopeWarning? OmittedOpenIdWarning);
 
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,

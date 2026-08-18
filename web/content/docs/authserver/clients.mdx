@@ -54,6 +54,8 @@ builder.AddSqlOS<AppDbContext>(options =>
 
 The dashboard and Admin API surface a computed `emptyAllowlistWarning` when a user-facing client has an empty allowlist. Code-owned records show the same warning and must be fixed in the seed, not by overwriting ownership from the dashboard.
 
+`openid` is never always-allowed. SqlOS does not issue an `id_token` yet (that remains issue #118). The dashboard and Admin API surface a computed `omittedOpenIdWarning` when a user-facing client allowlist omits `openid`, including empty allowlists. Code-owned records show the same warning and must be fixed in the seed. Omitting `openid` on `/authorize` is valid OAuth and does not fail the request; hosted and headless pages set a non-blocking info signal when the allowlist includes `openid` but the grant does not.
+
 ### Admin API
 
 ```bash
