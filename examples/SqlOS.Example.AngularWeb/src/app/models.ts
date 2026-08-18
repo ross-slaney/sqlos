@@ -114,6 +114,7 @@ export interface HeadlessViewModel {
   organizationSelection?: HeadlessOrganizationOption[];
   settings?: HeadlessSettings | null;
   fieldErrors?: Record<string, string>;
+  scope?: string | null;
 }
 
 export interface HeadlessProvider {

@@ -239,7 +239,8 @@ public sealed class SqlOSHeadlessAuthService
             OrganizationSelection: Array.Empty<SqlOSOrganizationOption>(),
             Providers: providers,
             Invitation: invitation,
-            UiContext: uiContext);
+            UiContext: uiContext,
+            Scope: "");
     }
 
     public async Task<SqlOSHeadlessViewModel> ResolveDeviceAuthorizationAsync(
@@ -1694,7 +1695,8 @@ public sealed class SqlOSHeadlessAuthService
             MfaToken: mfaToken,
             RequiresMfaEnrollment: requiresMfaEnrollment,
             MfaMethods: mfaMethods ?? Array.Empty<string>(),
-            TotpEnrollment: totpEnrollment);
+            TotpEnrollment: totpEnrollment,
+            Scope: authorizationRequest.Scope);
     }
 
     private async Task<string> PublicViewErrorMessageAsync(
@@ -2038,7 +2040,8 @@ public sealed class SqlOSHeadlessAuthService
             Providers: providers,
             Invitation: null,
             UiContext: uiContext,
-            DeviceAuthorization: ToHeadlessDeviceAuthorization(resolved));
+            DeviceAuthorization: ToHeadlessDeviceAuthorization(resolved),
+            Scope: resolved.Scope);
     }
 
     private static SqlOSHeadlessDeviceAuthorizationDto ToHeadlessDeviceAuthorization(SqlOSDeviceAuthorizationResolveResult resolved)
