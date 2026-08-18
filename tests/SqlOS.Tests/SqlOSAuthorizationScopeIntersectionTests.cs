@@ -39,20 +39,20 @@ public sealed class SqlOSAuthorizationScopeIntersectionTests
     }
 
     [TestMethod]
-    public async Task CreateAuthorizationRequest_EmptyAllowedScopes_GrantsRequestedScopes()
+    public async Task CreateAuthorizationRequest_EmptyAllowedScopes_GrantsNoRequestedScopes()
     {
         await using var harness = await CreateHarnessAsync([]);
 
         var request = await harness.Authorization.CreateAuthorizationRequestAsync(
             Authorize("openid profile email custom.read"));
 
-        request.Scope.Should().Be("openid profile email custom.read");
+        request.Scope.Should().BeEmpty();
     }
 
     [TestMethod]
     public async Task CreateAuthorizationRequest_DuplicateScopeEntries_DeduplicatesGrantedScopes()
     {
-        await using var harness = await CreateHarnessAsync([]);
+        await using var harness = await CreateHarnessAsync(["openid", "profile", "email"]);
 
         var request = await harness.Authorization.CreateAuthorizationRequestAsync(
             Authorize("openid openid profile profile email"));
@@ -64,7 +64,7 @@ public sealed class SqlOSAuthorizationScopeIntersectionTests
     public async Task CreateAuthorizationRequest_ThousandCharacterScope_PersistsAtColumnLimit()
     {
         var thousandCharacterScope = new string('a', 1000);
-        await using var harness = await CreateHarnessAsync([]);
+        await using var harness = await CreateHarnessAsync([thousandCharacterScope]);
 
         var request = await harness.Authorization.CreateAuthorizationRequestAsync(
             Authorize(thousandCharacterScope));

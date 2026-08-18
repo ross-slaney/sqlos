@@ -53,17 +53,14 @@ public sealed class SqlOSDeviceAuthorizationService
 
         var requestedScopes = NormalizeRequestedScopes(request.Scope);
         var allowedScopes = SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson);
-        if (allowedScopes.Count > 0)
+        var unsupportedScopes = requestedScopes
+            .Where(scope => !allowedScopes.Contains(scope, StringComparer.Ordinal))
+            .ToList();
+        if (unsupportedScopes.Count > 0)
         {
-            var unsupportedScopes = requestedScopes
-                .Where(scope => !allowedScopes.Contains(scope, StringComparer.Ordinal))
-                .ToList();
-            if (unsupportedScopes.Count > 0)
-            {
-                throw new SqlOSDeviceAuthorizationException(
-                    "invalid_scope",
-                    $"Unsupported scope(s): {string.Join(", ", unsupportedScopes)}.");
-            }
+            throw new SqlOSDeviceAuthorizationException(
+                "invalid_scope",
+                $"Unsupported scope(s): {string.Join(", ", unsupportedScopes)}.");
         }
 
         var requestedResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)

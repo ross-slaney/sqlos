@@ -74,6 +74,21 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
     }
 
     [TestMethod]
+    public async Task StartAsync_EmptyAllowlistRejectsEveryRequestedScope()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "todo-cli");
+        client.AllowedScopesJson = "[]";
+        await harness.Context.SaveChangesAsync();
+
+        var emptyAllowlist = await Assert.ThrowsExceptionAsync<SqlOSDeviceAuthorizationException>(() =>
+            harness.Device.StartAsync(
+                new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid todos.read", "https://api.example.com/todos"),
+                harness.Http));
+        emptyAllowlist.Error.Should().Be("invalid_scope");
+    }
+
+    [TestMethod]
     public async Task ApproveAsync_AllowsExactlyOneSuccessfulTokenPoll()
     {
         await using var harness = await Harness.CreateAsync();

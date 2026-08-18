@@ -61,6 +61,25 @@ public sealed class SqlOSClientCredentialsServiceTests
     }
 
     [TestMethod]
+    public async Task EmptyAllowlist_RejectsEveryRequestedScope()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var client = await harness.Context.Set<SqlOSClientApplication>().SingleAsync();
+        client.AllowedScopesJson = "[]";
+        await harness.Context.SaveChangesAsync();
+
+        var emptyAllowlist = await Assert.ThrowsExceptionAsync<SqlOSClientCredentialsException>(() =>
+            harness.Service.ExchangeAsync(
+                "ledger-worker",
+                harness.Secret,
+                "https://api.example.test/ledger",
+                "ledger.read",
+                new DefaultHttpContext(),
+                default));
+        emptyAllowlist.Error.Should().Be("invalid_scope");
+    }
+
+    [TestMethod]
     public async Task PublicDisabledExpiredAndGrantlessClients_AreRejected()
     {
         await using var harness = await CreateHarnessAsync();
