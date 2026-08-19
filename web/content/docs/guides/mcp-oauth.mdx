@@ -177,7 +177,7 @@ The token response returns `access_token`, `refresh_token`, `token_type`, `expir
 }
 ```
 
-Requested scopes are returned by the token endpoint but are not currently emitted as a JWT `scope` claim. Do not authorize an MCP tool from requested scope alone.
+Requested scopes are returned by the token endpoint but are deliberately not emitted as a JWT `scope` claim on user tokens — scope is a client grant, not a per-user authorization decision. Do not authorize an MCP tool from requested scope alone; see [Scopes and Permissions](/docs/authserver/scopes-and-permissions) for the decision record.
 
 ## 6. Authorize each MCP operation
 

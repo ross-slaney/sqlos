@@ -108,7 +108,13 @@ JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session
 | `sub` | User subject ID |
 | `sid` | Session ID |
 | `client_id` | OAuth client |
+| `amr` | Authentication methods for the session (for example `password`, `totp`) |
+| `email` | User's default email, when one exists |
 | `org_id` | Organization (if scoped) |
 | `iss` | Issuer URL |
 | `aud` | Audience |
+| `nbf` | Not valid before |
+| `iat` | Issued at |
 | `exp` | Expiration |
+
+User access tokens carry no `scope` claim by design: scope constrains what a client may request, while FGA authorizes what a subject may do. Service tokens from client-credentials machine clients are the exception and carry `scope` plus `token_kind: "service"`. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
