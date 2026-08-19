@@ -132,6 +132,10 @@ public sealed class SqlOSSsoAuthorizationService
             authorizationCode.AuthenticationMethod,
             httpContext.Request.Headers.UserAgent.ToString(),
             httpContext.Connection.RemoteIpAddress?.ToString(),
+            resource: null,
+            authorizationCode.Scope,
+            authorizationCode.Nonce,
+            authorizationCode.AuthTime,
             cancellationToken);
     }
 }

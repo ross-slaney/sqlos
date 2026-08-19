@@ -160,8 +160,13 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var prompt = context.Request.Query["prompt"].ToString();
+                var rawMaxAge = context.Request.Query["max_age"].ToString();
                 var invitationToken = ReadInvitationToken(context);
-                if (string.Equals(prompt, "login", StringComparison.Ordinal))
+                // select_account has no account chooser yet; forcing a fresh
+                // sign-in is the compliant conservative reading.
+                var promptForcesLogin = string.Equals(prompt, "login", StringComparison.Ordinal)
+                    || string.Equals(prompt, "select_account", StringComparison.Ordinal);
+                if (promptForcesLogin)
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
                 }
@@ -180,7 +185,8 @@ public static partial class EndpointRouteBuilderExtensions
                         prompt,
                         context.Request.Query["nonce"].ToString(),
                         headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
-                        context.Request.Query["ui_context"].ToString()),
+                        context.Request.Query["ui_context"].ToString(),
+                        rawMaxAge),
                     cancellationToken);
                 SqlOSEmailInvitationResult? invitation = null;
                 if (!string.IsNullOrWhiteSpace(invitationToken))
@@ -204,7 +210,25 @@ public static partial class EndpointRouteBuilderExtensions
                 };
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
-                if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
+                if (existingSession != null
+                    && SqlOSAuthorizationServerService.TryParseMaxAge(rawMaxAge, out var maxAgeSeconds)
+                    && maxAgeSeconds is { } maxAge
+                    && DateTime.UtcNow - existingSession.AuthenticatedAt >= TimeSpan.FromSeconds(maxAge))
+                {
+                    if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                    {
+                        return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                            authorizationRequest,
+                            "login_required",
+                            "The user's authentication is older than max_age.",
+                            cancellationToken));
+                    }
+
+                    await authPageSessionService.SignOutAsync(context, cancellationToken);
+                    existingSession = null;
+                }
+
+                if (existingSession != null && !promptForcesLogin)
                 {
                     if (authorizationRequest.ClientApplication?.IsFirstParty != true)
                     {

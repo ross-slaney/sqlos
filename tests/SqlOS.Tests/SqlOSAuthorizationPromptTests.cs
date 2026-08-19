@@ -102,6 +102,83 @@ public sealed class SqlOSAuthorizationPromptTests
     }
 
     [TestMethod]
+    public async Task CreateAuthorizationRequestAsync_ValidatesMaxAge()
+    {
+        await using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedBrowserClient("maxage-web", "MaxAge Web", "https://app.example.test/auth/callback");
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authorizationServer = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            authService,
+            crypto,
+            settings,
+            authPageSessionService,
+            options);
+        await admin.UpsertSeededClientsAsync();
+
+        SqlOSAuthorizeRequestInput Input(string? maxAge) => new(
+            "code",
+            "maxage-web",
+            "https://app.example.test/auth/callback",
+            "state-maxage",
+            "openid",
+            ValidCodeChallenge,
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null,
+            maxAge);
+
+        var garbage = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("not-a-number"));
+        await garbage.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("max_age must be a non-negative integer.");
+
+        var negative = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("-1"));
+        await negative.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("max_age must be a non-negative integer.");
+
+        var zero = await authorizationServer.CreateAuthorizationRequestAsync(Input("0"));
+        zero.Id.Should().NotBeNullOrWhiteSpace();
+
+        var absent = await authorizationServer.CreateAuthorizationRequestAsync(Input(null));
+        absent.Id.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public void TryParseMaxAge_AcceptsOnlyUnsignedIntegers()
+    {
+        SqlOSAuthorizationServerService.TryParseMaxAge(null, out var absent).Should().BeTrue();
+        absent.Should().BeNull();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("", out var blank).Should().BeTrue();
+        blank.Should().BeNull();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("0", out var zero).Should().BeTrue();
+        zero.Should().Be(0);
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("86400", out var day).Should().BeTrue();
+        day.Should().Be(86400);
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("-1", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("+1", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge(" 5", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("5.5", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("abc", out _).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task BuildAuthorizationErrorRedirectAsync_CancelsRequest_AndPreservesState()
     {
         await using var context = CreateContext();

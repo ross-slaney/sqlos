@@ -55,7 +55,7 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     }
 
     [TestMethod]
-    public async Task HostedAuthorizeToToken_RefreshGrant_ReturnsEmptyScope()
+    public async Task HostedAuthorizeToToken_RefreshGrant_EchoesOriginallyGrantedScope()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
         await fixture.SetClientAllowedScopesAsync("openid", "profile", "email");
@@ -64,9 +64,22 @@ public sealed class HostedAuthorizeTokenIntegrationTests
 
         using var refreshed = await fixture.RefreshAsync(refreshToken);
 
-        refreshed.RootElement.GetProperty("scope").GetString().Should().Be("");
+        refreshed.RootElement.GetProperty("scope").GetString().Should().Be("openid profile email");
         refreshed.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
         refreshed.RootElement.GetProperty("refresh_token").GetString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task HostedAuthorizeToToken_RefreshGrant_EmptyGrant_EchoesEmptyScopeNotOmission()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
+        await fixture.SetClientAllowedScopesAsync();
+        using var issued = await fixture.AuthorizeLoginAndExchangeAsync("openid profile");
+        var refreshToken = issued.RootElement.GetProperty("refresh_token").GetString()!;
+
+        using var refreshed = await fixture.RefreshAsync(refreshToken);
+
+        refreshed.RootElement.GetProperty("scope").GetString().Should().Be("");
     }
 
     [TestMethod]
@@ -90,7 +103,7 @@ public sealed class HostedAuthorizeTokenIntegrationTests
         using var refreshed = await fixture.RefreshAsync(issued.RootElement.GetProperty("refresh_token").GetString()!);
 
         AssertExactTokenResponseFields(refreshed);
-        refreshed.RootElement.GetProperty("scope").GetString().Should().Be("");
+        refreshed.RootElement.GetProperty("scope").GetString().Should().Be("openid profile");
     }
 
     [TestMethod]

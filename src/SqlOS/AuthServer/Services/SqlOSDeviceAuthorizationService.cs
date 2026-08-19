@@ -459,6 +459,9 @@ public sealed class SqlOSDeviceAuthorizationService
             httpContext.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
             deviceAuthorization.Resource,
+            deviceAuthorization.Scope,
+            nonce: null,
+            deviceAuthorization.ApprovedAt,
             cancellationToken);
 
         await _adminService.RecordAuditAsync(

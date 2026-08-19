@@ -146,6 +146,11 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("State cannot exceed 2048 characters.");
         }
 
+        if (!TryParseMaxAge(input.MaxAge, out _))
+        {
+            throw new InvalidOperationException("max_age must be a non-negative integer.");
+        }
+
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
         var isPublicClient = string.Equals(
             client.TokenEndpointAuthMethod,
@@ -1087,12 +1092,14 @@ public sealed class SqlOSAuthorizationServerService
             httpContext.Connection.RemoteIpAddress?.ToString(),
             cancellationToken);
 
+        var authenticatedAt = await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken);
+
         if (!string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
         {
             authorizationRequest.ResolvedAuthMethod = authenticationMethod;
             authorizationRequest.ResolvedOrganizationId = organizationId;
             await _context.SaveChangesAsync(cancellationToken);
-            await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
+            await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
 
             return QueryHelpers.AddQueryString(
                 $"{_options.BasePath.TrimEnd('/')}/device/approve",
@@ -1112,6 +1119,8 @@ public sealed class SqlOSAuthorizationServerService
             State = authorizationRequest.State,
             Scope = authorizationRequest.Scope,
             Resource = authorizationRequest.Resource,
+            Nonce = authorizationRequest.Nonce,
+            AuthTime = authenticatedAt,
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
@@ -1137,7 +1146,7 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authorization request is no longer active.", ex);
         }
 
-        await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
+        await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
 
         var query = new Dictionary<string, string?>
         {
@@ -1150,6 +1159,49 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
+
+    /// <summary>
+    /// Parses the OIDC <c>max_age</c> authorize parameter. Absent or blank means the
+    /// parameter was not supplied; anything else must be a non-negative integer number
+    /// of seconds with no sign or surrounding whitespace.
+    /// </summary>
+    internal static bool TryParseMaxAge(string? rawMaxAge, out long? maxAgeSeconds)
+    {
+        maxAgeSeconds = null;
+        if (string.IsNullOrWhiteSpace(rawMaxAge))
+        {
+            return true;
+        }
+
+        if (!long.TryParse(
+                rawMaxAge,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            return false;
+        }
+
+        maxAgeSeconds = parsed;
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the moment the user actually authenticated for the sign-in completing
+    /// now. When the request carries a live auth-page session for the same user (silent
+    /// SSO reuse), the original authentication time is preserved; otherwise the user
+    /// authenticated interactively in this request and the moment is now.
+    /// </summary>
+    private async Task<DateTime> ResolveAuthenticatedAtAsync(
+        HttpContext httpContext,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var existingSession = await _authPageSessionService.TryGetSessionAsync(httpContext, cancellationToken);
+        return existingSession != null && string.Equals(existingSession.User.Id, userId, StringComparison.Ordinal)
+            ? existingSession.AuthenticatedAt
+            : DateTime.UtcNow;
     }
 
     private async Task RequireActiveLifecycleAsync(
@@ -1207,7 +1259,16 @@ public sealed class SqlOSAuthorizationServerService
             var refreshed = await _authService.RefreshAsync(
                 new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
                 cancellationToken);
-            return new SqlOSTokenEndpointResult(refreshed, null);
+
+            // RFC 6749 §5.1: echo the originally granted scope. Sessions created
+            // before the Scope column existed return null, which omits the field
+            // from the response instead of claiming an empty grant.
+            var sessionScope = await _context.Set<SqlOSSession>()
+                .AsNoTracking()
+                .Where(x => x.Id == refreshed.SessionId)
+                .Select(x => x.Scope)
+                .FirstOrDefaultAsync(cancellationToken);
+            return new SqlOSTokenEndpointResult(refreshed, sessionScope);
         }
 
         if (!string.Equals(request.GrantType, "authorization_code", StringComparison.Ordinal))
@@ -1281,6 +1342,9 @@ public sealed class SqlOSAuthorizationServerService
             httpContext.Request.Headers.UserAgent.ToString(),
             httpContext.Connection.RemoteIpAddress?.ToString(),
             authorizationCode.Resource,
+            authorizationCode.Scope,
+            authorizationCode.Nonce,
+            authorizationCode.AuthTime,
             cancellationToken);
 
         return new SqlOSTokenEndpointResult(tokens, authorizationCode.Scope);
@@ -1404,7 +1468,8 @@ public sealed record SqlOSAuthorizeRequestInput(
     string? Prompt,
     string? Nonce,
     string? PresentationMode,
-    string? UiContextJson);
+    string? UiContextJson,
+    string? MaxAge = null);
 
 public sealed record SqlOSPasswordAuthenticationResult(
     SqlOSUser User,

@@ -594,6 +594,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.OrganizationId).HasMaxLength(64);
             entity.Property(x => x.Resource).HasMaxLength(2048);
             entity.Property(x => x.EffectiveAudience).HasMaxLength(2048);
+            entity.Property(x => x.Scope).HasMaxLength(1000);
             // Session revocation is the family-level lifecycle lock. A
             // refresh rotation that loaded an active session must fail its
             // transaction if replay detection revokes that session before
@@ -941,6 +942,7 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);
             entity.Property(x => x.AuthenticationMethod).HasMaxLength(50);
+            entity.Property(x => x.Nonce).HasMaxLength(256);
             entity.Property(x => x.ConsumedAt).IsConcurrencyToken();
             entity.HasOne(x => x.AuthorizationRequest)
                 .WithMany()

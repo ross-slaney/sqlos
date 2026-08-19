@@ -37,6 +37,7 @@ public static class SqlOSPublicAuthErrorMapper
         "MFA challenge is invalid or expired.",
         SqlOSAuthService.MfaChallengeFailureMessage,
         "Magic-link sign-in is unavailable.",
+        "max_age must be a non-negative integer.",
         "Only authorization code requests are supported.",
         "Only S256 PKCE is supported.",
         "Organization name cannot exceed 200 characters.",

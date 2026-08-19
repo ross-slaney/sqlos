@@ -281,6 +281,9 @@ public sealed class SqlOSSamlService
             State = authorizationRequest.State,
             Scope = authorizationRequest.Scope,
             Resource = authorizationRequest.Resource,
+            Nonce = authorizationRequest.Nonce,
+            // The SAML assertion consumed in this request is the authentication.
+            AuthTime = DateTime.UtcNow,
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,

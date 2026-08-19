@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 42;
+    private const int CurrentSchemaVersion = 43;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -234,6 +234,10 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "Resource"), "Column SqlOSSessions.Resource should exist.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "EffectiveAudience"), "Column SqlOSSessions.EffectiveAudience should exist.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "OrganizationId"), "Column SqlOSSessions.OrganizationId should exist.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "Scope"), "Column SqlOSSessions.Scope should record the granted scope for refresh echo.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "AuthenticatedAt"), "Column SqlOSSessions.AuthenticatedAt should record when the user authenticated.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationCodes", "Nonce"), "Column SqlOSAuthorizationCodes.Nonce should carry the OIDC nonce to token exchange.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationCodes", "AuthTime"), "Column SqlOSAuthorizationCodes.AuthTime should carry auth_time to token exchange.");
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuthorizationCodes", "IX_SqlOSAuthorizationCodes_AuthorizationRequestId"),
             "SqlOSAuthorizationCodes.AuthorizationRequestId should be uniquely indexed.");

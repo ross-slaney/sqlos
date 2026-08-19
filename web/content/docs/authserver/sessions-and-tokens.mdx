@@ -63,7 +63,7 @@ JWKS-only validation cannot see the persisted SqlOS session. It accepts a signed
 
 ## Refresh tokens
 
-Refresh tokens are opaque and rotated on successful refresh. Each refresh consumes the old token and issues a new pair. A public client's OAuth `/token` refresh is identified by that token; `client_id` is optional. Confidential clients still present `client_secret_basic`. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
+Refresh tokens are opaque and rotated on successful refresh. Each refresh consumes the old token and issues a new pair. A public client's OAuth `/token` refresh is identified by that token; `client_id` is optional. Confidential clients still present `client_secret_basic`. Sessions record the scope granted at authorization time and the moment the user actually authenticated (`AuthenticatedAt`, preserved across silent SSO reuse), so OAuth refresh responses echo the original grant and `max_age` decisions stay truthful. See [Refresh and Logout](/docs/authserver/refresh-and-logout).
 
 ```csharp
 var tokens = await authService.RefreshAsync(

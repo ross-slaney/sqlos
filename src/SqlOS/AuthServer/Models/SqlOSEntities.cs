@@ -473,6 +473,20 @@ public sealed class SqlOSSession
     public string? UserAgent { get; set; }
     public string? IpAddress { get; set; }
 
+    /// <summary>
+    /// The scope granted when this session was established through an OAuth grant,
+    /// stored so refresh responses can echo it. Null for sessions created before the
+    /// column existed and for direct (non-OAuth) logins.
+    /// </summary>
+    public string? Scope { get; set; }
+
+    /// <summary>
+    /// The moment the user actually authenticated for this session. Falls back to
+    /// <see cref="CreatedAt"/> when null; differs from it when a session is minted
+    /// from an authorization code issued against an earlier silent SSO sign-in.
+    /// </summary>
+    public DateTime? AuthenticatedAt { get; set; }
+
     public SqlOSUser? User { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSOrganization? Organization { get; set; }
@@ -957,6 +971,18 @@ public sealed class SqlOSAuthorizationCode
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime? ConsumedAt { get; set; }
+
+    /// <summary>
+    /// The OIDC nonce from the originating authorization request, carried on the code
+    /// so token issuance can bind it into an ID token.
+    /// </summary>
+    public string? Nonce { get; set; }
+
+    /// <summary>
+    /// When the user authenticated for the sign-in that produced this code. Preserved
+    /// across silent SSO reuse so <c>auth_time</c> and <c>max_age</c> stay truthful.
+    /// </summary>
+    public DateTime? AuthTime { get; set; }
 
     public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
     public SqlOSUser? User { get; set; }

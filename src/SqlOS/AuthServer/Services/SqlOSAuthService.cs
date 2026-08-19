@@ -2173,6 +2173,9 @@ public sealed class SqlOSAuthService
             httpContext?.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
             payload.Resource,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken),
             cancellationToken);
 
@@ -2215,6 +2218,9 @@ public sealed class SqlOSAuthService
             userAgent,
             ipAddress,
             null,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             securitySettings,
             cancellationToken);
     }
@@ -2228,6 +2234,37 @@ public sealed class SqlOSAuthService
         string? ipAddress,
         string? resource,
         CancellationToken cancellationToken = default)
+        => await CreateSessionTokensForUserAsync(
+            user,
+            client,
+            organizationId,
+            authenticationMethod,
+            userAgent,
+            ipAddress,
+            resource,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Creates a session and token pair for an OAuth grant, persisting the granted
+    /// scope and the moment of actual user authentication on the session. The nonce
+    /// is accepted alongside them so OIDC token issuance can bind it once OpenID
+    /// Provider mode ships; it is not stored on the session.
+    /// </summary>
+    public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string? organizationId,
+        string authenticationMethod,
+        string? userAgent,
+        string? ipAddress,
+        string? resource,
+        string? scope,
+        string? nonce,
+        DateTime? authenticatedAt,
+        CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
         return await CreateSessionAndTokensAsync(
@@ -2238,6 +2275,9 @@ public sealed class SqlOSAuthService
             userAgent,
             ipAddress,
             resource,
+            scope,
+            nonce,
+            authenticatedAt,
             securitySettings,
             cancellationToken);
     }
@@ -2259,6 +2299,9 @@ public sealed class SqlOSAuthService
             httpContext.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
             null,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             securitySettings,
             cancellationToken);
     }
@@ -2271,9 +2314,16 @@ public sealed class SqlOSAuthService
         string? userAgent,
         string? ipAddress,
         string? resource,
+        string? scope,
+        string? nonce,
+        DateTime? authenticatedAt,
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        // The nonce is intentionally unused until OpenID Provider mode mints ID
+        // tokens; accepting it here keeps every grant's call chain stable when
+        // that lands.
+        _ = nonce;
         organizationId = string.IsNullOrWhiteSpace(organizationId) ? null : organizationId.Trim();
         var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -2309,6 +2359,8 @@ public sealed class SqlOSAuthService
             AuthenticationMethod = authenticationMethod,
             Resource = resource,
             EffectiveAudience = effectiveAudience,
+            Scope = scope,
+            AuthenticatedAt = authenticatedAt,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
             IdleExpiresAt = DateTime.UtcNow.Add(securitySettings.SessionIdleTimeout),
