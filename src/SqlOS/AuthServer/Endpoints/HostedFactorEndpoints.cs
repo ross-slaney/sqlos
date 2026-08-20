@@ -485,24 +485,58 @@ public static partial class EndpointRouteBuilderExtensions
             var requestId = form["requestId"].ToString();
             var pendingToken = form["pendingToken"].ToString();
             var organizationId = form["organizationId"].ToString();
-            var completion = await authorizationServerService.CompletePendingOrganizationSelectionForLoginAsync(
-                pendingToken,
-                organizationId,
-                context,
-                cancellationToken);
-            if (completion.RequiresMfa)
+            try
             {
-                return await RenderMfaChallengeAsync(
-                    completion,
+                var completion = await authorizationServerService.CompletePendingOrganizationSelectionForLoginAsync(
+                    pendingToken,
+                    organizationId,
+                    context,
+                    cancellationToken);
+                if (completion.RequiresMfa)
+                {
+                    return await RenderMfaChallengeAsync(
+                        completion,
+                        requestId,
+                        email: null,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken);
+                }
+
+                return Results.Redirect(completion.RedirectUrl!);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Pre-consumption rejections (for example a lapsed max_age) leave the
+                // pending token unconsumed; re-render the chooser with the safe public
+                // message instead of surfacing a 500.
+                IReadOnlyList<SqlOSOrganizationOption>? organizations = null;
+                try
+                {
+                    organizations = (await authorizationServerService.GetPendingOrganizationSelectionForLoginAsync(
+                        pendingToken,
+                        requestId,
+                        cancellationToken)).Organizations;
+                }
+                catch (InvalidOperationException)
+                {
+                    // The pending token itself is invalid or already consumed.
+                }
+
+                var page = await BuildAuthPageViewModelAsync(
+                    "organization",
                     requestId,
                     email: null,
+                    error: await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
+                    displayName: null,
+                    pendingToken: pendingToken,
                     authPrefix,
                     authorizationServerService,
-                    authService,
-                    cancellationToken);
+                    cancellationToken,
+                    organizations);
+                return Html(page, StatusCodes.Status400BadRequest);
             }
-
-            return Results.Redirect(completion.RedirectUrl!);
         });
 
         hostedForms.MapPost("/mfa/verify", async (

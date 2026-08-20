@@ -225,7 +225,8 @@ public sealed class SqlOSOidcAuthService
                 authMethod,
                 organizations.Count)
             {
-                UserCreated = provisioned.Created
+                UserCreated = provisioned.Created,
+                UpstreamAuthenticatedAt = completed.AuthenticatedAt
             };
         }
         catch (Exception ex)
@@ -270,7 +271,43 @@ public sealed class SqlOSOidcAuthService
             cancellationToken);
         return new CompletedProviderAuthorization(
             providerUser,
-            SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal));
+            SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal),
+            ResolveUpstreamAuthenticatedAt(idTokenPrincipal));
+    }
+
+    /// <summary>
+    /// Resolves when the user actually authenticated at the upstream provider from
+    /// the validated ID token: <c>auth_time</c> when present, otherwise the token's
+    /// <c>iat</c>, otherwise now. A silently reused upstream session must stamp the
+    /// original authentication moment, not the callback time. Future values (provider
+    /// clock skew) are clamped to now.
+    /// </summary>
+    internal static DateTime ResolveUpstreamAuthenticatedAt(ClaimsPrincipal idTokenPrincipal)
+    {
+        var now = DateTime.UtcNow;
+        var authenticatedAt = ParseEpochSecondsClaim(idTokenPrincipal, "auth_time")
+            ?? ParseEpochSecondsClaim(idTokenPrincipal, "iat")
+            ?? now;
+        return authenticatedAt > now ? now : authenticatedAt;
+    }
+
+    private static DateTime? ParseEpochSecondsClaim(ClaimsPrincipal principal, string claimType)
+    {
+        var value = principal.FindFirstValue(claimType);
+        if (string.IsNullOrWhiteSpace(value)
+            || !long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return null;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
@@ -1289,7 +1326,8 @@ public sealed class SqlOSOidcAuthService
 
     private sealed record CompletedProviderAuthorization(
         ProviderUser User,
-        SqlOSUpstreamMfaDecision UpstreamMfa);
+        SqlOSUpstreamMfaDecision UpstreamMfa,
+        DateTime? AuthenticatedAt = null);
 
     private sealed record ResolvedEmailClaims(string Email, bool EmailVerified, string Source);
 

@@ -298,6 +298,8 @@ curl -X POST https://app.example.com/sqlos/auth/headless/start \
   }'
 ```
 
+`prompt`, `nonce`, `maxAge`, and `invitationToken` are also accepted as optional JSON fields with the same semantics as their `/authorize` query parameters. Headless `/start` never silently reuses an AuthPage session, so `maxAge` is not a re-challenge gate here; the value persists on the authorization request, and a positive `maxAge` is still enforced at code issuance when interstitials such as organization selection or MFA outlast it.
+
 Actions return `SqlOSHeadlessActionResult`. This abridged response shows the control-flow fields:
 
 ```json

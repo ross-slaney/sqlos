@@ -61,7 +61,8 @@ public static partial class EndpointRouteBuilderExtensions
                         request.Prompt,
                         request.Nonce,
                         "headless",
-                        SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext)),
+                        SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext),
+                        request.MaxAge),
                     cancellationToken);
 
                 SqlOSEmailInvitationResult? invitation = null;

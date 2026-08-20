@@ -569,6 +569,23 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Peek before consuming the one-time pending token: when the requested
+        // max_age lapsed while the user parked on the organization chooser, reject
+        // without consuming anything so the interaction can be retried after
+        // reauthentication instead of dead-ending the flow.
+        var peekedToken = await _cryptoService.FindTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+            ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
+        var peekedPayload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(peekedToken)
+            ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
+        var peekedRequest = await GetRequiredAuthorizationRequestAsync(peekedPayload.AuthorizationRequestId, cancellationToken);
+        if (peekedRequest.MaxAgeSeconds is { } pendingMaxAgeSeconds
+            && pendingMaxAgeSeconds > 0
+            && peekedPayload.AuthenticatedAt is { } pendingAuthenticatedAt
+            && (DateTime.UtcNow - pendingAuthenticatedAt).TotalSeconds >= pendingMaxAgeSeconds)
+        {
+            throw new InvalidOperationException("Authentication is older than the requested max_age.");
+        }
+
         var temporaryToken = await _cryptoService.ConsumeTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
             ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
         if (temporaryToken.UserId == null)
@@ -1120,8 +1137,12 @@ public sealed class SqlOSAuthorizationServerService
         // interstitials (organization selection, MFA) can outlast it. Re-check the
         // resolved authentication age at the issuance boundary for both the device
         // and the authorization-code paths. TotalSeconds avoids the OverflowException
-        // TimeSpan.FromSeconds would throw for very large max_age values.
+        // TimeSpan.FromSeconds would throw for very large max_age values. max_age=0
+        // is excluded: the /authorize gate already forces fresh reauthentication for
+        // it, and any elapsed time would make zero unsatisfiable here; the RP
+        // validates auth_time itself.
         if (authorizationRequest.MaxAgeSeconds is { } maxAgeSeconds
+            && maxAgeSeconds > 0
             && (DateTime.UtcNow - authenticatedAt).TotalSeconds >= maxAgeSeconds)
         {
             throw new InvalidOperationException("Authentication is older than the requested max_age.");

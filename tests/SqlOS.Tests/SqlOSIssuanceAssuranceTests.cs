@@ -402,19 +402,44 @@ public sealed class SqlOSIssuanceAssuranceTests
     }
 
     [TestMethod]
-    public async Task IssueAuthorizationRedirectAsync_WhenAuthenticationOlderThanMaxAge_Throws()
+    public async Task IssueAuthorizationRedirectAsync_MaxAgeZero_IssuesAfterFreshInteractiveLogin()
     {
         await using var harness = await Harness.CreateAsync();
-        var user = await harness.CreateMemberAsync("max-age");
+        var user = await harness.CreateMemberAsync("max-age-zero");
         var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail, maxAge: "0");
         request.MaxAgeSeconds.Should().Be(0);
 
-        var act = async () => await harness.Authorization.IssueAuthorizationRedirectAsync(
+        // max_age=0 forces reauthentication at /authorize; once the user has just
+        // authenticated interactively, issuance must not treat zero as "always
+        // stale" — the RP validates auth_time itself.
+        var redirect = await harness.Authorization.IssueAuthorizationRedirectAsync(
             request,
             user,
             harness.OrganizationId,
             "password",
             harness.Http);
+
+        redirect.Should().Contain("code=");
+        var code = await harness.Context.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.AuthorizationRequestId == request.Id);
+        code.AuthTime.Should().NotBeNull();
+        code.AuthTime!.Value.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorizationRequestLoginAsync_WhenAuthenticationOlderThanPositiveMaxAge_Throws()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("max-age-stale");
+        var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail, maxAge: "60");
+        request.MaxAgeSeconds.Should().Be(60);
+
+        var act = async () => await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            request,
+            user,
+            "password",
+            harness.Http,
+            knownAuthenticatedAt: DateTime.UtcNow.AddMinutes(-30));
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Authentication is older than the requested max_age.");
@@ -463,6 +488,52 @@ public sealed class SqlOSIssuanceAssuranceTests
             .SingleAsync(x => x.AuthorizationRequestId == request.Id);
         code.AuthTime.Should().NotBeNull();
         code.AuthTime!.Value.Should().BeCloseTo(originalAuthenticatedAt, TimeSpan.FromSeconds(1));
+    }
+
+    [TestMethod]
+    public async Task CompletePendingOrganizationSelection_WhenMaxAgeLapsed_RejectsWithoutConsumingPendingToken()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("pending-maxage");
+        var secondOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Second MaxAge Org", null));
+        await harness.Admin.CreateMembershipAsync(
+            secondOrganization.Id,
+            new SqlOSCreateMembershipRequest(user.Id, "member"));
+        var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail, maxAge: "60");
+        request.MaxAgeSeconds.Should().Be(60);
+
+        var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            request,
+            user,
+            "password",
+            harness.Http);
+        completion.RequiresOrganizationSelection.Should().BeTrue();
+        completion.PendingToken.Should().NotBeNullOrWhiteSpace();
+
+        // Simulate max_age lapsing while the user parked on the organization
+        // chooser: rewrite the pending payload's stamped authentication time.
+        var pending = await harness.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.Purpose == "auth_page_pending" && x.UserId == user.Id);
+        var payload = System.Text.Json.Nodes.JsonNode.Parse(pending.PayloadJson!)!.AsObject();
+        payload["AuthenticatedAt"] = DateTime.UtcNow.AddMinutes(-30).ToString("O");
+        pending.PayloadJson = payload.ToJsonString();
+        await harness.Context.SaveChangesAsync();
+
+        var act = async () => await harness.Authorization.CompletePendingOrganizationSelectionForLoginAsync(
+            completion.PendingToken!,
+            harness.OrganizationId,
+            harness.Http);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Authentication is older than the requested max_age.");
+
+        // The one-time pending token must remain unconsumed so the interaction
+        // can be retried after reauthentication.
+        (await harness.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.Id == pending.Id)).ConsumedAt.Should().BeNull();
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == request.Id)).Should().Be(0);
     }
 
     private static void RequireAllUsersMfa(SqlOSAuthServerOptions options)

@@ -343,12 +343,15 @@ public sealed class SqlOSOidcBrowserAuthService
 
             var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
             authorizationRequest.OrganizationId ??= organizationId;
+            // A silently reused upstream session must stamp the upstream auth_time
+            // (or iat) as the authentication moment, not the callback time.
             var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 user,
                 result.AuthenticationMethod,
                 httpContext,
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt: result.UpstreamAuthenticatedAt);
             var redirectUrl = completion.RedirectUrl
                 ?? await _authorizationServerService.CreateAuthorizationContinuationRedirectAsync(
                     completion,

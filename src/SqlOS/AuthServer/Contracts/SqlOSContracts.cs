@@ -595,6 +595,13 @@ public sealed record SqlOSCompleteOidcAuthorizationResult(
     int OrganizationCount)
 {
     public bool UserCreated { get; init; }
+
+    /// <summary>
+    /// When the user authenticated at the upstream provider, taken from the
+    /// validated ID token (<c>auth_time</c>, falling back to <c>iat</c>).
+    /// Null for providers without an ID token (OAuth profile flows).
+    /// </summary>
+    public DateTime? UpstreamAuthenticatedAt { get; init; }
 }
 
 public sealed record SqlOSPkceExchangeRequest(
