@@ -238,6 +238,8 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync("SqlOSSessions", "AuthenticatedAt"), "Column SqlOSSessions.AuthenticatedAt should record when the user authenticated.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationCodes", "Nonce"), "Column SqlOSAuthorizationCodes.Nonce should carry the OIDC nonce to token exchange.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationCodes", "AuthTime"), "Column SqlOSAuthorizationCodes.AuthTime should carry auth_time to token exchange.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSDeviceAuthorizations", "AuthTime"), "Column SqlOSDeviceAuthorizations.AuthTime should record when the approving user authenticated.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationRequests", "MaxAgeSeconds"), "Column SqlOSAuthorizationRequests.MaxAgeSeconds should persist max_age for the issuance re-check.");
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuthorizationCodes", "IX_SqlOSAuthorizationCodes_AuthorizationRequestId"),
             "SqlOSAuthorizationCodes.AuthorizationRequestId should be uniquely indexed.");

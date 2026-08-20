@@ -230,6 +230,16 @@ public sealed class SqlOSSamlService
             },
             cancellationToken: cancellationToken);
 
+        // The assertion's AuthnInstant is when the IdP authenticated the user; the
+        // IdP may have silently reused an old IdP session, so ACS processing time
+        // overstates freshness. Future-skewed values clamp to now; absent values
+        // fall back to now (the assertion consumed in this request is then the
+        // best available evidence of authentication).
+        var utcNow = DateTime.UtcNow;
+        DateTime? assertionAuthTime = assertion.AuthnInstant is { } authnInstant
+            ? (authnInstant < utcNow ? authnInstant : utcNow)
+            : null;
+
         if (_authorizationServerService != null)
         {
             authorizationRequest.ResolvedConnectionId = connection.Id;
@@ -239,7 +249,8 @@ public sealed class SqlOSSamlService
                 user,
                 authenticationMethod,
                 httpContext ?? new DefaultHttpContext(),
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt: assertionAuthTime);
             return completion.RedirectUrl
                 ?? await _authorizationServerService.CreateAuthorizationContinuationRedirectAsync(
                     completion,
@@ -282,8 +293,7 @@ public sealed class SqlOSSamlService
             Scope = authorizationRequest.Scope,
             Resource = authorizationRequest.Resource,
             Nonce = authorizationRequest.Nonce,
-            // The SAML assertion consumed in this request is the authentication.
-            AuthTime = DateTime.UtcNow,
+            AuthTime = assertionAuthTime ?? utcNow,
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
@@ -439,7 +449,36 @@ public sealed class SqlOSSamlService
             responseId,
             assertionId,
             expiresAt + SamlClockSkew,
-            authnContextClassRefs);
+            authnContextClassRefs,
+            ExtractAuthnInstant(assertionElement, ns));
+    }
+
+    /// <summary>
+    /// Extracts the earliest parseable <c>AuthnInstant</c> from the assertion's
+    /// AuthnStatements. This is when the IdP says the user actually authenticated;
+    /// the IdP may have silently reused an old IdP session, so ACS-processing time
+    /// must not be claimed as the authentication moment. Missing or malformed values
+    /// yield null and the caller falls back to now.
+    /// </summary>
+    private static DateTime? ExtractAuthnInstant(XmlElement assertionElement, XmlNamespaceManager ns)
+    {
+        var statements = assertionElement.SelectNodes("saml:AuthnStatement", ns);
+        if (statements == null)
+        {
+            return null;
+        }
+
+        DateTime? earliest = null;
+        foreach (var statement in statements.OfType<XmlElement>())
+        {
+            var parsed = TryParseSamlDateTimeOrNull(statement.GetAttribute("AuthnInstant"));
+            if (parsed.HasValue && (earliest == null || parsed.Value < earliest.Value))
+            {
+                earliest = parsed;
+            }
+        }
+
+        return earliest;
     }
 
     private async Task ConsumeReplayIdentifiersAsync(
@@ -715,6 +754,18 @@ public sealed class SqlOSSamlService
         }
 
         return XmlConvert.ToDateTime(value, XmlDateTimeSerializationMode.Utc);
+    }
+
+    private static DateTime? TryParseSamlDateTimeOrNull(string? value)
+    {
+        try
+        {
+            return ParseSamlDateTimeOrNull(value);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     private static string StoreSamlRequestState(string? uiContextJson, SamlRequestState state)
@@ -1038,7 +1089,8 @@ public sealed class SqlOSSamlService
         string ResponseId,
         string AssertionId,
         DateTime ReplayExpiresAt,
-        IReadOnlyList<string> AuthnContextClassRefs);
+        IReadOnlyList<string> AuthnContextClassRefs,
+        DateTime? AuthnInstant);
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
         => exception.InnerException is SqlException { Number: 2601 or 2627 };

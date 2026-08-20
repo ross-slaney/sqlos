@@ -91,6 +91,47 @@ public sealed class HostedAuthorizePromptIntegrationTests
     }
 
     [TestMethod]
+    public async Task MaxAge_LongMaxValue_WithLiveSession_SilentSsoSucceeds()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var login = await fixture.SubmitPasswordLoginWithSessionAsync(started);
+
+        // long.MaxValue seconds must not 500 (TimeSpan.FromSeconds would throw
+        // OverflowException); the session age is never >= that, so silent SSO
+        // issues a code.
+        using var silent = await fixture.AuthorizeWithSessionAsync(
+            "openid",
+            login.AuthPageCookie,
+            maxAge: "9223372036854775807");
+
+        silent.Response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var query = QueryHelpers.ParseQuery(silent.Response.Headers.Location!.Query);
+        query["code"].ToString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task PromptSelectAccountConsentList_WithLiveSession_ForcesFreshSignIn()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var login = await fixture.SubmitPasswordLoginWithSessionAsync(started);
+
+        // prompt is a space-delimited list; select_account must be honored even
+        // when combined with other values.
+        using var challenged = await fixture.AuthorizeWithSessionAsync(
+            "openid",
+            login.AuthPageCookie,
+            prompt: "select_account consent");
+
+        challenged.Response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var html = await challenged.Response.Content.ReadAsStringAsync();
+        html.Should().Contain("__RequestVerificationToken");
+    }
+
+    [TestMethod]
     public async Task PromptSelectAccount_WithLiveSession_ForcesFreshSignIn()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");

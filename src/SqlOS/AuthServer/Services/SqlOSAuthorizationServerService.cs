@@ -146,7 +146,7 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("State cannot exceed 2048 characters.");
         }
 
-        if (!TryParseMaxAge(input.MaxAge, out _))
+        if (!TryParseMaxAge(input.MaxAge, out var maxAgeSeconds))
         {
             throw new InvalidOperationException("max_age must be a non-negative integer.");
         }
@@ -194,6 +194,7 @@ public sealed class SqlOSAuthorizationServerService
             Resource = normalizedResource,
             Nonce = input.Nonce,
             Prompt = input.Prompt,
+            MaxAgeSeconds = maxAgeSeconds,
             LoginHintEmail = input.LoginHint,
             UiContextJson = SqlOSHeadlessAuthService.NormalizeUiContext(input.UiContextJson),
             CodeChallenge = input.CodeChallenge ?? string.Empty,
@@ -522,14 +523,23 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSUser user,
         SqlOSAuthorizationRequest authorizationRequest,
         string authenticationMethod,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? authenticatedAt = null)
     {
+        // Stamp the moment the user actually authenticated so organization
+        // selection cannot inflate auth_time to the selection-click time. When
+        // the caller does not know a better value, the pending token is being
+        // created at the moment of a just-completed interactive login, so now
+        // is the correct authentication time.
         return await _cryptoService.CreateTemporaryTokenAsync(
             "auth_page_pending",
             user.Id,
             authorizationRequest.ClientApplicationId,
             null,
-            new PendingAuthorizationPayload(authorizationRequest.Id, authenticationMethod),
+            new PendingAuthorizationPayload(
+                authorizationRequest.Id,
+                authenticationMethod,
+                authenticatedAt ?? DateTime.UtcNow),
             TimeSpan.FromMinutes(10),
             cancellationToken);
     }
@@ -583,7 +593,10 @@ public sealed class SqlOSAuthorizationServerService
             payload.AuthenticationMethod,
             organizations,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            // Pending tokens minted before AuthenticatedAt existed deserialize
+            // null, which falls back to issuance-time resolution.
+            knownAuthenticatedAt: payload.AuthenticatedAt);
     }
 
     internal async Task<SqlOSAuthorizationRequestLoginResult> GetPendingOrganizationSelectionForLoginAsync(
@@ -727,7 +740,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSUser user,
         string authenticationMethod,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? knownAuthenticatedAt = null)
     {
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
@@ -746,7 +760,8 @@ public sealed class SqlOSAuthorizationServerService
                 authenticationMethod,
                 invitationOrganizations,
                 httpContext,
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt);
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
@@ -765,7 +780,8 @@ public sealed class SqlOSAuthorizationServerService
                 authenticationMethod,
                 organizations,
                 httpContext,
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt);
         }
 
         if (organizations.Count > 1)
@@ -777,7 +793,8 @@ public sealed class SqlOSAuthorizationServerService
                     user,
                     authorizationRequest,
                     authenticationMethod,
-                    cancellationToken),
+                    cancellationToken,
+                    knownAuthenticatedAt ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken)),
                 organizations,
                 AuthorizationRequestId: authorizationRequest.Id);
         }
@@ -790,7 +807,8 @@ public sealed class SqlOSAuthorizationServerService
             authenticationMethod,
             organizations,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            knownAuthenticatedAt);
     }
 
     public async Task<string> CompleteMfaChallengeAsync(
@@ -924,7 +942,8 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         IReadOnlyList<SqlOSOrganizationOption> organizations,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? knownAuthenticatedAt = null)
     {
         var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -950,7 +969,8 @@ public sealed class SqlOSAuthorizationServerService
                 authorizationRequest,
                 user,
                 httpContext,
-                cancellationToken),
+                cancellationToken,
+                knownAuthenticatedAt),
             false,
             null,
             organizations,
@@ -1028,7 +1048,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? knownAuthenticatedAt = null)
     {
         if (!string.Equals(assurance.UserId, user.Id, StringComparison.Ordinal)
             || !string.Equals(assurance.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
@@ -1092,7 +1113,19 @@ public sealed class SqlOSAuthorizationServerService
             httpContext.Connection.RemoteIpAddress?.ToString(),
             cancellationToken);
 
-        var authenticatedAt = await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken);
+        var authenticatedAt = knownAuthenticatedAt
+            ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken);
+
+        // max_age was validated when the authorize request arrived, but
+        // interstitials (organization selection, MFA) can outlast it. Re-check the
+        // resolved authentication age at the issuance boundary for both the device
+        // and the authorization-code paths. TotalSeconds avoids the OverflowException
+        // TimeSpan.FromSeconds would throw for very large max_age values.
+        if (authorizationRequest.MaxAgeSeconds is { } maxAgeSeconds
+            && (DateTime.UtcNow - authenticatedAt).TotalSeconds >= maxAgeSeconds)
+        {
+            throw new InvalidOperationException("Authentication is older than the requested max_age.");
+        }
 
         if (!string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
         {
@@ -1256,18 +1289,16 @@ public sealed class SqlOSAuthorizationServerService
             var refreshResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
                 ? request.Resource.Trim()
                 : null;
-            var refreshed = await _authService.RefreshAsync(
-                new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
-                cancellationToken);
 
-            // RFC 6749 §5.1: echo the originally granted scope. Sessions created
+            // RFC 6749 §5.1: echo the originally granted scope. The scope is
+            // captured inside the refresh while the session entity is loaded so
+            // no query runs after rotation has committed (a post-consumption
+            // failure there would burn the rotated token). Sessions created
             // before the Scope column existed return null, which omits the field
             // from the response instead of claiming an empty grant.
-            var sessionScope = await _context.Set<SqlOSSession>()
-                .AsNoTracking()
-                .Where(x => x.Id == refreshed.SessionId)
-                .Select(x => x.Scope)
-                .FirstOrDefaultAsync(cancellationToken);
+            var (refreshed, sessionScope) = await _authService.RefreshWithSessionScopeAsync(
+                new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
+                cancellationToken);
             return new SqlOSTokenEndpointResult(refreshed, sessionScope);
         }
 
@@ -1440,7 +1471,13 @@ public sealed class SqlOSAuthorizationServerService
             && !scope.StartsWith("auth:", StringComparison.Ordinal)
             && !ReservedOidcScopeNames.Contains(scope);
 
-    private sealed record PendingAuthorizationPayload(string AuthorizationRequestId, string AuthenticationMethod);
+    // AuthenticatedAt defaults so pending tokens minted before the field existed
+    // still deserialize; null means "unknown" and issuance falls back to its own
+    // resolution.
+    private sealed record PendingAuthorizationPayload(
+        string AuthorizationRequestId,
+        string AuthenticationMethod,
+        DateTime? AuthenticatedAt = null);
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");

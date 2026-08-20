@@ -27,3 +27,19 @@ BEGIN
     ALTER TABLE [{Schema}].[SqlOSSessions]
     ADD [AuthenticatedAt] DATETIME2 NULL;
 END
+
+GO
+
+IF OBJECT_ID(N'[{Schema}].[SqlOSDeviceAuthorizations]', N'U') IS NOT NULL AND COL_LENGTH('[{Schema}].[SqlOSDeviceAuthorizations]', 'AuthTime') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSDeviceAuthorizations]
+    ADD [AuthTime] DATETIME2 NULL;
+END
+
+GO
+
+IF OBJECT_ID(N'[{Schema}].[SqlOSAuthorizationRequests]', N'U') IS NOT NULL AND COL_LENGTH('[{Schema}].[SqlOSAuthorizationRequests]', 'MaxAgeSeconds') IS NULL
+BEGIN
+    ALTER TABLE [{Schema}].[SqlOSAuthorizationRequests]
+    ADD [MaxAgeSeconds] BIGINT NULL;
+END

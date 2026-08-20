@@ -171,6 +171,14 @@ public sealed class SqlOSAuthorizationPromptTests
         SqlOSAuthorizationServerService.TryParseMaxAge("86400", out var day).Should().BeTrue();
         day.Should().Be(86400);
 
+        // long.MaxValue is accepted; the age comparison must use TotalSeconds so
+        // no TimeSpan is constructed (TimeSpan.FromSeconds would overflow).
+        SqlOSAuthorizationServerService.TryParseMaxAge("9223372036854775807", out var huge).Should().BeTrue();
+        huge.Should().Be(long.MaxValue);
+        var age = (DateTime.UtcNow - DateTime.UtcNow.AddYears(-1)).TotalSeconds >= huge!.Value;
+        age.Should().BeFalse();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("9223372036854775808", out _).Should().BeFalse();
         SqlOSAuthorizationServerService.TryParseMaxAge("-1", out _).Should().BeFalse();
         SqlOSAuthorizationServerService.TryParseMaxAge("+1", out _).Should().BeFalse();
         SqlOSAuthorizationServerService.TryParseMaxAge(" 5", out _).Should().BeFalse();

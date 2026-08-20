@@ -643,6 +643,13 @@ public sealed class SqlOSDeviceAuthorization
     public string? ApprovedOrganizationId { get; set; }
     public string? AuthenticationMethod { get; set; }
     public DateTime? ApprovedAt { get; set; }
+
+    /// <summary>
+    /// When the approving user actually authenticated. Preserved from the approving
+    /// auth-page session so device-grant sessions do not claim approval-click
+    /// freshness for <c>auth_time</c>.
+    /// </summary>
+    public DateTime? AuthTime { get; set; }
     public DateTime? DeniedAt { get; set; }
     public DateTime? ConsumedAt { get; set; }
     public string? IpAddress { get; set; }
@@ -926,6 +933,14 @@ public sealed class SqlOSAuthorizationRequest
     public string? Resource { get; set; }
     public string? Nonce { get; set; }
     public string? Prompt { get; set; }
+
+    /// <summary>
+    /// The parsed OIDC <c>max_age</c> parameter, persisted so issuance can re-check
+    /// authentication age after interstitials (organization selection, MFA) that can
+    /// outlast the freshness the client demanded. Null when max_age was not supplied.
+    /// </summary>
+    public long? MaxAgeSeconds { get; set; }
+
     public string CodeChallenge { get; set; } = string.Empty;
     public string CodeChallengeMethod { get; set; } = "S256";
     public string? ResolvedAuthMethod { get; set; }

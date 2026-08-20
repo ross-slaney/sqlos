@@ -709,6 +709,18 @@ public sealed class SqlOSAuthService
     }
 
     public async Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken cancellationToken = default)
+        => (await RefreshWithSessionScopeAsync(request, cancellationToken)).Tokens;
+
+    /// <summary>
+    /// Refreshes tokens and also returns the session's granted scope, captured while
+    /// the session entity is already loaded. Callers that must echo the scope (RFC
+    /// 6749 §5.1) use this instead of querying after <see cref="RefreshAsync"/>
+    /// returns — a post-rotation query is a failure boundary that would burn the
+    /// consumed refresh token without delivering a response.
+    /// </summary>
+    internal async Task<(SqlOSTokenResponse Tokens, string? SessionScope)> RefreshWithSessionScopeAsync(
+        SqlOSRefreshRequest request,
+        CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
         var hashedToken = _cryptoService.HashToken(request.RefreshToken);
@@ -733,7 +745,7 @@ public sealed class SqlOSAuthService
 
         if (refreshToken.ConsumedAt != null)
         {
-            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken), session.Scope);
         }
 
         EnsureSessionIsActive(session);
@@ -750,7 +762,7 @@ public sealed class SqlOSAuthService
 
         if (refreshToken.ConsumedAt != null)
         {
-            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken), session.Scope);
         }
 
         var requestedOrganizationId = string.IsNullOrWhiteSpace(request.OrganizationId)
@@ -884,17 +896,17 @@ public sealed class SqlOSAuthService
                 throw new InvalidOperationException("Refresh token rotation could not be completed.");
             }
 
-            return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken), fresh.Session!.Scope);
         }
 
-        return new SqlOSTokenResponse(
+        return (new SqlOSTokenResponse(
             accessToken,
             newRawRefreshToken,
             session.Id,
             session.ClientApplication!.ClientId,
             organizationId,
             accessTokenExpiresAt,
-            nextRefreshToken.ExpiresAt);
+            nextRefreshToken.ExpiresAt), session.Scope);
     }
 
     /// <summary>

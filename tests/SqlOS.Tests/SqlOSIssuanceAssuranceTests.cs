@@ -401,6 +401,70 @@ public sealed class SqlOSIssuanceAssuranceTests
         harness.Http.Response.Headers.SetCookie.ToString().Should().NotContain(completion.MfaToken);
     }
 
+    [TestMethod]
+    public async Task IssueAuthorizationRedirectAsync_WhenAuthenticationOlderThanMaxAge_Throws()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("max-age");
+        var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail, maxAge: "0");
+        request.MaxAgeSeconds.Should().Be(0);
+
+        var act = async () => await harness.Authorization.IssueAuthorizationRedirectAsync(
+            request,
+            user,
+            harness.OrganizationId,
+            "password",
+            harness.Http);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Authentication is older than the requested max_age.");
+        (await harness.Context.Set<SqlOSAuthorizationCode>()
+            .CountAsync(x => x.AuthorizationRequestId == request.Id)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task CompletePendingOrganizationSelection_UsesPendingCreationAuthTime_NotSelectionTime()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.CreateMemberAsync("pending-authtime");
+        var secondOrganization = await harness.Admin.CreateOrganizationAsync(
+            new SqlOSCreateOrganizationRequest("Second Issuance Org", null));
+        await harness.Admin.CreateMembershipAsync(
+            secondOrganization.Id,
+            new SqlOSCreateMembershipRequest(user.Id, "member"));
+        var request = await harness.CreateAuthorizationRequestAsync(user.DefaultEmail);
+
+        var completion = await harness.Authorization.CompleteAuthorizationRequestLoginAsync(
+            request,
+            user,
+            "password",
+            harness.Http);
+        completion.RequiresOrganizationSelection.Should().BeTrue();
+        completion.PendingToken.Should().NotBeNullOrWhiteSpace();
+
+        // Simulate the user parking on the organization chooser: rewrite the
+        // pending payload's stamped authentication time to half an hour ago. The
+        // minted code must carry that moment, not the selection-click time.
+        var originalAuthenticatedAt = DateTime.UtcNow.AddMinutes(-30);
+        var pending = await harness.Context.Set<SqlOSTemporaryToken>()
+            .SingleAsync(x => x.Purpose == "auth_page_pending" && x.UserId == user.Id);
+        var payload = System.Text.Json.Nodes.JsonNode.Parse(pending.PayloadJson!)!.AsObject();
+        payload["AuthenticatedAt"] = originalAuthenticatedAt.ToString("O");
+        pending.PayloadJson = payload.ToJsonString();
+        await harness.Context.SaveChangesAsync();
+
+        var result = await harness.Authorization.CompletePendingOrganizationSelectionForLoginAsync(
+            completion.PendingToken!,
+            harness.OrganizationId,
+            harness.Http);
+
+        result.RedirectUrl.Should().Contain("code=");
+        var code = await harness.Context.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.AuthorizationRequestId == request.Id);
+        code.AuthTime.Should().NotBeNull();
+        code.AuthTime!.Value.Should().BeCloseTo(originalAuthenticatedAt, TimeSpan.FromSeconds(1));
+    }
+
     private static void RequireAllUsersMfa(SqlOSAuthServerOptions options)
     {
         options.Mfa.Enabled = true;
@@ -527,7 +591,7 @@ public sealed class SqlOSIssuanceAssuranceTests
             return user;
         }
 
-        public async Task<SqlOSAuthorizationRequest> CreateAuthorizationRequestAsync(string? loginHint, string? state = null)
+        public async Task<SqlOSAuthorizationRequest> CreateAuthorizationRequestAsync(string? loginHint, string? state = null, string? maxAge = null)
             => await Authorization.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
                 "code",
                 "test-client",
@@ -541,7 +605,8 @@ public sealed class SqlOSIssuanceAssuranceTests
                 null,
                 null,
                 "hosted",
-                null));
+                null,
+                maxAge));
 
         public async ValueTask DisposeAsync() => await Context.DisposeAsync();
     }

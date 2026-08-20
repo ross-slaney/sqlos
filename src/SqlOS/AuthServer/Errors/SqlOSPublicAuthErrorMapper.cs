@@ -19,6 +19,7 @@ public static class SqlOSPublicAuthErrorMapper
         "An account already exists for this email. Sign in with an email code instead.",
         "An account already exists for this phone number.",
         "An account already exists for this phone number. Sign in with a phone code instead.",
+        "Authentication is older than the requested max_age.",
         "Authorization request is invalid or expired.",
         "Client application is required.",
         "Create an account to accept this invitation.",

@@ -124,6 +124,69 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
     }
 
     [TestMethod]
+    public async Task ApproveAsync_CarriesAuthPageSessionAuthTime_IntoIssuedSession()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.SeedUserAsync();
+        var start = await harness.Device.StartAsync(
+            new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid", "https://api.example.com/todos"),
+            harness.Http);
+
+        // The approving browser signed in two hours ago; the approval click must
+        // not overwrite that as the authentication moment.
+        var originalAuthenticatedAt = DateTime.UtcNow.AddHours(-2);
+        var authPageToken = await harness.Crypto.CreateTemporaryTokenAsync(
+            SqlOSAuthLifecyclePolicy.AuthPageSessionPurpose,
+            user.Id,
+            null,
+            null,
+            new { AuthenticationMethod = "password", AuthenticatedAt = originalAuthenticatedAt },
+            TimeSpan.FromHours(8));
+        harness.Http.Request.Headers.Cookie = $"sqlos_auth_page={authPageToken}";
+
+        var resolved = await harness.Device.ApproveAsync(
+            new SqlOSDeviceAuthorizationApprovalRequest(start.UserCode),
+            user,
+            "password",
+            harness.Http);
+        resolved.Status.Should().Be(SqlOSDeviceAuthorizationService.ApprovedStatus);
+
+        var stored = await harness.Context.Set<SqlOSDeviceAuthorization>().SingleAsync();
+        stored.AuthTime.Should().NotBeNull();
+        stored.AuthTime!.Value.Should().BeCloseTo(originalAuthenticatedAt, TimeSpan.FromSeconds(1));
+        stored.ApprovedAt.Should().NotBeNull();
+        stored.ApprovedAt!.Value.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+
+        await harness.Device.PollAsync(
+            new SqlOSDeviceTokenPollRequest("todo-cli", start.DeviceCode, "https://api.example.com/todos"),
+            harness.Http);
+
+        var session = await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.UserId == user.Id);
+        session.AuthenticatedAt.Should().NotBeNull();
+        session.AuthenticatedAt!.Value.Should().BeCloseTo(originalAuthenticatedAt, TimeSpan.FromSeconds(1));
+    }
+
+    [TestMethod]
+    public async Task ApproveAsync_WithoutAuthPageSession_StampsFreshAuthTime()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var user = await harness.SeedUserAsync();
+        var start = await harness.Device.StartAsync(
+            new SqlOSDeviceAuthorizationStartRequest("todo-cli", "openid", "https://api.example.com/todos"),
+            harness.Http);
+
+        await harness.Device.ApproveAsync(
+            new SqlOSDeviceAuthorizationApprovalRequest(start.UserCode),
+            user,
+            "password",
+            harness.Http);
+
+        var stored = await harness.Context.Set<SqlOSDeviceAuthorization>().SingleAsync();
+        stored.AuthTime.Should().NotBeNull();
+        stored.AuthTime!.Value.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
     public async Task PollAsync_RejectsWrongClientAndResource()
     {
         await using var harness = await Harness.CreateAsync();
@@ -173,6 +236,7 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
         public SqlOSDeviceAuthorizationService Device { get; }
         public SqlOSAuthorizationServerService Authorization { get; }
         public DefaultHttpContext Http { get; }
+        public SqlOSCryptoService Crypto => _crypto;
 
         public static async Task<Harness> CreateAsync()
         {
@@ -199,7 +263,7 @@ public sealed class SqlOSDeviceAuthorizationServiceTests
             var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
             var mfaPolicy = new SqlOSMfaPolicyService(context, settings, options);
             var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp, mfaPolicyService: mfaPolicy);
-            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy);
+            var device = new SqlOSDeviceAuthorizationService(context, admin, auth, crypto, options, mfaPolicy, authPageSession);
             var authorization = new SqlOSAuthorizationServerService(context, admin, auth, crypto, settings, authPageSession, options, mfaPolicyService: mfaPolicy);
             var http = new DefaultHttpContext();
             http.Request.Scheme = "https";

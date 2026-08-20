@@ -21,6 +21,7 @@ public sealed class SqlOSDeviceAuthorizationService
     private readonly SqlOSCryptoService _cryptoService;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSMfaPolicyService _mfaPolicyService;
+    private readonly SqlOSAuthPageSessionService _authPageSessionService;
 
     public SqlOSDeviceAuthorizationService(
         ISqlOSAuthServerDbContext context,
@@ -28,17 +29,18 @@ public sealed class SqlOSDeviceAuthorizationService
         SqlOSAuthService authService,
         SqlOSCryptoService cryptoService,
         IOptions<SqlOSAuthServerOptions> options,
-        SqlOSMfaPolicyService? mfaPolicyService = null)
+        SqlOSMfaPolicyService? mfaPolicyService = null,
+        SqlOSAuthPageSessionService? authPageSessionService = null)
     {
         _context = context;
         _adminService = adminService;
         _authService = authService;
         _cryptoService = cryptoService;
         _options = options.Value;
-        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(
-            context,
-            new SqlOSSettingsService(context, options, new SqlOSAcsAuthEmailSender(options)),
-            options);
+        var settingsService = new SqlOSSettingsService(context, options, new SqlOSAcsAuthEmailSender(options));
+        _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
+        _authPageSessionService = authPageSessionService
+            ?? new SqlOSAuthPageSessionService(context, cryptoService, settingsService);
     }
 
     public async Task<SqlOSDeviceAuthorizationStartResult> StartAsync(
@@ -297,6 +299,7 @@ public sealed class SqlOSDeviceAuthorizationService
         deviceAuthorization.ApprovedOrganizationId = organizationId;
         deviceAuthorization.AuthenticationMethod = authenticationMethod;
         deviceAuthorization.ApprovedAt = DateTime.UtcNow;
+        deviceAuthorization.AuthTime = await ResolveApprovalAuthTimeAsync(user, httpContext, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await _adminService.RecordAuditAsync(
             "oauth.device.approved",
@@ -413,6 +416,7 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.ApprovedOrganizationId = null;
             deviceAuthorization.AuthenticationMethod = null;
             deviceAuthorization.ApprovedAt = null;
+            deviceAuthorization.AuthTime = null;
             var boundRequest = await _context.Set<SqlOSAuthorizationRequest>()
                 .FirstOrDefaultAsync(x => x.DeviceAuthorizationId == deviceAuthorization.Id, cancellationToken);
             if (boundRequest != null)
@@ -461,7 +465,9 @@ public sealed class SqlOSDeviceAuthorizationService
             deviceAuthorization.Resource,
             deviceAuthorization.Scope,
             nonce: null,
-            deviceAuthorization.ApprovedAt,
+            // AuthTime is when the approving user actually authenticated;
+            // ApprovedAt (the approval click) would overstate freshness.
+            deviceAuthorization.AuthTime,
             cancellationToken);
 
         await _adminService.RecordAuditAsync(
@@ -474,6 +480,24 @@ public sealed class SqlOSDeviceAuthorizationService
             cancellationToken: cancellationToken);
 
         return new SqlOSDeviceTokenPollResult(tokens, deviceAuthorization.Scope);
+    }
+
+    /// <summary>
+    /// Resolves when the approving user actually authenticated. The hosted and
+    /// headless approve endpoints sign the user in before the approval POST, so the
+    /// request normally carries an auth-page session cookie whose AuthenticatedAt
+    /// survives silent SSO reuse. Without one (fresh interactive approval), now is
+    /// the authentication moment.
+    /// </summary>
+    private async Task<DateTime> ResolveApprovalAuthTimeAsync(
+        SqlOSUser user,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var session = await _authPageSessionService.TryGetSessionAsync(httpContext, cancellationToken);
+        return session != null && string.Equals(session.User.Id, user.Id, StringComparison.Ordinal)
+            ? session.AuthenticatedAt
+            : DateTime.UtcNow;
     }
 
     private async Task EnsureMfaSatisfiedAsync(

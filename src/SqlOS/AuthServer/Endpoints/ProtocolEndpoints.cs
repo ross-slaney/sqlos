@@ -162,10 +162,15 @@ public static partial class EndpointRouteBuilderExtensions
                 var prompt = context.Request.Query["prompt"].ToString();
                 var rawMaxAge = context.Request.Query["max_age"].ToString();
                 var invitationToken = ReadInvitationToken(context);
+                // OIDC prompt is a space-delimited list; tokenize once so values
+                // like "select_account consent" are still recognized. The raw
+                // string is persisted on the authorization request unchanged.
+                var promptValues = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var promptRequestsNone = promptValues.Contains("none", StringComparer.Ordinal);
                 // select_account has no account chooser yet; forcing a fresh
                 // sign-in is the compliant conservative reading.
-                var promptForcesLogin = string.Equals(prompt, "login", StringComparison.Ordinal)
-                    || string.Equals(prompt, "select_account", StringComparison.Ordinal);
+                var promptForcesLogin = promptValues.Contains("login", StringComparer.Ordinal)
+                    || promptValues.Contains("select_account", StringComparer.Ordinal);
                 if (promptForcesLogin)
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
@@ -210,12 +215,14 @@ public static partial class EndpointRouteBuilderExtensions
                 };
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
+                // TotalSeconds avoids the OverflowException TimeSpan.FromSeconds
+                // would throw for max_age values near long.MaxValue.
                 if (existingSession != null
                     && SqlOSAuthorizationServerService.TryParseMaxAge(rawMaxAge, out var maxAgeSeconds)
                     && maxAgeSeconds is { } maxAge
-                    && DateTime.UtcNow - existingSession.AuthenticatedAt >= TimeSpan.FromSeconds(maxAge))
+                    && (DateTime.UtcNow - existingSession.AuthenticatedAt).TotalSeconds >= maxAge)
                 {
-                    if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                    if (promptRequestsNone)
                     {
                         return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                             authorizationRequest,
@@ -232,7 +239,7 @@ public static partial class EndpointRouteBuilderExtensions
                 {
                     if (authorizationRequest.ClientApplication?.IsFirstParty != true)
                     {
-                        if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                        if (promptRequestsNone)
                         {
                             return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                                 authorizationRequest,
@@ -250,7 +257,7 @@ public static partial class EndpointRouteBuilderExtensions
                             context,
                             cancellationToken);
                         if ((completion.RequiresOrganizationSelection || completion.RequiresMfa)
-                            && string.Equals(prompt, "none", StringComparison.Ordinal))
+                            && promptRequestsNone)
                         {
                             await authorizationServerService.CancelAuthorizationInteractionAsync(
                                 completion,
@@ -320,7 +327,7 @@ public static partial class EndpointRouteBuilderExtensions
                     }
                 }
 
-                if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                if (promptRequestsNone)
                 {
                     return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                         authorizationRequest,
