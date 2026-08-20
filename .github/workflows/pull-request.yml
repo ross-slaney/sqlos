@@ -94,7 +94,9 @@ jobs:
       - run: chmod +x scripts/*.sh && ./scripts/integration-tests.sh
         env:
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
-        timeout-minutes: 30
+        # The consent and OIDC provider trains grew the suite past the old
+        # 30-minute ceiling (last green run on the base stack: 29m47s).
+        timeout-minutes: 45
       - uses: actions/upload-artifact@v4
         if: always()
         with:
