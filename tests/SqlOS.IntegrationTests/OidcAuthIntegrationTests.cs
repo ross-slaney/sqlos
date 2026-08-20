@@ -603,7 +603,9 @@ public sealed class OidcAuthIntegrationTests
             return existing;
         }
 
-        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"]));
+        // These tests pin upstream social-login mechanics for the operator's own
+        // app; first-party keeps them off the third-party consent interstitial.
+        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"], IsFirstParty: true));
     }
 
     private static Task<SqlOSOidcConnection> CreateGoogleConnectionAsync(SqlOSAdminService admin, string callbackUri)
