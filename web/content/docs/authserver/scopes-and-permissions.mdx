@@ -59,6 +59,8 @@ api.MapGet("/projects", async (
 
 The audience check proves the token was minted for this API. The FGA filter decides which rows this user sees. Neither step reads a scope.
 
+This example is the **user-token** flow: `UserId` is deliberately null on a validated client-credentials service token. An endpoint that also accepts service tokens should branch on the `token_kind` claim and resolve the service-account subject from the principal's `sub` claim instead, then apply the service-scope-plus-FGA rule described under service tokens above.
+
 This applies with full force to MCP resource servers: a dynamically registered MCP client can request whatever scopes it likes, so requested scope is untrusted input, not an authorization decision. Validate the audience, resolve the actor, and apply FGA or app policy per operation — see [MCP OAuth](/docs/guides/mcp-oauth).
 
 ## Where scope does gate behavior
@@ -76,7 +78,9 @@ Scope-based API enforcement is intentionally absent, and it is not planned. If a
 - Add a `RequiredScopes` option to `SqlOSAccessTokenValidationOptions`, enforced by the same middleware that checks the audience.
 - Fail with an RFC 6750 §3.1 `insufficient_scope` Bearer challenge rather than a bare 403.
 
-The prerequisites — the empty-allowlist deny-all sentinel and the scope-intersection policy — already shipped, so the path is open; the decision is that SqlOS does not take it. Until that decision changes, treat any scope-based authorization check in resource-server code as a bug: it will pass review against this page only if it is gating claim release, not API access.
+The prerequisites — the empty-allowlist deny-all sentinel and the scope-intersection policy — already shipped, so the path is open; the decision is that SqlOS does not take it. Until that decision changes, treat any scope-based authorization check against a **user** token as a bug: it will pass review against this page only if it is gating claim release, not API access.
+
+Service tokens are the exception, exactly because they carry a `scope` claim on purpose: a resource server handling `token_kind: "service"` should require both the service scope relevant to the operation *and* the FGA decision for the service-account subject. The granted scope describes what the automation was admitted to do; honoring a token deliberately narrowed to one scope is part of that contract, and FGA still decides what the subject may do to each row.
 
 ## See also
 
