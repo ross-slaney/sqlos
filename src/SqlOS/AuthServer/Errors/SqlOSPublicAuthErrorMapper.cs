@@ -50,6 +50,7 @@ public static class SqlOSPublicAuthErrorMapper
         "Phone number is invalid.",
         "Phone sign-in is unavailable.",
         "Phone signup is not available for email invitations.",
+        "prompt cannot combine none with other values.",
         SqlOSSignupOrchestration.UnauthorizedResourceMessage,
         "Sign in before approving this device request.",
         "Sign in before changing phone numbers.",

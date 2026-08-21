@@ -143,7 +143,11 @@ public sealed class SqlOSOidcBrowserAuthService
                 providerState,
                 providerNonce,
                 _cryptoService.CreatePkceCodeChallenge(providerCodeVerifier),
-                "S256"),
+                "S256")
+            {
+                ForceFreshAuthentication = SqlOSAuthorizationServerService.RequiresFreshAuthentication(authorizationRequest),
+                PropagateMaxAgeZero = authorizationRequest.MaxAgeSeconds == 0
+            },
             httpContext.Connection.RemoteIpAddress?.ToString(),
             cancellationToken);
 
@@ -344,7 +348,8 @@ public sealed class SqlOSOidcBrowserAuthService
             var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == result.UserId, cancellationToken);
             authorizationRequest.OrganizationId ??= organizationId;
             // A silently reused upstream session must stamp the upstream auth_time
-            // (or iat) as the authentication moment, not the callback time.
+            // as the authentication moment, not the callback time. When the provider
+            // did not assert auth_time this is null and local resolution applies.
             var completion = await _authorizationServerService.CompleteAuthorizationRequestLoginAsync(
                 authorizationRequest,
                 user,

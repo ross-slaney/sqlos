@@ -101,6 +101,19 @@ public sealed class SqlOSOidcAuthService
                 authorizationParameters["code_challenge"] = request.CodeChallenge;
                 authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
                 authorizationParameters["login_hint"] = request.Email;
+
+                if (request.ForceFreshAuthentication)
+                {
+                    // Clearing the local SqlOS session does not force the upstream
+                    // provider to reauthenticate; propagate the forced-interaction
+                    // requirement so a silently reused upstream session cannot
+                    // satisfy a fresh-authentication demand.
+                    authorizationParameters["prompt"] = "login";
+                    if (request.PropagateMaxAgeZero)
+                    {
+                        authorizationParameters["max_age"] = "0";
+                    }
+                }
             }
             else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
             {
@@ -277,17 +290,22 @@ public sealed class SqlOSOidcAuthService
 
     /// <summary>
     /// Resolves when the user actually authenticated at the upstream provider from
-    /// the validated ID token: <c>auth_time</c> when present, otherwise the token's
-    /// <c>iat</c>, otherwise now. A silently reused upstream session must stamp the
-    /// original authentication moment, not the callback time. Future values (provider
+    /// the validated ID token's <c>auth_time</c> claim. <c>iat</c> is deliberately
+    /// not a fallback: a silently reused upstream session still mints a token with
+    /// a fresh <c>iat</c>, so treating it as the authentication moment would
+    /// fabricate freshness. When <c>auth_time</c> is absent this returns null and
+    /// callers fall back to conservative local resolution. Future values (provider
     /// clock skew) are clamped to now.
     /// </summary>
-    internal static DateTime ResolveUpstreamAuthenticatedAt(ClaimsPrincipal idTokenPrincipal)
+    internal static DateTime? ResolveUpstreamAuthenticatedAt(ClaimsPrincipal idTokenPrincipal)
     {
         var now = DateTime.UtcNow;
-        var authenticatedAt = ParseEpochSecondsClaim(idTokenPrincipal, "auth_time")
-            ?? ParseEpochSecondsClaim(idTokenPrincipal, "iat")
-            ?? now;
+        var authenticatedAt = ParseEpochSecondsClaim(idTokenPrincipal, "auth_time");
+        if (authenticatedAt == null)
+        {
+            return null;
+        }
+
         return authenticatedAt > now ? now : authenticatedAt;
     }
 

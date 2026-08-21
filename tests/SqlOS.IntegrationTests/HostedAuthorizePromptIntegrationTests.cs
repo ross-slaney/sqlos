@@ -160,6 +160,58 @@ public sealed class HostedAuthorizePromptIntegrationTests
     }
 
     [TestMethod]
+    public async Task MaxAge_WhitespaceOnly_IsRejectedAsInvalidRequest()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var login = await fixture.SubmitPasswordLoginWithSessionAsync(started);
+
+        // max_age=%20 is present but malformed; it must be rejected instead of
+        // silently reading as absent and dropping the freshness constraint
+        // (which would let silent SSO issue a code here).
+        using var rejected = await fixture.AuthorizeWithSessionAsync("openid", login.AuthPageCookie, maxAge: " ");
+
+        rejected.Response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [TestMethod]
+    public async Task PromptNone_CombinedWithLogin_IsRejectedAsInvalidRequest()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var login = await fixture.SubmitPasswordLoginWithSessionAsync(started);
+
+        // OIDC Core 3.1.2.1: none MUST NOT be combined with any other value.
+        using var rejected = await fixture.AuthorizeWithSessionAsync(
+            "openid",
+            login.AuthPageCookie,
+            prompt: "none login");
+
+        rejected.Response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var html = await rejected.Response.Content.ReadAsStringAsync();
+        html.Should().Contain("prompt cannot combine none with other values.");
+    }
+
+    [TestMethod]
+    public async Task PromptNone_CombinedWithConsent_DoesNotSilentlyIssueCode()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");
+        await fixture.SetClientAllowedScopesAsync("openid");
+        var started = await fixture.StartAuthorizeAsync("openid");
+        var login = await fixture.SubmitPasswordLoginWithSessionAsync(started);
+
+        using var rejected = await fixture.AuthorizeWithSessionAsync(
+            "openid",
+            login.AuthPageCookie,
+            prompt: "none consent");
+
+        rejected.Response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        rejected.Response.Headers.Location.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task NonceAndAuthTime_RoundTripThroughCodeToSession()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("PromptMaxAge");

@@ -138,7 +138,12 @@ public sealed class SqlOSSamlService
             throw new InvalidOperationException("SAML connection not found or disabled.");
         }
 
-        var samlRequest = BuildAuthnRequest(connection);
+        // When the bound request demands fresh authentication (max_age=0 or
+        // prompt login/select_account), the AuthnRequest carries ForceAuthn so
+        // the IdP cannot silently reuse an existing IdP session.
+        var samlRequest = BuildAuthnRequest(
+            connection,
+            forceAuthn: SqlOSAuthorizationServerService.RequiresFreshAuthentication(authorizationRequest));
         authorizationRequest.UiContextJson = StoreSamlRequestState(
             authorizationRequest.UiContextJson,
             new SamlRequestState(samlRequest.Id, samlRequest.AssertionConsumerServiceUrl));
@@ -330,14 +335,15 @@ public sealed class SqlOSSamlService
         return $"{authorizationRequest.RedirectUri}{separator}code={Uri.EscapeDataString(rawCode)}&state={Uri.EscapeDataString(authorizationRequest.State)}";
     }
 
-    private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection)
+    private SamlAuthnRequest BuildAuthnRequest(SqlOSSsoConnection connection, bool forceAuthn = false)
     {
         var acsUrl = _adminService.GetAssertionConsumerServiceUrl(connection.Id);
         var requestId = $"_{Guid.NewGuid():N}";
         var issueInstant = DateTime.UtcNow.ToString("o");
+        var forceAuthnAttribute = forceAuthn ? " ForceAuthn=\"true\"" : string.Empty;
 
         var xml = $"""
-        <samlp:AuthnRequest xmlns:samlp="{SamlProtocolNs}" xmlns:saml="{SamlAssertionNs}" ID="{requestId}" Version="2.0" IssueInstant="{issueInstant}" Destination="{connection.SingleSignOnUrl}" AssertionConsumerServiceURL="{acsUrl}">
+        <samlp:AuthnRequest xmlns:samlp="{SamlProtocolNs}" xmlns:saml="{SamlAssertionNs}" ID="{requestId}" Version="2.0" IssueInstant="{issueInstant}" Destination="{connection.SingleSignOnUrl}" AssertionConsumerServiceURL="{acsUrl}"{forceAuthnAttribute}>
           <saml:Issuer>{SecurityElement.Escape(_options.Issuer)}</saml:Issuer>
         </samlp:AuthnRequest>
         """;

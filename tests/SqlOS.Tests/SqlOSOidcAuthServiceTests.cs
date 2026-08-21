@@ -115,27 +115,31 @@ public sealed class SqlOSOidcAuthServiceTests
     }
 
     [TestMethod]
-    public void ResolveUpstreamAuthenticatedAt_PrefersAuthTime_FallsBackToIat_ClampsFuture()
+    public void ResolveUpstreamAuthenticatedAt_UsesOnlyAuthTime_NeverIat_ClampsFuture()
     {
         var now = DateTimeOffset.UtcNow;
         var authTime = now.AddMinutes(-30);
         var iat = now.AddMinutes(-5);
 
         var both = Principal(("auth_time", authTime.ToUnixTimeSeconds()), ("iat", iat.ToUnixTimeSeconds()));
-        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(both)
-            .Should().BeCloseTo(authTime.UtcDateTime, TimeSpan.FromSeconds(2));
+        var resolvedBoth = SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(both);
+        resolvedBoth.Should().NotBeNull();
+        resolvedBoth!.Value.Should().BeCloseTo(authTime.UtcDateTime, TimeSpan.FromSeconds(2));
 
+        // iat must never substitute for auth_time: a silently reused upstream
+        // session still mints a token with a fresh iat, which would fabricate
+        // authentication freshness. Absent auth_time resolves to null so callers
+        // fall back to conservative local resolution.
         var iatOnly = Principal(("iat", iat.ToUnixTimeSeconds()));
-        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(iatOnly)
-            .Should().BeCloseTo(iat.UtcDateTime, TimeSpan.FromSeconds(2));
+        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(iatOnly).Should().BeNull();
 
         var neither = Principal();
-        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(neither)
-            .Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(neither).Should().BeNull();
 
         var future = Principal(("auth_time", now.AddMinutes(10).ToUnixTimeSeconds()));
-        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(future)
-            .Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+        var resolvedFuture = SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(future);
+        resolvedFuture.Should().NotBeNull();
+        resolvedFuture!.Value.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
 
         static ClaimsPrincipal Principal(params (string Type, long Seconds)[] claims)
             => new(new ClaimsIdentity(
@@ -332,6 +336,45 @@ public sealed class SqlOSOidcAuthServiceTests
                 "S256"));
         await invalidChallenge.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*valid RFC 7636 S256 PKCE code challenge*");
+    }
+
+    [TestMethod]
+    public async Task StartAuthorization_ForceFreshAuthentication_PropagatesPromptLoginAndMaxAgeZeroUpstream()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        var connection = await CreateGoogleConnectionAsync(admin);
+
+        SqlOSStartOidcAuthorizationRequest Request() => new(
+            connection.Id,
+            "user@example.com",
+            "example-web",
+            "https://app.example.local/callback/google",
+            "state",
+            "nonce",
+            new string('A', 43),
+            "S256");
+
+        // Clearing the local SqlOS session does not force the upstream provider
+        // to reauthenticate; a fresh-authentication demand must reach the IdP.
+        var forced = await oidc.StartAuthorizationAsync(Request() with
+        {
+            ForceFreshAuthentication = true,
+            PropagateMaxAgeZero = true
+        });
+        forced.AuthorizationUrl.Should().Contain("prompt=login");
+        forced.AuthorizationUrl.Should().Contain("max_age=0");
+
+        var promptOnly = await oidc.StartAuthorizationAsync(Request() with
+        {
+            ForceFreshAuthentication = true
+        });
+        promptOnly.AuthorizationUrl.Should().Contain("prompt=login");
+        promptOnly.AuthorizationUrl.Should().NotContain("max_age=");
+
+        var relaxed = await oidc.StartAuthorizationAsync(Request());
+        relaxed.AuthorizationUrl.Should().NotContain("prompt=");
+        relaxed.AuthorizationUrl.Should().NotContain("max_age=");
     }
 
     [TestMethod]
