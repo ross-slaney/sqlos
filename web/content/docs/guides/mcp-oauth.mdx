@@ -173,11 +173,12 @@ The token response returns `access_token`, `refresh_token`, `token_type`, `expir
 {
   "iss": "https://auth.taskrail.test/sqlos/auth",
   "aud": "https://mcp.taskrail.test",
-  "client_id": "https://client.taskrail.test/oauth-client.json"
+  "client_id": "https://client.taskrail.test/oauth-client.json",
+  "scope": "tasks.read"
 }
 ```
 
-Requested scopes are returned by the token endpoint but are deliberately not emitted as a JWT `scope` claim on user tokens — scope is a client grant, not a per-user authorization decision. Do not authorize an MCP tool from requested scope alone; see [Scopes and Permissions](/docs/authserver/scopes-and-permissions) for the decision record.
+The `scope` claim is the *granted* scope — the requested set already intersected with the client's allowlist — and records the MCP client's delegation ceiling, which the resource server may enforce with `RequiredScopes`. It is a client grant, not a per-user authorization decision: never authorize an MCP tool from scope alone. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
 ## 6. Authorize each MCP operation
 

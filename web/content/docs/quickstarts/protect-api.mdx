@@ -104,6 +104,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
 `RequireSqlOSAccessToken` is an endpoint filter on the route group. After validation it sets `HttpContext.User` and stores the typed `SqlOSValidatedToken`, available through `GetSqlOSValidatedToken()`.
 
+When the API also serves delegated (especially third-party) clients, add `options.RequiredScopes = ["your.scope"]` to enforce the client's granted ceiling — a token whose `scope` claim misses a required entry answers `403 insufficient_scope`. Scope bounds the *client*; per-user, per-resource decisions stay with FGA. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
+
 <Callout type="info" title="Audience follows the API, not the login sample">
   The runnable ASP.NET Core sample requests the Todo audience at `http://localhost:5080/api/todos`. When adapting that handler to this standalone host, register and request `http://localhost:5050/api`. A valid token for the Todo API is correctly rejected here.
 </Callout>

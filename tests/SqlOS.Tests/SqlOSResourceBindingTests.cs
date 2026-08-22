@@ -238,6 +238,121 @@ public sealed class SqlOSResourceBindingTests
     }
 
     [TestMethod]
+    public async Task ResourceServerMiddleware_RequiredScopes_RejectsTokenOutsideGrantedCeiling()
+    {
+        using var context = CreateContext();
+        var (options, auth, crypto) = CreateAuthHarnessWithCrypto(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "scope-mw-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        await auth.CreateSessionTokensForUserAsync(user, client, null, "password", "test-agent", "127.0.0.1");
+        var session = await context.Set<SqlOSSession>().SingleAsync();
+        session.Scope = "todos.read";
+        await context.SaveChangesAsync();
+        var scopedToken = await crypto.CreateAccessTokenAsync(user, session, client, null);
+
+        var nextCalled = false;
+        var middleware = new SqlOSAccessTokenValidationMiddleware(
+            _ => { nextCalled = true; return Task.CompletedTask; },
+            new SqlOSAccessTokenValidationOptions
+            {
+                ExpectedAudience = "https://api-a.example.test",
+                RequiredScopes = ["todos.write"]
+            });
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = $"Bearer {scopedToken}";
+
+        await middleware.InvokeAsync(httpContext, auth);
+
+        nextCalled.Should().BeFalse();
+        httpContext.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        var challenge = httpContext.Response.Headers.WWWAuthenticate.ToString();
+        challenge.Should().Contain("error=\"insufficient_scope\"");
+        challenge.Should().Contain("scope=\"todos.write\"");
+        httpContext.GetSqlOSValidatedToken().Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ResourceServerMiddleware_RequiredScopes_AcceptsTokenWithinGrantedCeiling()
+    {
+        using var context = CreateContext();
+        var (options, auth, crypto) = CreateAuthHarnessWithCrypto(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "scope-mw-ok-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        await auth.CreateSessionTokensForUserAsync(user, client, null, "password", "test-agent", "127.0.0.1");
+        var session = await context.Set<SqlOSSession>().SingleAsync();
+        session.Scope = "openid todos.read todos.write";
+        await context.SaveChangesAsync();
+        var scopedToken = await crypto.CreateAccessTokenAsync(user, session, client, null);
+
+        var nextCalled = false;
+        var middleware = new SqlOSAccessTokenValidationMiddleware(
+            _ => { nextCalled = true; return Task.CompletedTask; },
+            new SqlOSAccessTokenValidationOptions
+            {
+                ExpectedAudience = "https://api-a.example.test",
+                RequiredScopes = ["todos.read", "todos.write"]
+            });
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = $"Bearer {scopedToken}";
+
+        await middleware.InvokeAsync(httpContext, auth);
+
+        nextCalled.Should().BeTrue();
+        var validated = httpContext.GetSqlOSValidatedToken();
+        validated.Should().NotBeNull();
+        validated!.Scope.Should().Be("openid todos.read todos.write");
+    }
+
+    [TestMethod]
+    public async Task ResourceServerMiddleware_RequiredScopes_FailsClosedForTokenWithoutScopeClaim()
+    {
+        using var context = CreateContext();
+        var (options, _, auth) = CreateAuthHarness(context);
+        var user = await SeedUserAsync(context);
+        var client = await SeedClientAsync(context, options.Value, "scope-legacy-client", "https://client.example.test/callback", "https://api-a.example.test");
+
+        // Direct (non-OAuth) session: no granted scope is recorded, so the token
+        // carries no scope claim and a scope-requiring resource must fail closed.
+        var tokens = await auth.CreateSessionTokensForUserAsync(user, client, null, "password", "test-agent", "127.0.0.1");
+
+        var nextCalled = false;
+        var middleware = new SqlOSAccessTokenValidationMiddleware(
+            _ => { nextCalled = true; return Task.CompletedTask; },
+            new SqlOSAccessTokenValidationOptions
+            {
+                ExpectedAudience = "https://api-a.example.test",
+                RequiredScopes = ["todos.read"]
+            });
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Authorization = $"Bearer {tokens.AccessToken}";
+
+        await middleware.InvokeAsync(httpContext, auth);
+
+        nextCalled.Should().BeFalse();
+        httpContext.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        httpContext.Response.Headers.WWWAuthenticate.ToString().Should().Contain("error=\"insufficient_scope\"");
+    }
+
+    [TestMethod]
+    public void ScopeRequirementPolicy_NormalizesAndEvaluates()
+    {
+        SqlOSScopeRequirementPolicy.Normalize(null).Should().BeEmpty();
+        SqlOSScopeRequirementPolicy.Normalize([" todos.read ", "todos.read", "", "  "])
+            .Should().BeEquivalentTo(["todos.read"]);
+
+        SqlOSScopeRequirementPolicy.DescribeUnsatisfied([], null).Should().BeNull();
+        SqlOSScopeRequirementPolicy.DescribeUnsatisfied(["a"], "a b").Should().BeNull();
+        SqlOSScopeRequirementPolicy.DescribeUnsatisfied(["a", "c"], "a b").Should().Contain("c");
+        SqlOSScopeRequirementPolicy.DescribeUnsatisfied(["a"], null).Should().Contain("no granted scope");
+        SqlOSScopeRequirementPolicy.DescribeUnsatisfied(["a"], "").Should().Contain("a");
+    }
+
+    [TestMethod]
     public void ResourceServerMiddleware_FailsClosed_WhenAudienceNotConfigured()
     {
         var constructMiddleware = () => new SqlOSAccessTokenValidationMiddleware(
@@ -508,6 +623,26 @@ public sealed class SqlOSResourceBindingTests
         context.Set<SqlOSClientApplication>().Add(client);
         await context.SaveChangesAsync();
         return client;
+    }
+
+    private static (IOptions<SqlOSAuthServerOptions> Options, SqlOSAuthService Auth, SqlOSCryptoService Crypto) CreateAuthHarnessWithCrypto(TestSqlOSInMemoryDbContext context)
+    {
+        // Mirrors CreateAuthHarness but also returns the crypto service: the scope
+        // tests mint a second access token after stamping the session's granted
+        // scope, and both services must share one signing-key custody.
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            Issuer = "https://app.example.com/sqlos/auth",
+            PublicOrigin = "https://app.example.com"
+        };
+        var options = Options.Create(optionsValue);
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        return (options, auth, crypto);
     }
 
     private static (IOptions<SqlOSAuthServerOptions> Options, SqlOSAdminService Admin, SqlOSAuthService Auth) CreateAuthHarness(TestSqlOSInMemoryDbContext context)

@@ -111,10 +111,25 @@ JWKS-only validation is necessarily stateless. It cannot observe a SqlOS session
 | `amr` | Authentication methods for the session (for example `password`, `totp`) |
 | `email` | User's default email, when one exists |
 | `org_id` | Organization (if scoped) |
+| `scope` | The granted scope of the session's OAuth grant — the client's delegation ceiling. Omitted for sessions created before scope tracking and for direct (non-OAuth) logins, where the grant is unknown |
 | `iss` | Issuer URL |
 | `aud` | Audience |
 | `nbf` | Not valid before |
 | `iat` | Issued at |
 | `exp` | Expiration |
 
-User access tokens carry no `scope` claim by design: scope constrains what a client may request, while FGA authorizes what a subject may do. Service tokens from client-credentials machine clients are the exception and carry `scope` plus `token_kind: "service"`. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
+The `scope` claim records what the *client application* was granted, not what the user may do: per-user, per-resource authorization stays with FGA, and effective permission is the intersection of both. Service tokens from client-credentials machine clients also carry `scope`, plus `token_kind: "service"`. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
+
+## Requiring scopes
+
+To bound what a delegated client — especially a third-party one — may reach with a user's token, require scopes at the API edge. Enforcement runs only when `RequiredScopes` is set:
+
+```csharp
+var api = app.MapGroup("/api").RequireSqlOSAccessToken(options =>
+{
+    options.ExpectedAudience = "https://api.example.com";
+    options.RequiredScopes = ["todos.read"];
+});
+```
+
+A validated token whose granted scope misses a required entry answers `403` with an RFC 6750 §3.1 `insufficient_scope` Bearer challenge naming the required scope. Tokens without a `scope` claim fail closed — their grant is unknown, and enforcement must not assume the widest one. The granted scope is also available as `Scope` on the validated token from `GetSqlOSValidatedToken()`. Scope requirements bound the client's ceiling; they never replace the FGA decision for the user.

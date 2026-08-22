@@ -310,12 +310,30 @@ public sealed class SqlOSCryptoServiceTests
     }
 
     [TestMethod]
-    public async Task CreateAccessToken_DoesNotIncludeScopeClaim()
+    public async Task CreateAccessToken_SessionWithGrantedScope_CarriesScopeClaim()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var (user, session, client) = await SeedTokenContextAsync(context);
+        session.Scope = "openid profile todos.read";
+        await context.SaveChangesAsync();
+
+        var rawToken = await service.CreateAccessTokenAsync(user, session, client, "org_test");
+        var parsed = new JwtSecurityTokenHandler().ReadJwtToken(rawToken);
+
+        parsed.Payload["scope"].Should().Be("openid profile todos.read");
+    }
+
+    [TestMethod]
+    public async Task CreateAccessToken_SessionWithoutGrantedScope_OmitsScopeClaim()
     {
         using var context = CreateContext();
         var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
         var (user, session, client) = await SeedTokenContextAsync(context);
 
+        // Null session scope (pre-scope-tracking sessions, direct logins) means the
+        // grant is unknown: the claim is omitted, never fabricated — mirroring the
+        // token response, which omits the scope field for the same sessions.
         var rawToken = await service.CreateAccessTokenAsync(user, session, client, "org_test");
         var parsed = new JwtSecurityTokenHandler().ReadJwtToken(rawToken);
 

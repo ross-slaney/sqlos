@@ -265,7 +265,7 @@ An enterprise federation protocol where an identity provider sends a signed XML 
 
 ### Scope
 
-A string requested by an OAuth client and allowed by its registration, such as `openid`, `profile`, `email`, `offline_access`, or an application-defined scope. Scopes constrain what a client may request; FGA permissions decide what a subject can do to particular resources. Do not treat scope and permission as synonyms. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
+A string requested by an OAuth client and allowed by its registration, such as `openid`, `profile`, `email`, `offline_access`, or an application-defined scope. The granted set — request intersected with allowlist — rides in the token response and the access token's `scope` claim, and APIs may enforce it as the client's delegation ceiling via `RequiredScopes`. FGA permissions decide what a subject can do to particular resources; do not treat scope and permission as synonyms. See [Scopes and Permissions](/docs/authserver/scopes-and-permissions).
 
 ### Service account
 

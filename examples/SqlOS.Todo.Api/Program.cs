@@ -409,7 +409,7 @@ app.MapGet("/api/todos", async (
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.read", cancellationToken);
     if (authResult.Error is not null)
     {
         return authResult.Error;
@@ -456,7 +456,7 @@ app.MapPost("/api/todos", async (
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.write", cancellationToken);
     if (authResult.Error is not null)
     {
         return authResult.Error;
@@ -510,7 +510,7 @@ app.MapPost("/api/todos/{id:guid}/toggle", async (
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.write", cancellationToken);
     if (authResult.Error is not null)
     {
         return authResult.Error;
@@ -557,7 +557,7 @@ app.MapDelete("/api/todos/{id:guid}", async (
     TodoSampleDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.write", cancellationToken);
     if (authResult.Error is not null)
     {
         return authResult.Error;
@@ -592,7 +592,7 @@ app.MapGet("/api/me", async (
     IOptions<TodoSampleOptions> sampleOptions,
     CancellationToken cancellationToken) =>
 {
-    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, cancellationToken);
+    var authResult = await RequireTodoContextAsync(httpContext, authService, todoFgaService, sampleOptions.Value, "todos.read", cancellationToken);
     if (authResult.Error is not null)
     {
         return authResult.Error;
@@ -646,12 +646,23 @@ static async Task<TodoRequestAuthResult> RequireTodoContextAsync(
     SqlOSAuthService authService,
     TodoFgaService todoFgaService,
     TodoSampleOptions sampleOptions,
+    string requiredScope,
     CancellationToken cancellationToken)
 {
     var validated = await TryValidateTodoTokenAsync(httpContext, authService, sampleOptions, cancellationToken);
     if (validated == null)
     {
         return TodoRequestAuthResult.Failure(CreateTodoChallenge(httpContext, sampleOptions));
+    }
+
+    // The token's scope claim is the client's granted delegation ceiling: a client
+    // admitted with only todos.read cannot mutate, whatever its user could do
+    // directly. FGA below still decides what this user may do to each todo —
+    // effective permission is the intersection of both.
+    var grantedScopes = validated.Scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+    if (!grantedScopes.Contains(requiredScope, StringComparer.Ordinal))
+    {
+        return TodoRequestAuthResult.Failure(CreateInsufficientScopeChallenge(httpContext, requiredScope));
     }
 
     httpContext.User = validated.Principal;
@@ -683,6 +694,19 @@ static IResult CreateTodoChallenge(HttpContext httpContext, TodoSampleOptions sa
         error_description = "Present a bearer token minted for the Todo resource.",
         resource_metadata = resourceMetadataUrl
     }, statusCode: StatusCodes.Status401Unauthorized);
+}
+
+static IResult CreateInsufficientScopeChallenge(HttpContext httpContext, string requiredScope)
+{
+    // RFC 6750 §3.1: valid token, insufficient scope — 403 with the scope the
+    // operation requires.
+    httpContext.Response.Headers.WWWAuthenticate =
+        $"Bearer realm=\"SqlOS Todo API\", error=\"insufficient_scope\", scope=\"{requiredScope}\"";
+    return Results.Json(new
+    {
+        error = "insufficient_scope",
+        error_description = $"This operation requires the '{requiredScope}' scope."
+    }, statusCode: StatusCodes.Status403Forbidden);
 }
 
 static IResult CreatePermissionDenied()
