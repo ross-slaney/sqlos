@@ -16,7 +16,7 @@ section: guides
 
 ![A product-owned login UI renders each view returned by the SqlOS headless state machine before the OAuth callback](/docs/guides-custom-login-ui.svg)
 
-This guide builds **RelayDesk**, a fictional support application. RelayDesk renders the email, password, organization, and MFA screens. SqlOS validates every transition and eventually returns a normal authorization code to RelayDesk's registered callback.
+This guide builds **RelayDesk**, a fictional support application. RelayDesk renders the email, password, organization, MFA, and consent screens. SqlOS validates every transition and eventually returns a normal authorization code to RelayDesk's registered callback.
 
 ## Goal
 
@@ -26,7 +26,7 @@ The browser completes this flow:
 /authorize + state + S256 PKCE
   -> RelayDesk identify form
   -> password, SSO, or another server-selected step
-  -> organization or MFA when required
+  -> organization, MFA, or consent when required
   -> registered callback + authorization code
   -> /token + original PKCE verifier
 ```
@@ -196,16 +196,25 @@ type OrganizationOption = {
   role: string;
 };
 
+type ConsentScopeDisplay = {
+  scope: string;
+  displayName: string;
+  description?: string | null;
+};
+
 type HeadlessViewModel = {
   view: string;
   requestId?: string | null;
   headlessApiBasePath: string;
+  clientName?: string | null;
   email?: string | null;
   error?: string | null;
   info?: string | null;
   fieldErrors: Record<string, string>;
   pendingToken?: string | null;
   mfaToken?: string | null;
+  consentToken?: string | null;
+  consentScopes?: ConsentScopeDisplay[] | null;
   organizationSelection: OrganizationOption[];
   providers: Array<{
     connectionId: string;
@@ -248,9 +257,9 @@ async function loadRequest(route: URLSearchParams): Promise<HeadlessViewModel> {
 
 Pass the context emitted by `BuildUiUrl` back to the request loader. This matters after a provider callback when the next view can carry pending organization or MFA state. SqlOS still loads the saved request and validates the flow; the query is not an identity assertion.
 
-Render `model.view`; do not infer the next security step from the form you just submitted. A password can correctly produce `organization`, `mfa`, or `mfa-enroll` instead of completing authorization.
+Render `model.view`; do not infer the next security step from the form you just submitted. A password can correctly produce `organization`, `mfa`, `mfa-enroll`, or `consent` instead of completing authorization.
 
-## 5. Submit identify, password, organization, and MFA
+## 5. Submit identify, password, organization, MFA, and consent
 
 Use one credentialed action helper:
 
@@ -306,7 +315,24 @@ const verified = await postAction("/mfa/verify", {
 });
 ```
 
-Keep `requestId`, `pendingToken`, `mfaToken`, enrollment tokens, and challenge tokens with the view model that returned them. Do not substitute values across tabs, users, clients, organizations, or parallel requests.
+Non-first-party clients surface the `consent` view before their first code is issued (see [Consent](/docs/authserver/consent)). The view model carries `clientName`, a one-time `consentToken`, and `consentScopes` — each requested scope with its catalog display name and description, falling back to the raw scope string when no catalog entry exists. Render the list, then submit the user's decision:
+
+```ts
+const decided = await postAction("/consent/approve", {
+  requestId: model.requestId,
+  consentToken: model.consentToken,
+});
+
+// or, when the user declines:
+const declined = await postAction("/consent/deny", {
+  requestId: model.requestId,
+  consentToken: model.consentToken,
+});
+```
+
+Approval issues the code redirect (a remembered grant skips this view on later logins); denial redirects back to the client with `access_denied` and cancels the request. Reloading the page is safe — `GET /requests/{id}` re-mints the consent token from the flow's continuation cookie.
+
+Keep `requestId`, `pendingToken`, `mfaToken`, `consentToken`, enrollment tokens, and challenge tokens with the view model that returned them. Do not substitute values across tabs, users, clients, organizations, or parallel requests.
 
 ## 6. Apply every action result the same way
 
