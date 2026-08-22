@@ -23,8 +23,11 @@ http://localhost:3020 and click **Sign in with X**:
    "See your email address").
 3. Approve, and you land back in App Y signed in — Auth.js validated the ID
    token against X's JWKS and read your profile from UserInfo.
-4. Sign out of App Y and sign in again: the remembered grant plus X's session
-   make it silent — no password, no consent.
+4. **Sign out** is federated: it ends App Y's session, then X's, so the next
+   sign-in shows a real login page — but no consent screen, because the grant
+   is remembered.
+5. Clear only App Y's cookies instead and sign in again: the live X session
+   plus the remembered grant make it fully silent — no password, no consent.
 
 ## What to look at
 
@@ -40,3 +43,17 @@ http://localhost:3020 and click **Sign in with X**:
   its OIDC capability and discovery URL, per-user **App grants** (revoke one
   and the next App Y sign-in re-prompts consent), and the scope display-name
   catalog.
+
+## Tests that cover this example
+
+- `examples/SqlOS.SignInWithX.E2eTests` — Playwright Chromium drives the real
+  journeys (first sign-up + consent, federated sign-out with the grant
+  remembered, silent SSO) against this app host booted on alternate ports
+  (5110/3030/1438), so the tests can run while a manual demo is up. CI runs
+  them on every PR and on main (`dotnet test examples/SqlOS.SignInWithX.E2eTests`).
+- `tests/SqlOS.Conformance` — the OpenID Foundation conformance suite (Config
+  OP + Basic OP certification plans) runs against App X in conformance mode,
+  also gated in CI.
+
+The consumer-facing walkthrough of this pattern is the
+[Sign in with X guide](https://sqlos.dev/docs/guides/sign-in-with-x).
