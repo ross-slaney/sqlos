@@ -1,0 +1,51 @@
+---
+title: "SqlOS 3.28: An OpenID Provider You Can Prove"
+description: "Every SqlOS host is now an OpenID Connect Provider with consent, granted-scope tokens, and the OpenID Foundation suite in CI."
+date: "2026-08-22"
+author: "Ross Slaney"
+tags: ["AuthServer", "OIDC", "OAuth", "OpenID Provider", "Security", "SqlOS"]
+---
+
+SqlOS 3.28 turns every host into an OpenID Connect Provider. Downstream apps can federate with discovery, RS256 ID tokens, and UserInfo. Third-party clients get an explicit consent screen. User access tokens carry the granted scope, and APIs can enforce it. The OpenID Foundation Basic OP and Config OP plans run in CI on every change.
+
+## OpenID Connect is on by default
+
+`/.well-known/openid-configuration` and `/userinfo` ship with the host. ID tokens are minted only when the granted scope includes `openid`. They are RS256, `aud` is the client, and they never pass access-token validation (`typ: JWT` vs `at+jwt`). Disable provider mode only when you need the previous OAuth-only posture.
+
+See [OpenID Provider](/docs/authserver/openid-provider) and [Sign in with X](/docs/guides/sign-in-with-x).
+
+## Third-party clients ask the user
+
+Non-first-party clients (DCR, CIMD, or a registered third party) now require an Allow/Deny step before the first code. Grants are remembered per user and client, re-prompted on scope escalation or `prompt=consent`, and revoked when CIMD metadata becomes security-sensitive. First-party clients are unchanged.
+
+Operators can give scopes human names through code seeds, the Admin API, or the dashboard. Custom login UIs get a `consent` view with approve and deny.
+
+See [Consent](/docs/authserver/consent) and [Build your own login and signup UI](/docs/guides/custom-login-ui).
+
+## Granted scope is on the token
+
+User access tokens carry the granted scope as an RFC 9068 `scope` claim — the same string the token response echoes. Sessions from before scope tracking omit the claim. Opt in to API-edge checks with `RequiredScopes` on access-token validation; an unsatisfied token returns `403` and `insufficient_scope`. Scope is the client's delegation ceiling. FGA remains the per-resource authority.
+
+See [Scopes and permissions](/docs/authserver/scopes-and-permissions) and [Token validation](/docs/authserver/token-validation).
+
+## Proof, not a claim
+
+The [OpenID Foundation conformance suite](https://gitlab.com/openid/conformance-suite) runs the Config OP and Basic OP plans against the Sign in with X example on every pull request and every push to `main`. That harness found protocol gaps internal tests missed: POST `/authorize`, honest `request`/`request_uri` errors, `client_secret_post`, and PKCE verified only when a challenge was issued.
+
+A real-browser e2e suite walks signup, consent, remembered grants, and federated sign-out. The verification story is in [Sign in with X: proving an OpenID Provider](/blog/sign-in-with-x-proving-an-openid-provider).
+
+## Upgrade notes
+
+Upgrade the package normally:
+
+```bash
+dotnet add package SqlOS --version 3.28.0
+```
+
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test a first-party authorize plus one third-party client if you have one.
+
+Two schema revisions land: authorization codes and sessions now persist nonce, `auth_time`, and granted scope; consent grants and scope display names are new tables. `SqlOSTokenResponse` adds an optional trailing `IdToken` member — source-compatible, binary-breaking for compiled callers.
+
+If you already set `AllowedScopes` and send `scope` on `/authorize`, first-party flows keep working. Third-party clients will pause on consent until the user approves. Downstream OIDC apps can point at the discovery document. To require a scope at an API, set `RequiredScopes`.
+
+This release is backed by hosted authorize-to-token pins, OpenID Provider wire tests, consent parity across the three control planes, OIDF Basic OP and Config OP in CI, Sign in with X browser e2e, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
