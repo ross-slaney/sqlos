@@ -1132,9 +1132,10 @@ public sealed class SqlOSAuthService
         return true;
     }
 
-    private async Task<SqlOSSession?> FindActiveSessionByRefreshTokenAsync(
+    internal async Task<SqlOSSession?> FindActiveSessionByRefreshTokenAsync(
         string? refreshToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeClientApplication = false)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
@@ -1143,8 +1144,14 @@ public sealed class SqlOSAuthService
 
         var now = DateTime.UtcNow;
         var hashed = _cryptoService.HashToken(refreshToken);
-        var token = await _context.Set<SqlOSRefreshToken>()
-            .Include(x => x.Session)
+        IQueryable<SqlOSRefreshToken> query = _context.Set<SqlOSRefreshToken>()
+            .Include(x => x.Session);
+        if (includeClientApplication)
+        {
+            query = query.Include(x => x.Session!.ClientApplication);
+        }
+
+        var token = await query
             .FirstOrDefaultAsync(x => x.TokenHash == hashed
                 && x.RevokedAt == null
                 && x.ConsumedAt == null

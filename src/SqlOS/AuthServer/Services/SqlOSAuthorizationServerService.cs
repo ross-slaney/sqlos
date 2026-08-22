@@ -26,6 +26,7 @@ public sealed class SqlOSAuthorizationServerService
     private readonly SqlOSPasswordLoginAbuseService _passwordLoginAbuseService;
     private readonly SqlOSMfaPolicyService _mfaPolicyService;
     private readonly SqlOSTotpMfaService? _totpMfaService;
+    private readonly SqlOSConsentService _consentService;
 
     public SqlOSAuthorizationServerService(
         ISqlOSAuthServerDbContext context,
@@ -38,7 +39,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSInvitationService? invitationService = null,
         SqlOSPasswordLoginAbuseService? passwordLoginAbuseService = null,
         SqlOSMfaPolicyService? mfaPolicyService = null,
-        SqlOSTotpMfaService? totpMfaService = null)
+        SqlOSTotpMfaService? totpMfaService = null,
+        SqlOSConsentService? consentService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -52,6 +54,7 @@ public sealed class SqlOSAuthorizationServerService
             ?? new SqlOSPasswordLoginAbuseService(context, adminService, cryptoService, options);
         _mfaPolicyService = mfaPolicyService ?? new SqlOSMfaPolicyService(context, settingsService, options);
         _totpMfaService = totpMfaService;
+        _consentService = consentService ?? new SqlOSConsentService(context, cryptoService);
     }
 
     public async Task<SqlOSAuthorizationServerMetadataDto> GetMetadataAsync(HttpContext httpContext, CancellationToken cancellationToken = default)
@@ -282,7 +285,18 @@ public sealed class SqlOSAuthorizationServerService
         if (authorizationRequest.CompletedAt == null && authorizationRequest.CancelledAt == null)
         {
             authorizationRequest.CancelledAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // A concurrent writer already completed or cancelled the request (the
+                // CompletedAt/CancelledAt concurrency tokens make terminal writes mutually
+                // exclusive). Surface the same safe already-inactive failure the issuance
+                // path uses instead of a provider concurrency error.
+                throw new InvalidOperationException("Authorization request is no longer active.", ex);
+            }
         }
 
         var query = new Dictionary<string, string?>
@@ -321,7 +335,258 @@ public sealed class SqlOSAuthorizationServerService
                 completion.MfaToken,
                 cancellationToken);
         }
+
+        if (!string.IsNullOrWhiteSpace(completion.ConsentToken))
+        {
+            _ = await _cryptoService.ConsumeTemporaryTokenAsync(
+                ConsentTokenPurpose,
+                completion.ConsentToken,
+                cancellationToken);
+        }
     }
+
+    /// <summary>
+    /// Consumes a consent token, records the remembered grant (union of stored and granted
+    /// scopes), audits <c>oauth.consent.granted</c>, and re-enters the completion flow so the
+    /// organization and MFA interstitials still run after approval.
+    /// </summary>
+    public async Task<SqlOSAuthorizationRequestLoginResult> ApproveConsentAsync(
+        string consentToken,
+        string authorizationRequestId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate without consuming first: precheck failures (stale metadata, scope-union
+        // overflow) must not burn the one-time token the user would need for a retry.
+        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+            ?? throw new InvalidOperationException("The consent session is invalid or expired.");
+        var (payload, authorizationRequest) = await ValidateConsentTokenAsync(token, authorizationRequestId, cancellationToken);
+
+        // The consent gate bound the request to the user it showed the interstitial to;
+        // a token minted for anyone else (for example after an account switch) is invalid.
+        if (authorizationRequest.PendingConsentUserId != null
+            && !string.Equals(token.UserId, authorizationRequest.PendingConsentUserId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The consent session is not valid for this user.");
+        }
+
+        // Reject approvals whose consent screen no longer reflects the client's
+        // security-sensitive metadata. Tokens minted before fingerprint stamping existed
+        // carry null and are accepted; the 10-minute token lifetime bounds that exposure.
+        var client = authorizationRequest.ClientApplication
+            ?? await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        var currentClientMetadataFingerprint = SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client);
+        if (payload.ClientMetadataFingerprint != null
+            && !string.Equals(
+                payload.ClientMetadataFingerprint,
+                currentClientMetadataFingerprint,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(ConsentClientMetadataChangedMessage);
+        }
+
+        var grantedScopes = SqlOSScopePolicy.Split(authorizationRequest.Scope);
+        // Deterministic overflow precheck before the one-time token is consumed, so an
+        // oversized union rejects with the token still usable.
+        SqlOSConsentService.EnsureUnionWithinLimits(
+            await _consentService.GetActiveGrantScopeAsync(
+                token.UserId!,
+                authorizationRequest.ClientApplicationId,
+                cancellationToken),
+            grantedScopes);
+
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+            ?? throw new InvalidOperationException("The consent session is invalid or expired.");
+
+        var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
+        var grant = await _consentService.UpsertGrantAsync(
+            user.Id,
+            authorizationRequest.ClientApplicationId,
+            grantedScopes,
+            // Stamp the metadata fingerprint this approval was granted against, so a grant
+            // written after a concurrent CIMD refresh (which recomputes a different current
+            // fingerprint) fails the coverage check and the next authorize re-prompts.
+            currentClientMetadataFingerprint,
+            cancellationToken);
+        await _adminService.RecordAuditAsync(
+            "oauth.consent.granted",
+            "user",
+            user.Id,
+            userId: user.Id,
+            ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+            data: new
+            {
+                client_id = authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
+                scope = SqlOSScopePolicy.Join(grantedScopes)
+            },
+            cancellationToken: cancellationToken);
+
+        try
+        {
+            return await CompleteAuthorizationRequestLoginAsync(
+                authorizationRequest,
+                user,
+                payload.AuthenticationMethod,
+                httpContext,
+                cancellationToken,
+                consentGranted: true,
+                // Preserve the original authentication instant (SAML AuthnInstant / upstream
+                // auth_time) across the consent interstitial so issuance does not record the
+                // approval click as the authentication time.
+                knownAuthenticatedAt: payload.AuthenticatedAt);
+        }
+        catch (InvalidOperationException ex) when (string.Equals(
+            ex.Message,
+            "Authorization request is no longer active.",
+            StringComparison.Ordinal))
+        {
+            // A concurrent denial (or another terminal write) won the CancelledAt race after
+            // this approval already committed its grant. The winning decision's effect must
+            // include the grant, so compensate before surfacing the safe failure.
+            await RevokeGrantForInactiveRequestAsync(grant, user.Id, authorizationRequest, httpContext, cancellationToken);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Compensation for an approval whose issuance lost the terminal-write race: the grant
+    /// that this approval created or updated is revoked (reason
+    /// <c>authorization_request_cancelled</c>) and audited as <c>oauth.consent.revoked</c>,
+    /// so a winning denial leaves no active remembered grant behind.
+    /// </summary>
+    private async Task RevokeGrantForInactiveRequestAsync(
+        SqlOSConsentGrant grant,
+        string userId,
+        SqlOSAuthorizationRequest authorizationRequest,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // Drop the failed issuance's staged writes (the added authorization code and the
+        // terminal request update) so the compensating revocation save cannot replay them.
+        if (_context is DbContext db)
+        {
+            foreach (var entry in db.ChangeTracker.Entries()
+                .Where(x => x.Entity is SqlOSAuthorizationCode or SqlOSAuthorizationRequest
+                    && x.State is EntityState.Added or EntityState.Modified)
+                .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
+
+        try
+        {
+            await _consentService.RevokeGrantAsync(
+                userId,
+                grant.Id,
+                "authorization_request_cancelled",
+                cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // Already revoked (for example the CIMD tripwire fired concurrently): the
+            // required effect — no active grant survives the losing approval — already holds.
+            return;
+        }
+
+        await _adminService.RecordAuditAsync(
+            "oauth.consent.revoked",
+            "user",
+            userId,
+            userId: userId,
+            ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+            data: new
+            {
+                client_id = authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
+                reason = "authorization_request_cancelled"
+            },
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Consumes a consent token, audits <c>oauth.consent.denied</c>, cancels the authorization
+    /// request, and returns the RFC 6749 §4.1.2.1 <c>access_denied</c> error redirect.
+    /// </summary>
+    public async Task<string> DenyConsentAsync(
+        string consentToken,
+        string authorizationRequestId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        // Mirror ApproveConsentAsync: validate every request/client binding BEFORE consuming
+        // the one-time token. A mismatched request id (for example another tab's) must fail
+        // with the binding error while the flow's only approval/denial credential stays
+        // usable — headless native flows may have no continuation cookie or auth-page
+        // session from which the reload endpoint could re-mint it.
+        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+            ?? throw new InvalidOperationException("The consent session is invalid or expired.");
+        var (_, authorizationRequest) = await ValidateConsentTokenAsync(token, authorizationRequestId, cancellationToken);
+
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+            ?? throw new InvalidOperationException("The consent session is invalid or expired.");
+        await _adminService.RecordAuditAsync(
+            "oauth.consent.denied",
+            "user",
+            token.UserId,
+            userId: token.UserId,
+            ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+            data: new
+            {
+                client_id = authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
+                scope = authorizationRequest.Scope
+            },
+            cancellationToken: cancellationToken);
+
+        return await BuildAuthorizationErrorRedirectAsync(
+            authorizationRequest,
+            "access_denied",
+            "The user denied the authorization request.",
+            cancellationToken);
+    }
+
+    private async Task<(PendingConsentPayload Payload, SqlOSAuthorizationRequest AuthorizationRequest)> ValidateConsentTokenAsync(
+        SqlOSTemporaryToken token,
+        string authorizationRequestId,
+        CancellationToken cancellationToken)
+    {
+        if (token.UserId == null)
+        {
+            throw new InvalidOperationException("The consent session is invalid.");
+        }
+
+        var payload = _cryptoService.DeserializePayload<PendingConsentPayload>(token)
+            ?? throw new InvalidOperationException("The consent session payload is invalid.");
+        if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The consent session is not valid for this authorization request.");
+        }
+
+        var authorizationRequest = await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
+        if (!string.Equals(token.ClientApplicationId, authorizationRequest.ClientApplicationId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The consent session is not valid for this client.");
+        }
+
+        return (payload, authorizationRequest);
+    }
+
+    /// <summary>
+    /// Safe public failure for approvals whose consent screen went stale because the
+    /// client's security-sensitive metadata changed between mint and approval.
+    /// Listed in SqlOSPublicAuthErrorMapper.SafePublicMessages.
+    /// </summary>
+    internal const string ConsentClientMetadataChangedMessage =
+        "The application's registration changed while consent was pending. Start the request again.";
+
+    // AuthenticatedAt and ClientMetadataFingerprint default so consent tokens minted
+    // before the fields existed still deserialize; null AuthenticatedAt falls back to
+    // issuance-time resolution and null fingerprint skips the staleness check.
+    private sealed record PendingConsentPayload(
+        string AuthorizationRequestId,
+        string AuthenticationMethod,
+        DateTime? AuthenticatedAt = null,
+        string? ClientMetadataFingerprint = null);
 
     public async Task<SqlOSPasswordAuthenticationResult> AuthenticatePasswordAsync(
         string email,
@@ -691,7 +956,20 @@ public sealed class SqlOSAuthorizationServerService
     }
 
     internal const string AuthorizationContinuationPurpose = "authorization_continue";
-    internal const string AuthorizationContinuationCookie = "sqlos_auth_continue";
+    internal const string AuthorizationContinuationCookiePrefix = "sqlos_auth_continue_";
+
+    /// <summary>
+    /// Per-request continuation cookie name (mirroring the antiforgery cookie-name
+    /// derivation in <see cref="Security.SqlOSHostedFormAntiforgery"/>): two authorization
+    /// flows racing in separate browser tabs each keep their own cookie slot, so the second
+    /// callback's Set-Cookie can never clobber the first tab's continuation handle. Writers
+    /// and readers all know the authorization request id from the query/route, so the name
+    /// is derivable everywhere the handle is needed.
+    /// </summary>
+    internal static string BuildContinuationCookieName(string authorizationRequestId)
+        => AuthorizationContinuationCookiePrefix + Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(authorizationRequestId)))[..16].ToLowerInvariant();
 
     public async Task<string> CreateAuthorizationContinuationRedirectAsync(
         SqlOSAuthorizationRequestLoginResult completion,
@@ -703,7 +981,7 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("The authorization interaction is missing its request binding.");
         }
 
-        if (!completion.RequiresMfa && !completion.RequiresOrganizationSelection)
+        if (!completion.RequiresMfa && !completion.RequiresOrganizationSelection && !completion.RequiresConsent)
         {
             throw new InvalidOperationException("The authorization interaction is already complete.");
         }
@@ -718,6 +996,11 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("The organization interaction is missing its pending binding.");
         }
 
+        if (completion.RequiresConsent && string.IsNullOrWhiteSpace(completion.ConsentToken))
+        {
+            throw new InvalidOperationException("The consent interaction is missing its consent binding.");
+        }
+
         var handle = await _cryptoService.CreateTemporaryTokenAsync(
             AuthorizationContinuationPurpose,
             userId: null,
@@ -726,18 +1009,26 @@ public sealed class SqlOSAuthorizationServerService
             new AuthorizationContinuationPayload(
                 completion.AuthorizationRequestId,
                 completion.MfaToken,
-                completion.PendingToken),
+                completion.PendingToken,
+                completion.ConsentToken),
             _options.Mfa.Totp.ChallengeTokenLifetime,
             cancellationToken);
 
         var continuePath = $"{_options.BasePath.TrimEnd('/')}/continue";
-        httpContext.Response.Cookies.Append(AuthorizationContinuationCookie, handle, new CookieOptions
+        // The cookie must reach both /continue and the headless request-reload endpoint
+        // (GET {headlessApiBasePath}/requests/{id}): custom BuildUiUrl delegates may drop
+        // the ConsentToken route field, and the reload re-mints it from this cookie via
+        // TryCreateConsentTokenForRequestReloadAsync.
+        httpContext.Response.Cookies.Append(
+            BuildContinuationCookieName(completion.AuthorizationRequestId),
+            handle,
+            new CookieOptions
         {
             HttpOnly = true,
             IsEssential = true,
             SameSite = SameSiteMode.Lax,
             Secure = httpContext.Request.IsHttps,
-            Path = continuePath,
+            Path = ResolveContinuationCookiePath(),
             Expires = DateTimeOffset.UtcNow.Add(_options.Mfa.Totp.ChallengeTokenLifetime)
         });
 
@@ -745,6 +1036,32 @@ public sealed class SqlOSAuthorizationServerService
         {
             ["request"] = completion.AuthorizationRequestId
         });
+    }
+
+    /// <summary>
+    /// Scopes the continuation cookie to the auth base path so it covers both
+    /// <c>{BasePath}/continue</c> and the default headless API under <c>{BasePath}/headless</c>.
+    /// A custom headless API base path outside the auth base path falls back to the site
+    /// root — the cookie is an HttpOnly random handle, so the wider path only changes which
+    /// server endpoints can observe it.
+    /// </summary>
+    private string ResolveContinuationCookiePath()
+    {
+        var basePath = _options.BasePath.TrimEnd('/');
+        if (basePath.Length == 0)
+        {
+            return "/";
+        }
+
+        var headlessApiBasePath = _options.Headless.ResolveApiBasePath(_options.BasePath);
+        // Browser cookie-path matching is case-sensitive (RFC 6265 section 5.1.4), so the
+        // prefix check must be ordinal: configured paths that differ only by case would
+        // produce a cookie the browser never sends to the headless reload endpoint, so
+        // they fall back to the site root like any other non-prefix path.
+        return string.Equals(headlessApiBasePath, basePath, StringComparison.Ordinal)
+            || headlessApiBasePath.StartsWith(basePath + "/", StringComparison.Ordinal)
+                ? basePath
+                : "/";
     }
 
     internal async Task<SqlOSAuthorizationRequestLoginResult> ResolveAuthorizationContinuationAsync(
@@ -790,13 +1107,201 @@ public sealed class SqlOSAuthorizationServerService
                 cancellationToken);
         }
 
+        if (!string.IsNullOrWhiteSpace(payload.ConsentToken))
+        {
+            return await GetPendingConsentForLoginAsync(
+                payload.ConsentToken,
+                authorizationRequestId,
+                cancellationToken);
+        }
+
         throw new InvalidOperationException("Authorization continuation is invalid.");
+    }
+
+    internal async Task<SqlOSAuthorizationRequestLoginResult> GetPendingConsentForLoginAsync(
+        string consentToken,
+        string authorizationRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        var token = await _cryptoService.FindTemporaryTokenAsync(ConsentTokenPurpose, consentToken, cancellationToken)
+            ?? throw new InvalidOperationException("The consent session is invalid or expired.");
+        var payload = _cryptoService.DeserializePayload<PendingConsentPayload>(token)
+            ?? throw new InvalidOperationException("The consent session payload is invalid.");
+        if (!string.Equals(payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The consent session is not valid for this authorization request.");
+        }
+
+        var authorizationRequest = await GetRequiredAuthorizationRequestAsync(authorizationRequestId, cancellationToken);
+        var grantedScopes = SqlOSScopePolicy.Split(authorizationRequest.Scope);
+        return new SqlOSAuthorizationRequestLoginResult(
+            null,
+            false,
+            null,
+            Array.Empty<SqlOSOrganizationOption>(),
+            AuthorizationRequestId: authorizationRequestId,
+            RequiresConsent: true,
+            ConsentToken: consentToken,
+            ConsentScopes: await _consentService.BuildScopeDisplaysAsync(grantedScopes, cancellationToken));
     }
 
     private sealed record AuthorizationContinuationPayload(
         string AuthorizationRequestId,
         string? MfaToken,
-        string? PendingToken);
+        string? PendingToken,
+        string? ConsentToken = null);
+
+    internal const string ConsentTokenPurpose = "auth_page_consent";
+    private static readonly TimeSpan ConsentTokenLifetime = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Re-mints a consent pending token for a consent view reloaded through the headless
+    /// request endpoint. Custom <c>BuildUiUrl</c> delegates may drop the ConsentToken route
+    /// field, so the reload recovers the user from what the browser actually carries: the
+    /// authorization continuation cookie minted for this request, or a live auth-page
+    /// session that still owes consent (silent SSO). Anonymous or foreign-browser reloads
+    /// resolve neither and get no token — the consent view then fails closed.
+    /// </summary>
+    public async Task<string?> TryCreateConsentTokenForRequestReloadAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        var continuationToken = await TryMintConsentTokenFromContinuationCookieAsync(
+            authorizationRequest,
+            httpContext,
+            cancellationToken);
+        if (continuationToken != null)
+        {
+            return continuationToken;
+        }
+
+        return await TryMintConsentTokenFromAuthPageSessionAsync(authorizationRequest, httpContext, cancellationToken);
+    }
+
+    private async Task<string?> TryMintConsentTokenFromContinuationCookieAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var continuationHandle = httpContext.Request.Cookies[BuildContinuationCookieName(authorizationRequest.Id)];
+        if (string.IsNullOrWhiteSpace(continuationHandle))
+        {
+            return null;
+        }
+
+        var continuation = await _cryptoService.FindTemporaryTokenAsync(
+            AuthorizationContinuationPurpose,
+            continuationHandle,
+            cancellationToken);
+        var continuationPayload = continuation == null
+            ? null
+            : _cryptoService.DeserializePayload<AuthorizationContinuationPayload>(continuation);
+        if (continuationPayload == null
+            || !string.Equals(continuationPayload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(continuationPayload.ConsentToken))
+        {
+            return null;
+        }
+
+        var consentTokenRecord = await _cryptoService.FindTemporaryTokenAsync(
+            ConsentTokenPurpose,
+            continuationPayload.ConsentToken,
+            cancellationToken);
+        var consentPayload = consentTokenRecord == null
+            ? null
+            : _cryptoService.DeserializePayload<PendingConsentPayload>(consentTokenRecord);
+        if (consentTokenRecord?.UserId == null
+            || consentPayload == null
+            || !string.Equals(consentPayload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal)
+            || !string.Equals(consentTokenRecord.ClientApplicationId, authorizationRequest.ClientApplicationId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        // The continuation cookie carries the original consent token's user, but it must
+        // still match the user the consent gate bound to the request.
+        if (authorizationRequest.PendingConsentUserId != null
+            && !string.Equals(consentTokenRecord.UserId, authorizationRequest.PendingConsentUserId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return await _cryptoService.CreateTemporaryTokenAsync(
+            ConsentTokenPurpose,
+            consentTokenRecord.UserId,
+            authorizationRequest.ClientApplicationId,
+            null,
+            // Carry the original payload's authentication instant and metadata fingerprint
+            // forward so the re-minted token behaves exactly like the one it replaces.
+            new PendingConsentPayload(
+                authorizationRequest.Id,
+                consentPayload.AuthenticationMethod,
+                consentPayload.AuthenticatedAt,
+                consentPayload.ClientMetadataFingerprint),
+            ConsentTokenLifetime,
+            cancellationToken);
+    }
+
+    private async Task<string?> TryMintConsentTokenFromAuthPageSessionAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var session = await _authPageSessionService.TryGetSessionAsync(httpContext, cancellationToken);
+        if (session == null)
+        {
+            return null;
+        }
+
+        // The auth-page session cookie is mutable (the browser can switch accounts between
+        // reaching consent and reloading it), so the fallback only mints for the user the
+        // consent gate bound to the request. The gate always stamps the binding when it
+        // mints the first consent token, so a missing binding means no consent is owed by
+        // this reload and the view fails closed.
+        if (authorizationRequest.PendingConsentUserId == null
+            || !string.Equals(session.User.Id, authorizationRequest.PendingConsentUserId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        // Mirror the consent gate in CompleteAuthorizationRequestLoginAsync: only mint when
+        // this session's user actually owes consent for this request.
+        var client = authorizationRequest.ClientApplication
+            ?? await _context.Set<SqlOSClientApplication>()
+                .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+        if (client.IsFirstParty || !string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
+        {
+            return null;
+        }
+
+        var clientMetadataFingerprint = SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client);
+        var grantedScopes = SqlOSScopePolicy.Split(authorizationRequest.Scope);
+        var promptForcesConsent = SqlOSScopePolicy.Split(authorizationRequest.Prompt).Contains("consent", StringComparer.Ordinal);
+        if (!promptForcesConsent
+            && await _consentService.HasCoveringGrantAsync(
+                session.User.Id,
+                authorizationRequest.ClientApplicationId,
+                grantedScopes,
+                clientMetadataFingerprint,
+                cancellationToken))
+        {
+            return null;
+        }
+
+        return await _cryptoService.CreateTemporaryTokenAsync(
+            ConsentTokenPurpose,
+            session.User.Id,
+            authorizationRequest.ClientApplicationId,
+            null,
+            new PendingConsentPayload(
+                authorizationRequest.Id,
+                session.AuthenticationMethod,
+                session.AuthenticatedAt,
+                clientMetadataFingerprint),
+            ConsentTokenLifetime,
+            cancellationToken);
+    }
 
     public async Task<SqlOSAuthorizationRequestLoginResult> CompleteAuthorizationRequestLoginAsync(
         SqlOSAuthorizationRequest authorizationRequest,
@@ -804,8 +1309,68 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         HttpContext httpContext,
         CancellationToken cancellationToken = default,
+        bool consentGranted = false,
         DateTime? knownAuthenticatedAt = null)
     {
+        // Consent is the first interstitial: it runs before invitation acceptance,
+        // organization selection, and MFA so a denied request never advances state.
+        // Device authorization requests are exempt because the device-approval page
+        // is itself an explicit consent surface for the client and its scopes.
+        if (!consentGranted && string.IsNullOrWhiteSpace(authorizationRequest.DeviceAuthorizationId))
+        {
+            var client = authorizationRequest.ClientApplication
+                ?? await _context.Set<SqlOSClientApplication>()
+                    .FirstAsync(x => x.Id == authorizationRequest.ClientApplicationId, cancellationToken);
+            if (!client.IsFirstParty)
+            {
+                var clientMetadataFingerprint = SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client);
+                var grantedScopes = SqlOSScopePolicy.Split(authorizationRequest.Scope);
+                var promptForcesConsent = SqlOSScopePolicy.Split(authorizationRequest.Prompt).Contains("consent", StringComparer.Ordinal);
+                if (promptForcesConsent
+                    || !await _consentService.HasCoveringGrantAsync(
+                        user.Id,
+                        authorizationRequest.ClientApplicationId,
+                        grantedScopes,
+                        clientMetadataFingerprint,
+                        cancellationToken))
+                {
+                    // Bind the request to the user who reached the consent interstitial in
+                    // the same save that mints the token, so reload re-minting and approval
+                    // can reject a browser whose session cookie switched accounts.
+                    authorizationRequest.PendingConsentUserId = user.Id;
+                    var consentToken = await _cryptoService.CreateTemporaryTokenAsync(
+                        ConsentTokenPurpose,
+                        user.Id,
+                        authorizationRequest.ClientApplicationId,
+                        null,
+                        new PendingConsentPayload(
+                            authorizationRequest.Id,
+                            authenticationMethod,
+                            // The caller's known authentication instant (SAML AuthnInstant /
+                            // upstream auth_time / the auth-page session cookie). When the
+                            // caller has none, resolve it now: a live same-user session
+                            // yields the original sign-in moment (silent SSO), and a fresh
+                            // interactive flow reaches this gate immediately after
+                            // credential verification, so now IS the authentication moment.
+                            // Never null — approval must not substitute the approval click.
+                            knownAuthenticatedAt
+                                ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken),
+                            clientMetadataFingerprint),
+                        ConsentTokenLifetime,
+                        cancellationToken);
+                    return new SqlOSAuthorizationRequestLoginResult(
+                        null,
+                        false,
+                        null,
+                        Array.Empty<SqlOSOrganizationOption>(),
+                        AuthorizationRequestId: authorizationRequest.Id,
+                        RequiresConsent: true,
+                        ConsentToken: consentToken,
+                        ConsentScopes: await _consentService.BuildScopeDisplaysAsync(grantedScopes, cancellationToken));
+                }
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
             // Enforce max_age freshness before accepting the bound invitation:
@@ -1644,7 +2209,10 @@ public sealed record SqlOSAuthorizationRequestLoginResult(
     string? MfaToken = null,
     bool RequiresMfaEnrollment = false,
     IReadOnlyList<string>? MfaMethods = null,
-    string? AuthorizationRequestId = null);
+    string? AuthorizationRequestId = null,
+    bool RequiresConsent = false,
+    string? ConsentToken = null,
+    IReadOnlyList<SqlOSConsentScopeDisplay>? ConsentScopes = null);
 
 public sealed record SqlOSTokenRequest(
     string GrantType,

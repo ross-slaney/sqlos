@@ -1,0 +1,72 @@
+---
+title: "Consent"
+description: "The per-user consent screen for non-first-party clients and the scope display-name catalog."
+order: 28.6
+section: authserver
+---
+
+Non-first-party clients — dynamically registered, [CIMD](/docs/authserver/client-id-metadata-documents), and any manually created client without `IsFirstParty` — get an explicit per-user consent screen before SqlOS issues their authorization code. First-party clients never see it. Device authorization requests are also exempt: the device-approval page is already an explicit consent surface for the client and its scopes.
+
+Consent is the first interstitial. It runs before invitation acceptance, organization selection, and MFA, so a denied request never advances authorization state.
+
+## When the screen appears
+
+- The user has never approved this client, or a previous grant was revoked.
+- The granted scope set escalates beyond what the user's remembered grant covers.
+- The request sends `prompt=consent`, which forces the screen even with a covering grant.
+
+The screen shows the client name and each granted scope's display name and optional description from the scope display-name catalog. Scopes without a catalog entry fall back to the raw scope string, so the screen always renders. An empty granted set renders as default access.
+
+## Remembered grants
+
+Approval records one grant per user and client. Approving again unions the newly granted scopes into the active grant; a previously revoked grant is reactivated with exactly the newly granted set, so old revoked approvals never silently widen a fresh consent.
+
+With an active grant covering every granted scope, the authorization completes silently — the same behavior first-party clients get. `prompt=none` returns `consent_required` only when no covering grant exists. Denying redirects to the client with the RFC 6749 `access_denied` error and cancels the request.
+
+This preserves the protection the first-party boundary exists for: a client-controlled authorization URL still cannot ride an unrelated signed-in browser session, because the first grant always requires an explicit user gesture. When a CIMD client's security-sensitive metadata changes (redirect URIs, auth method, grant/response types, scopes), SqlOS revokes its remembered grants in the same save, so users re-consent on the next authorization.
+
+## Hosted and headless surfaces
+
+The hosted AuthPage renders the `consent` view with Allow access and Deny request forms posting to `POST /sqlos/auth/consent/approve` and `POST /sqlos/auth/consent/deny`. These are hosted form handlers with the standard antiforgery requirement; see the [HTTP API Reference](/docs/reference/api-reference).
+
+Headless UIs receive a view model with `view: "consent"`, a short-lived `consentToken`, and `consentScopes` (each entry has `scope`, `displayName`, and optional `description`). Post `{ requestId, consentToken }` to `POST /sqlos/auth/headless/consent/approve` or `/consent/deny`. Approval returns the normal `SqlOSHeadlessActionResult` — organization selection or MFA can still follow; denial returns a redirect result carrying the `access_denied` error redirect. The consent token is transaction-bound: it cannot be substituted across users, clients, or authorization requests, and it expires after ten minutes.
+
+## Scope display names
+
+The catalog that maps raw scopes to consent-screen text is one domain model with three control planes:
+
+- **Code**: seed entries in startup configuration; the scope string is the stable source key.
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.SeedScopeDisplayName(
+        "tasks.read",
+        "Read your tasks",
+        "See task titles, notes, and due dates.");
+});
+```
+
+- **Admin API**: `GET`/`POST /sqlos/admin/auth/api/scope-display-names` and `PUT`/`DELETE /sqlos/admin/auth/api/scope-display-names/{id}`, or `SqlOSAdminService` from trusted backend code.
+- **Dashboard**: the Auth Server → Scope Display Names section lists the catalog and edits dashboard-owned entries.
+
+Startup reconciliation is deterministic and idempotent. Code-seeded entries are code-owned and reapplied authoritatively on every restart; edit them in source control. Dashboard- and API-created entries are dashboard-owned and are never overwritten or adopted by startup. A code-owned entry whose seed disappears is marked orphaned rather than deleted, and seeding a scope that a dashboard-owned entry already claims fails loudly instead of silently changing ownership. Reconciliation outcomes are audited as `configuration.reconciled`.
+
+## Revoking grants
+
+- **Dashboard**: the user detail page's App grants tab lists active grants (client, scopes, granted/updated) with per-grant revoke.
+- **Admin API**: `GET /sqlos/admin/auth/api/users/{userId}/grants` and `POST /sqlos/admin/auth/api/users/{userId}/grants/{grantId}/revoke`.
+- **Account self-service**: `POST /sqlos/auth/account/grants` and `POST /sqlos/auth/account/grants/revoke`. Like `/logout`, the refresh token is the credential; it scopes what the caller can see and revoke. The token must come from a first-party client's session: these surfaces manage the user's grants across every client, so a third-party client's refresh token is rejected with the same generic `401` as an invalid token.
+
+Revocation does not end existing sessions or tokens; it forces the consent screen on the user's next authorization for that client.
+
+## Audit events
+
+`oauth.consent.granted`, `oauth.consent.denied`, and `oauth.consent.revoked` record the consent lifecycle. Catalog changes record `scope_display_name.created`, `scope_display_name.updated`, and `scope_display_name.deleted`.
+
+## See also
+
+- [Clients](/docs/authserver/clients) — the first-party boundary and browser SSO reuse
+- [OpenID Provider mode](/docs/authserver/openid-provider) — `id_token` issuance for the granted `openid` scope
+- [Scopes and Permissions](/docs/authserver/scopes-and-permissions) — scope grants are not API authorization
+- [HTTP API Reference](/docs/reference/api-reference) — exact routes and request shapes

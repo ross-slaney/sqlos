@@ -137,6 +137,93 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenScopeDisplaySeedsContainDuplicateScopes()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.SeedScopeDisplayName("todo:read", "Read your tasks");
+            options.AuthServer.SeedScopeDisplayName("todo:read", "Read tasks again");
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer scope display seeds contain duplicate scope 'todo:read'.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_AllowsDistinctScopeDisplaySeedScopes_ComparedOrdinally()
+    {
+        var services = new ServiceCollection();
+
+        // Scope policy compares ordinally, so scopes differing only by case are distinct.
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.SeedScopeDisplayName("todo:read", "Read your tasks");
+            options.AuthServer.SeedScopeDisplayName("TODO:READ", "Shouting variant");
+        });
+
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenScopeDisplaySeedScopeExceedsColumnLength()
+    {
+        var services = new ServiceCollection();
+        var overlongScope = new string('s', 201);
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.AuthServer.SeedScopeDisplayName(overlongScope, "Too long"));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*cannot exceed 200 characters.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenScopeDisplaySeedIsMissingDisplayName()
+    {
+        var services = new ServiceCollection();
+
+        // Configuration-bound seeds bypass the SeedScopeDisplayName helper, so the
+        // validator must reject a missing display name itself.
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.AuthServer.ScopeDisplaySeeds.Add(new SqlOSScopeDisplaySeedOptions
+            {
+                Scope = "todo:read",
+                DisplayName = "   "
+            }));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer scope display seed 'todo:read' requires a display name.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenScopeDisplaySeedDisplayNameExceedsColumnLength()
+    {
+        var services = new ServiceCollection();
+        var overlongDisplayName = new string('d', 201);
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.AuthServer.SeedScopeDisplayName("todo:read", overlongDisplayName));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer scope display seed 'todo:read' display name cannot exceed 200 characters.*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenScopeDisplaySeedDescriptionExceedsColumnLength()
+    {
+        var services = new ServiceCollection();
+        var overlongDescription = new string('d', 1001);
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+            options.AuthServer.SeedScopeDisplayName("todo:read", "Read your tasks", overlongDescription));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthServer scope display seed 'todo:read' description cannot exceed 1000 characters.*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_AllowsValidHostedConfiguration()
     {
         var services = new ServiceCollection();

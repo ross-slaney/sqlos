@@ -118,13 +118,19 @@ The handler reads discovery, sends `nonce` and PKCE, validates the ID token sign
 ## Not here yet
 
 - RP-initiated logout: there is no `end_session_endpoint`; the discovery document reserves the field but does not emit it (issue #266). Use `GET /sqlos/auth/logout` for browser sign-out.
-- Consent screen (issue #265).
 - Per-application claim policies (issue #121).
 - Hybrid and implicit flows — not planned; SqlOS issues tokens through code + PKCE only.
+
+Non-first-party relying parties see the per-user [consent screen](/docs/authserver/consent) before their first code is issued; first-party clients are exempt.
+
+## Runnable example
+
+The [Sign in with X sample](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) runs the full federation under .NET Aspire: App X is a SqlOS host whose entire identity-provider role is one `AddSqlOS` call, and App Y is a Next.js app whose **"Sign in with X"** button is a standard Auth.js OIDC provider block — discovery, code + PKCE as a public client, ID-token validation, and UserInfo, with the consent screen and remembered grants in between.
 
 ## See also
 
 - [Clients](/docs/authserver/clients) — allowlists, the intersection rule, and the `openid` warnings
+- [Consent](/docs/authserver/consent) — the per-user consent screen and scope display names
 - [Scopes and Permissions](/docs/authserver/scopes-and-permissions) — scope gates claim release, never API authorization
 - [Token Validation](/docs/authserver/token-validation) — validating access tokens in your APIs
 - [HTTP API Reference](/docs/reference/api-reference) — exact routes, parameters, and error shapes

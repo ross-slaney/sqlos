@@ -79,7 +79,10 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var requestId = context.Request.Query["request"].ToString();
-                var continuationHandle = context.Request.Cookies[SqlOSAuthorizationServerService.AuthorizationContinuationCookie];
+                // The continuation cookie name is derived per authorization request, so two
+                // flows racing in separate tabs each resolve their own handle.
+                var continuationHandle = context.Request.Cookies[
+                    SqlOSAuthorizationServerService.BuildContinuationCookieName(requestId)];
                 if (string.IsNullOrWhiteSpace(continuationHandle))
                 {
                     throw new InvalidOperationException("Authorization continuation is invalid or expired.");
@@ -96,15 +99,18 @@ public static partial class EndpointRouteBuilderExtensions
                     return Results.Redirect(headlessAuthService.BuildUiUrl(
                         context,
                         authorizationRequest.Id,
-                        completion.RequiresMfa
-                            ? completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa"
-                            : "organization",
+                        completion.RequiresConsent
+                            ? "consent"
+                            : completion.RequiresMfa
+                                ? completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa"
+                                : "organization",
                         error: null,
                         pendingToken: completion.PendingToken,
                         email: authorizationRequest.LoginHintEmail,
                         displayName: null,
                         uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
-                        mfaToken: completion.MfaToken));
+                        mfaToken: completion.MfaToken,
+                        consentToken: completion.ConsentToken));
                 }
 
                 return await RenderHostedAuthorizationCompletionAsync(
@@ -237,94 +243,116 @@ public static partial class EndpointRouteBuilderExtensions
 
                 if (existingSession != null && !promptForcesLogin)
                 {
-                    if (authorizationRequest.ClientApplication?.IsFirstParty != true)
+                    var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
+                        authorizationRequest,
+                        existingSession.User,
+                        existingSession.AuthenticationMethod,
+                        context,
+                        cancellationToken,
+                        // Silent SSO reuses the session's original authentication moment, so
+                        // the consent gate stamps the true auth time into its pending token
+                        // instead of falling back to a later resolution.
+                        knownAuthenticatedAt: existingSession.AuthenticatedAt);
+                    if ((completion.RequiresConsent || completion.RequiresOrganizationSelection || completion.RequiresMfa)
+                        && promptRequestsNone)
                     {
-                        if (promptRequestsNone)
-                        {
-                            return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
-                                authorizationRequest,
-                                "consent_required",
-                                "User interaction is required for this client.",
-                                cancellationToken));
-                        }
-                    }
-                    else
-                    {
-                        var completion = await authorizationServerService.CompleteAuthorizationRequestLoginAsync(
-                            authorizationRequest,
-                            existingSession.User,
-                            existingSession.AuthenticationMethod,
-                            context,
+                        await authorizationServerService.CancelAuthorizationInteractionAsync(
+                            completion,
                             cancellationToken);
-                        if ((completion.RequiresOrganizationSelection || completion.RequiresMfa)
-                            && promptRequestsNone)
-                        {
-                            await authorizationServerService.CancelAuthorizationInteractionAsync(
-                                completion,
-                                cancellationToken);
-                            return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
-                                authorizationRequest,
-                                "interaction_required",
-                                "Additional user interaction is required.",
-                                cancellationToken));
-                        }
-
-                        if (completion.RequiresOrganizationSelection)
-                        {
-                            if (headlessAuthService.IsBrowserUiEnabled)
-                            {
-                                return Results.Redirect(headlessAuthService.BuildUiUrl(
-                                    context,
-                                    authorizationRequest.Id,
-                                    "organization",
-                                    error: null,
-                                    pendingToken: completion.PendingToken,
-                                    email: existingSession.User.DefaultEmail,
-                                    displayName: null,
-                                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
-                            }
-
-                            return Html(await BuildAuthPageViewModelAsync(
-                                "organization",
-                                authorizationRequest.Id,
-                                existingSession.User.DefaultEmail,
-                                error: null,
-                                displayName: null,
-                                pendingToken: completion.PendingToken,
-                                authPrefix,
-                                authorizationServerService,
-                                cancellationToken,
-                                organizationSelection: completion.Organizations));
-                        }
-
-                        if (completion.RequiresMfa)
-                        {
-                            if (headlessAuthService.IsBrowserUiEnabled)
-                            {
-                                return Results.Redirect(headlessAuthService.BuildUiUrl(
-                                    context,
-                                    authorizationRequest.Id,
-                                    completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
-                                    error: null,
-                                    pendingToken: null,
-                                    email: existingSession.User.DefaultEmail,
-                                    displayName: null,
-                                    uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
-                                    mfaToken: completion.MfaToken));
-                            }
-
-                            return await RenderMfaChallengeAsync(
-                                completion,
-                                authorizationRequest.Id,
-                                existingSession.User.DefaultEmail,
-                                authPrefix,
-                                authorizationServerService,
-                                authService,
-                                cancellationToken);
-                        }
-
-                        return Results.Redirect(completion.RedirectUrl!);
+                        return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                            authorizationRequest,
+                            completion.RequiresConsent ? "consent_required" : "interaction_required",
+                            completion.RequiresConsent
+                                ? "User interaction is required for this client."
+                                : "Additional user interaction is required.",
+                            cancellationToken));
                     }
+
+                    if (completion.RequiresConsent)
+                    {
+                        if (headlessAuthService.IsBrowserUiEnabled)
+                        {
+                            return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                context,
+                                authorizationRequest.Id,
+                                "consent",
+                                error: null,
+                                pendingToken: null,
+                                email: existingSession.User.DefaultEmail,
+                                displayName: null,
+                                uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                                consentToken: completion.ConsentToken));
+                        }
+
+                        return Html(await BuildAuthPageViewModelAsync(
+                            "consent",
+                            authorizationRequest.Id,
+                            existingSession.User.DefaultEmail,
+                            error: null,
+                            displayName: null,
+                            pendingToken: null,
+                            authPrefix,
+                            authorizationServerService,
+                            cancellationToken,
+                            consentToken: completion.ConsentToken,
+                            consentScopes: completion.ConsentScopes));
+                    }
+
+                    if (completion.RequiresOrganizationSelection)
+                    {
+                        if (headlessAuthService.IsBrowserUiEnabled)
+                        {
+                            return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                context,
+                                authorizationRequest.Id,
+                                "organization",
+                                error: null,
+                                pendingToken: completion.PendingToken,
+                                email: existingSession.User.DefaultEmail,
+                                displayName: null,
+                                uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson)));
+                        }
+
+                        return Html(await BuildAuthPageViewModelAsync(
+                            "organization",
+                            authorizationRequest.Id,
+                            existingSession.User.DefaultEmail,
+                            error: null,
+                            displayName: null,
+                            pendingToken: completion.PendingToken,
+                            authPrefix,
+                            authorizationServerService,
+                            cancellationToken,
+                            organizationSelection: completion.Organizations));
+                    }
+
+                    if (completion.RequiresMfa)
+                    {
+                        if (headlessAuthService.IsBrowserUiEnabled)
+                        {
+                            return Results.Redirect(headlessAuthService.BuildUiUrl(
+                                context,
+                                authorizationRequest.Id,
+                                completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
+                                error: null,
+                                pendingToken: null,
+                                email: existingSession.User.DefaultEmail,
+                                displayName: null,
+                                uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
+                                mfaToken: completion.MfaToken));
+                        }
+
+                        return await RenderMfaChallengeAsync(
+                            completion,
+                            authorizationRequest.Id,
+                            existingSession.User.DefaultEmail,
+                            authPrefix,
+                            authorizationServerService,
+                            authService,
+                            cancellationToken);
+                    }
+
+                    return Results.Redirect(completion.RedirectUrl!);
                 }
 
                 if (promptRequestsNone)

@@ -149,7 +149,7 @@ GET https://auth.taskrail.test/sqlos/auth/authorize?
   resource=https%3A%2F%2Fmcp.taskrail.test
 ```
 
-After sign-in and authorization, validate `state` at the exact registered callback before reading the authorization code. Public clients have no client secret; PKCE binds the code exchange to the process that started it. SqlOS does not currently present a per-user OAuth consent screen for CIMD scopes; `TrustedHosts`/`TrustPolicy` are operator admission controls, and FGA or app policy remains the authorization boundary.
+After sign-in and authorization, validate `state` at the exact registered callback before reading the authorization code. Public clients have no client secret; PKCE binds the code exchange to the process that started it. SqlOS shows a per-user [consent screen](/docs/authserver/consent) for non-first-party clients — including CIMD and DCR clients — before issuing their first authorization code; `TrustedHosts`/`TrustPolicy` remain operator admission controls, and FGA or app policy remains the authorization boundary.
 
 ## 5. Exchange the code for the same resource
 

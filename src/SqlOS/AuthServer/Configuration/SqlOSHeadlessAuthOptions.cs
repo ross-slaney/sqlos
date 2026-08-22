@@ -32,7 +32,8 @@ public sealed record SqlOSHeadlessUiRouteContext(
     string? Email,
     string? DisplayName,
     JsonObject? UiContext,
-    string? MfaToken = null);
+    string? MfaToken = null,
+    string? ConsentToken = null);
 
 public sealed record SqlOSHeadlessSignupHookContext(
     HttpContext HttpContext,

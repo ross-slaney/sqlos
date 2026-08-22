@@ -123,6 +123,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSAuthPageSessionService>();
         services.AddScoped<SqlOSAuthorizationServerService>();
         services.AddScoped<SqlOSUserInfoService>();
+        services.AddScoped<SqlOSConsentService>();
         services.AddScoped<SqlOSHeadlessAuthService>();
         services.AddScoped<SqlOSHomeRealmDiscoveryService>();
         services.AddScoped<SqlOSOidcAuthService>();

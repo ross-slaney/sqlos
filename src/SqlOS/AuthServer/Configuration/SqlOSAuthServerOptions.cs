@@ -76,6 +76,7 @@ public class SqlOSAuthServerOptions
     public List<SqlOSOidcConnectionSeedOptions> OidcConnectionSeeds { get; } = [];
     public List<SqlOSSamlConnectionSeedOptions> SamlConnectionSeeds { get; } = [];
     public List<SqlOSScimConnectionSeedOptions> ScimConnectionSeeds { get; } = [];
+    public List<SqlOSScopeDisplaySeedOptions> ScopeDisplaySeeds { get; } = [];
 
     public SqlOSAuthServerOptions UseHeadlessAuthPage(Action<SqlOSHeadlessAuthOptions> configure)
     {
@@ -112,6 +113,31 @@ public class SqlOSAuthServerOptions
         var seed = new SqlOSClientSeedOptions();
         configure(seed);
         ClientSeeds.Add(seed);
+        return this;
+    }
+
+    /// <summary>
+    /// Seeds an operator-defined display name (and optional description) for a raw OAuth scope
+    /// string. Consent screens show the display name; unlisted scopes fall back to the raw scope.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedScopeDisplayName(string scope, string displayName, string? description = null)
+    {
+        if (string.IsNullOrWhiteSpace(scope))
+        {
+            throw new InvalidOperationException("Seeded scope display names require a scope.");
+        }
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new InvalidOperationException("Seeded scope display names require a display name.");
+        }
+
+        ScopeDisplaySeeds.Add(new SqlOSScopeDisplaySeedOptions
+        {
+            Scope = scope.Trim(),
+            DisplayName = displayName.Trim(),
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim()
+        });
         return this;
     }
 

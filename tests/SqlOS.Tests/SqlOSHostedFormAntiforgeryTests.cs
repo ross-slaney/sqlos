@@ -27,6 +27,8 @@ public sealed class SqlOSHostedFormAntiforgeryTests
 {
     private static readonly string[] HostedPostRoutes =
     [
+        "/sqlos/auth/consent/approve",
+        "/sqlos/auth/consent/deny",
         "/sqlos/auth/device/approve",
         "/sqlos/auth/device/deny",
         "/sqlos/auth/device/verify",

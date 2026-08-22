@@ -894,7 +894,14 @@ public static class SqlOSAuthServerModelConfiguration
             entity.Property(x => x.CodeChallenge).HasMaxLength(256);
             entity.Property(x => x.CodeChallengeMethod).HasMaxLength(32);
             entity.Property(x => x.ResolvedAuthMethod).HasMaxLength(50);
+            entity.Property(x => x.PendingConsentUserId).HasMaxLength(64);
+            // CompletedAt and CancelledAt are both terminal-state locks. Marking both as
+            // concurrency tokens makes approve/deny (and issue/cancel) mutually exclusive:
+            // the losing writer's save observes the other terminal stamp and fails with
+            // DbUpdateConcurrencyException instead of committing a code after a denial
+            // (or a cancellation over a completed request).
             entity.Property(x => x.CompletedAt).IsConcurrencyToken();
+            entity.Property(x => x.CancelledAt).IsConcurrencyToken();
             entity.HasOne(x => x.ClientApplication)
                 .WithMany()
                 .HasForeignKey(x => x.ClientApplicationId)
@@ -960,6 +967,53 @@ public static class SqlOSAuthServerModelConfiguration
                 .WithMany()
                 .HasForeignKey(x => x.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSConsentGrant>(entity =>
+        {
+            entity.ToTable("SqlOSConsentGrants", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.UserId).HasMaxLength(64);
+            entity.Property(x => x.ClientApplicationId).HasMaxLength(64);
+            // Approvals union scopes across requests; SqlOSConsentService guards this
+            // ceiling before save so the provider never truncates a runaway union.
+            entity.Property(x => x.Scope).HasMaxLength(4000);
+            entity.Property(x => x.RevocationReason).HasMaxLength(200);
+            entity.Property(x => x.ClientMetadataFingerprint).HasMaxLength(64);
+            // Concurrent scope escalations must not lose updates: a stale UpdatedAt fails
+            // the save (like the ConsumedAt precedents) and falls into the upsert retry.
+            entity.Property(x => x.UpdatedAt).IsConcurrencyToken();
+            entity.HasIndex(x => new { x.UserId, x.ClientApplicationId })
+                .IsUnique()
+                .HasFilter("[RevokedAt] IS NULL")
+                .HasDatabaseName("UX_SqlOSConsentGrants_ActiveUserClient");
+            entity.HasIndex(x => x.ClientApplicationId);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ClientApplication)
+                .WithMany()
+                .HasForeignKey(x => x.ClientApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SqlOSScopeDisplayName>(entity =>
+        {
+            entity.ToTable("SqlOSScopeDisplayNames", schema, t => t.ExcludeFromMigrations());
+            entity.HasKey(x => x.Id);
+            // Binary collation so SQL Scope lookups match the ordinal scope-policy
+            // comparison even on case-insensitive server collations.
+            entity.Property(x => x.Scope).HasMaxLength(200).UseCollation("Latin1_General_100_BIN2");
+            entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.Description).HasMaxLength(1000);
+            entity.Property(x => x.ConfigurationOwner).HasMaxLength(40);
+            // The scope string is the configuration source key, so it shares Scope's length
+            // and binary collation: the orphan-sweep SQL compares it against the in-memory
+            // seed set ordinally.
+            entity.Property(x => x.ConfigurationSourceKey).HasMaxLength(200).UseCollation("Latin1_General_100_BIN2");
+            entity.Property(x => x.ConfigurationFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => x.Scope).IsUnique();
         });
     }
 }

@@ -330,3 +330,15 @@ public sealed class SqlOSScimGroupMappingSeedOptions
     public string? Description { get; set; }
     public bool Enabled { get; set; } = true;
 }
+
+/// <summary>
+/// Code-first seed for one consent-screen scope display name. Reconciled on startup by
+/// <c>SqlOSAdminService.UpsertSeededScopeDisplayNamesAsync</c> with the scope string as the
+/// stable configuration source key.
+/// </summary>
+public sealed class SqlOSScopeDisplaySeedOptions
+{
+    public string Scope { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+}

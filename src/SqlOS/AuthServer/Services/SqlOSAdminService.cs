@@ -2060,6 +2060,12 @@ public sealed partial class SqlOSAdminService
                 continue;
             }
 
+            // Consent grants FK the client and are meaningless once it is gone, so they
+            // are deleted in the same SaveChanges as the client instead of blocking it.
+            var consentGrants = await _context.Set<SqlOSConsentGrant>()
+                .Where(x => x.ClientApplicationId == client.Id)
+                .ToListAsync(cancellationToken);
+            _context.Set<SqlOSConsentGrant>().RemoveRange(consentGrants);
             _context.Set<SqlOSClientApplication>().Remove(client);
             await _context.SaveChangesAsync(cancellationToken);
             removed++;

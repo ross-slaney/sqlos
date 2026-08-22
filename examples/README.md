@@ -12,6 +12,7 @@ These samples are working reference applications, not isolated snippets. They sh
 | Integrate a JavaScript browser app | [Next.js client](SqlOS.Example.Web/README.md) or [Angular client](SqlOS.Example.AngularWeb/README.md) | Hosted and headless auth, browser PKCE, token refresh, and FGA-filtered retail screens |
 | Integrate a native mobile app | [Expo client](SqlOS.Example.ExpoApp/README.md) | Custom-scheme callback, PKCE, SecureStore, refresh tokens, and protected APIs |
 | Build a terminal sign-in flow | [Todo CLI](SqlOS.Todo.Cli/README.md) | OAuth device authorization, browser handoff, polling, token refresh, and CLI API calls |
+| Offer "Sign in with your app" to other apps | [Sign in with X](SqlOS.SignInWithX.AppHost/README.md) | SqlOS as an OpenID Provider: a Next.js + Auth.js relying party federates via pure OIDC discovery, with the consent screen and remembered grants |
 
 If you are new to the repository, start with the Todo sample. Use the full example when you want to compare client patterns or explore SSO, MFA, headless auth, and richer FGA models.
 

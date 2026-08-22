@@ -206,6 +206,22 @@ public static partial class EndpointRouteBuilderExtensions
         SqlOSAuthService authService,
         CancellationToken cancellationToken)
     {
+        if (completion.RequiresConsent)
+        {
+            return Html(await BuildAuthPageViewModelAsync(
+                "consent",
+                authorizationRequest.Id,
+                email,
+                error: null,
+                displayName: null,
+                pendingToken: null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                consentToken: completion.ConsentToken,
+                consentScopes: completion.ConsentScopes));
+        }
+
         if (completion.RequiresMfa)
         {
             return await RenderMfaChallengeAsync(
@@ -262,7 +278,9 @@ public static partial class EndpointRouteBuilderExtensions
         string? enrollmentToken = null,
         string? totpSecret = null,
         string? totpProvisioningUri = null,
-        string? totpQrCodeDataUrl = null)
+        string? totpQrCodeDataUrl = null,
+        string? consentToken = null,
+        IReadOnlyList<SqlOSConsentScopeDisplay>? consentScopes = null)
     {
         var settings = await authorizationServerService.GetAuthPageSettingsAsync(cancellationToken);
         var isDeviceView = string.Equals(mode, "device", StringComparison.OrdinalIgnoreCase)
@@ -338,7 +356,10 @@ public static partial class EndpointRouteBuilderExtensions
             totpSecret,
             totpProvisioningUri,
             totpQrCodeDataUrl,
-            OmittedOpenId: requestWarning.OmittedOpenId);
+            OmittedOpenId: requestWarning.OmittedOpenId,
+            ConsentToken: consentToken,
+            ClientName: authorizationRequest?.ClientApplication?.Name,
+            ConsentScopes: consentScopes);
     }
 
     private static string ResolvePreferredLocalView(SqlOSResolvedCredentialSettings credentialSettings)

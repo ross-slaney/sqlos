@@ -397,7 +397,9 @@ public sealed class SqlOSIssuanceAssuranceTests
         redirect.Should().NotContain("mfa_token");
         redirect.Should().Contain("/continue");
         redirect.Should().Contain(request.Id);
-        harness.Http.Response.Headers.SetCookie.ToString().Should().Contain("sqlos_auth_continue");
+        harness.Http.Response.Headers.SetCookie.ToString().Should().Contain(
+            SqlOSAuthorizationServerService.BuildContinuationCookieName(request.Id),
+            "the continuation cookie slot is derived per authorization request so parallel tabs cannot clobber each other");
         harness.Http.Response.Headers.SetCookie.ToString().Should().NotContain(completion.MfaToken);
     }
 

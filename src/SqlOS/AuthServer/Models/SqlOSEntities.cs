@@ -951,6 +951,13 @@ public sealed class SqlOSAuthorizationRequest
     public DateTime? CompletedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
 
+    /// <summary>
+    /// The user the consent gate showed the consent interstitial to. Reload re-minting
+    /// and approval must stay bound to this user even when the browser's auth-page
+    /// session cookie has since switched accounts. Null until the consent gate runs.
+    /// </summary>
+    public string? PendingConsentUserId { get; set; }
+
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSDeviceAuthorization? DeviceAuthorization { get; set; }
     public SqlOSOrganization? Organization { get; set; }
@@ -1003,4 +1010,52 @@ public sealed class SqlOSAuthorizationCode
     public SqlOSUser? User { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSOrganization? Organization { get; set; }
+}
+
+/// <summary>
+/// A remembered OAuth consent decision for one (user, client) pair. <see cref="Scope"/>
+/// stores the union of every scope set the user has approved for the client; coverage
+/// checks compare the currently granted scope set against this stored set ordinally.
+/// </summary>
+public sealed class SqlOSConsentGrant
+{
+    public string Id { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string ClientApplicationId { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public DateTime GrantedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? RevocationReason { get; set; }
+
+    /// <summary>
+    /// Fingerprint of the client's security-sensitive metadata
+    /// (<see cref="Services.SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint"/>)
+    /// this approval was granted against. Coverage checks require it to match the client's
+    /// current metadata (null = legacy grant, accepted), so an approval that raced a CIMD
+    /// metadata refresh is never silently reused and the next authorize re-prompts.
+    /// </summary>
+    public string? ClientMetadataFingerprint { get; set; }
+
+    public SqlOSUser? User { get; set; }
+    public SqlOSClientApplication? ClientApplication { get; set; }
+}
+
+/// <summary>
+/// Operator-defined human-readable name (and optional description) for a raw OAuth
+/// scope string, shown on the consent screen. Absent entries fall back to the raw scope.
+/// </summary>
+public sealed class SqlOSScopeDisplayName
+{
+    public string Id { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string ConfigurationOwner { get; set; } = "dashboard";
+    public string? ConfigurationSourceKey { get; set; }
+    public string? ConfigurationFingerprint { get; set; }
+    public DateTime? LastReconciledAt { get; set; }
+    public DateTime? ConfigurationOrphanedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }

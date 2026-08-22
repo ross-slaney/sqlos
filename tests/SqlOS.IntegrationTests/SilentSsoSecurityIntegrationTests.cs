@@ -145,10 +145,12 @@ public sealed class SilentSsoSecurityIntegrationTests
 
         using var client = server.App.GetTestClient();
         client.DefaultRequestHeaders.Add("Cookie", cookie);
+        // A live session no longer forces a full re-login for third-party
+        // clients; the interaction is now the consent approval itself.
         var interactive = await client.GetAsync(BuildAuthorizeUrl("third-party-client", "state-interactive"));
         interactive.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var interactionQuery = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(interactive.Headers.Location!.Query);
-        interactionQuery["view"].ToString().Should().Be("login");
+        interactionQuery["view"].ToString().Should().Be("consent");
         interactionQuery.ContainsKey("mfaToken").Should().BeFalse();
 
         var silent = await client.GetAsync(BuildAuthorizeUrl("third-party-client", "state-none", "none"));

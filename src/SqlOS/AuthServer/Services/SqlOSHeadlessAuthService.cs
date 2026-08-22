@@ -94,7 +94,8 @@ public sealed class SqlOSHeadlessAuthService
         string? email,
         string? displayName,
         JsonObject? uiContext,
-        string? mfaToken = null)
+        string? mfaToken = null,
+        string? consentToken = null)
     {
         if (!IsBrowserUiEnabled)
         {
@@ -116,7 +117,8 @@ public sealed class SqlOSHeadlessAuthService
                 email,
                 displayName,
                 uiContext,
-                mfaToken));
+                mfaToken,
+                consentToken));
     }
 
     public async Task<string?> TryBuildUiUrlForAuthorizationRequestAsync(
@@ -154,7 +156,8 @@ public sealed class SqlOSHeadlessAuthService
         string? email,
         string? displayName,
         CancellationToken cancellationToken = default,
-        string? mfaToken = null)
+        string? mfaToken = null,
+        HttpContext? httpContext = null)
     {
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(requestId, cancellationToken);
         if (!string.IsNullOrWhiteSpace(mfaToken))
@@ -189,6 +192,19 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken: cancellationToken);
         }
 
+        // A consent reload arrives without its consent token whenever a custom BuildUiUrl
+        // delegate did not forward the ConsentToken route field. Re-mint one from the
+        // browser's continuation cookie or live auth-page session; anonymous reloads get
+        // the consent view without a token (fail closed).
+        string? consentToken = null;
+        if (httpContext != null && string.Equals(NormalizeView(requestedView), "consent", StringComparison.Ordinal))
+        {
+            consentToken = await _authorizationServerService.TryCreateConsentTokenForRequestReloadAsync(
+                authorizationRequest,
+                httpContext,
+                cancellationToken);
+        }
+
         return await BuildViewModelAsync(
             authorizationRequest,
             requestedView,
@@ -198,7 +214,8 @@ public sealed class SqlOSHeadlessAuthService
             displayName,
             fieldErrors: null,
             organizationSelection: null,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            consentToken: consentToken);
     }
 
     public async Task<SqlOSHeadlessViewModel> ResolveInvitationAsync(
@@ -433,6 +450,37 @@ public sealed class SqlOSHeadlessAuthService
             error: null,
             info: "CLI access was denied.",
             organizationSelection: Array.Empty<SqlOSOrganizationOption>(),
+            cancellationToken));
+    }
+
+    public async Task<SqlOSHeadlessActionResult> ApproveConsentAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessConsentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        var completion = await _authorizationServerService.ApproveConsentAsync(
+            request.ConsentToken,
+            authorizationRequest.Id,
+            httpContext,
+            cancellationToken);
+        return await BuildCompletionActionResultAsync(
+            authorizationRequest,
+            completion,
+            authorizationRequest.LoginHintEmail,
+            cancellationToken);
+    }
+
+    public async Task<SqlOSHeadlessActionResult> DenyConsentAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessConsentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        return Redirect(await _authorizationServerService.DenyConsentAsync(
+            request.ConsentToken,
+            authorizationRequest.Id,
+            httpContext,
             cancellationToken));
     }
 
@@ -1656,8 +1704,18 @@ public sealed class SqlOSHeadlessAuthService
         bool requiresMfaEnrollment = false,
         IReadOnlyList<string>? mfaMethods = null,
         SqlOSTotpEnrollmentStartResult? totpEnrollment = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? consentToken = null,
+        IReadOnlyList<SqlOSConsentScopeDisplay>? consentScopes = null)
     {
+        if (consentScopes == null && string.Equals(NormalizeView(requestedView), "consent", StringComparison.Ordinal))
+        {
+            consentScopes = await SqlOSConsentService.BuildScopeDisplaysAsync(
+                _context,
+                SqlOSScopePolicy.Split(authorizationRequest.Scope),
+                cancellationToken);
+        }
+
         var settings = await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
         var providers = (await _authorizationServerService.ListEnabledOidcProvidersAsync(cancellationToken))
             .Select(provider => new SqlOSHeadlessProviderDto(
@@ -1699,7 +1757,9 @@ public sealed class SqlOSHeadlessAuthService
             MfaMethods: mfaMethods ?? Array.Empty<string>(),
             TotpEnrollment: totpEnrollment,
             Scope: authorizationRequest.Scope,
-            OmittedOpenId: requestWarning.OmittedOpenId);
+            OmittedOpenId: requestWarning.OmittedOpenId,
+            ConsentToken: consentToken,
+            ConsentScopes: consentScopes);
     }
 
     private async Task<string> PublicViewErrorMessageAsync(
@@ -1813,6 +1873,7 @@ public sealed class SqlOSHeadlessAuthService
             "mfa" => "mfa",
             "mfa-enroll" => "mfa-enroll",
             "organization" => "organization",
+            "consent" => "consent",
             "logged-out" => "logged-out",
             _ => "login"
         };
@@ -1824,6 +1885,22 @@ public sealed class SqlOSHeadlessAuthService
         string? email,
         CancellationToken cancellationToken)
     {
+        if (completion.RequiresConsent)
+        {
+            return View(await BuildViewModelAsync(
+                authorizationRequest,
+                "consent",
+                error: null,
+                pendingToken: null,
+                email: email,
+                displayName: null,
+                fieldErrors: null,
+                organizationSelection: null,
+                cancellationToken: cancellationToken,
+                consentToken: completion.ConsentToken,
+                consentScopes: completion.ConsentScopes));
+        }
+
         if (completion.RequiresOrganizationSelection)
         {
             return View(await BuildViewModelAsync(

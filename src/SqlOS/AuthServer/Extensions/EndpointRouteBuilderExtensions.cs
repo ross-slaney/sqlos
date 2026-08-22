@@ -64,6 +64,7 @@ public static partial class EndpointRouteBuilderExtensions
 
         MapProtocolEndpoints(auth, authPrefix);
         MapHostedPrimaryEndpoints(auth, hostedForms, authPrefix);
+        MapHostedConsentEndpoints(hostedForms, authPrefix);
         MapEmailOtpEndpoints(auth, hostedForms, authPrefix);
         MapHostedFactorEndpoints(auth, hostedForms, authPrefix);
         MapHostedSignupEndpoints(auth, hostedForms, authPrefix);

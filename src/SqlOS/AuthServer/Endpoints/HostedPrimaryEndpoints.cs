@@ -708,6 +708,22 @@ public static partial class EndpointRouteBuilderExtensions
                     context,
                     cancellationToken);
 
+                if (completion.RequiresConsent)
+                {
+                    return Html(await BuildAuthPageViewModelAsync(
+                        "consent",
+                        requestId,
+                        email,
+                        null,
+                        null,
+                        null,
+                        authPrefix,
+                        authorizationServerService,
+                        cancellationToken,
+                        consentToken: completion.ConsentToken,
+                        consentScopes: completion.ConsentScopes));
+                }
+
                 if (completion.RequiresOrganizationSelection)
                 {
                     var organizationPage = await BuildAuthPageViewModelAsync(

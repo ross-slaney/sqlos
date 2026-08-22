@@ -86,6 +86,108 @@ public sealed class SqlOSControlPlaneParityTests
     }
 
     [TestMethod]
+    public async Task ScopeDisplayName_CodeServiceAndDashboard_ProjectAndRenderConsentEquivalently()
+    {
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options =>
+            options.SeedScopeDisplayName("todo:read", "Read your tasks", "See every task on your boards."));
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+
+        await code.ReconcileStartupAsync();
+        await service.Admin.CreateScopeDisplayNameAsync(
+            new SqlOSCreateScopeDisplayNameRequest("todo:read", "Read your tasks", "See every task on your boards."));
+        await dashboard.PostDashboardAsync(
+            DashboardAdminContracts.ScopeDisplayNames,
+            new { scope = "todo:read", displayName = "Read your tasks", description = "See every task on your boards." });
+
+        var codeProjection = await code.ProjectScopeDisplayNameAsync("todo:read");
+        var serviceProjection = await service.ProjectScopeDisplayNameAsync("todo:read");
+        var dashboardProjection = await dashboard.ProjectScopeDisplayNameAsync("todo:read");
+
+        codeProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        dashboardProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        codeProjection.Owner.Should().Be(SqlOSConfigurationOwners.Code);
+        codeProjection.IsEditable.Should().BeFalse();
+        serviceProjection.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        serviceProjection.IsEditable.Should().BeTrue();
+        dashboardProjection.Owner.Should().Be(SqlOSConfigurationOwners.Dashboard);
+        dashboardProjection.IsEditable.Should().BeTrue();
+
+        // Real runtime boundary: a third-party authorization reaching the consent
+        // interstitial must resolve the same catalog display name on every control plane.
+        foreach (var harness in new[] { code, service, dashboard })
+        {
+            var completion = await StartThirdPartyConsentAsync(harness);
+            completion.RequiresConsent.Should().BeTrue();
+            var display = completion.ConsentScopes!.Single(x => x.Scope == "todo:read");
+            display.DisplayName.Should().Be("Read your tasks");
+            display.Description.Should().Be("See every task on your boards.");
+            completion.ConsentScopes!.Single(x => x.Scope == "openid").DisplayName
+                .Should().Be("openid", "uncataloged scopes fall back to the raw scope string");
+        }
+
+        // Invalid input and ownership behavior are shared across planes.
+        using var missingScope = await dashboard.Client.PostAsJsonAsync(
+            DashboardAdminContracts.ScopeDisplayNames,
+            new { scope = "", displayName = "x" });
+        missingScope.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var codeEntry = await code.Context.Set<SqlOSScopeDisplayName>().SingleAsync(x => x.Scope == "todo:read");
+        using var editCodeOwned = await code.Client.PutAsJsonAsync(
+            $"{DashboardAdminContracts.ScopeDisplayNames}/{codeEntry.Id}",
+            new { displayName = "Renamed" });
+        editCodeOwned.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var deleteCodeOwned = await code.Client.DeleteAsync(
+            $"{DashboardAdminContracts.ScopeDisplayNames}/{codeEntry.Id}");
+        deleteCodeOwned.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var dashboardEntry = await dashboard.Context.Set<SqlOSScopeDisplayName>().SingleAsync(x => x.Scope == "todo:read");
+        await dashboard.PutDashboardAsync(
+            $"{DashboardAdminContracts.ScopeDisplayNames}/{dashboardEntry.Id}",
+            new { displayName = "Read tasks", description = "Updated." });
+        (await dashboard.ProjectScopeDisplayNameAsync("todo:read")).Configuration["displayName"].Should().Be("Read tasks");
+    }
+
+    private static async Task<SqlOSAuthorizationRequestLoginResult> StartThirdPartyConsentAsync(
+        ControlPlaneParityHarness harness)
+    {
+        // The client and user are scaffolding for the runtime boundary, not the capability
+        // under test, so creating them through the public admin service is fine everywhere.
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        await harness.Admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            $"consent-client-{suffix}",
+            "Consent Parity Client",
+            "sqlos",
+            [Callback],
+            AllowedScopes: ["openid", "todo:read"],
+            IsFirstParty: false));
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Consent Parity User",
+            $"consent-{suffix}@parity.test",
+            "P@ssword123!"));
+        var request = await harness.AuthorizationServer.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
+            "code",
+            $"consent-client-{suffix}",
+            Callback,
+            $"state-{suffix}",
+            "openid todo:read",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null));
+
+        return await harness.AuthorizationServer.CompleteAuthorizationRequestLoginAsync(
+            request,
+            user,
+            "password",
+            new DefaultHttpContext());
+    }
+
+    [TestMethod]
     public async Task OidcCapableClient_CodeServiceAndDashboard_ProjectTheSameDiscoveryCapability()
     {
         await using var code = await ControlPlaneParityHarness.CreateAsync(options => options.SeedClient(seed =>
@@ -662,6 +764,23 @@ public sealed class SqlOSControlPlaneParityTests
             "`${authApiBasePath}/machine-clients/${encodeURIComponent(button.dataset.machineEmergencyEnable)}/emergency-enable`",
             "configurationOwner",
             "emergencyDisabled");
+        AssertDashboardContract(
+            Section(javascript, "async function renderAuthScopes()", "function auditDateParam("),
+            "`${authApiBasePath}/scope-display-names`",
+            "`${authApiBasePath}/scope-display-names/${encodeURIComponent(entry.id)}`",
+            "`${authApiBasePath}/scope-display-names/${encodeURIComponent(button.dataset.id)}`",
+            "scope", "displayName", "description",
+            // The description inputs must allow the shared 1000-character contract the
+            // service, seed validator, and database column all accept.
+            "maxlength=\"1000\"",
+            "ownership.isEditable",
+            "ownership.isOrphaned",
+            "SeedScopeDisplayName");
+        AssertDashboardContract(
+            Section(javascript, "async function renderAuthUserDetail(userId, tab)", "function renderUserTabLink("),
+            "`${authApiBasePath}/users/${userId}/grants`",
+            "`${authApiBasePath}/users/${encodeURIComponent(userId)}/grants/${encodeURIComponent(button.dataset.grantId)}/revoke`",
+            "clientName", "scopes", "grantedAt", "updatedAt");
     }
 
     private static void AssertDashboardContract(string section, params string[] expected)

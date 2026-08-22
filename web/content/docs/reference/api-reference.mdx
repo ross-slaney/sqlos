@@ -78,7 +78,7 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
 | `login_hint` | No | Prefills or routes the hosted/headless login flow. |
-| `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `select_account` behaves like `login` (SqlOS has no account chooser yet). `none` returns `login_required` when no reusable session exists or the session is older than `max_age`. |
+| `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `select_account` behaves like `login` (SqlOS has no account chooser yet). `consent` forces the [consent screen](/docs/authserver/consent) for a non-first-party client even when a covering grant exists. `none` returns `login_required` when no reusable session exists or the session is older than `max_age`, and `consent_required` when a non-first-party client lacks a covering consent grant. |
 | `nonce` | No | Stored with the authorization request and copied onto the authorization code at issuance; the `id_token` minted at code exchange echoes the same `nonce` claim. |
 | `max_age` | No | Non-negative integer seconds. When the AuthPage session's original authentication is older than this, SqlOS re-challenges instead of silently reusing the session; `max_age=0` always forces a fresh sign-in. Combined with `prompt=none`, a stale session returns `login_required`. |
 
@@ -229,6 +229,8 @@ Every hosted `POST` requires the short-lived antiforgery field and matching brow
 | `GET` | `/sqlos/auth/signup/phone-otp` | Phone-code signup page |
 | `POST` | `/sqlos/auth/mfa/verify` | Verify a hosted MFA challenge |
 | `POST` | `/sqlos/auth/mfa/totp/enroll/verify` | Complete required TOTP enrollment |
+| `POST` | `/sqlos/auth/consent/approve` | Approve the [consent screen](/docs/authserver/consent) for a non-first-party client |
+| `POST` | `/sqlos/auth/consent/deny` | Deny consent; redirects to the client with `access_denied` |
 | `GET` / `POST` | `/sqlos/auth/password/forgot` and `/password/forgot/submit` | Hosted password-reset request |
 | `GET` / `POST` | `/sqlos/auth/password/reset` and `/password/reset/submit` | Hosted password-reset form |
 | `GET` | `/sqlos/auth/invitations/accept?token=...` | Open an email invitation |
@@ -256,6 +258,8 @@ These routes expose the same strongly typed contracts used by `SqlOSAuthService`
 | `POST /sqlos/auth/token/refresh` | `SqlOSRefreshRequest` | `200 SqlOSTokenResponse` |
 | `POST /sqlos/auth/logout` | `{ refreshToken? }` | `204 No Content`; unknown or missing tokens are idempotent no-ops |
 | `POST /sqlos/auth/logout-all` | `{ refreshToken }` | `204 No Content`; `401` when the refresh token is missing, inactive, expired, or already consumed |
+| `POST /sqlos/auth/account/grants` | `{ refreshToken }` | `200` with `data`: the user's active [consent grants](/docs/authserver/consent). The refresh token must belong to a first-party client's session; `401` when it resolves no active session or the session's client is not first-party |
+| `POST /sqlos/auth/account/grants/revoke` | `{ refreshToken, grantId }` | `200` with the revoked grant's `id` and `revokedAt`; `401` without an active first-party session (third-party refresh tokens get the same generic `401`); `400` for an unknown or already-revoked grant |
 | `POST /sqlos/auth/password/forgot` | `SqlOSForgotPasswordRequest` | `200 SqlOSPasswordResetRequestResult` |
 | `POST /sqlos/auth/password/reset-email` | `SqlOSSendPasswordResetEmailRequest` | `200 SqlOSPasswordResetRequestResult` |
 | `POST /sqlos/auth/password/reset` | `SqlOSResetPasswordRequest` | `204 No Content` |
@@ -280,6 +284,19 @@ The dashboard admin API has two authenticated platform-operator routes. Unauthor
 | `POST /sqlos/admin/auth/api/sessions/revocation` | Same request with `confirm: true` | Newly/already-revoked session counts and revoked refresh-token count |
 
 Supply at least one of `sessionId`, `userId`, `organizationId`, or `clientApplicationId`. Multiple values are combined with AND semantics. For a broad operation, copy the preview's `matchedSessions` into `expectedMatchedSessions`; execution rejects a changed count so the operator must preview and confirm the current scope again. `reason` and `operationId` are bounded strings, operation IDs cannot be reused for a different selector/reason, and operations matching more than 10,000 sessions are rejected so callers must narrow the incident scope. The API returns a generic not-found result when execution matches no records and does not expose cross-tenant record details.
+
+## Platform-admin consent administration
+
+The same authenticated dashboard admin API manages [consent grants and scope display names](/docs/authserver/consent).
+
+| Method and route | JSON request | Success response |
+| --- | --- | --- |
+| `GET /sqlos/admin/auth/api/scope-display-names` | — | `data`: catalog entries with `id`, `scope`, `displayName`, `description`, and the standard configuration `ownership` projection |
+| `POST /sqlos/admin/auth/api/scope-display-names` | `{ scope, displayName, description? }` | The created dashboard-owned entry |
+| `PUT /sqlos/admin/auth/api/scope-display-names/{id}` | `{ displayName, description? }` | The updated entry; `400` for code-owned entries, which must change in source control |
+| `DELETE /sqlos/admin/auth/api/scope-display-names/{id}` | — | `{ deleted: true }`; `400` for code-owned entries |
+| `GET /sqlos/admin/auth/api/users/{userId}/grants` | — | `data`: the user's active consent grants (`id`, `clientId`, `clientName`, `scopes`, `grantedAt`, `updatedAt`) |
+| `POST /sqlos/admin/auth/api/users/{userId}/grants/{grantId}/revoke` | — | The revoked grant's `id` and `revokedAt`; `400` for an unknown or already-revoked grant |
 
 ## Headless AuthPage API
 
@@ -308,6 +325,8 @@ The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthS
 | `POST` | `/mfa/verify` | Verify TOTP or recovery code |
 | `POST` | `/mfa/totp/enroll/start` | Start required TOTP enrollment |
 | `POST` | `/mfa/totp/enroll/verify` | Verify required TOTP enrollment |
+| `POST` | `/consent/approve` | Approve the consent screen with `{ requestId, consentToken }` |
+| `POST` | `/consent/deny` | Deny consent with `{ requestId, consentToken }`; returns the `access_denied` redirect |
 | `POST` | `/provider/start` | Start a configured social/OIDC provider |
 | `POST` | `/device/resolve` | Resolve a device code request |
 | `POST` | `/device/approve` | Approve a device request |

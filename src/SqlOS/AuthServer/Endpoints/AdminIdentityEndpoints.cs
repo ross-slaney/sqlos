@@ -85,6 +85,47 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapGet("/users/{userId}/grants", async (HttpContext context, string userId, SqlOSConsentService consentService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var grants = await consentService.ListActiveGrantsForUserAsync(userId, cancellationToken);
+            return Results.Ok(new { data = grants });
+        });
+
+        api.MapPost("/users/{userId}/grants/{grantId}/revoke", async (HttpContext context, string userId, string grantId, SqlOSConsentService consentService, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var grant = await consentService.RevokeGrantAsync(userId, grantId, "admin_revoked", cancellationToken);
+                await adminService.RecordAuditAsync(
+                    "oauth.consent.revoked",
+                    "admin",
+                    "dashboard",
+                    userId: userId,
+                    data: new
+                    {
+                        grant_id = grant.Id,
+                        client_id = grant.ClientApplication?.ClientId ?? grant.ClientApplicationId,
+                        reason = grant.RevocationReason
+                    },
+                    cancellationToken: cancellationToken);
+                return Results.Ok(new { grant.Id, grant.RevokedAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapPost("/users/{userId}/password-reset-email", async (HttpContext context, string userId, SqlOSSendUserPasswordResetEmailRequest request, SqlOSAuthService authService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))

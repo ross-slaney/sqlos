@@ -313,6 +313,20 @@ public static class SqlOSAuthPageRenderer
                   </div>
                 </div>
                 """,
+            "consent" => $$"""
+                {{RenderPanelIntro("Authorize Access", $"{model.ClientName ?? "An application"} is asking to access your account.")}}
+                {{RenderConsentSummary(model)}}
+                <form class="auth-form" method="post" action="{{Html(model.BasePath.TrimEnd('/'))}}/consent/approve">
+                  {{requestIdInput}}
+                  <input type="hidden" name="consentToken" value="{{Html(model.ConsentToken ?? string.Empty)}}" />
+                  {{RenderPrimaryAction("Allow access", "Approving")}}
+                </form>
+                <form class="auth-form" method="post" action="{{Html(model.BasePath.TrimEnd('/'))}}/consent/deny">
+                  {{requestIdInput}}
+                  <input type="hidden" name="consentToken" value="{{Html(model.ConsentToken ?? string.Empty)}}" />
+                  <button class="secondary-action" type="submit">Deny request</button>
+                </form>
+                """,
             "signup" => signupContent,
             "password" => $$"""
                 {{RenderPanelIntro("Password", "Continue with your email and password.")}}
@@ -1255,6 +1269,28 @@ public static class SqlOSAuthPageRenderer
             """;
     }
 
+    private static string RenderConsentSummary(SqlOSAuthPageViewModel model)
+    {
+        var scopes = model.ConsentScopes ?? Array.Empty<SqlOSConsentScopeDisplay>();
+        var scopeMarkup = scopes.Count == 0
+            ? "<span>Default access</span>"
+            : string.Join("", scopes.Select(scope =>
+            {
+                var description = string.IsNullOrWhiteSpace(scope.Description)
+                    ? string.Empty
+                    : $" — {Html(scope.Description!)}";
+                return $"<span class=\"consent-scope\">{Html(scope.DisplayName)}{description}</span>";
+            }));
+
+        return $$"""
+            <div class="invite-summary">
+              <strong>{{Html(model.ClientName ?? "Unknown application")}}</strong>
+              <span>This application will be able to:</span>
+              {{scopeMarkup}}
+            </div>
+            """;
+    }
+
     private static string RenderDeviceSummary(SqlOSDeviceAuthorizationResolveResult? deviceAuthorization)
     {
         if (deviceAuthorization == null)
@@ -1595,6 +1631,9 @@ public sealed record SqlOSAuthPageViewModel(
     string? TotpSecret = null,
     string? TotpProvisioningUri = null,
     string? TotpQrCodeDataUrl = null,
-    bool OmittedOpenId = false);
+    bool OmittedOpenId = false,
+    string? ConsentToken = null,
+    string? ClientName = null,
+    IReadOnlyList<SqlOSConsentScopeDisplay>? ConsentScopes = null);
 
 public sealed record SqlOSAuthPageProviderLink(string ConnectionId, string DisplayName, string Url, string? LogoDataUrl = null);

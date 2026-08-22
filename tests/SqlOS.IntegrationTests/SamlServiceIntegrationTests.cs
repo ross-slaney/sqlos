@@ -256,7 +256,8 @@ public sealed class SamlServiceIntegrationTests
             $"oidc-inactive-{Guid.NewGuid():N}"[..22],
             "Inactive OIDC Client",
             "sqlos-tests",
-            ["https://client.example.local/callback/google"]));
+            ["https://client.example.local/callback/google"],
+            IsFirstParty: true));
         var oidcConnection = await admin.CreateOidcConnectionAsync(new SqlOSCreateOidcConnectionRequest(
             SqlOSOidcProviderType.Google,
             $"Google inactive {Guid.NewGuid():N}",
@@ -381,7 +382,8 @@ public sealed class SamlServiceIntegrationTests
             $"saml-client-{Guid.NewGuid():N}"[..18],
             "SAML Client",
             "sqlos-tests",
-            new List<string> { "https://client.example.local/callback" }));
+            new List<string> { "https://client.example.local/callback" },
+            IsFirstParty: true));
 
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSTestIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -618,7 +620,8 @@ public sealed class SamlServiceIntegrationTests
             $"pkce-client-{Guid.NewGuid():N}"[..20],
             "PKCE Client",
             "sqlos-tests",
-            new List<string> { "https://client.example.local/auth/callback" }));
+            new List<string> { "https://client.example.local/auth/callback" },
+            IsFirstParty: true));
 
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSPkceIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -791,7 +794,8 @@ public sealed class SamlServiceIntegrationTests
             $"existing-saml-{Guid.NewGuid():N}"[..20],
             "Existing SAML Client",
             "sqlos-tests",
-            new List<string> { "https://client.example.local/callback" }));
+            new List<string> { "https://client.example.local/callback" },
+            IsFirstParty: true));
 
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSExistingSamlIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -1305,7 +1309,8 @@ public sealed class SamlServiceIntegrationTests
             $"redir-client-{Guid.NewGuid():N}"[..20],
             "Redirect Client",
             "sqlos-tests",
-            new List<string> { "https://client.example.local/callback" }));
+            new List<string> { "https://client.example.local/callback" },
+            IsFirstParty: true));
 
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=SqlOSRedirectIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -1622,7 +1627,8 @@ public sealed class SamlServiceIntegrationTests
             $"{prefix}-{Guid.NewGuid():N}"[..20],
             $"{prefix} client",
             "sqlos-tests",
-            new List<string> { "https://client.example.local/callback" }));
+            new List<string> { "https://client.example.local/callback" },
+            IsFirstParty: true));
 
     private static async Task<SamlFlow> StartSamlRequestAsync(SqlOSSamlService saml, string connectionId, string clientId)
     {
