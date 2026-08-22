@@ -84,6 +84,7 @@
         clients: { title: "Applications", description: "Manage owned apps, client metadata, access assignments, and lifecycle actions." },
         "machine-clients": { title: "Machine Clients", description: "Provision OAuth client credentials and FGA service accounts as one operational identity." },
         oidc: { title: "Social Login", description: "Configure Google, Microsoft, Apple, GitHub, and custom providers for authserver-owned social login." },
+        scopes: { title: "Scope display names", description: "Human-readable names and descriptions the consent screen shows for OAuth scopes. Unmapped scopes fall back to the raw scope string." },
         security: { title: "Security", description: "Tune refresh, idle, and absolute session lifetimes." },
         mfa: { title: "MFA", description: "Configure authenticator app enrollment and second-factor requirements." },
         authpage: { title: "Auth Page", description: "Brand the hosted authorization page and publish the login, signup, and PKCE endpoints your app exposes." },
@@ -291,7 +292,7 @@
         "sso",
         ...(scimEnabled ? ["scim"] : [])
     ]);
-    const userTabs = new Set(["general", "organizations", "sessions"]);
+    const userTabs = new Set(["general", "organizations", "sessions", "grants"]);
 
     const fgaViews = {
         resources: { title: "Resources", description: "Inspect the resource hierarchy and navigate the authorization graph.", hash: "/resources" },
@@ -1642,6 +1643,11 @@
             return;
         }
 
+        if (view === "scopes") {
+            await renderAuthScopes();
+            return;
+        }
+
         if (view === "security") {
             await renderAuthSecurity();
             return;
@@ -2851,10 +2857,11 @@
 
         const membershipsPager = getPagerState(`auth-user-${userId}-memberships`);
         const sessionsPager = getPagerState(`auth-user-${userId}-sessions`);
-        const [user, memberships, sessions] = await Promise.all([
+        const [user, memberships, sessions, grants] = await Promise.all([
             fetchJson(`${authApiBasePath}/users/${userId}`),
             fetchJson(`${authApiBasePath}/users/${userId}/memberships?${pagerQuery(membershipsPager)}`),
-            fetchJson(`${authApiBasePath}/users/${userId}/sessions?${pagerQuery(sessionsPager)}`)
+            fetchJson(`${authApiBasePath}/users/${userId}/sessions?${pagerQuery(sessionsPager)}`),
+            fetchJson(`${authApiBasePath}/users/${userId}/grants`)
         ]);
 
         const summaryHtml = `
@@ -2883,6 +2890,7 @@
                 ${renderUserTabLink("general", "General", tab, userId)}
                 ${renderUserTabLink("organizations", "Organizations", tab, userId)}
                 ${renderUserTabLink("sessions", "Sessions", tab, userId)}
+                ${renderUserTabLink("grants", "App grants", tab, userId)}
             </div>
         `;
 
@@ -2948,6 +2956,33 @@
                             ])}
                         `,
                         "No memberships yet."
+                    )}
+                </section>
+            `;
+        } else if (tab === "grants") {
+            tabContent = `
+                <section class="panel">
+                    <div class="panel-actions">
+                        <div>
+                            <h2>App Grants</h2>
+                            <p>Remembered consent decisions for non-first-party applications. Revoking a grant forces the consent screen on the user's next authorization.</p>
+                        </div>
+                    </div>
+                    ${renderList(
+                        grants.data,
+                        item => `
+                            <div class="list-item-header">
+                                <strong>${esc(item.clientName || item.clientId)}</strong>
+                                <span class="inline-code">${esc(item.clientId)}</span>
+                            </div>
+                            ${renderMetadataRows([
+                                { label: "Scopes", value: (item.scopes || []).map(scope => typeof scope === "string" ? scope : (scope.displayName || scope.scope)).join(", ") || "none" },
+                                { label: "Granted", value: formatDate(item.grantedAt) },
+                                { label: "Updated", value: formatDate(item.updatedAt) }
+                            ])}
+                            <button type="button" class="js-revoke-user-grant" data-grant-id="${esc(item.id)}" data-client-name="${esc(item.clientName || item.clientId)}">Revoke</button>
+                        `,
+                        "No active app grants. A grant appears here after this user approves a non-first-party application on the consent screen."
                     )}
                 </section>
             `;
@@ -3018,6 +3053,19 @@
             });
         } else if (tab === "organizations") {
             bindPagination("#user-memberships-pagination-top", `auth-user-${userId}-memberships`, memberships, () => render());
+        } else if (tab === "grants") {
+            document.querySelectorAll(".js-revoke-user-grant").forEach(button => {
+                button.addEventListener("click", async () => {
+                    if (!window.confirm(`Revoke ${button.dataset.clientName}'s access for this user? The user must approve the consent screen again before the app regains access.`)) return;
+                    try {
+                        await fetchJson(`${authApiBasePath}/users/${encodeURIComponent(userId)}/grants/${encodeURIComponent(button.dataset.grantId)}/revoke`, { method: "POST" });
+                        setFlash("success", "Consent grant revoked.");
+                    } catch (error) {
+                        setFlash("error", error.message || String(error));
+                    }
+                    await render();
+                });
+            });
         } else if (tab === "sessions") {
             bindPagination("#user-sessions-pagination-top", `auth-user-${userId}-sessions`, sessions, () => render());
             document.querySelectorAll(".js-revoke-user-session").forEach(button => {
@@ -4746,6 +4794,109 @@
             eyebrow: "Audit Logs",
             title: "Auth Server Audit",
             description: "Review auth-server events through the central audit log product."
+        });
+    }
+
+    async function renderAuthScopes() {
+        const config = authViews.scopes;
+        setHeader("Auth Server", config.title, config.description);
+        renderLoading("Loading scope display names...");
+
+        const catalog = await fetchJson(`${authApiBasePath}/scope-display-names`);
+        const entries = catalog.data || [];
+
+        content.innerHTML = `
+            ${consumeFlashHtml()}
+            <div class="panel-grid">
+                <section class="panel">
+                    <h2>Add scope display name</h2>
+                    <p>The consent screen shows these names to users when a non-first-party app requests the scope.</p>
+                    <form id="create-scope-display-name-form">
+                        <input name="scope" maxlength="200" placeholder="calendar.read" required>
+                        <input name="displayName" maxlength="200" placeholder="Read your calendar" required>
+                        <input name="description" maxlength="1000" placeholder="Optional longer consent-screen description">
+                        <button type="submit">Create display name</button>
+                    </form>
+                </section>
+                <section class="panel">
+                    <h2>How entries are used</h2>
+                    <p>Each entry maps one OAuth scope to the display name and optional description users see on the consent screen. Scopes without an entry fall back to the raw scope string, so the screen always renders.</p>
+                    <p>Code-owned entries come from <span class="inline-code">SeedScopeDisplayName</span> and are reconciled at startup; edit them in source control. Dashboard-owned entries are editable here and are never overwritten by startup reconciliation.</p>
+                </section>
+            </div>
+            <section class="panel">
+                <h2>Catalog</h2>
+                ${renderList(
+                    entries,
+                    entry => `
+                        <div class="list-item-header">
+                            <strong>${esc(entry.scope)}</strong>
+                            <span class="inline-code">${esc(entry.ownership ? entry.ownership.owner : "dashboard")}</span>
+                        </div>
+                        ${renderMetadataRows([
+                            { label: "Display name", value: entry.displayName },
+                            { label: "Description", value: entry.description || "n/a" },
+                            { label: "Source key", value: entry.ownership && entry.ownership.sourceKey ? entry.ownership.sourceKey : "n/a" },
+                            { label: "Updated", value: formatDate(entry.updatedAt) }
+                        ])}
+                        ${entry.ownership && entry.ownership.isOrphaned ? `<div class="callout"><strong>Orphaned:</strong> This code-owned entry no longer appears in the startup seeds, so consent screens fall back to the raw scope string. Restore the seed or delete the record here.</div>
+                        <div class="form-actions">
+                            <button type="button" class="js-delete-scope-display-name" data-id="${esc(entry.id)}" data-scope="${esc(entry.scope)}">Delete</button>
+                        </div>` : ""}
+                        ${entry.ownership && !entry.ownership.isEditable ? `
+                            <div class="callout">
+                                <strong>Code owned:</strong> This entry is managed by <span class="inline-code">SeedScopeDisplayName</span>. Change it in source control and restart SqlOS.
+                            </div>
+                        ` : `<form id="update-scope-display-name-${esc(entry.id)}" class="nested-form">
+                            <input name="displayName" maxlength="200" placeholder="Display name" value="${esc(entry.displayName || "")}" required>
+                            <input name="description" maxlength="1000" placeholder="Consent-screen description" value="${esc(entry.description || "")}">
+                            <button type="submit">Save display name</button>
+                        </form>
+                        <div class="form-actions">
+                            <button type="button" class="js-delete-scope-display-name" data-id="${esc(entry.id)}" data-scope="${esc(entry.scope)}">Delete</button>
+                        </div>`}
+                    `,
+                    "No scope display names yet. The consent screen falls back to raw scope strings until entries are added here or seeded from code."
+                )}
+            </section>
+        `;
+
+        bindForm("create-scope-display-name-form", async form => {
+            await fetchJson(`${authApiBasePath}/scope-display-names`, {
+                method: "POST",
+                body: JSON.stringify({
+                    scope: form.get("scope"),
+                    displayName: form.get("displayName"),
+                    description: String(form.get("description") || "").trim() || null
+                })
+            });
+            setFlash("success", "Scope display name created.");
+        });
+
+        entries.filter(entry => entry.ownership && entry.ownership.isEditable).forEach(entry => {
+            bindForm(`update-scope-display-name-${entry.id}`, async form => {
+                await fetchJson(`${authApiBasePath}/scope-display-names/${encodeURIComponent(entry.id)}`, {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        displayName: form.get("displayName"),
+                        description: String(form.get("description") || "").trim() || null
+                    })
+                });
+                setFlash("success", "Scope display name updated.");
+            });
+        });
+
+        document.querySelectorAll(".js-delete-scope-display-name").forEach(button => {
+            button.addEventListener("click", async () => {
+                if (!window.confirm(`Delete the display name for ${button.dataset.scope}? The consent screen will fall back to the raw scope string.`)) return;
+                try {
+                    await fetchJson(`${authApiBasePath}/scope-display-names/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" });
+                    setFlash("success", "Scope display name deleted.");
+                } catch (error) {
+                    setFlash("error", error.message || String(error));
+                }
+                await render();
+            });
         });
     }
 

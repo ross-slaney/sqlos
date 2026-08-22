@@ -412,6 +412,69 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        api.MapGet("/scope-display-names", async (HttpContext context, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            var entries = await adminService.ListScopeDisplayNamesAsync(cancellationToken);
+            return Results.Ok(new { data = entries.Select(ToScopeDisplayNameResponse) });
+        });
+
+        api.MapPost("/scope-display-names", async (HttpContext context, SqlOSCreateScopeDisplayNameRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(ToScopeDisplayNameResponse(await adminService.CreateScopeDisplayNameAsync(request, cancellationToken)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapPut("/scope-display-names/{id}", async (HttpContext context, string id, SqlOSUpdateScopeDisplayNameRequest request, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(ToScopeDisplayNameResponse(await adminService.UpdateScopeDisplayNameAsync(id, request, cancellationToken)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
+        api.MapDelete("/scope-display-names/{id}", async (HttpContext context, string id, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                await adminService.DeleteScopeDisplayNameAsync(id, cancellationToken);
+                return Results.Ok(new { deleted = true });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        });
+
         api.MapGet("/sessions", async (HttpContext context, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))
@@ -494,4 +557,22 @@ public static partial class EndpointRouteBuilderExtensions
     }
 
     private sealed record OtpTestDeliveryRequest(string Method, string Destination);
+
+    private static object ToScopeDisplayNameResponse(SqlOSScopeDisplayName entry)
+        => new
+        {
+            entry.Id,
+            entry.Scope,
+            entry.DisplayName,
+            entry.Description,
+            Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
+                entry.ConfigurationOwner,
+                entry.ConfigurationSourceKey,
+                entry.LastReconciledAt,
+                entry.ConfigurationFingerprint,
+                entry.ConfigurationOrphanedAt,
+                false),
+            entry.CreatedAt,
+            entry.UpdatedAt
+        };
 }

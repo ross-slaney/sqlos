@@ -188,6 +188,48 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/consent/approve", async (
+            SqlOSHeadlessConsentRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.ApproveConsentAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
+            }
+        });
+
+        headless.MapPost("/consent/deny", async (
+            SqlOSHeadlessConsentRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.DenyConsentAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
+            }
+        });
+
         headless.MapGet("/requests/{requestId}", async (
             string requestId,
             string? view,
@@ -200,6 +242,10 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken) =>
         {
+            // The reload response can carry a freshly minted one-time ConsentToken, so no
+            // response from this endpoint may be cached (same precedent as /email/verify).
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
             if (!headlessAuthService.IsApiEnabled)
             {
                 return Results.NotFound();
@@ -215,7 +261,8 @@ public static partial class EndpointRouteBuilderExtensions
                     email,
                     displayName,
                     cancellationToken,
-                    mfaToken));
+                    mfaToken,
+                    httpContext: context));
             }
             catch (InvalidOperationException ex)
             {

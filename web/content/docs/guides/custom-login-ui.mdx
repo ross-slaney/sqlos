@@ -429,6 +429,7 @@ The core transition rule stays the same. Add only the views your enabled policy 
 | `invite`, `invite-login`, `invite-email-otp-verify`, `invite-accepted` | Resolve and preserve the invitation-bound request instead of starting unrelated signup | [Invite teammates](/docs/guides/invite-only-b2b-onboarding) |
 | Provider redirect | Follow the exact returned OIDC/SAML URL; SqlOS owns callback validation | [Social sign-in](/docs/guides/social-oidc) · [SAML SSO](/docs/guides/saml-sso) |
 | `mfa`, `mfa-enroll` | Verify an existing factor or render forced enrollment with its returned token and QR data | [Authenticator MFA](/docs/guides/mfa-totp) |
+| `consent` | Show the client name and `consentScopes`, then approve or deny with the view model's `consentToken` | [Consent](/docs/authserver/consent) |
 | `forgot-password`, `forgot-password-sent`, `password-reset` | Keep recovery enumeration-safe and use the configured reset destination | [Account recovery](/docs/guides/account-recovery-sessions) |
 | `device`, `device-approve`, `device-approved`, `device-denied` | Keep the device request bound to its request ID and require explicit approval | [CLI OAuth](/docs/authserver/cli-oauth) |
 

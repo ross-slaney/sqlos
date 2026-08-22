@@ -189,11 +189,16 @@ session. If organization selection or MFA is required, the user sees that step
 instead of receiving a code. With `prompt=none`, SqlOS returns
 `interaction_required` because the protocol forbids displaying the step.
 
-Dynamically registered, CIMD, and other third-party clients do not receive this
-silent session reuse. They require a user interaction; `prompt=none` returns
-`consent_required`. This prevents a client-controlled authorization URL from
-riding an unrelated signed-in browser session. Do not set `IsFirstParty` for an
-application you do not own and trust.
+Dynamically registered, CIMD, and other third-party clients require explicit
+user consent on their first authorization: the user sees the
+[consent screen](/docs/authserver/consent) before SqlOS issues the code. After
+the user approves, the remembered grant lets later authorizations with covered
+scopes complete silently, exactly like first-party clients. `prompt=none`
+returns `consent_required` only when no covering grant exists. The
+client-controlled-URL protection is preserved because the first grant always
+requires an explicit user gesture; an unrelated signed-in browser session alone
+never produces a code for a third-party client. Do not set `IsFirstParty` for
+an application you do not own and trust.
 
 Custom headless browser UIs should forward both `PendingToken` and `MfaToken`
 from `BuildUiUrl`. The former carries organization selection; the latter carries

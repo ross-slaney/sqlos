@@ -14,7 +14,7 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class SchemaInitializerIntegrationTests
 {
-    private const int CurrentSchemaVersion = 43;
+    private const int CurrentSchemaVersion = 44;
 
     [TestMethod]
     public async Task EnsureSchema_CreatesCoreTables()
@@ -61,6 +61,8 @@ public sealed class SchemaInitializerIntegrationTests
                      "SqlOSCalendarConnections",
                      "SqlOSCalendarSyncStates",
                      "SqlOSCalendarEvents",
+                     "SqlOSConsentGrants",
+                     "SqlOSScopeDisplayNames",
                      "SqlOSSchema",
                      "SqlOSAppliedMigrations"
                  })
@@ -77,13 +79,73 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync(
             "SqlOSAuthOidcConnections",
             "AcceptedAcrValuesJson"));
-        foreach (var table in new[] { "SqlOSClientApplications", "SqlOSAuthOidcConnections", "SqlOSScimConnections", "SqlOSMfaSettings" })
+        foreach (var table in new[] { "SqlOSClientApplications", "SqlOSAuthOidcConnections", "SqlOSScimConnections", "SqlOSMfaSettings", "SqlOSScopeDisplayNames" })
         {
             foreach (var column in new[] { "ConfigurationOwner", "ConfigurationSourceKey", "ConfigurationFingerprint", "LastReconciledAt", "ConfigurationOrphanedAt" })
             {
                 Assert.IsTrue(await ColumnExistsAsync(table, column), $"Column {table}.{column} should exist.");
             }
         }
+
+        foreach (var column in new[]
+                 {
+                     "UserId",
+                     "ClientApplicationId",
+                     "Scope",
+                     "GrantedAt",
+                     "UpdatedAt",
+                     "RevokedAt",
+                     "RevocationReason",
+                     "ClientMetadataFingerprint"
+                 })
+        {
+            Assert.IsTrue(await ColumnExistsAsync("SqlOSConsentGrants", column), $"Column SqlOSConsentGrants.{column} should exist.");
+        }
+
+        foreach (var column in new[] { "Scope", "DisplayName", "Description", "CreatedAt", "UpdatedAt" })
+        {
+            Assert.IsTrue(await ColumnExistsAsync("SqlOSScopeDisplayNames", column), $"Column SqlOSScopeDisplayNames.{column} should exist.");
+        }
+
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSConsentGrants", "UX_SqlOSConsentGrants_ActiveUserClient"),
+            "Consent grants need the active (UserId, ClientApplicationId) filtered unique index.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSConsentGrants", "IX_SqlOSConsentGrants_ClientApplicationId"),
+            "Consent grants need a ClientApplicationId index for client-wide revocation.");
+        Assert.IsTrue(
+            await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSScopeDisplayNames", "UX_SqlOSScopeDisplayNames_Scope"),
+            "Scope display names need a unique Scope index.");
+        Assert.AreEqual(
+            "Latin1_General_100_BIN2",
+            await ScalarStringAsync(
+                AspireFixture.SharedContext,
+                "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'Scope'"),
+            "The Scope key needs a binary collation so the unique index matches ordinal scope policy.");
+        Assert.AreEqual(
+            200,
+            await ScalarIntAsync(
+                AspireFixture.SharedContext,
+                "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'ConfigurationSourceKey'"),
+            "ConfigurationSourceKey stores the scope string, so it must fit every Scope value.");
+        Assert.AreEqual(
+            "Latin1_General_100_BIN2",
+            await ScalarStringAsync(
+                AspireFixture.SharedContext,
+                "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSScopeDisplayNames' AND COLUMN_NAME = 'ConfigurationSourceKey'"),
+            "ConfigurationSourceKey stores the scope string; the orphan-sweep SQL comparison must be ordinal like the in-memory seed set.");
+        Assert.AreEqual(
+            4000,
+            await ScalarIntAsync(
+                AspireFixture.SharedContext,
+                "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSConsentGrants' AND COLUMN_NAME = 'Scope'"),
+            "Grant scopes union across approvals; the column must hold the guarded 4000-character ceiling.");
+        Assert.AreEqual(
+            64,
+            await ScalarIntAsync(
+                AspireFixture.SharedContext,
+                "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SqlOSConsentGrants' AND COLUMN_NAME = 'ClientMetadataFingerprint'"),
+            "Grants stamp the SHA-256 hex metadata fingerprint they were approved against.");
 
         foreach (var column in new[]
                  {
@@ -240,6 +302,7 @@ public sealed class SchemaInitializerIntegrationTests
         Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationCodes", "AuthTime"), "Column SqlOSAuthorizationCodes.AuthTime should carry auth_time to token exchange.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSDeviceAuthorizations", "AuthTime"), "Column SqlOSDeviceAuthorizations.AuthTime should record when the approving user authenticated.");
         Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationRequests", "MaxAgeSeconds"), "Column SqlOSAuthorizationRequests.MaxAgeSeconds should persist max_age for the issuance re-check.");
+        Assert.IsTrue(await ColumnExistsAsync("SqlOSAuthorizationRequests", "PendingConsentUserId"), "Column SqlOSAuthorizationRequests.PendingConsentUserId should bind pending consent to the user who reached it.");
         Assert.IsTrue(
             await IndexExistsAsync(AspireFixture.SharedContext, "SqlOSAuthorizationCodes", "IX_SqlOSAuthorizationCodes_AuthorizationRequestId"),
             "SqlOSAuthorizationCodes.AuthorizationRequestId should be uniquely indexed.");

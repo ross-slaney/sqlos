@@ -613,7 +613,8 @@ public sealed class TodoSampleIntegrationTests
         });
         headlessResponse.EnsureSuccessStatusCode();
         var headlessJson = JsonDocument.Parse(await headlessResponse.Content.ReadAsStringAsync());
-        var code = QueryHelpers.ParseQuery(new Uri(headlessJson.RootElement.GetProperty("redirectUrl").GetString()!).Query)["code"].ToString();
+        var redirectUrl = await ResolveHeadlessRedirectUrlAsync(client, headlessJson, authorize.RequestId);
+        var code = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query)["code"].ToString();
 
         var tokens = await ExchangeAuthorizationCodeAsync(client, code, clientMetadataUrl, redirectUri, authorize.CodeVerifier);
         ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
@@ -710,7 +711,8 @@ public sealed class TodoSampleIntegrationTests
         });
         headlessResponse.EnsureSuccessStatusCode();
         var headlessJson = JsonDocument.Parse(await headlessResponse.Content.ReadAsStringAsync());
-        var code = QueryHelpers.ParseQuery(new Uri(headlessJson.RootElement.GetProperty("redirectUrl").GetString()!).Query)["code"].ToString();
+        var redirectUrl = await ResolveHeadlessRedirectUrlAsync(client, headlessJson, authorize.RequestId);
+        var code = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query)["code"].ToString();
 
         var tokens = await ExchangeAuthorizationCodeAsync(client, code, clientId!, redirectUri, authorize.CodeVerifier);
         ReadAudience(tokens.AccessToken).Should().Be(TodoResource);
@@ -771,12 +773,65 @@ public sealed class TodoSampleIntegrationTests
             ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
+        // Non-first-party clients render the consent view before the first code.
+        signupResponse = await ApproveHostedConsentIfPromptedAsync(client, signupResponse);
+
         signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var location = signupResponse.Headers.Location!.ToString();
         var code = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
         code.Should().NotBeNullOrWhiteSpace();
 
         return new HostedSignupResult(code, authorize.CodeVerifier);
+    }
+
+    private static async Task<HttpResponseMessage> ApproveHostedConsentIfPromptedAsync(
+        HttpClient client,
+        HttpResponseMessage response)
+    {
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return response;
+        }
+
+        var html = await response.Content.ReadAsStringAsync();
+        if (!html.Contains("name=\"consentToken\"", StringComparison.Ordinal))
+        {
+            return response;
+        }
+
+        return await client.PostAsync("/sqlos/auth/consent/approve", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = ExtractHiddenInput(html, "requestId"),
+            ["consentToken"] = ExtractHiddenInput(html, "consentToken"),
+            ["__RequestVerificationToken"] = ExtractHiddenInput(html, "__RequestVerificationToken")
+        }));
+    }
+
+    private static async Task<string> ResolveHeadlessRedirectUrlAsync(
+        HttpClient client,
+        JsonDocument headlessJson,
+        string requestId)
+    {
+        if (headlessJson.RootElement.TryGetProperty("redirectUrl", out var redirect)
+            && redirect.ValueKind == JsonValueKind.String)
+        {
+            return redirect.GetString()!;
+        }
+
+        // Non-first-party clients surface the typed consent view state first.
+        var viewModel = headlessJson.RootElement.GetProperty("viewModel");
+        viewModel.GetProperty("view").GetString().Should().Be("consent");
+        var consentToken = viewModel.GetProperty("consentToken").GetString();
+        consentToken.Should().NotBeNullOrWhiteSpace();
+
+        var approveResponse = await client.PostAsJsonAsync("/sqlos/auth/headless/consent/approve", new
+        {
+            requestId,
+            consentToken
+        });
+        approveResponse.EnsureSuccessStatusCode();
+        using var approveJson = JsonDocument.Parse(await approveResponse.Content.ReadAsStringAsync());
+        return approveJson.RootElement.GetProperty("redirectUrl").GetString()!;
     }
 
     private static async Task<TokenResult> ExchangeAuthorizationCodeAsync(

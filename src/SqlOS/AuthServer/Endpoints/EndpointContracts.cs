@@ -39,6 +39,8 @@ public static partial class EndpointRouteBuilderExtensions
         bool? SendEmail);
     private sealed record RevokeInvitationRequest(string? Reason);
     private sealed record LogoutAllRequest(string? RefreshToken);
+    private sealed record AccountGrantsRequest(string? RefreshToken);
+    private sealed record AccountGrantRevokeRequest(string? RefreshToken, string? GrantId);
     private sealed record CreateMembershipRequest(string OrganizationId, string UserId, string Role);
     private static bool TryParseClientAuthMethod(string? value, out SqlOSOidcClientAuthMethod? method)
     {

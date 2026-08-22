@@ -113,6 +113,61 @@ public static partial class EndpointRouteBuilderExtensions
                 : Results.Unauthorized();
         });
 
+        // Account self-service over remembered consent grants. Like /logout, the refresh
+        // token is the credential: it resolves an active session whose user scopes what
+        // the caller may see and revoke. Only first-party sessions qualify — a third-party
+        // client's refresh token must not enumerate or revoke the user's grants for every
+        // other client. Non-first-party sessions get the same generic 401 as an invalid
+        // token so the response is not an oracle for client classification.
+        auth.MapPost("/account/grants", async (AccountGrantsRequest request, SqlOSAuthService authService, SqlOSConsentService consentService, CancellationToken cancellationToken) =>
+        {
+            var session = await authService.FindActiveSessionByRefreshTokenAsync(request.RefreshToken, cancellationToken, includeClientApplication: true);
+            if (session?.ClientApplication?.IsFirstParty != true)
+            {
+                return Results.Unauthorized();
+            }
+
+            var grants = await consentService.ListActiveGrantsForUserAsync(session.UserId, cancellationToken);
+            return Results.Ok(new { data = grants });
+        });
+
+        auth.MapPost("/account/grants/revoke", async (AccountGrantRevokeRequest request, SqlOSAuthService authService, SqlOSConsentService consentService, SqlOSAdminService adminService, HttpContext httpContext, CancellationToken cancellationToken) =>
+        {
+            var session = await authService.FindActiveSessionByRefreshTokenAsync(request.RefreshToken, cancellationToken, includeClientApplication: true);
+            if (session?.ClientApplication?.IsFirstParty != true)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var grant = await consentService.RevokeGrantAsync(
+                    session.UserId,
+                    request.GrantId ?? string.Empty,
+                    "user_revoked",
+                    cancellationToken);
+                await adminService.RecordAuditAsync(
+                    "oauth.consent.revoked",
+                    "user",
+                    session.UserId,
+                    userId: session.UserId,
+                    sessionId: session.Id,
+                    ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                    data: new
+                    {
+                        grant_id = grant.Id,
+                        client_id = grant.ClientApplication?.ClientId ?? grant.ClientApplicationId,
+                        reason = grant.RevocationReason
+                    },
+                    cancellationToken: cancellationToken);
+                return Results.Ok(new { grant.Id, grant.RevokedAt });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await PublicAuthJsonErrorAsync(httpContext, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken);
+            }
+        });
+
         auth.MapPost("/password/forgot", async (SqlOSForgotPasswordRequest request, SqlOSAuthService authService, HttpContext httpContext, CancellationToken cancellationToken) =>
             Results.Ok(await authService.RequestPasswordResetEmailAsync(request, httpContext, cancellationToken)));
 

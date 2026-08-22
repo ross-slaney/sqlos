@@ -190,19 +190,30 @@ public sealed class SqlOSCimdClientService
         }
 
         var requiresFreshConsent = existingClient != null && HasSecuritySensitiveMetadataChange(existingClient, parsed);
-        var client = await UpsertDiscoveredClientAsync(existingClient, parsed, rawJson, response, now, cancellationToken);
+        // When the security-sensitive tripwire fires, the metadata commit and the
+        // session/grant invalidation must land in ONE save: a failure between a committed
+        // refresh (MetadataExpiresAt pushed out) and a separate revocation save would
+        // leave stale grants alive until the next metadata change.
+        var client = await UpsertDiscoveredClientAsync(
+            existingClient,
+            parsed,
+            rawJson,
+            response,
+            now,
+            saveChanges: !requiresFreshConsent,
+            cancellationToken);
 
         if (requiresFreshConsent)
         {
-            await RevokeActiveSessionsAsync(client.Id, cancellationToken);
-            await RecordAuditAsync(
+            await StageSessionAndConsentGrantRevocationsAsync(client, cancellationToken);
+            AddAuditEvent(
                 "client.cimd.metadata-changed",
                 client.ClientId,
                 new
                 {
                     requires_fresh_consent = true
-                },
-                cancellationToken);
+                });
+            await _context.SaveChangesAsync(cancellationToken);
         }
 
         return new SqlOSResolvedClient(client, "cimd", requiresFreshConsent);
@@ -277,6 +288,7 @@ public sealed class SqlOSCimdClientService
         string rawJson,
         HttpResponseMessage response,
         DateTime now,
+        bool saveChanges,
         CancellationToken cancellationToken)
     {
         var client = existingClient ?? new SqlOSClientApplication
@@ -318,7 +330,13 @@ public sealed class SqlOSCimdClientService
         client.MetadataLastModifiedAt = response.Content.Headers.LastModified?.UtcDateTime;
         client.LastSeenAt = now;
 
-        await _context.SaveChangesAsync(cancellationToken);
+        // The security-sensitive-change path passes saveChanges: false so the staged
+        // metadata updates commit atomically with the session/grant revocations.
+        if (saveChanges)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
         return client;
     }
 
@@ -407,49 +425,105 @@ public sealed class SqlOSCimdClientService
 
     private static bool HasSecuritySensitiveMetadataChange(SqlOSClientApplication existingClient, ParsedCimdDocument parsed)
     {
-        var existingRedirects = SqlOSAdminService.DeserializeJsonList(existingClient.RedirectUrisJson);
-        var redirectsChanged = !existingRedirects.SequenceEqual(parsed.RedirectUris, StringComparer.Ordinal);
+        // redirect_uris, grant_types, response_types, and scopes are sets: a refresh that
+        // only reorders (or duplicates) entries is semantically identical, so it must not
+        // trip consent invalidation or reject pending consent tokens. Canonicalize before
+        // comparing, mirroring ComputeSensitiveMetadataFingerprint.
+        var redirectsChanged = !CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(existingClient.RedirectUrisJson))
+            .SequenceEqual(CanonicalizeMetadataSet(parsed.RedirectUris), StringComparer.Ordinal);
         var authMethodChanged = !string.Equals(existingClient.TokenEndpointAuthMethod, parsed.TokenEndpointAuthMethod, StringComparison.Ordinal);
-        var grantTypesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.GrantTypesJson)
-            .SequenceEqual(parsed.GrantTypes, StringComparer.Ordinal);
-        var responseTypesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.ResponseTypesJson)
-            .SequenceEqual(parsed.ResponseTypes, StringComparer.Ordinal);
-        var scopesChanged = !SqlOSAdminService.DeserializeJsonList(existingClient.AllowedScopesJson)
-            .SequenceEqual(parsed.Scopes, StringComparer.Ordinal);
+        var grantTypesChanged = !CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(existingClient.GrantTypesJson))
+            .SequenceEqual(CanonicalizeMetadataSet(parsed.GrantTypes), StringComparer.Ordinal);
+        var responseTypesChanged = !CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(existingClient.ResponseTypesJson))
+            .SequenceEqual(CanonicalizeMetadataSet(parsed.ResponseTypes), StringComparer.Ordinal);
+        var scopesChanged = !CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(existingClient.AllowedScopesJson))
+            .SequenceEqual(CanonicalizeMetadataSet(parsed.Scopes), StringComparer.Ordinal);
 
         return redirectsChanged || authMethodChanged || grantTypesChanged || responseTypesChanged || scopesChanged;
     }
 
-    private async Task RevokeActiveSessionsAsync(string clientApplicationId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Canonical form of a set-valued metadata field (ordinal sort + dedup) so order-only
+    /// differences never register as security-sensitive changes or fingerprint drift.
+    /// </summary>
+    private static List<string> CanonicalizeMetadataSet(IEnumerable<string> values)
+        => values
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
+    /// Stages (without saving) session, refresh-token, and consent-grant revocations plus
+    /// their audit event for a client whose security-sensitive metadata changed. The caller
+    /// commits them in the same SaveChanges as the staged metadata refresh so no failure
+    /// window can leave refreshed metadata with stale grants alive.
+    /// </summary>
+    private async Task StageSessionAndConsentGrantRevocationsAsync(SqlOSClientApplication client, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         var sessions = await _context.Set<SqlOSSession>()
-            .Where(x => x.ClientApplicationId == clientApplicationId && x.RevokedAt == null)
+            .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)
             .ToListAsync(cancellationToken);
 
-        if (sessions.Count == 0)
+        // Security-sensitive metadata changed, so remembered consent decisions are stale:
+        // revoke them in the same save so users re-consent on the next authorization.
+        var revokedGrants = await SqlOSConsentService.MarkGrantsRevokedForClientAsync(
+            _context,
+            client.Id,
+            "cimd_metadata_changed",
+            cancellationToken);
+
+        if (sessions.Count > 0)
         {
-            return;
+            var sessionIds = sessions.Select(x => x.Id).ToList();
+            var refreshTokens = await _context.Set<SqlOSRefreshToken>()
+                .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+
+            foreach (var session in sessions)
+            {
+                session.RevokedAt = now;
+                session.RevocationReason = "cimd_metadata_changed";
+            }
+
+            foreach (var refreshToken in refreshTokens)
+            {
+                refreshToken.RevokedAt = now;
+            }
         }
 
-        var sessionIds = sessions.Select(x => x.Id).ToList();
-        var refreshTokens = await _context.Set<SqlOSRefreshToken>()
-            .Where(x => sessionIds.Contains(x.SessionId) && x.RevokedAt == null)
-            .ToListAsync(cancellationToken);
-
-        foreach (var session in sessions)
+        if (revokedGrants.Count > 0)
         {
-            session.RevokedAt = now;
-            session.RevocationReason = "cimd_metadata_changed";
+            AddAuditEvent(
+                "oauth.consent.invalidated",
+                client.ClientId,
+                new
+                {
+                    reason = "cimd_metadata_changed",
+                    grant_count = revokedGrants.Count
+                });
         }
-
-        foreach (var refreshToken in refreshTokens)
-        {
-            refreshToken.RevokedAt = now;
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Canonical fingerprint of the security-sensitive client metadata guarded by
+    /// <see cref="HasSecuritySensitiveMetadataChange"/>: redirect URIs, token endpoint auth
+    /// method, grant types, response types, and allowed scopes. Pending consent tokens stamp
+    /// it so an approval can detect the client changed under the consent screen the user saw.
+    /// Works for any client record, not only CIMD-sourced ones.
+    /// </summary>
+    internal static string ComputeSensitiveMetadataFingerprint(SqlOSClientApplication client)
+        => SqlOSConfigurationOwnershipPolicy.Fingerprint(new
+        {
+            // Set-valued fields are canonicalized (ordinal sort + dedup) so an order-only
+            // metadata refresh keeps the fingerprint stable: pending consent tokens stay
+            // valid and remembered grants stamped against it stay covering.
+            redirect_uris = CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(client.RedirectUrisJson)),
+            token_endpoint_auth_method = client.TokenEndpointAuthMethod,
+            grant_types = CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(client.GrantTypesJson)),
+            response_types = CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(client.ResponseTypesJson)),
+            scopes = CanonicalizeMetadataSet(SqlOSAdminService.DeserializeJsonList(client.AllowedScopesJson))
+        });
 
     private ParsedCimdDocument ParseMetadataDocument(JsonElement root, string clientId, string? redirectUri)
     {
@@ -709,7 +783,16 @@ public sealed class SqlOSCimdClientService
 
     private async Task RecordAuditAsync(string eventType, string clientId, object data, CancellationToken cancellationToken)
     {
-        _context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
+        AddAuditEvent(eventType, clientId, data);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Stages an audit event without saving so callers can commit it atomically with the
+    /// state change it describes.
+    /// </summary>
+    private void AddAuditEvent(string eventType, string clientId, object data)
+        => _context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent
         {
             Id = _cryptoService.GenerateId("evt"),
             EventType = eventType,
@@ -718,8 +801,6 @@ public sealed class SqlOSCimdClientService
             DataJson = JsonSerializer.Serialize(data),
             OccurredAt = DateTime.UtcNow
         });
-        await _context.SaveChangesAsync(cancellationToken);
-    }
 
     private sealed record ParsedCimdDocument(
         string ClientId,

@@ -105,10 +105,13 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         string scope,
         string? state = null,
         string? nonce = null,
-        bool omitState = false)
+        bool omitState = false,
+        string? clientId = null,
+        string? redirectUri = null,
+        string? prompt = null)
     {
         var codeVerifier = CreateCodeVerifier();
-        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt: null, maxAge: null, codeVerifier, omitState);
+        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt, maxAge: null, codeVerifier, omitState, clientId, redirectUri);
 
         using var authorize = await Client.GetAsync(authorizeUrl);
         var html = await authorize.Content.ReadAsStringAsync();
@@ -179,10 +182,12 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         string authPageCookie,
         string? prompt = null,
         string? maxAge = null,
-        string? nonce = null)
+        string? nonce = null,
+        string? clientId = null,
+        string? redirectUri = null)
     {
         var codeVerifier = CreateCodeVerifier();
-        var authorizeUrl = BuildAuthorizeUrl(scope, state: null, nonce, prompt, maxAge, codeVerifier);
+        var authorizeUrl = BuildAuthorizeUrl(scope, state: null, nonce, prompt, maxAge, codeVerifier, omitState: false, clientId, redirectUri);
         using var request = new HttpRequestMessage(HttpMethod.Get, authorizeUrl);
         request.Headers.TryAddWithoutValidation("Cookie", authPageCookie);
         var response = await Client.SendAsync(request);
@@ -196,13 +201,15 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         string? prompt,
         string? maxAge,
         string codeVerifier,
-        bool omitState = false)
+        bool omitState = false,
+        string? clientId = null,
+        string? redirectUri = null)
     {
         var query = new Dictionary<string, string?>
         {
             ["response_type"] = "code",
-            ["client_id"] = ClientId,
-            ["redirect_uri"] = RedirectUri,
+            ["client_id"] = clientId ?? ClientId,
+            ["redirect_uri"] = redirectUri ?? RedirectUri,
             ["scope"] = scope,
             ["code_challenge"] = CreateCodeChallenge(codeVerifier),
             ["code_challenge_method"] = "S256",
@@ -230,7 +237,68 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         return QueryHelpers.AddQueryString("/sqlos/auth/authorize", query);
     }
 
-    public async Task<JsonDocument> ExchangeAuthorizationCodeAsync(string code, string codeVerifier)
+    /// <summary>
+    /// Submits the hosted password login for an authorize flow that must land on the consent
+    /// interstitial (a non-first-party client without a covering grant). Returns everything a
+    /// follow-up consent decision POST needs.
+    /// </summary>
+    public async Task<HostedConsentPage> SubmitPasswordLoginExpectingConsentAsync(HostedAuthorizeStart started)
+    {
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/login/password")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["requestId"] = started.RequestId,
+                ["email"] = Email,
+                ["password"] = Password,
+                ["__RequestVerificationToken"] = started.AntiforgeryToken
+            })
+        };
+        login.Headers.TryAddWithoutValidation("Cookie", started.AntiforgeryCookie);
+        login.Headers.TryAddWithoutValidation("Origin", TrustedOrigin);
+        using var response = await Client.SendAsync(login);
+        var html = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != HttpStatusCode.OK || !html.Contains("/consent/approve", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Password login did not render the consent page. Status {(int)response.StatusCode}: {html}");
+        }
+
+        return new HostedConsentPage(
+            ExtractInputValue(html, "requestId"),
+            ExtractInputValue(html, "consentToken"),
+            ExtractInputValue(html, "__RequestVerificationToken"),
+            TryExtractCookie(response, "sqlos_auth_page_csrf_") ?? started.AntiforgeryCookie,
+            html);
+    }
+
+    /// <summary>
+    /// Posts the hosted consent approve or deny form and returns the raw response so callers
+    /// can assert the code redirect (approve) or the access_denied error redirect (deny).
+    /// </summary>
+    public async Task<HttpResponseMessage> SubmitConsentDecisionAsync(HostedConsentPage page, bool approve)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            approve ? "/sqlos/auth/consent/approve" : "/sqlos/auth/consent/deny")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["requestId"] = page.RequestId,
+                ["consentToken"] = page.ConsentToken,
+                ["__RequestVerificationToken"] = page.AntiforgeryToken
+            })
+        };
+        request.Headers.TryAddWithoutValidation("Cookie", page.AntiforgeryCookie);
+        request.Headers.TryAddWithoutValidation("Origin", TrustedOrigin);
+        return await Client.SendAsync(request);
+    }
+
+    public async Task<JsonDocument> ExchangeAuthorizationCodeAsync(
+        string code,
+        string codeVerifier,
+        string? clientId = null,
+        string? redirectUri = null)
     {
         using var response = await Client.PostAsync(
             "/sqlos/auth/token",
@@ -238,8 +306,8 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             {
                 ["grant_type"] = "authorization_code",
                 ["code"] = code,
-                ["client_id"] = ClientId,
-                ["redirect_uri"] = RedirectUri,
+                ["client_id"] = clientId ?? ClientId,
+                ["redirect_uri"] = redirectUri ?? RedirectUri,
                 ["code_verifier"] = codeVerifier
             }));
         var body = await response.Content.ReadAsStringAsync();
@@ -309,6 +377,17 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             .Single(value => value.StartsWith(prefix, StringComparison.Ordinal));
     }
 
+    public static string? TryExtractCookie(HttpResponseMessage response, string prefix)
+    {
+        if (!response.Headers.TryGetValues("Set-Cookie", out var values))
+        {
+            return null;
+        }
+
+        return values.Select(value => value.Split(';', 2)[0])
+            .FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
     private static string CreateCodeVerifier()
         => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace("+", "-", StringComparison.Ordinal)
@@ -329,6 +408,13 @@ public sealed record HostedLoginResult(
     string Code,
     string AuthPageCookie,
     string Location);
+
+public sealed record HostedConsentPage(
+    string RequestId,
+    string ConsentToken,
+    string AntiforgeryToken,
+    string AntiforgeryCookie,
+    string Html);
 
 public sealed record HostedSessionAuthorize(
     HttpResponseMessage Response,

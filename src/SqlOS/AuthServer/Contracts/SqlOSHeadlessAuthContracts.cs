@@ -44,7 +44,9 @@ public sealed record SqlOSHeadlessViewModel(
     IReadOnlyList<string>? MfaMethods = null,
     SqlOSTotpEnrollmentStartResult? TotpEnrollment = null,
     string Scope = "",
-    bool OmittedOpenId = false);
+    bool OmittedOpenId = false,
+    string? ConsentToken = null,
+    IReadOnlyList<SqlOSConsentScopeDisplay>? ConsentScopes = null);
 
 public sealed record SqlOSHeadlessActionResult(
     string Type,
@@ -182,6 +184,10 @@ public sealed record SqlOSHeadlessDeviceAuthorizationApproveRequest(
     string? UserCode,
     string? OrganizationId = null,
     string? RequestId = null);
+
+public sealed record SqlOSHeadlessConsentRequest(
+    string RequestId,
+    string ConsentToken);
 
 public sealed record SqlOSHeadlessProviderStartRequest(
     string RequestId,

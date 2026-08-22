@@ -54,6 +54,7 @@ public static class SqlOSPublicAuthErrorMapper
         SqlOSSignupOrchestration.UnauthorizedResourceMessage,
         "Sign in before approving this device request.",
         "Sign in before changing phone numbers.",
+        SqlOSAuthorizationServerService.ConsentClientMetadataChangedMessage,
         "The device authorization request is invalid or expired.",
         "The organization selection session is invalid or expired.",
         "The selected organization is not available to this user.",

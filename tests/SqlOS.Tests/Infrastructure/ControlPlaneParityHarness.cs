@@ -33,6 +33,7 @@ internal static class DashboardAdminContracts
         => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/emergency-disable";
     public static string MachineClientEmergencyEnable(string clientId)
         => $"{MachineClients}/{Uri.EscapeDataString(clientId)}/emergency-enable";
+    public const string ScopeDisplayNames = "/sqlos/admin/auth/api/scope-display-names";
 }
 
 internal sealed record ParityProjection(
@@ -68,7 +69,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         Machines = scope.ServiceProvider.GetRequiredService<SqlOSMachineClientAdminService>();
         ClientCredentials = scope.ServiceProvider.GetRequiredService<SqlOSClientCredentialsService>();
         Crypto = scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
-        Authorization = scope.ServiceProvider.GetRequiredService<SqlOSAuthorizationServerService>();
+        Consent = scope.ServiceProvider.GetRequiredService<SqlOSConsentService>();
+        AuthorizationServer = scope.ServiceProvider.GetRequiredService<SqlOSAuthorizationServerService>();
+        Authorization = AuthorizationServer;
         Auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
     }
 
@@ -83,6 +86,8 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public SqlOSMachineClientAdminService Machines { get; }
     public SqlOSClientCredentialsService ClientCredentials { get; }
     public SqlOSCryptoService Crypto { get; }
+    public SqlOSConsentService Consent { get; }
+    public SqlOSAuthorizationServerService AuthorizationServer { get; }
     public SqlOSAuthorizationServerService Authorization { get; }
     public SqlOSAuthService Auth { get; }
 
@@ -116,6 +121,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         await Settings.UpsertSeededAuthPageSettingsAsync();
         await Settings.UpsertSeededAuthEmailSettingsAsync();
         await Admin.UpsertSeededClientsAsync();
+        await Admin.UpsertSeededScopeDisplayNamesAsync();
         await Machines.UpsertSeededMachineClientsAsync();
         await Admin.UpsertSeededOidcConnectionsAsync();
         await Admin.UpsertSeededScimConnectionsAsync();
@@ -260,6 +266,20 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             ["backgroundColor"] = item.EmailBackgroundColor,
             ["hasLogo"] = (!string.IsNullOrWhiteSpace(item.EmailLogoBase64)).ToString()
         }, item.EmailConfigurationOwner, ReadEditable(dashboardItem), true, true);
+    }
+
+    public async Task<ParityProjection> ProjectScopeDisplayNameAsync(string scope)
+    {
+        var item = await Context.Set<SqlOSScopeDisplayName>().AsNoTracking().SingleAsync(x => x.Scope == scope);
+        var response = await Client.GetFromJsonAsync<JsonElement>(DashboardAdminContracts.ScopeDisplayNames);
+        var dashboardItem = response.GetProperty("data").EnumerateArray()
+            .Single(x => x.GetProperty("scope").GetString() == scope);
+        return new ParityProjection("scope_display_name", new Dictionary<string, string?>
+        {
+            ["scope"] = item.Scope,
+            ["displayName"] = item.DisplayName,
+            ["description"] = item.Description
+        }, item.ConfigurationOwner, ReadEditable(dashboardItem), true, true);
     }
 
     public async ValueTask DisposeAsync()

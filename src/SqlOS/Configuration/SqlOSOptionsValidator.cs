@@ -120,6 +120,7 @@ internal static class SqlOSOptionsValidator
         ValidateClientRegistrationOptions(options.AuthServer, errors);
         ValidateSigningKeyOptions(options.AuthServer, errors);
         ValidateOpenIdProviderOptions(options.AuthServer, errors);
+        ValidateScopeDisplaySeeds(options.AuthServer, errors);
 
         if (errors.Count > 0)
         {
@@ -229,6 +230,48 @@ internal static class SqlOSOptionsValidator
         else if (options.OpenIdProvider.IdTokenLifetime > TimeSpan.FromDays(options.DefaultSigningKeyGraceWindowDays))
         {
             errors.Add("AuthServer.OpenIdProvider.IdTokenLifetime must not exceed the DefaultSigningKeyGraceWindowDays JWKS grace window, or unexpired ID tokens would outlive their published validation key after rotation.");
+        }
+    }
+
+    // Matches the SqlOSScopeDisplayNames.Scope / ConfigurationSourceKey column length; longer
+    // seeds would silently truncate at reconcile time.
+    private const int MaxScopeDisplaySeedScopeLength = 200;
+
+    // Matches the SqlOSScopeDisplayNames.DisplayName / Description column lengths; longer
+    // seeds would fail (or truncate) at reconcile time instead of configuration time.
+    private const int MaxScopeDisplaySeedDisplayNameLength = 200;
+    private const int MaxScopeDisplaySeedDescriptionLength = 1000;
+
+    private static void ValidateScopeDisplaySeeds(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var seed in options.ScopeDisplaySeeds)
+        {
+            var scope = seed.Scope?.Trim() ?? string.Empty;
+            if (scope.Length > MaxScopeDisplaySeedScopeLength)
+            {
+                errors.Add($"AuthServer scope display seed scope '{scope}' cannot exceed {MaxScopeDisplaySeedScopeLength} characters.");
+            }
+
+            if (scope.Length > 0 && !seen.Add(scope))
+            {
+                errors.Add($"AuthServer scope display seeds contain duplicate scope '{scope}'.");
+            }
+
+            var displayName = seed.DisplayName?.Trim() ?? string.Empty;
+            if (displayName.Length == 0)
+            {
+                errors.Add($"AuthServer scope display seed '{scope}' requires a display name.");
+            }
+            else if (displayName.Length > MaxScopeDisplaySeedDisplayNameLength)
+            {
+                errors.Add($"AuthServer scope display seed '{scope}' display name cannot exceed {MaxScopeDisplaySeedDisplayNameLength} characters.");
+            }
+
+            if ((seed.Description?.Trim().Length ?? 0) > MaxScopeDisplaySeedDescriptionLength)
+            {
+                errors.Add($"AuthServer scope display seed '{scope}' description cannot exceed {MaxScopeDisplaySeedDescriptionLength} characters.");
+            }
         }
     }
 

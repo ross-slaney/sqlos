@@ -40,6 +40,33 @@ public sealed class SqlOSOidcClaimMapping
 
 public sealed record SqlOSOrganizationOption(string Id, string Slug, string Name, string Role);
 
+/// <summary>
+/// One scope entry rendered on the consent screen. <see cref="DisplayName"/> comes from the
+/// operator-defined scope display-name catalog and falls back to the raw scope string when
+/// no catalog entry exists.
+/// </summary>
+public sealed record SqlOSConsentScopeDisplay(string Scope, string DisplayName, string? Description = null);
+
+/// <summary>A remembered consent grant projected for admin and account surfaces.</summary>
+public sealed record SqlOSConsentGrantSummary(
+    string Id,
+    string UserId,
+    string ClientApplicationId,
+    string ClientId,
+    string ClientName,
+    IReadOnlyList<string> Scopes,
+    DateTime GrantedAt,
+    DateTime UpdatedAt);
+
+public sealed record SqlOSCreateScopeDisplayNameRequest(
+    string Scope,
+    string DisplayName,
+    string? Description = null);
+
+public sealed record SqlOSUpdateScopeDisplayNameRequest(
+    string DisplayName,
+    string? Description = null);
+
 public sealed record SqlOSTokenResponse(
     string AccessToken,
     string RefreshToken,

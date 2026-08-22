@@ -680,6 +680,67 @@ public sealed class SqlOSCimdClientServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveRequiredClientAsync_MetadataChange_RevokesConsentGrantsAndAuditsInvalidation()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_grant_changed",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"https://client.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        context.Set<SqlOSConsentGrant>().Add(new SqlOSConsentGrant
+        {
+            Id = "cgr_changed",
+            UserId = "usr_1",
+            ClientApplicationId = existing.Id,
+            Scope = "openid profile",
+            GrantedAt = DateTime.UtcNow.AddDays(-1),
+            UpdatedAt = DateTime.UtcNow.AddDays(-1)
+        });
+        await context.SaveChangesAsync();
+
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Example MCP Client",
+              "redirect_uris": [
+                "https://client.example.test/callback",
+                "https://client.example.test/new-callback"
+              ],
+              "token_endpoint_auth_method": "none"
+            }
+            """));
+
+        var resolver = CreateResolver(context, CreateOptions(), httpFactory);
+
+        var resolved = await resolver.ResolveRequiredClientAsync(
+            "https://client.example.test/oauth/client.json",
+            "https://client.example.test/callback");
+
+        resolved.RequiresFreshConsent.Should().BeTrue();
+        var grant = await context.Set<SqlOSConsentGrant>().SingleAsync(x => x.Id == "cgr_changed");
+        grant.RevokedAt.Should().NotBeNull();
+        grant.RevocationReason.Should().Be("cimd_metadata_changed");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "oauth.consent.invalidated")).Should().BeTrue();
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.metadata-changed")).Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task ResolveRequiredClientAsync_WidenedScope_RevokesSessionsAndAuditsMetadataChange()
     {
         using var context = CreateContext();
@@ -790,6 +851,218 @@ public sealed class SqlOSCimdClientServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*fetch failed*");
         (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.fetch-failed")).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ResolveClientAsync_SecuritySensitiveChange_CommitsMetadataAndRevocationsInOneSave()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_atomic",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Cached Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"https://client.example.test/callback\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        context.Set<SqlOSSession>().Add(new SqlOSSession
+        {
+            Id = "sess_atomic",
+            UserId = "usr_1",
+            ClientApplicationId = existing.Id,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+            LastSeenAt = DateTime.UtcNow.AddMinutes(-1),
+            IdleExpiresAt = DateTime.UtcNow.AddHours(1),
+            AbsoluteExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
+        context.Set<SqlOSRefreshToken>().Add(new SqlOSRefreshToken
+        {
+            Id = "rt_atomic",
+            SessionId = "sess_atomic",
+            TokenHash = "hash_atomic",
+            FamilyId = "fam_atomic",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
+        context.Set<SqlOSConsentGrant>().Add(new SqlOSConsentGrant
+        {
+            Id = "cgr_atomic",
+            UserId = "usr_1",
+            ClientApplicationId = existing.Id,
+            Scope = "openid profile",
+            GrantedAt = DateTime.UtcNow.AddDays(-1),
+            UpdatedAt = DateTime.UtcNow.AddDays(-1)
+        });
+        await context.SaveChangesAsync();
+
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Example MCP Client",
+              "redirect_uris": [
+                "https://client.example.test/callback",
+                "https://client.example.test/new-callback"
+              ],
+              "token_endpoint_auth_method": "none"
+            }
+            """,
+            cacheSeconds: 300));
+        var options = Options.Create(CreateOptions());
+        var cimd = new SqlOSCimdClientService(context, options, httpFactory, TestCryptoService.Create(context, options));
+
+        var savesBefore = context.SaveChangesAsyncCallCount;
+        var resolved = await cimd.ResolveClientAsync(
+            existing.ClientId,
+            "https://client.example.test/callback",
+            existing);
+
+        resolved.Should().NotBeNull();
+        resolved!.RequiresFreshConsent.Should().BeTrue();
+        context.SaveChangesAsyncCallCount.Should().Be(
+            savesBefore + 1,
+            "the metadata commit and the session/grant invalidation must share one save so no "
+            + "failure window can leave refreshed metadata with stale grants alive");
+
+        var client = await context.Set<SqlOSClientApplication>().SingleAsync(x => x.Id == existing.Id);
+        client.RedirectUrisJson.Should().Contain("https://client.example.test/new-callback");
+        client.MetadataExpiresAt.Should().BeAfter(DateTime.UtcNow, "the refreshed expiry committed in the same save");
+        (await context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_atomic")).RevokedAt.Should().NotBeNull();
+        (await context.Set<SqlOSRefreshToken>().SingleAsync(x => x.Id == "rt_atomic")).RevokedAt.Should().NotBeNull();
+        var grant = await context.Set<SqlOSConsentGrant>().SingleAsync(x => x.Id == "cgr_atomic");
+        grant.RevokedAt.Should().NotBeNull();
+        grant.RevocationReason.Should().Be("cimd_metadata_changed");
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "client.cimd.metadata-changed")).Should().BeTrue();
+        (await context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "oauth.consent.invalidated")).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void ComputeSensitiveMetadataFingerprint_TracksOnlySecuritySensitiveFields()
+    {
+        var client = new SqlOSClientApplication
+        {
+            Id = "cli_fp",
+            ClientId = "fingerprint-client",
+            Name = "Fingerprint Client",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"https://client.example.test/callback\"]",
+            AllowedScopesJson = "[\"openid\",\"todo:read\"]"
+        };
+        var baseline = SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client);
+
+        client.Name = "Renamed Cosmetically";
+        client.LogoUri = "https://client.example.test/logo.png";
+        SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client).Should().Be(
+            baseline,
+            "cosmetic metadata must not invalidate pending consent");
+
+        client.RedirectUrisJson = "[\"https://client.example.test/callback\",\"https://client.example.test/new\"]";
+        SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client).Should().NotBe(
+            baseline,
+            "redirect URIs are security-sensitive");
+    }
+
+    [TestMethod]
+    public void ComputeSensitiveMetadataFingerprint_IsInsensitiveToSetOrderAndDuplicates()
+    {
+        var client = new SqlOSClientApplication
+        {
+            Id = "cli_fp_order",
+            ClientId = "fingerprint-order-client",
+            Name = "Fingerprint Order Client",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"https://client.example.test/a\",\"https://client.example.test/b\"]",
+            AllowedScopesJson = "[\"openid\",\"todo:read\"]"
+        };
+        var baseline = SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client);
+
+        client.RedirectUrisJson = "[\"https://client.example.test/b\",\"https://client.example.test/a\"]";
+        client.GrantTypesJson = "[\"refresh_token\",\"authorization_code\",\"authorization_code\"]";
+        client.AllowedScopesJson = "[\"todo:read\",\"openid\"]";
+        SqlOSCimdClientService.ComputeSensitiveMetadataFingerprint(client).Should().Be(
+            baseline,
+            "set-valued metadata is canonicalized, so order-only (or duplicate-only) refreshes must not "
+            + "invalidate pending consent tokens or remembered grants");
+    }
+
+    [TestMethod]
+    public async Task ResolveClientAsync_OrderOnlyMetadataReorder_DoesNotTripTheSensitiveChangeRevocation()
+    {
+        using var context = CreateContext();
+        var existing = new SqlOSClientApplication
+        {
+            Id = "cli_reorder",
+            ClientId = "https://client.example.test/oauth/client.json",
+            Name = "Reorder Client",
+            Audience = "sqlos",
+            ClientType = "public_pkce",
+            RegistrationSource = "cimd",
+            TokenEndpointAuthMethod = "none",
+            GrantTypesJson = "[\"authorization_code\",\"refresh_token\"]",
+            ResponseTypesJson = "[\"code\"]",
+            RedirectUrisJson = "[\"https://client.example.test/callback\",\"https://client.example.test/alt\"]",
+            MetadataDocumentUrl = "https://client.example.test/oauth/client.json",
+            MetadataFetchedAt = DateTime.UtcNow.AddHours(-2),
+            MetadataExpiresAt = DateTime.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(existing);
+        context.Set<SqlOSConsentGrant>().Add(new SqlOSConsentGrant
+        {
+            Id = "cgr_reorder",
+            UserId = "usr_1",
+            ClientApplicationId = existing.Id,
+            Scope = "openid",
+            GrantedAt = DateTime.UtcNow.AddDays(-1),
+            UpdatedAt = DateTime.UtcNow.AddDays(-1)
+        });
+        await context.SaveChangesAsync();
+
+        // Same set, different order (and grant types repeated): semantically identical.
+        var httpFactory = new FakeHttpClientFactory(_ => JsonResponse(
+            """
+            {
+              "client_id": "https://client.example.test/oauth/client.json",
+              "client_name": "Reorder Client",
+              "redirect_uris": [
+                "https://client.example.test/alt",
+                "https://client.example.test/callback"
+              ],
+              "grant_types": ["refresh_token", "authorization_code"],
+              "response_types": ["code"],
+              "token_endpoint_auth_method": "none"
+            }
+            """,
+            cacheSeconds: 300));
+        var options = Options.Create(CreateOptions());
+        var cimd = new SqlOSCimdClientService(context, options, httpFactory, TestCryptoService.Create(context, options));
+
+        var resolved = await cimd.ResolveClientAsync(
+            existing.ClientId,
+            "https://client.example.test/callback",
+            existing);
+
+        resolved.Should().NotBeNull();
+        resolved!.RequiresFreshConsent.Should().BeFalse(
+            "an order-only refresh of set-valued metadata is not a security-sensitive change");
+        var grant = await context.Set<SqlOSConsentGrant>().SingleAsync(x => x.Id == "cgr_reorder");
+        grant.RevokedAt.Should().BeNull("remembered grants must survive an order-only metadata refresh");
     }
 
     private static SqlOSAuthServerOptions CreateOptions()

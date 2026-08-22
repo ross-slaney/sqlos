@@ -242,6 +242,57 @@ public sealed class SqlOSAuthPageRendererTests
     }
 
     [TestMethod]
+    public void RenderPage_ConsentMode_RendersClientScopesAndDecisionForms()
+    {
+        var model = CreateModel(
+            mode: "consent",
+            requestId: "req_consent") with
+        {
+            ClientName = "Example MCP Client",
+            ConsentToken = "consent_token_123",
+            ConsentScopes = new[]
+            {
+                new SqlOSConsentScopeDisplay("todo:read", "Read your tasks", "See every task on your boards."),
+                new SqlOSConsentScopeDisplay("todo:write", "todo:write")
+            }
+        };
+
+        var html = SqlOSAuthPageRenderer.RenderPage(model);
+
+        html.Should().Contain("Example MCP Client");
+        html.Should().Contain("Read your tasks");
+        html.Should().Contain("See every task on your boards.");
+        html.Should().Contain("todo:write");
+        html.Should().Contain("action=\"/sqlos/auth/consent/approve\"");
+        html.Should().Contain("action=\"/sqlos/auth/consent/deny\"");
+        html.Should().Contain("name=\"consentToken\" value=\"consent_token_123\"");
+        html.Should().Contain("name=\"requestId\" value=\"req_consent\"");
+        html.Should().Contain("Allow access");
+        html.Should().Contain("Deny request");
+    }
+
+    [TestMethod]
+    public void RenderPage_ConsentMode_HtmlEncodesClientAndScopeText()
+    {
+        var model = CreateModel(mode: "consent", requestId: "req_consent_xss") with
+        {
+            ClientName = "<script>alert(1)</script>",
+            ConsentToken = "consent_token_xss",
+            ConsentScopes = new[]
+            {
+                new SqlOSConsentScopeDisplay("evil", "<img src=x onerror=alert(2)>", "<b>desc</b>")
+            }
+        };
+
+        var html = SqlOSAuthPageRenderer.RenderPage(model);
+
+        html.Should().NotContain("<script>alert(1)</script>");
+        html.Should().NotContain("<img src=x onerror=alert(2)>");
+        html.Should().NotContain("<b>desc</b>");
+        html.Should().Contain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
+
+    [TestMethod]
     [DataRow("PrimaryColor", "</style><script>alert(1)</script>", "--primary: #4f46e5")]
     [DataRow("AccentColor", "url(https://evil.example)", "--accent: #111827")]
     [DataRow("BackgroundColor", "red;}</style><script>alert(1)</script>", "--page-bg: #f8fafc")]
