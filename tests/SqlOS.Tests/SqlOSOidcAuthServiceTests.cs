@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Net;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using SqlOS.AuthServer.Configuration;
@@ -81,6 +82,68 @@ public sealed class SqlOSOidcAuthServiceTests
             .FirstAsync(item => item.EventType == "user.login.oidc.success");
         audit.DataJson.Should().Contain("\"Accepted\":true");
         audit.DataJson.Should().Contain("\"AcceptedClaim\":\"amr\"");
+    }
+
+    [TestMethod]
+    public async Task CompleteAuthorization_SurfacesUpstreamAuthTime_AsUpstreamAuthenticatedAt()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        const string callbackUri = "https://app.example.local/callback/google";
+        await admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "example-web",
+            "Example Web",
+            "sqlos-example",
+            [callbackUri]));
+        var connection = await CreateGoogleConnectionAsync(admin, callbackUri);
+
+        var result = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id,
+            "example-web",
+            callbackUri,
+            "stale-auth-time:auth-time@example.com:nonce-auth-time",
+            "verifier",
+            "nonce-auth-time",
+            null));
+
+        // A silently reused upstream session must surface the original upstream
+        // authentication moment, not the callback time.
+        result.UpstreamAuthenticatedAt.Should().NotBeNull();
+        result.UpstreamAuthenticatedAt!.Value.Should().BeCloseTo(
+            DateTime.UtcNow.AddMinutes(-45),
+            TimeSpan.FromMinutes(1));
+    }
+
+    [TestMethod]
+    public void ResolveUpstreamAuthenticatedAt_UsesOnlyAuthTime_NeverIat_ClampsFuture()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var authTime = now.AddMinutes(-30);
+        var iat = now.AddMinutes(-5);
+
+        var both = Principal(("auth_time", authTime.ToUnixTimeSeconds()), ("iat", iat.ToUnixTimeSeconds()));
+        var resolvedBoth = SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(both);
+        resolvedBoth.Should().NotBeNull();
+        resolvedBoth!.Value.Should().BeCloseTo(authTime.UtcDateTime, TimeSpan.FromSeconds(2));
+
+        // iat must never substitute for auth_time: a silently reused upstream
+        // session still mints a token with a fresh iat, which would fabricate
+        // authentication freshness. Absent auth_time resolves to null so callers
+        // fall back to conservative local resolution.
+        var iatOnly = Principal(("iat", iat.ToUnixTimeSeconds()));
+        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(iatOnly).Should().BeNull();
+
+        var neither = Principal();
+        SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(neither).Should().BeNull();
+
+        var future = Principal(("auth_time", now.AddMinutes(10).ToUnixTimeSeconds()));
+        var resolvedFuture = SqlOSOidcAuthService.ResolveUpstreamAuthenticatedAt(future);
+        resolvedFuture.Should().NotBeNull();
+        resolvedFuture!.Value.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+
+        static ClaimsPrincipal Principal(params (string Type, long Seconds)[] claims)
+            => new(new ClaimsIdentity(
+                claims.Select(claim => new Claim(claim.Type, claim.Seconds.ToString())).ToArray()));
     }
 
     [TestMethod]
@@ -273,6 +336,45 @@ public sealed class SqlOSOidcAuthServiceTests
                 "S256"));
         await invalidChallenge.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*valid RFC 7636 S256 PKCE code challenge*");
+    }
+
+    [TestMethod]
+    public async Task StartAuthorization_ForceFreshAuthentication_PropagatesPromptLoginAndMaxAgeZeroUpstream()
+    {
+        using var context = CreateContext();
+        var (admin, oidc) = CreateServices(context);
+        var connection = await CreateGoogleConnectionAsync(admin);
+
+        SqlOSStartOidcAuthorizationRequest Request() => new(
+            connection.Id,
+            "user@example.com",
+            "example-web",
+            "https://app.example.local/callback/google",
+            "state",
+            "nonce",
+            new string('A', 43),
+            "S256");
+
+        // Clearing the local SqlOS session does not force the upstream provider
+        // to reauthenticate; a fresh-authentication demand must reach the IdP.
+        var forced = await oidc.StartAuthorizationAsync(Request() with
+        {
+            ForceFreshAuthentication = true,
+            PropagateMaxAgeZero = true
+        });
+        forced.AuthorizationUrl.Should().Contain("prompt=login");
+        forced.AuthorizationUrl.Should().Contain("max_age=0");
+
+        var promptOnly = await oidc.StartAuthorizationAsync(Request() with
+        {
+            ForceFreshAuthentication = true
+        });
+        promptOnly.AuthorizationUrl.Should().Contain("prompt=login");
+        promptOnly.AuthorizationUrl.Should().NotContain("max_age=");
+
+        var relaxed = await oidc.StartAuthorizationAsync(Request());
+        relaxed.AuthorizationUrl.Should().NotContain("prompt=");
+        relaxed.AuthorizationUrl.Should().NotContain("max_age=");
     }
 
     [TestMethod]

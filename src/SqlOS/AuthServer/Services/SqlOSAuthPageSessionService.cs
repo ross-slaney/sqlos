@@ -73,18 +73,31 @@ public sealed class SqlOSAuthPageSessionService
         }
 
         var payload = _cryptoService.DeserializePayload<AuthPageSessionPayload>(token);
+        var authenticatedAt = payload is { AuthenticatedAt: var stamped } && stamped != default
+            ? stamped
+            : token.CreatedAt;
         return new SqlOSAuthPageSession(
             rawToken,
             user,
             token.OrganizationId,
-            payload?.AuthenticationMethod ?? "password");
+            payload?.AuthenticationMethod ?? "password",
+            authenticatedAt);
     }
+
+    public Task SignInAsync(
+        HttpContext httpContext,
+        SqlOSUser user,
+        string? organizationId,
+        string authenticationMethod,
+        CancellationToken cancellationToken = default)
+        => SignInAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt: null, cancellationToken);
 
     public async Task SignInAsync(
         HttpContext httpContext,
         SqlOSUser user,
         string? organizationId,
         string authenticationMethod,
+        DateTime? authenticatedAt,
         CancellationToken cancellationToken = default)
     {
         var lifecycle = await SqlOSAuthLifecyclePolicy.EvaluateAsync(
@@ -118,7 +131,7 @@ public sealed class SqlOSAuthPageSessionService
             user.Id,
             null,
             organizationId,
-            new AuthPageSessionPayload(authenticationMethod),
+            new AuthPageSessionPayload(authenticationMethod, authenticatedAt ?? DateTime.UtcNow),
             securitySettings.SessionIdleTimeout,
             cancellationToken);
 
@@ -151,11 +164,15 @@ public sealed class SqlOSAuthPageSessionService
         });
     }
 
-    private sealed record AuthPageSessionPayload(string AuthenticationMethod);
+    // AuthenticatedAt defaults so cookies minted before the field existed still
+    // deserialize; a default value means "unknown" and falls back to the
+    // temporary token's CreatedAt.
+    private sealed record AuthPageSessionPayload(string AuthenticationMethod, DateTime AuthenticatedAt = default);
 }
 
 public sealed record SqlOSAuthPageSession(
     string RawToken,
     SqlOSUser User,
     string? OrganizationId,
-    string AuthenticationMethod);
+    string AuthenticationMethod,
+    DateTime AuthenticatedAt);

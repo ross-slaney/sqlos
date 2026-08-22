@@ -121,13 +121,27 @@ public static partial class EndpointRouteBuilderExtensions
                     context,
                     cancellationToken);
 
+                // RFC 6749 §5.1: a null scope means "unknown" (legacy sessions on the
+                // refresh grant), so the field is omitted instead of claiming an empty
+                // grant. An empty string is a real deny-all grant and is still echoed.
+                if (result.Scope is null)
+                {
+                    return Results.Ok(new
+                    {
+                        access_token = result.Tokens.AccessToken,
+                        refresh_token = result.Tokens.RefreshToken,
+                        token_type = "Bearer",
+                        expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds)
+                    });
+                }
+
                 return Results.Ok(new
                 {
                     access_token = result.Tokens.AccessToken,
                     refresh_token = result.Tokens.RefreshToken,
                     token_type = "Bearer",
                     expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
-                    scope = result.Scope ?? string.Empty
+                    scope = result.Scope
                 });
             }
             catch (SqlOSDeviceAuthorizationException ex)

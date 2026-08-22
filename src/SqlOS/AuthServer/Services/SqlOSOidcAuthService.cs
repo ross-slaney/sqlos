@@ -101,6 +101,19 @@ public sealed class SqlOSOidcAuthService
                 authorizationParameters["code_challenge"] = request.CodeChallenge;
                 authorizationParameters["code_challenge_method"] = request.CodeChallengeMethod;
                 authorizationParameters["login_hint"] = request.Email;
+
+                if (request.ForceFreshAuthentication)
+                {
+                    // Clearing the local SqlOS session does not force the upstream
+                    // provider to reauthenticate; propagate the forced-interaction
+                    // requirement so a silently reused upstream session cannot
+                    // satisfy a fresh-authentication demand.
+                    authorizationParameters["prompt"] = "login";
+                    if (request.PropagateMaxAgeZero)
+                    {
+                        authorizationParameters["max_age"] = "0";
+                    }
+                }
             }
             else if (connection.ProviderType == SqlOSOidcProviderType.GitHub)
             {
@@ -225,7 +238,8 @@ public sealed class SqlOSOidcAuthService
                 authMethod,
                 organizations.Count)
             {
-                UserCreated = provisioned.Created
+                UserCreated = provisioned.Created,
+                UpstreamAuthenticatedAt = completed.AuthenticatedAt
             };
         }
         catch (Exception ex)
@@ -270,7 +284,48 @@ public sealed class SqlOSOidcAuthService
             cancellationToken);
         return new CompletedProviderAuthorization(
             providerUser,
-            SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal));
+            SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal),
+            ResolveUpstreamAuthenticatedAt(idTokenPrincipal));
+    }
+
+    /// <summary>
+    /// Resolves when the user actually authenticated at the upstream provider from
+    /// the validated ID token's <c>auth_time</c> claim. <c>iat</c> is deliberately
+    /// not a fallback: a silently reused upstream session still mints a token with
+    /// a fresh <c>iat</c>, so treating it as the authentication moment would
+    /// fabricate freshness. When <c>auth_time</c> is absent this returns null and
+    /// callers fall back to conservative local resolution. Future values (provider
+    /// clock skew) are clamped to now.
+    /// </summary>
+    internal static DateTime? ResolveUpstreamAuthenticatedAt(ClaimsPrincipal idTokenPrincipal)
+    {
+        var now = DateTime.UtcNow;
+        var authenticatedAt = ParseEpochSecondsClaim(idTokenPrincipal, "auth_time");
+        if (authenticatedAt == null)
+        {
+            return null;
+        }
+
+        return authenticatedAt > now ? now : authenticatedAt;
+    }
+
+    private static DateTime? ParseEpochSecondsClaim(ClaimsPrincipal principal, string claimType)
+    {
+        var value = principal.FindFirstValue(claimType);
+        if (string.IsNullOrWhiteSpace(value)
+            || !long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return null;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
@@ -1289,7 +1344,8 @@ public sealed class SqlOSOidcAuthService
 
     private sealed record CompletedProviderAuthorization(
         ProviderUser User,
-        SqlOSUpstreamMfaDecision UpstreamMfa);
+        SqlOSUpstreamMfaDecision UpstreamMfa,
+        DateTime? AuthenticatedAt = null);
 
     private sealed record ResolvedEmailClaims(string Email, bool EmailVerified, string Source);
 

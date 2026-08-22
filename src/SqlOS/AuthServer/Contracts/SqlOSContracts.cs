@@ -566,7 +566,22 @@ public sealed record SqlOSStartOidcAuthorizationRequest(
     string State,
     string Nonce,
     string CodeChallenge,
-    string CodeChallengeMethod);
+    string CodeChallengeMethod)
+{
+    /// <summary>
+    /// When the bound authorization request demands fresh authentication
+    /// (max_age=0, or prompt containing login/select_account), the upstream
+    /// authorize URL carries <c>prompt=login</c> so the provider cannot
+    /// silently reuse an existing upstream session.
+    /// </summary>
+    public bool ForceFreshAuthentication { get; init; }
+
+    /// <summary>
+    /// True when the bound authorization request carried <c>max_age=0</c>;
+    /// the upstream authorize URL then also carries <c>max_age=0</c>.
+    /// </summary>
+    public bool PropagateMaxAgeZero { get; init; }
+}
 
 public sealed record SqlOSStartOidcAuthorizationResult(
     string AuthorizationUrl,
@@ -595,6 +610,14 @@ public sealed record SqlOSCompleteOidcAuthorizationResult(
     int OrganizationCount)
 {
     public bool UserCreated { get; init; }
+
+    /// <summary>
+    /// When the user authenticated at the upstream provider, taken from the
+    /// validated ID token's <c>auth_time</c> claim. Null when the provider did
+    /// not assert <c>auth_time</c> or has no ID token (OAuth profile flows);
+    /// callers then fall back to conservative local resolution.
+    /// </summary>
+    public DateTime? UpstreamAuthenticatedAt { get; init; }
 }
 
 public sealed record SqlOSPkceExchangeRequest(

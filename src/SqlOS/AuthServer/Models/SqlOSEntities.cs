@@ -473,6 +473,20 @@ public sealed class SqlOSSession
     public string? UserAgent { get; set; }
     public string? IpAddress { get; set; }
 
+    /// <summary>
+    /// The scope granted when this session was established through an OAuth grant,
+    /// stored so refresh responses can echo it. Null for sessions created before the
+    /// column existed and for direct (non-OAuth) logins.
+    /// </summary>
+    public string? Scope { get; set; }
+
+    /// <summary>
+    /// The moment the user actually authenticated for this session. Falls back to
+    /// <see cref="CreatedAt"/> when null; differs from it when a session is minted
+    /// from an authorization code issued against an earlier silent SSO sign-in.
+    /// </summary>
+    public DateTime? AuthenticatedAt { get; set; }
+
     public SqlOSUser? User { get; set; }
     public SqlOSClientApplication? ClientApplication { get; set; }
     public SqlOSOrganization? Organization { get; set; }
@@ -629,6 +643,13 @@ public sealed class SqlOSDeviceAuthorization
     public string? ApprovedOrganizationId { get; set; }
     public string? AuthenticationMethod { get; set; }
     public DateTime? ApprovedAt { get; set; }
+
+    /// <summary>
+    /// When the approving user actually authenticated. Preserved from the approving
+    /// auth-page session so device-grant sessions do not claim approval-click
+    /// freshness for <c>auth_time</c>.
+    /// </summary>
+    public DateTime? AuthTime { get; set; }
     public DateTime? DeniedAt { get; set; }
     public DateTime? ConsumedAt { get; set; }
     public string? IpAddress { get; set; }
@@ -912,6 +933,14 @@ public sealed class SqlOSAuthorizationRequest
     public string? Resource { get; set; }
     public string? Nonce { get; set; }
     public string? Prompt { get; set; }
+
+    /// <summary>
+    /// The parsed OIDC <c>max_age</c> parameter, persisted so issuance can re-check
+    /// authentication age after interstitials (organization selection, MFA) that can
+    /// outlast the freshness the client demanded. Null when max_age was not supplied.
+    /// </summary>
+    public long? MaxAgeSeconds { get; set; }
+
     public string CodeChallenge { get; set; } = string.Empty;
     public string CodeChallengeMethod { get; set; } = "S256";
     public string? ResolvedAuthMethod { get; set; }
@@ -957,6 +986,18 @@ public sealed class SqlOSAuthorizationCode
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime? ConsumedAt { get; set; }
+
+    /// <summary>
+    /// The OIDC nonce from the originating authorization request, carried on the code
+    /// so token issuance can bind it into an ID token.
+    /// </summary>
+    public string? Nonce { get; set; }
+
+    /// <summary>
+    /// When the user authenticated for the sign-in that produced this code. Preserved
+    /// across silent SSO reuse so <c>auth_time</c> and <c>max_age</c> stay truthful.
+    /// </summary>
+    public DateTime? AuthTime { get; set; }
 
     public SqlOSAuthorizationRequest? AuthorizationRequest { get; set; }
     public SqlOSUser? User { get; set; }

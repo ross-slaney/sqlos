@@ -160,8 +160,18 @@ public static partial class EndpointRouteBuilderExtensions
             try
             {
                 var prompt = context.Request.Query["prompt"].ToString();
+                var rawMaxAge = context.Request.Query["max_age"].ToString();
                 var invitationToken = ReadInvitationToken(context);
-                if (string.Equals(prompt, "login", StringComparison.Ordinal))
+                // OIDC prompt is a space-delimited list; tokenize once so values
+                // like "select_account consent" are still recognized. The raw
+                // string is persisted on the authorization request unchanged.
+                var promptValues = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var promptRequestsNone = promptValues.Contains("none", StringComparer.Ordinal);
+                // select_account has no account chooser yet; forcing a fresh
+                // sign-in is the compliant conservative reading.
+                var promptForcesLogin = promptValues.Contains("login", StringComparer.Ordinal)
+                    || promptValues.Contains("select_account", StringComparer.Ordinal);
+                if (promptForcesLogin)
                 {
                     await authPageSessionService.SignOutAsync(context, cancellationToken);
                 }
@@ -180,7 +190,8 @@ public static partial class EndpointRouteBuilderExtensions
                         prompt,
                         context.Request.Query["nonce"].ToString(),
                         headlessAuthService.IsBrowserUiEnabled ? "headless" : "hosted",
-                        context.Request.Query["ui_context"].ToString()),
+                        context.Request.Query["ui_context"].ToString(),
+                        rawMaxAge),
                     cancellationToken);
                 SqlOSEmailInvitationResult? invitation = null;
                 if (!string.IsNullOrWhiteSpace(invitationToken))
@@ -204,11 +215,31 @@ public static partial class EndpointRouteBuilderExtensions
                 };
 
                 var existingSession = await authPageSessionService.TryGetSessionAsync(context, cancellationToken);
-                if (existingSession != null && !string.Equals(prompt, "login", StringComparison.Ordinal))
+                // TotalSeconds avoids the OverflowException TimeSpan.FromSeconds
+                // would throw for max_age values near long.MaxValue.
+                if (existingSession != null
+                    && SqlOSAuthorizationServerService.TryParseMaxAge(rawMaxAge, out var maxAgeSeconds)
+                    && maxAgeSeconds is { } maxAge
+                    && (DateTime.UtcNow - existingSession.AuthenticatedAt).TotalSeconds >= maxAge)
+                {
+                    if (promptRequestsNone)
+                    {
+                        return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
+                            authorizationRequest,
+                            "login_required",
+                            "The user's authentication is older than max_age.",
+                            cancellationToken));
+                    }
+
+                    await authPageSessionService.SignOutAsync(context, cancellationToken);
+                    existingSession = null;
+                }
+
+                if (existingSession != null && !promptForcesLogin)
                 {
                     if (authorizationRequest.ClientApplication?.IsFirstParty != true)
                     {
-                        if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                        if (promptRequestsNone)
                         {
                             return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                                 authorizationRequest,
@@ -226,7 +257,7 @@ public static partial class EndpointRouteBuilderExtensions
                             context,
                             cancellationToken);
                         if ((completion.RequiresOrganizationSelection || completion.RequiresMfa)
-                            && string.Equals(prompt, "none", StringComparison.Ordinal))
+                            && promptRequestsNone)
                         {
                             await authorizationServerService.CancelAuthorizationInteractionAsync(
                                 completion,
@@ -296,7 +327,7 @@ public static partial class EndpointRouteBuilderExtensions
                     }
                 }
 
-                if (string.Equals(prompt, "none", StringComparison.Ordinal))
+                if (promptRequestsNone)
                 {
                     return Results.Redirect(await authorizationServerService.BuildAuthorizationErrorRedirectAsync(
                         authorizationRequest,

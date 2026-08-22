@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.IdentityModel.Tokens.Jwt;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -244,6 +245,95 @@ public sealed class OidcAuthIntegrationTests
             .Should().Contain(["google", "upstream_mfa"]);
         (await crypto.ValidateAccessTokenAsync(tokens.AccessToken, client.Audience))
             .Should().NotBeNull();
+    }
+
+    [TestMethod]
+    public async Task OidcAuthorizationRequestCallback_StampsUpstreamAuthTimeOnIssuedCode()
+    {
+        await ResetOidcStateAsync();
+
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(AspireFixture.SharedContext, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(AspireFixture.SharedContext, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(AspireFixture.SharedContext, options, emailSender);
+        var emailOtp = new SqlOSEmailOtpService(AspireFixture.SharedContext, admin, crypto, settings, emailSender, options);
+        var auth = new SqlOSAuthService(AspireFixture.SharedContext, options, admin, crypto, settings, emailOtp);
+        var authPageSession = new SqlOSAuthPageSessionService(AspireFixture.SharedContext, crypto, settings);
+        var authorization = new SqlOSAuthorizationServerService(
+            AspireFixture.SharedContext,
+            admin,
+            auth,
+            crypto,
+            settings,
+            authPageSession,
+            options);
+        var oidc = new SqlOSOidcAuthService(
+            AspireFixture.SharedContext,
+            admin,
+            crypto,
+            new FakeOidcProviderHttpClientFactory(),
+            NullLogger<SqlOSOidcAuthService>.Instance);
+        var browser = new SqlOSOidcBrowserAuthService(
+            AspireFixture.SharedContext,
+            admin,
+            auth,
+            authorization,
+            crypto,
+            oidc,
+            options);
+
+        var client = await EnsureClientAsync(admin, "example-web-auth-time");
+        // The provider callback URI the browser service derives from the fixture
+        // options (issuer origin + base path).
+        var connection = await CreateGoogleConnectionAsync(admin, "https://tests/sqlos/auth/oidc/callback");
+
+        var authorizationRequest = await authorization.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
+            "code",
+            client.ClientId,
+            $"https://app.example.local/callback/{client.ClientId}",
+            Guid.NewGuid().ToString("N"),
+            "openid",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null));
+
+        var startContext = new DefaultHttpContext();
+        startContext.Request.Scheme = "https";
+        startContext.Request.Host = new HostString("tests");
+        var startResult = await browser.CreateAuthorizationUrlForAuthRequestAsync(
+            authorizationRequest.Id,
+            connection.Id,
+            "stale-session@example.com",
+            startContext);
+
+        var providerQuery = Microsoft.AspNetCore.WebUtilities.QueryHelpers
+            .ParseQuery(new Uri(startResult.AuthorizationUrl).Query);
+        var state = providerQuery["state"].ToString();
+        var nonce = providerQuery["nonce"].ToString();
+
+        // The fake provider mints an ID token whose auth_time is 45 minutes ago,
+        // simulating a silently reused upstream session.
+        var callbackContext = new DefaultHttpContext();
+        callbackContext.Request.Scheme = "https";
+        callbackContext.Request.Host = new HostString("tests");
+        callbackContext.Request.Method = "GET";
+        callbackContext.Request.QueryString = new QueryString(
+            $"?state={Uri.EscapeDataString(state)}&code={Uri.EscapeDataString($"stale-auth-time:stale-session@example.com:{nonce}")}");
+
+        await browser.HandleCallbackAsync(callbackContext);
+
+        // The minted authorization code must carry the upstream authentication
+        // moment, not the callback time.
+        var code = await AspireFixture.SharedContext.Set<SqlOSAuthorizationCode>()
+            .SingleAsync(x => x.AuthorizationRequestId == authorizationRequest.Id);
+        code.AuthTime.Should().NotBeNull();
+        code.AuthTime!.Value.Should().BeCloseTo(DateTime.UtcNow.AddMinutes(-45), TimeSpan.FromMinutes(1));
     }
 
     [TestMethod]
@@ -513,7 +603,9 @@ public sealed class OidcAuthIntegrationTests
             return existing;
         }
 
-        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"]));
+        // These tests pin upstream social-login mechanics for the operator's own
+        // app; first-party keeps them off the third-party consent interstitial.
+        return await admin.CreateClientAsync(new SqlOSCreateClientRequest(clientId, clientId, "sqlos-example", [$"https://app.example.local/callback/{clientId}"], IsFirstParty: true));
     }
 
     private static Task<SqlOSOidcConnection> CreateGoogleConnectionAsync(SqlOSAdminService admin, string callbackUri)

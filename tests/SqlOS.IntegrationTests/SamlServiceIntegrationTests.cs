@@ -417,6 +417,45 @@ public sealed class SamlServiceIntegrationTests
         tokens.AccessToken.Should().NotBeNullOrWhiteSpace();
     }
 
+    [TestMethod]
+    public async Task SignedSamlResponse_CodeAuthTime_PinsAssertionAuthnInstant()
+    {
+        var (crypto, admin, saml) = CreateSamlServices();
+        var org = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest($"SAML AuthTime {Guid.NewGuid():N}", null));
+        var client = await CreateSamlClientAsync(admin, "authtime");
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=SqlOSAuthTimeIdP", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var connection = await admin.CreateSsoConnectionAsync(new SqlOSCreateSsoConnectionRequest(
+            org.Id, "AuthTime SSO", $"urn:authtime:{Guid.NewGuid():N}:idp", "https://idp.example.test/sso",
+            cert.ExportCertificatePem(), true, false, "email", "first_name", "last_name"));
+
+        // The IdP silently reused a session it established ten minutes ago. The
+        // minted code's auth_time must reflect the assertion's AuthnInstant, not
+        // the moment the ACS processed the response.
+        var authnInstant = DateTime.UtcNow.AddMinutes(-10);
+        var flow = await StartSamlRequestAsync(saml, connection.Id, client.ClientId);
+        var samlResponse = BuildSignedSamlResponse(
+            cert,
+            connection.IdentityProviderEntityId,
+            $"authtime-{Guid.NewGuid():N}@example.com",
+            "Auth",
+            "Time",
+            flow,
+            authnInstant: authnInstant);
+
+        var redirectUrl = await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
+        var code = QueryHelpers.ParseQuery(new Uri(redirectUrl).Query)["code"].ToString();
+        code.Should().NotBeNullOrWhiteSpace();
+
+        var codeHash = crypto.HashToken(code!);
+        var codeRow = await AspireFixture.SharedContext.Set<SqlOSAuthorizationCode>()
+            .AsNoTracking()
+            .SingleAsync(x => x.CodeHash == codeHash);
+        codeRow.AuthTime.Should().NotBeNull();
+        codeRow.AuthTime!.Value.Should().BeCloseTo(authnInstant, TimeSpan.FromSeconds(1));
+    }
+
     [DataTestMethod]
     [DataRow(true, false, DisplayName = "Duplicate response ID is rejected")]
     [DataRow(false, true, DisplayName = "Duplicate assertion ID is rejected")]
@@ -1725,7 +1764,8 @@ public sealed class SamlServiceIntegrationTests
         string? assertionId = null,
         Action<XmlDocument, XmlElement, XmlElement>? mutateBeforeSigning = null,
         Action<XmlDocument, XmlElement>? mutateAfterSigning = null,
-        string? authnContextClassRef = null)
+        string? authnContextClassRef = null,
+        DateTime? authnInstant = null)
     {
         responseId ??= $"_{Guid.NewGuid():N}";
         assertionId ??= $"_{Guid.NewGuid():N}";
@@ -1742,12 +1782,16 @@ public sealed class SamlServiceIntegrationTests
                 </saml:Conditions>
             """
             : string.Empty;
-        var authnStatementXml = string.IsNullOrWhiteSpace(authnContextClassRef)
+        var effectiveAuthnInstant = authnInstant?.ToString("o") ?? issueInstant;
+        var effectiveAuthnContextClassRef = string.IsNullOrWhiteSpace(authnContextClassRef)
+            ? "urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified"
+            : authnContextClassRef;
+        var authnStatementXml = string.IsNullOrWhiteSpace(authnContextClassRef) && authnInstant == null
             ? string.Empty
             : $"""
-                <saml:AuthnStatement AuthnInstant="{issueInstant}">
+                <saml:AuthnStatement AuthnInstant="{effectiveAuthnInstant}">
                   <saml:AuthnContext>
-                    <saml:AuthnContextClassRef>{SecurityElement.Escape(authnContextClassRef)}</saml:AuthnContextClassRef>
+                    <saml:AuthnContextClassRef>{SecurityElement.Escape(effectiveAuthnContextClassRef)}</saml:AuthnContextClassRef>
                   </saml:AuthnContext>
                 </saml:AuthnStatement>
             """;

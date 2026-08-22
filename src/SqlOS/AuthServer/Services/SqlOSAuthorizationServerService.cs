@@ -146,6 +146,21 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("State cannot exceed 2048 characters.");
         }
 
+        // OIDC Core 3.1.2.1: "none" MUST NOT be used with any other prompt value.
+        // Independently honoring both memberships would clear the session for
+        // "none login" or proceed silently for "none consent" instead of failing.
+        var promptValues = TokenizePrompt(input.Prompt);
+        if (promptValues.Contains("none", StringComparer.Ordinal)
+            && promptValues.Any(static value => !string.Equals(value, "none", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("prompt cannot combine none with other values.");
+        }
+
+        if (!TryParseMaxAge(input.MaxAge, out var maxAgeSeconds))
+        {
+            throw new InvalidOperationException("max_age must be a non-negative integer.");
+        }
+
         var client = await _adminService.RequireClientAsync(input.ClientId, input.RedirectUri, cancellationToken);
         var isPublicClient = string.Equals(
             client.TokenEndpointAuthMethod,
@@ -189,6 +204,7 @@ public sealed class SqlOSAuthorizationServerService
             Resource = normalizedResource,
             Nonce = input.Nonce,
             Prompt = input.Prompt,
+            MaxAgeSeconds = maxAgeSeconds,
             LoginHintEmail = input.LoginHint,
             UiContextJson = SqlOSHeadlessAuthService.NormalizeUiContext(input.UiContextJson),
             CodeChallenge = input.CodeChallenge ?? string.Empty,
@@ -517,14 +533,23 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSUser user,
         SqlOSAuthorizationRequest authorizationRequest,
         string authenticationMethod,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? authenticatedAt = null)
     {
+        // Stamp the moment the user actually authenticated so organization
+        // selection cannot inflate auth_time to the selection-click time. When
+        // the caller does not know a better value, the pending token is being
+        // created at the moment of a just-completed interactive login, so now
+        // is the correct authentication time.
         return await _cryptoService.CreateTemporaryTokenAsync(
             "auth_page_pending",
             user.Id,
             authorizationRequest.ClientApplicationId,
             null,
-            new PendingAuthorizationPayload(authorizationRequest.Id, authenticationMethod),
+            new PendingAuthorizationPayload(
+                authorizationRequest.Id,
+                authenticationMethod,
+                authenticatedAt ?? DateTime.UtcNow),
             TimeSpan.FromMinutes(10),
             cancellationToken);
     }
@@ -554,6 +579,23 @@ public sealed class SqlOSAuthorizationServerService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // Peek before consuming the one-time pending token: when the requested
+        // max_age lapsed while the user parked on the organization chooser, reject
+        // without consuming anything so the interaction can be retried after
+        // reauthentication instead of dead-ending the flow.
+        var peekedToken = await _cryptoService.FindTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
+            ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
+        var peekedPayload = _cryptoService.DeserializePayload<PendingAuthorizationPayload>(peekedToken)
+            ?? throw new InvalidOperationException("The organization selection session payload is invalid.");
+        var peekedRequest = await GetRequiredAuthorizationRequestAsync(peekedPayload.AuthorizationRequestId, cancellationToken);
+        if (peekedRequest.MaxAgeSeconds is { } pendingMaxAgeSeconds
+            && pendingMaxAgeSeconds > 0
+            && peekedPayload.AuthenticatedAt is { } pendingAuthenticatedAt
+            && (DateTime.UtcNow - pendingAuthenticatedAt).TotalSeconds >= pendingMaxAgeSeconds)
+        {
+            throw new InvalidOperationException("Authentication is older than the requested max_age.");
+        }
+
         var temporaryToken = await _cryptoService.ConsumeTemporaryTokenAsync("auth_page_pending", pendingToken, cancellationToken)
             ?? throw new InvalidOperationException("The organization selection session is invalid or expired.");
         if (temporaryToken.UserId == null)
@@ -578,7 +620,10 @@ public sealed class SqlOSAuthorizationServerService
             payload.AuthenticationMethod,
             organizations,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            // Pending tokens minted before AuthenticatedAt existed deserialize
+            // null, which falls back to issuance-time resolution.
+            knownAuthenticatedAt: payload.AuthenticatedAt);
     }
 
     internal async Task<SqlOSAuthorizationRequestLoginResult> GetPendingOrganizationSelectionForLoginAsync(
@@ -722,10 +767,19 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSUser user,
         string authenticationMethod,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? knownAuthenticatedAt = null)
     {
         if (!string.IsNullOrWhiteSpace(authorizationRequest.InvitationId))
         {
+            // Enforce max_age freshness before accepting the bound invitation:
+            // acceptance commits email verification and membership immediately,
+            // and a flow the issuance recheck would reject must not leave that
+            // half-committed state behind.
+            var invitationAuthenticatedAt = knownAuthenticatedAt
+                ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken);
+            EnforceMaxAgeFreshness(authorizationRequest, invitationAuthenticatedAt);
+
             var invitationAcceptance = await RequireInvitationService().AcceptBoundInvitationAsync(
                 authorizationRequest.InvitationId,
                 user.Id,
@@ -741,7 +795,8 @@ public sealed class SqlOSAuthorizationServerService
                 authenticationMethod,
                 invitationOrganizations,
                 httpContext,
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt ?? invitationAuthenticatedAt);
         }
 
         var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
@@ -760,7 +815,8 @@ public sealed class SqlOSAuthorizationServerService
                 authenticationMethod,
                 organizations,
                 httpContext,
-                cancellationToken);
+                cancellationToken,
+                knownAuthenticatedAt);
         }
 
         if (organizations.Count > 1)
@@ -772,7 +828,8 @@ public sealed class SqlOSAuthorizationServerService
                     user,
                     authorizationRequest,
                     authenticationMethod,
-                    cancellationToken),
+                    cancellationToken,
+                    knownAuthenticatedAt ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken)),
                 organizations,
                 AuthorizationRequestId: authorizationRequest.Id);
         }
@@ -785,7 +842,8 @@ public sealed class SqlOSAuthorizationServerService
             authenticationMethod,
             organizations,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            knownAuthenticatedAt);
     }
 
     public async Task<string> CompleteMfaChallengeAsync(
@@ -892,13 +950,18 @@ public sealed class SqlOSAuthorizationServerService
         var authorizationRequest = await GetRequiredAuthorizationRequestAsync(payload.AuthorizationRequestId, cancellationToken);
         var user = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == token.UserId, cancellationToken);
         var authenticationMethod = SqlOSMfaPolicyService.AddAuthenticationMethod(payload.AuthenticationMethod, factorMethod);
+        // The user just verified a required authentication factor. That completion
+        // is fresh authentication: a session that aged past max_age while the user
+        // finished the challenge must not be rejected at issuance, and the minted
+        // code's auth_time reflects the factor-verification moment.
         var redirectUrl = await IssueAuthorizationRedirectAsync(
             authorizationRequest,
             user,
             token.OrganizationId,
             authenticationMethod,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            knownAuthenticatedAt: DateTime.UtcNow);
 
         await _adminService.RecordAuditAsync(
             "user.login.mfa",
@@ -919,7 +982,8 @@ public sealed class SqlOSAuthorizationServerService
         string authenticationMethod,
         IReadOnlyList<SqlOSOrganizationOption> organizations,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? knownAuthenticatedAt = null)
     {
         var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -945,7 +1009,8 @@ public sealed class SqlOSAuthorizationServerService
                 authorizationRequest,
                 user,
                 httpContext,
-                cancellationToken),
+                cancellationToken,
+                knownAuthenticatedAt),
             false,
             null,
             organizations,
@@ -997,7 +1062,8 @@ public sealed class SqlOSAuthorizationServerService
         string? organizationId,
         string authenticationMethod,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? knownAuthenticatedAt = null)
     {
         var decision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -1015,7 +1081,8 @@ public sealed class SqlOSAuthorizationServerService
             authorizationRequest,
             user,
             httpContext,
-            cancellationToken);
+            cancellationToken,
+            knownAuthenticatedAt);
     }
 
     private async Task<string> IssueAssuredAuthorizationRedirectAsync(
@@ -1023,7 +1090,8 @@ public sealed class SqlOSAuthorizationServerService
         SqlOSAuthorizationRequest authorizationRequest,
         SqlOSUser user,
         HttpContext httpContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? knownAuthenticatedAt = null)
     {
         if (!string.Equals(assurance.UserId, user.Id, StringComparison.Ordinal)
             || !string.Equals(assurance.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
@@ -1033,6 +1101,13 @@ public sealed class SqlOSAuthorizationServerService
 
         var organizationId = assurance.OrganizationId;
         var authenticationMethod = assurance.AuthenticationMethod;
+
+        // Resolve and enforce authentication freshness before any mutation:
+        // invitation acceptance and application-access side effects must not be
+        // committed for a flow that the max_age recheck is about to reject.
+        var authenticatedAt = knownAuthenticatedAt
+            ?? await ResolveAuthenticatedAtAsync(httpContext, user.Id, cancellationToken);
+        EnforceMaxAgeFreshness(authorizationRequest, authenticatedAt);
 
         await RequireActiveLifecycleAsync(
             user.Id,
@@ -1092,7 +1167,7 @@ public sealed class SqlOSAuthorizationServerService
             authorizationRequest.ResolvedAuthMethod = authenticationMethod;
             authorizationRequest.ResolvedOrganizationId = organizationId;
             await _context.SaveChangesAsync(cancellationToken);
-            await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
+            await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
 
             return QueryHelpers.AddQueryString(
                 $"{_options.BasePath.TrimEnd('/')}/device/approve",
@@ -1112,6 +1187,8 @@ public sealed class SqlOSAuthorizationServerService
             State = authorizationRequest.State,
             Scope = authorizationRequest.Scope,
             Resource = authorizationRequest.Resource,
+            Nonce = authorizationRequest.Nonce,
+            AuthTime = authenticatedAt,
             CodeHash = _cryptoService.HashToken(rawCode),
             CodeChallenge = authorizationRequest.CodeChallenge,
             CodeChallengeMethod = authorizationRequest.CodeChallengeMethod,
@@ -1137,7 +1214,7 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Authorization request is no longer active.", ex);
         }
 
-        await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, cancellationToken);
+        await _authPageSessionService.SignInAsync(httpContext, user, organizationId, authenticationMethod, authenticatedAt, cancellationToken);
 
         var query = new Dictionary<string, string?>
         {
@@ -1150,6 +1227,93 @@ public sealed class SqlOSAuthorizationServerService
         }
 
         return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(authorizationRequest.RedirectUri, query);
+    }
+
+    /// <summary>
+    /// max_age is validated when the authorize request arrives, but interstitials
+    /// (organization selection, MFA) can outlast it. Re-check the resolved
+    /// authentication age at the issuance boundary — and before any committed
+    /// mutation such as invitation acceptance. TotalSeconds avoids the
+    /// OverflowException TimeSpan.FromSeconds would throw for very large max_age
+    /// values. max_age=0 is excluded: the /authorize gate already forces fresh
+    /// reauthentication for it, and any elapsed time would make zero unsatisfiable
+    /// here; the RP validates auth_time itself.
+    /// </summary>
+    private static void EnforceMaxAgeFreshness(SqlOSAuthorizationRequest authorizationRequest, DateTime authenticatedAt)
+    {
+        if (authorizationRequest.MaxAgeSeconds is { } maxAgeSeconds
+            && maxAgeSeconds > 0
+            && (DateTime.UtcNow - authenticatedAt).TotalSeconds >= maxAgeSeconds)
+        {
+            throw new InvalidOperationException("Authentication is older than the requested max_age.");
+        }
+    }
+
+    /// <summary>
+    /// Parses the OIDC <c>max_age</c> authorize parameter. Only null or the empty
+    /// string mean the parameter was not supplied; any other value — including a
+    /// whitespace-only one — must be a non-negative integer number of seconds with
+    /// no sign or surrounding whitespace, so a present but malformed value is
+    /// rejected instead of silently dropping the freshness constraint.
+    /// </summary>
+    internal static bool TryParseMaxAge(string? rawMaxAge, out long? maxAgeSeconds)
+    {
+        maxAgeSeconds = null;
+        if (string.IsNullOrEmpty(rawMaxAge))
+        {
+            return true;
+        }
+
+        if (!long.TryParse(
+                rawMaxAge,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            return false;
+        }
+
+        maxAgeSeconds = parsed;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the bound authorization request demands a fresh interactive
+    /// authentication: <c>max_age=0</c>, or a prompt list containing
+    /// <c>login</c> or <c>select_account</c>. Federated start paths propagate
+    /// this upstream (<c>prompt=login</c> / SAML <c>ForceAuthn</c>) because
+    /// clearing the local SqlOS session does not force the upstream identity
+    /// provider to reauthenticate a silently reusable session.
+    /// </summary>
+    internal static bool RequiresFreshAuthentication(SqlOSAuthorizationRequest authorizationRequest)
+        => authorizationRequest.MaxAgeSeconds == 0
+            || PromptRequestsFreshLogin(authorizationRequest.Prompt);
+
+    internal static bool PromptRequestsFreshLogin(string? prompt)
+    {
+        var values = TokenizePrompt(prompt);
+        return values.Contains("login", StringComparer.Ordinal)
+            || values.Contains("select_account", StringComparer.Ordinal);
+    }
+
+    internal static string[] TokenizePrompt(string? prompt)
+        => (prompt ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Resolves the moment the user actually authenticated for the sign-in completing
+    /// now. When the request carries a live auth-page session for the same user (silent
+    /// SSO reuse), the original authentication time is preserved; otherwise the user
+    /// authenticated interactively in this request and the moment is now.
+    /// </summary>
+    private async Task<DateTime> ResolveAuthenticatedAtAsync(
+        HttpContext httpContext,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var existingSession = await _authPageSessionService.TryGetSessionAsync(httpContext, cancellationToken);
+        return existingSession != null && string.Equals(existingSession.User.Id, userId, StringComparison.Ordinal)
+            ? existingSession.AuthenticatedAt
+            : DateTime.UtcNow;
     }
 
     private async Task RequireActiveLifecycleAsync(
@@ -1204,10 +1368,17 @@ public sealed class SqlOSAuthorizationServerService
             var refreshResource = _options.ResourceIndicators.Enabled && !string.IsNullOrWhiteSpace(request.Resource)
                 ? request.Resource.Trim()
                 : null;
-            var refreshed = await _authService.RefreshAsync(
+
+            // RFC 6749 §5.1: echo the originally granted scope. The scope is
+            // captured inside the refresh while the session entity is loaded so
+            // no query runs after rotation has committed (a post-consumption
+            // failure there would burn the rotated token). Sessions created
+            // before the Scope column existed return null, which omits the field
+            // from the response instead of claiming an empty grant.
+            var (refreshed, sessionScope) = await _authService.RefreshWithSessionScopeAsync(
                 new SqlOSRefreshRequest(request.RefreshToken, null, refreshResource, request.ClientId),
                 cancellationToken);
-            return new SqlOSTokenEndpointResult(refreshed, null);
+            return new SqlOSTokenEndpointResult(refreshed, sessionScope);
         }
 
         if (!string.Equals(request.GrantType, "authorization_code", StringComparison.Ordinal))
@@ -1281,6 +1452,9 @@ public sealed class SqlOSAuthorizationServerService
             httpContext.Request.Headers.UserAgent.ToString(),
             httpContext.Connection.RemoteIpAddress?.ToString(),
             authorizationCode.Resource,
+            authorizationCode.Scope,
+            authorizationCode.Nonce,
+            authorizationCode.AuthTime,
             cancellationToken);
 
         return new SqlOSTokenEndpointResult(tokens, authorizationCode.Scope);
@@ -1376,7 +1550,13 @@ public sealed class SqlOSAuthorizationServerService
             && !scope.StartsWith("auth:", StringComparison.Ordinal)
             && !ReservedOidcScopeNames.Contains(scope);
 
-    private sealed record PendingAuthorizationPayload(string AuthorizationRequestId, string AuthenticationMethod);
+    // AuthenticatedAt defaults so pending tokens minted before the field existed
+    // still deserialize; null means "unknown" and issuance falls back to its own
+    // resolution.
+    private sealed record PendingAuthorizationPayload(
+        string AuthorizationRequestId,
+        string AuthenticationMethod,
+        DateTime? AuthenticatedAt = null);
 
     private SqlOSInvitationService RequireInvitationService()
         => _invitationService ?? throw new InvalidOperationException("SqlOS invitations are not configured.");
@@ -1404,7 +1584,8 @@ public sealed record SqlOSAuthorizeRequestInput(
     string? Prompt,
     string? Nonce,
     string? PresentationMode,
-    string? UiContextJson);
+    string? UiContextJson,
+    string? MaxAge = null);
 
 public sealed record SqlOSPasswordAuthenticationResult(
     SqlOSUser User,

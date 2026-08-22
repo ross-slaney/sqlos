@@ -709,6 +709,18 @@ public sealed class SqlOSAuthService
     }
 
     public async Task<SqlOSTokenResponse> RefreshAsync(SqlOSRefreshRequest request, CancellationToken cancellationToken = default)
+        => (await RefreshWithSessionScopeAsync(request, cancellationToken)).Tokens;
+
+    /// <summary>
+    /// Refreshes tokens and also returns the session's granted scope, captured while
+    /// the session entity is already loaded. Callers that must echo the scope (RFC
+    /// 6749 §5.1) use this instead of querying after <see cref="RefreshAsync"/>
+    /// returns — a post-rotation query is a failure boundary that would burn the
+    /// consumed refresh token without delivering a response.
+    /// </summary>
+    internal async Task<(SqlOSTokenResponse Tokens, string? SessionScope)> RefreshWithSessionScopeAsync(
+        SqlOSRefreshRequest request,
+        CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
         var hashedToken = _cryptoService.HashToken(request.RefreshToken);
@@ -733,7 +745,7 @@ public sealed class SqlOSAuthService
 
         if (refreshToken.ConsumedAt != null)
         {
-            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken), session.Scope);
         }
 
         EnsureSessionIsActive(session);
@@ -750,7 +762,7 @@ public sealed class SqlOSAuthService
 
         if (refreshToken.ConsumedAt != null)
         {
-            return await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(refreshToken, session, request, securitySettings, cancellationToken), session.Scope);
         }
 
         var requestedOrganizationId = string.IsNullOrWhiteSpace(request.OrganizationId)
@@ -884,17 +896,17 @@ public sealed class SqlOSAuthService
                 throw new InvalidOperationException("Refresh token rotation could not be completed.");
             }
 
-            return await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken);
+            return (await HandleConsumedRefreshTokenAsync(fresh, fresh.Session!, request, securitySettings, cancellationToken), fresh.Session!.Scope);
         }
 
-        return new SqlOSTokenResponse(
+        return (new SqlOSTokenResponse(
             accessToken,
             newRawRefreshToken,
             session.Id,
             session.ClientApplication!.ClientId,
             organizationId,
             accessTokenExpiresAt,
-            nextRefreshToken.ExpiresAt);
+            nextRefreshToken.ExpiresAt), session.Scope);
     }
 
     /// <summary>
@@ -2173,6 +2185,9 @@ public sealed class SqlOSAuthService
             httpContext?.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
             payload.Resource,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken),
             cancellationToken);
 
@@ -2215,6 +2230,9 @@ public sealed class SqlOSAuthService
             userAgent,
             ipAddress,
             null,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             securitySettings,
             cancellationToken);
     }
@@ -2228,6 +2246,37 @@ public sealed class SqlOSAuthService
         string? ipAddress,
         string? resource,
         CancellationToken cancellationToken = default)
+        => await CreateSessionTokensForUserAsync(
+            user,
+            client,
+            organizationId,
+            authenticationMethod,
+            userAgent,
+            ipAddress,
+            resource,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Creates a session and token pair for an OAuth grant, persisting the granted
+    /// scope and the moment of actual user authentication on the session. The nonce
+    /// is accepted alongside them so OIDC token issuance can bind it once OpenID
+    /// Provider mode ships; it is not stored on the session.
+    /// </summary>
+    public async Task<SqlOSTokenResponse> CreateSessionTokensForUserAsync(
+        SqlOSUser user,
+        SqlOSClientApplication client,
+        string? organizationId,
+        string authenticationMethod,
+        string? userAgent,
+        string? ipAddress,
+        string? resource,
+        string? scope,
+        string? nonce,
+        DateTime? authenticatedAt,
+        CancellationToken cancellationToken = default)
     {
         var securitySettings = await _settingsService.GetResolvedSecuritySettingsAsync(cancellationToken);
         return await CreateSessionAndTokensAsync(
@@ -2238,6 +2287,9 @@ public sealed class SqlOSAuthService
             userAgent,
             ipAddress,
             resource,
+            scope,
+            nonce,
+            authenticatedAt,
             securitySettings,
             cancellationToken);
     }
@@ -2259,6 +2311,9 @@ public sealed class SqlOSAuthService
             httpContext.Request.Headers.UserAgent.ToString(),
             GetIp(httpContext),
             null,
+            scope: null,
+            nonce: null,
+            authenticatedAt: null,
             securitySettings,
             cancellationToken);
     }
@@ -2271,9 +2326,16 @@ public sealed class SqlOSAuthService
         string? userAgent,
         string? ipAddress,
         string? resource,
+        string? scope,
+        string? nonce,
+        DateTime? authenticatedAt,
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
+        // The nonce is intentionally unused until OpenID Provider mode mints ID
+        // tokens; accepting it here keeps every grant's call chain stable when
+        // that lands.
+        _ = nonce;
         organizationId = string.IsNullOrWhiteSpace(organizationId) ? null : organizationId.Trim();
         var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -2309,6 +2371,8 @@ public sealed class SqlOSAuthService
             AuthenticationMethod = authenticationMethod,
             Resource = resource,
             EffectiveAudience = effectiveAudience,
+            Scope = scope,
+            AuthenticatedAt = authenticatedAt,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
             IdleExpiresAt = DateTime.UtcNow.Add(securitySettings.SessionIdleTimeout),

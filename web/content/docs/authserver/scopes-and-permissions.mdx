@@ -1,0 +1,91 @@
+---
+title: "Scopes and Permissions"
+description: "OAuth scope is a coarse client grant. FGA is the authorization authority. User access tokens carry no scope claim by design."
+order: 28.5
+section: authserver
+---
+
+SqlOS separates two questions that OAuth deployments often blur:
+
+- **OAuth scope** answers *what may this client application ask for?* It is a coarse, client-level grant negotiated once at authorization time: the client requests scopes, SqlOS intersects them with the client registration's allowed scopes, and the token endpoint echoes the granted set.
+- **FGA** answers *what may this subject do to this resource?* It is per-user, per-resource authorization evaluated on every API call, against the current grants and resource hierarchy.
+
+Scope constrains the client. FGA authorizes the request. Do not treat one as the other; the [glossary](/docs/reference/glossary) makes the same distinction.
+
+## Decision record: user access tokens carry no `scope` claim
+
+This is deliberate, not an omission.
+
+User access tokens carry identity, session, and audience claims — `sub`, `sid`, `client_id`, `amr`, and conditionally `email` and `org_id` (see [Token Validation](/docs/authserver/token-validation) for the full table). They never carry a `scope` claim, and SqlOS token validation (`UseSqlOSAccessTokenValidation`, `RequireSqlOSAccessToken`, `ValidateAccessTokenAsync`) deliberately has no scope requirement to configure: it validates issuer, signature, exact audience, JWT lifetime, and live session state, then hands authorization to your application.
+
+Two reasons:
+
+1. **A `scope` claim invites the wrong authorization model.** Scope describes the ceiling of what the *client application* was allowed to request, frozen at authorization time. It says nothing about what *this user* may do to *this row* right now. A resource server that allows a write because the token carries `tasks.write` has authorized the app, not the user — and cannot see grant changes, role changes, or resource-level policy that happened after the token was minted.
+2. **Per-resource authorization is FGA's job.** FGA sees the subject, the resource, the role grants, and the hierarchy at request time, and its decisions change the moment a grant changes. Because SqlOS validation is session-aware, revocation and offboarding also take effect before token expiry — a property a scope claim could never have.
+
+Service access tokens are the intentional asymmetry: client-credentials tokens for [machine clients](/docs/authserver/machine-clients) carry `scope` and `token_kind: "service"`, because there is no interactive user behind them — the granted scope set *is* the description of what the automation was admitted to do, and resource servers still combine it with service-account FGA grants for row-level decisions.
+
+## What a resource server should do instead
+
+Bind the audience, validate with session awareness, resolve the subject from the token, and let FGA decide — the same flow as the [EF authorization quickstart](/docs/quickstarts/ef-authorization):
+
+```csharp
+var api = app.MapGroup("/api").RequireSqlOSAccessToken("https://api.example.com");
+
+api.MapGet("/projects", async (
+    HttpContext http,
+    AppDbContext db,
+    ISqlOSFgaAuthService authorization,
+    CancellationToken cancellationToken) =>
+{
+    var subjectId = http.GetSqlOSValidatedToken()?.UserId;
+    if (string.IsNullOrWhiteSpace(subjectId))
+    {
+        return Results.Unauthorized();
+    }
+
+    var filter = await authorization.GetAuthorizationFilterAsync<Project>(
+        subjectId,
+        "project.read");
+
+    var projects = await db.Projects
+        .AsNoTracking()
+        .Where(filter)
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(projects);
+});
+```
+
+The audience check proves the token was minted for this API. The FGA filter decides which rows this user sees. Neither step reads a scope.
+
+This example is the **user-token** flow: `UserId` is deliberately null on a validated client-credentials service token. An endpoint that also accepts service tokens should branch on the `token_kind` claim and resolve the service-account subject from the principal's `sub` claim instead, then apply the service-scope-plus-FGA rule described under service tokens above.
+
+This applies with full force to MCP resource servers: a dynamically registered MCP client can request whatever scopes it likes, so requested scope is untrusted input, not an authorization decision. Validate the audience, resolve the actor, and apply FGA or app policy per operation — see [MCP OAuth](/docs/guides/mcp-oauth).
+
+## Where scope does gate behavior
+
+Scope is not decorative. Today it constrains what a client may request (the allowed-scopes intersection on every [client](/docs/authserver/clients)) and what a service token records. When SqlOS ships OpenID Provider mode (issue #118), scope will also gate **identity-claim release**: `openid` will mint an ID token, and `profile` / `email` will decide which claims appear in ID tokens and UserInfo responses.
+
+That boundary is precise: scope will gate what identity claims SqlOS releases *about* the user, and it still will not gate what the user may *do* against your API. FGA remains the authorization authority after OIDC Provider mode ships.
+
+## If scope enforcement is ever wanted
+
+Scope-based API enforcement is intentionally absent, and it is not planned. If a future deployment genuinely needs it, the contained shape — recorded here so it is a design note rather than a rediscovery — would be:
+
+- Emit the granted scope as a claim in `SqlOSCryptoService.CreateAccessTokenAsync`.
+- Surface it as a field on `SqlOSValidatedToken`.
+- Add a `RequiredScopes` option to `SqlOSAccessTokenValidationOptions`, enforced by the same middleware that checks the audience.
+- Fail with an RFC 6750 §3.1 `insufficient_scope` Bearer challenge rather than a bare 403.
+
+The prerequisites — the empty-allowlist deny-all sentinel and the scope-intersection policy — already shipped, so the path is open; the decision is that SqlOS does not take it. Until that decision changes, treat any scope-based authorization check against a **user** token as a bug: it will pass review against this page only if it is gating claim release, not API access.
+
+Service tokens are the exception, exactly because they carry a `scope` claim on purpose: a resource server handling `token_kind: "service"` should require both the service scope relevant to the operation *and* the FGA decision for the service-account subject. The granted scope describes what the automation was admitted to do; honoring a token deliberately narrowed to one scope is part of that contract, and FGA still decides what the subject may do to each row.
+
+## See also
+
+- [Token Validation](/docs/authserver/token-validation) — the exact claims on user access tokens
+- [Clients](/docs/authserver/clients) — allowed scopes and the intersection rule
+- [Machine Clients](/docs/authserver/machine-clients) — service tokens, where `scope` is a claim
+- [MCP OAuth](/docs/guides/mcp-oauth) — audience binding and per-operation authorization for MCP servers
+- [Checking a permission](/docs/fga/checking-a-permission) — the FGA decision APIs

@@ -101,21 +101,10 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         return await ExchangeAuthorizationCodeAsync(code, started.CodeVerifier);
     }
 
-    public async Task<HostedAuthorizeStart> StartAuthorizeAsync(string scope, string? state = null)
+    public async Task<HostedAuthorizeStart> StartAuthorizeAsync(string scope, string? state = null, string? nonce = null)
     {
         var codeVerifier = CreateCodeVerifier();
-        var challenge = CreateCodeChallenge(codeVerifier);
-        var authorizeUrl = QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
-        {
-            ["response_type"] = "code",
-            ["client_id"] = ClientId,
-            ["redirect_uri"] = RedirectUri,
-            ["state"] = state ?? $"state-{Guid.NewGuid():N}",
-            ["scope"] = scope,
-            ["code_challenge"] = challenge,
-            ["code_challenge_method"] = "S256",
-            ["view"] = "password"
-        });
+        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt: null, maxAge: null, codeVerifier);
 
         using var authorize = await Client.GetAsync(authorizeUrl);
         var html = await authorize.Content.ReadAsStringAsync();
@@ -133,6 +122,14 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
     }
 
     public async Task<string> SubmitPasswordLoginAsync(HostedAuthorizeStart started)
+        => (await SubmitPasswordLoginWithSessionAsync(started)).Code;
+
+    /// <summary>
+    /// Same as <see cref="SubmitPasswordLoginAsync"/>, but also captures the
+    /// <c>sqlos_auth_page</c> session cookie so a later authorize request can
+    /// exercise silent SSO reuse, <c>prompt</c>, and <c>max_age</c> semantics.
+    /// </summary>
+    public async Task<HostedLoginResult> SubmitPasswordLoginWithSessionAsync(HostedAuthorizeStart started)
     {
         using var login = new HttpRequestMessage(HttpMethod.Post, "/sqlos/auth/login/password")
         {
@@ -162,7 +159,64 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             throw new InvalidOperationException($"Authorization redirect omitted code: {location}");
         }
 
-        return code;
+        return new HostedLoginResult(code, ExtractCookie(response, "sqlos_auth_page="));
+    }
+
+    /// <summary>
+    /// Replays a captured auth-page session cookie against a fresh authorize request.
+    /// Returns the raw response so callers can assert silent SSO (302 with a code),
+    /// a re-challenge (200 login page), or an error redirect.
+    /// </summary>
+    public async Task<HostedSessionAuthorize> AuthorizeWithSessionAsync(
+        string scope,
+        string authPageCookie,
+        string? prompt = null,
+        string? maxAge = null,
+        string? nonce = null)
+    {
+        var codeVerifier = CreateCodeVerifier();
+        var authorizeUrl = BuildAuthorizeUrl(scope, state: null, nonce, prompt, maxAge, codeVerifier);
+        using var request = new HttpRequestMessage(HttpMethod.Get, authorizeUrl);
+        request.Headers.TryAddWithoutValidation("Cookie", authPageCookie);
+        var response = await Client.SendAsync(request);
+        return new HostedSessionAuthorize(response, codeVerifier);
+    }
+
+    private static string BuildAuthorizeUrl(
+        string scope,
+        string? state,
+        string? nonce,
+        string? prompt,
+        string? maxAge,
+        string codeVerifier)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = ClientId,
+            ["redirect_uri"] = RedirectUri,
+            ["state"] = state ?? $"state-{Guid.NewGuid():N}",
+            ["scope"] = scope,
+            ["code_challenge"] = CreateCodeChallenge(codeVerifier),
+            ["code_challenge_method"] = "S256",
+            ["view"] = "password"
+        };
+        if (!string.IsNullOrWhiteSpace(nonce))
+        {
+            query["nonce"] = nonce;
+        }
+
+        if (!string.IsNullOrWhiteSpace(prompt))
+        {
+            query["prompt"] = prompt;
+        }
+
+        if (maxAge != null)
+        {
+            query["max_age"] = maxAge;
+        }
+
+        return QueryHelpers.AddQueryString("/sqlos/auth/authorize", query);
     }
 
     public async Task<JsonDocument> ExchangeAuthorizationCodeAsync(string code, string codeVerifier)
@@ -259,3 +313,14 @@ public sealed record HostedAuthorizeStart(
     string CodeVerifier,
     string AntiforgeryToken,
     string AntiforgeryCookie);
+
+public sealed record HostedLoginResult(
+    string Code,
+    string AuthPageCookie);
+
+public sealed record HostedSessionAuthorize(
+    HttpResponseMessage Response,
+    string CodeVerifier) : IDisposable
+{
+    public void Dispose() => Response.Dispose();
+}

@@ -102,6 +102,182 @@ public sealed class SqlOSAuthorizationPromptTests
     }
 
     [TestMethod]
+    public async Task CreateAuthorizationRequestAsync_ValidatesMaxAge()
+    {
+        await using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedBrowserClient("maxage-web", "MaxAge Web", "https://app.example.test/auth/callback");
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authorizationServer = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            authService,
+            crypto,
+            settings,
+            authPageSessionService,
+            options);
+        await admin.UpsertSeededClientsAsync();
+
+        SqlOSAuthorizeRequestInput Input(string? maxAge) => new(
+            "code",
+            "maxage-web",
+            "https://app.example.test/auth/callback",
+            "state-maxage",
+            "openid",
+            ValidCodeChallenge,
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null,
+            maxAge);
+
+        var garbage = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("not-a-number"));
+        await garbage.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("max_age must be a non-negative integer.");
+
+        var negative = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("-1"));
+        await negative.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("max_age must be a non-negative integer.");
+
+        // A present but whitespace-only value must not silently drop the
+        // requested freshness constraint by reading as absent.
+        var whitespace = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input(" "));
+        await whitespace.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("max_age must be a non-negative integer.");
+
+        var zero = await authorizationServer.CreateAuthorizationRequestAsync(Input("0"));
+        zero.Id.Should().NotBeNullOrWhiteSpace();
+
+        var absent = await authorizationServer.CreateAuthorizationRequestAsync(Input(null));
+        absent.Id.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task CreateAuthorizationRequestAsync_RejectsPromptNoneCombinedWithOtherValues()
+    {
+        await using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.SeedBrowserClient("prompt-web", "Prompt Web", "https://app.example.test/auth/callback");
+        var options = Options.Create(optionsValue);
+        var crypto = new SqlOSCryptoService(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var emailSender = new TestAuthEmailSender();
+        var settings = new SqlOSSettingsService(context, options, emailSender);
+        var authPageSessionService = new SqlOSAuthPageSessionService(context, crypto, settings);
+        var emailOtp = new SqlOSEmailOtpService(context, admin, crypto, settings, emailSender, options);
+        var authService = new SqlOSAuthService(context, options, admin, crypto, settings, emailOtp);
+        var authorizationServer = new SqlOSAuthorizationServerService(
+            context,
+            admin,
+            authService,
+            crypto,
+            settings,
+            authPageSessionService,
+            options);
+        await admin.UpsertSeededClientsAsync();
+
+        SqlOSAuthorizeRequestInput Input(string? prompt) => new(
+            "code",
+            "prompt-web",
+            "https://app.example.test/auth/callback",
+            "state-prompt",
+            "openid",
+            ValidCodeChallenge,
+            "S256",
+            null,
+            null,
+            prompt,
+            null,
+            "hosted",
+            null);
+
+        // OIDC Core 3.1.2.1: none MUST NOT be combined with any other value.
+        var combined = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("none login"));
+        await combined.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("prompt cannot combine none with other values.");
+
+        var consentCombined = async () => await authorizationServer.CreateAuthorizationRequestAsync(Input("consent none"));
+        await consentCombined.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("prompt cannot combine none with other values.");
+
+        var noneAlone = await authorizationServer.CreateAuthorizationRequestAsync(Input("none"));
+        noneAlone.Id.Should().NotBeNullOrWhiteSpace();
+
+        var interactive = await authorizationServer.CreateAuthorizationRequestAsync(Input("login consent"));
+        interactive.Id.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public void RequiresFreshAuthentication_MapsMaxAgeZeroAndForcedPrompts()
+    {
+        static SqlOS.AuthServer.Models.SqlOSAuthorizationRequest Request(long? maxAgeSeconds, string? prompt) => new()
+        {
+            Id = "req_fresh",
+            ClientApplicationId = "client",
+            RedirectUri = "https://app.example.test/auth/callback",
+            State = "state",
+            Scope = "openid",
+            CodeChallenge = ValidCodeChallenge,
+            CodeChallengeMethod = "S256",
+            MaxAgeSeconds = maxAgeSeconds,
+            Prompt = prompt,
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        };
+
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(0, null)).Should().BeTrue();
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(null, "login")).Should().BeTrue();
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(null, "select_account consent")).Should().BeTrue();
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(null, null)).Should().BeFalse();
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(60, "consent")).Should().BeFalse();
+        SqlOSAuthorizationServerService.RequiresFreshAuthentication(Request(null, "none")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void TryParseMaxAge_AcceptsOnlyUnsignedIntegers()
+    {
+        SqlOSAuthorizationServerService.TryParseMaxAge(null, out var absent).Should().BeTrue();
+        absent.Should().BeNull();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("", out var blank).Should().BeTrue();
+        blank.Should().BeNull();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("0", out var zero).Should().BeTrue();
+        zero.Should().Be(0);
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("86400", out var day).Should().BeTrue();
+        day.Should().Be(86400);
+
+        // long.MaxValue is accepted; the age comparison must use TotalSeconds so
+        // no TimeSpan is constructed (TimeSpan.FromSeconds would overflow).
+        SqlOSAuthorizationServerService.TryParseMaxAge("9223372036854775807", out var huge).Should().BeTrue();
+        huge.Should().Be(long.MaxValue);
+        var age = (DateTime.UtcNow - DateTime.UtcNow.AddYears(-1)).TotalSeconds >= huge!.Value;
+        age.Should().BeFalse();
+
+        SqlOSAuthorizationServerService.TryParseMaxAge("9223372036854775808", out _).Should().BeFalse();
+        // A present but whitespace-only value is malformed, not absent: treating
+        // it as absent would silently drop the requested freshness constraint.
+        SqlOSAuthorizationServerService.TryParseMaxAge(" ", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("\t", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("-1", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("+1", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge(" 5", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("5.5", out _).Should().BeFalse();
+        SqlOSAuthorizationServerService.TryParseMaxAge("abc", out _).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task BuildAuthorizationErrorRedirectAsync_CancelsRequest_AndPreservesState()
     {
         await using var context = CreateContext();

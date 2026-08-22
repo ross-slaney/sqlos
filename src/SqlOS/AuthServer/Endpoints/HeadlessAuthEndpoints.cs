@@ -61,7 +61,8 @@ public static partial class EndpointRouteBuilderExtensions
                         request.Prompt,
                         request.Nonce,
                         "headless",
-                        SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext)),
+                        SqlOSHeadlessAuthService.NormalizeUiContext(request.UiContext),
+                        request.MaxAge),
                     cancellationToken);
 
                 SqlOSEmailInvitationResult? invitation = null;
@@ -70,7 +71,10 @@ public static partial class EndpointRouteBuilderExtensions
                     invitation = await invitationService.BindInvitationToAuthorizationRequestAsync(request.InvitationToken, authorizationRequest, cancellationToken);
                 }
 
-                if (string.Equals(request.Prompt, "none", StringComparison.Ordinal))
+                // OIDC prompt is a space-delimited list; recognize "none" even when
+                // combined with other values. The raw string is persisted unchanged.
+                var promptValues = request.Prompt?.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+                if (promptValues.Contains("none", StringComparer.Ordinal))
                 {
                     return Results.Ok(new SqlOSHeadlessActionResult(
                         "redirect",

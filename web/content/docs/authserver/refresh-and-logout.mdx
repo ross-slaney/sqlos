@@ -34,6 +34,8 @@ In-process `RefreshAsync` already takes only the refresh token. The public OAuth
 
 Confidential clients are different. Their refresh exchange still requires `client_secret_basic`. A missing or wrong secret returns generic `invalid_client` and does not consume the refresh token. See [Clients](/docs/authserver/clients) and the [HTTP Protocol API](/docs/reference/api-reference#authorization-code-and-refresh-tokens).
 
+The refresh response's `scope` field echoes the scope originally granted when the session was established (RFC 6749 §5.1). Sessions created before SqlOS recorded granted scope omit the field instead of claiming an empty grant.
+
 ### Organization switching
 
 Switch organizations without re-authenticating by passing a different `organizationId`:

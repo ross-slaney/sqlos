@@ -77,8 +77,9 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
 | `login_hint` | No | Prefills or routes the hosted/headless login flow. |
-| `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `none` returns `login_required` when no reusable session exists. |
-| `nonce` | No | Stored with the authorization request as client flow context. |
+| `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `select_account` behaves like `login` (SqlOS has no account chooser yet). `none` returns `login_required` when no reusable session exists or the session is older than `max_age`. |
+| `nonce` | No | Stored with the authorization request and copied onto the authorization code at issuance so token issuance can bind it once OpenID Provider mode ships. |
+| `max_age` | No | Non-negative integer seconds. When the AuthPage session's original authentication is older than this, SqlOS re-challenges instead of silently reusing the session; `max_age=0` always forces a fresh sign-in. Combined with `prompt=none`, a stale session returns `login_required`. |
 
 SqlOS-specific presentation parameters include `view` (`invite`, `login`, `signup`, `password`, `forgot-password`, `email-otp`, `phone-otp`, or `phone-otp-signup`), `ui_context` for a headless UI, and `invitation_token`/`invitationToken` for an invitation-bound flow. Portable OAuth clients should rely only on discovery and standard parameters.
 
@@ -123,7 +124,7 @@ curl -X POST https://app.example.com/sqlos/auth/token \
   --data-urlencode 'refresh_token=...'
 ```
 
-Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, `expires_in`, and `scope`. `scope` is the granted set after the same silent intersection used by `/authorize`, device authorization, and `client_credentials`. An empty grant is returned as an empty string rather than `invalid_scope`. OAuth errors use an `error` code and may include `error_description`.
+Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, `expires_in`, and `scope`. `scope` is the granted set after the same silent intersection used by `/authorize`, device authorization, and `client_credentials`. An empty grant is returned as an empty string rather than `invalid_scope`. Refresh-token responses echo the scope originally granted to the session; for sessions created before SqlOS recorded granted scope, the `scope` field is omitted rather than misreported as empty. OAuth errors use an `error` code and may include `error_description`.
 
 ## Device authorization
 
@@ -296,6 +297,8 @@ curl -X POST https://app.example.com/sqlos/auth/headless/start \
     "uiContext": { "returnTo": "/settings" }
   }'
 ```
+
+`prompt`, `nonce`, `maxAge`, and `invitationToken` are also accepted as optional JSON fields with the same semantics as their `/authorize` query parameters. Headless `/start` never silently reuses an AuthPage session, so `maxAge` is not a re-challenge gate here; the value persists on the authorization request, and a positive `maxAge` is still enforced at code issuance when interstitials such as organization selection or MFA outlast it.
 
 Actions return `SqlOSHeadlessActionResult`. This abridged response shows the control-flow fields:
 

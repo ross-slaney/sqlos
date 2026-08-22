@@ -65,7 +65,8 @@ public sealed record SqlOSHeadlessStartRequest(
     string? Nonce,
     string? View,
     JsonObject? UiContext,
-    string? InvitationToken = null);
+    string? InvitationToken = null,
+    string? MaxAge = null);
 
 public sealed record SqlOSHeadlessIdentifyRequest(
     string RequestId,

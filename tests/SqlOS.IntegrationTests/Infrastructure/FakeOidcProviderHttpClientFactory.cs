@@ -259,6 +259,19 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
             {
                 claims = [.. claims, new Claim("acr", "urn:example:loa:2")];
             }
+            else if (string.Equals(mode, "stale-auth-time", StringComparison.Ordinal))
+            {
+                // Simulates a silently reused upstream session: the provider re-issues
+                // a fresh ID token whose auth_time is the original sign-in, 45 minutes ago.
+                claims =
+                [
+                    .. claims,
+                    new Claim(
+                        "auth_time",
+                        DateTimeOffset.UtcNow.AddMinutes(-45).ToUnixTimeSeconds().ToString(),
+                        ClaimValueTypes.Integer64)
+                ];
+            }
 
             var token = new JwtSecurityToken(
                 issuer: issuer,
