@@ -1,0 +1,122 @@
+---
+title: "Ship \"Sign in with X\" for your product"
+description: "Turn a SqlOS-hosted app into the identity provider for your other apps: one OIDC client seed, scope display names, an Auth.js relying party, consent, and federated sign-out."
+order: 5
+section: guides
+---
+
+Your SqlOS host is already a full OpenID Connect Provider — discovery, ID tokens, UserInfo, and a consent screen are on by default (see [OpenID Provider](/docs/authserver/openid-provider)). This guide turns that into a product feature: a **"Sign in with X"** button in another app, where X is *your* app. The relying party needs no SqlOS SDK — only the standard OIDC discovery document, which is the point.
+
+![The SqlOS consent screen showing App Y's requested scopes by display name](/docs/guides-sign-in-with-x-consent.png)
+
+Everything below is runnable: the [Sign in with X example](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) boots both apps under .NET Aspire with one command.
+
+## 1. Register the relying party as a client
+
+The identity-provider side is one `AddSqlOS` call. Seed a client for the app that will show the button:
+
+```csharp
+builder.AddSqlOS<AppDbContext>(
+    db => db.UseSqlServer(connectionString),
+    options =>
+    {
+        var auth = options.AuthServer;
+
+        auth.SeedClient(client =>
+        {
+            client.ClientId = "app-y";
+            client.Name = "App Y";
+            client.Audience = "app-y";
+            client.RedirectUris = ["https://app-y.example.com/api/auth/callback/sqlos"];
+            client.AllowedScopes = ["openid", "profile", "email"];
+            client.ClientType = "public_pkce";   // browser app: no secret
+            client.RequirePkce = true;
+            client.IsFirstParty = false;         // third party ⇒ consent screen
+        });
+    });
+```
+
+Two decisions matter here:
+
+- **`AllowedScopes` must include `openid`.** Every grant is the intersection of the client's allowlist and the request's `scope`; without `openid` granted, no ID token is minted and the sign-in silently degrades to plain OAuth. The dashboard and hosted pages warn about this configuration gap, but the allowlist is where you prevent it.
+- **`IsFirstParty = false` is a product choice, not a technicality.** First-party clients skip consent. If the relying party is another team's app, a partner, or anything the user would think of as "a different application", leave it third-party so users see what they're sharing.
+
+## 2. Name your scopes for the consent screen
+
+The consent screen renders each requested scope by its entry in the scope display-name catalog; uncataloged scopes fall back to the raw scope string. Seed the standard three:
+
+```csharp
+auth.SeedScopeDisplayName("openid", "Sign you in",
+    "Confirm your identity to the app with an ID token.");
+auth.SeedScopeDisplayName("profile", "See your name",
+    "Share your display name and username.");
+auth.SeedScopeDisplayName("email", "See your email address",
+    "Share your email address and whether it is verified.");
+```
+
+The catalog is also manageable from the dashboard and the [Admin API](/docs/reference/api-reference), and the same entries feed the hosted page, the [headless view model](/docs/guides/custom-login-ui), and the control plane. SqlOS deliberately ships no default wording — what a scope grants is your product's promise to make.
+
+## 3. Point the relying party at your discovery document
+
+Any OIDC library works from five standard values (issuer, client id, redirect URI, scopes, code + PKCE). With [Auth.js](https://authjs.dev) (next-auth), the entire integration is one provider block:
+
+```ts
+providers: [
+  {
+    id: "sqlos",
+    name: "X",
+    type: "oauth",
+    wellKnown: "https://x.example.com/sqlos/auth/.well-known/openid-configuration",
+    authorization: { params: { scope: "openid profile email" } },
+    // idToken: true keeps openid-client's full OIDC callback (ID-token
+    // signature/iss/aud validation); the custom userinfo request sources
+    // profile claims from UserInfo, where OIDC Core §5.4 releases them.
+    idToken: true,
+    userinfo: {
+      async request({ client, tokens }) {
+        return await client.userinfo(tokens);
+      }
+    },
+    checks: ["pkce", "state"],
+    client: { token_endpoint_auth_method: "none" },
+    profile(profile) {
+      return { id: profile.sub, name: profile.name, email: profile.email };
+    }
+  }
+]
+```
+
+The subtlety worth keeping: SqlOS follows OIDC Core §5.4 and releases `name`/`email` claims from **UserInfo**, not the ID token, so the provider block validates the ID token *and* reads the profile from UserInfo. The ASP.NET Core equivalent (`AddOpenIdConnect` with `GetClaimsFromUserInfoEndpoint = true`) is in the [OpenID Provider reference](/docs/authserver/openid-provider).
+
+## 4. What the user experiences
+
+![X's hosted sign-in page with the branding seeded in AddSqlOS](/docs/guides-sign-in-with-x-login.png)
+
+1. **First sign-in** — X's hosted page (sign-up or login), then the consent screen above. Approval issues the code; the relying party exchanges it and validates the ID token against X's JWKS.
+2. **Later sign-ins** — the remembered grant plus X's live session make it silent: no password, no consent, straight back to the app. Consent re-appears only when the requested scopes escalate beyond the remembered grant or the client's sensitive metadata changes (see [Consent](/docs/authserver/consent)).
+3. **Sign-out** — signing out of the relying party alone leaves X's session alive, so the next sign-in is silent. For a sign-out that really re-authenticates, end both layers — the relying party's session, then X's:
+
+```ts
+await signOut({ redirect: false });                          // end the RP session
+window.location.href =
+  `https://x.example.com/sqlos/auth/logout?returnTo=${encodeURIComponent(window.location.origin)}`;
+```
+
+Spec-shaped RP-initiated logout (`end_session_endpoint`) is tracked as issue #266; this pattern is the supported equivalent today.
+
+![App Y signed in with claims from the ID token and UserInfo](/docs/guides-sign-in-with-x-signed-in.png)
+
+## 5. Custom UI, verification, and operations
+
+- **Bring-your-own-UI**: every step of this flow — including the consent view — is available headlessly for a product-owned login UI; see [Build your own login and signup UI](/docs/guides/custom-login-ui).
+- **Protocol conformance**: the OpenID Foundation conformance suite (Config + Basic OP profiles, 36 modules) runs against a SqlOS deployment in this repo's CI on every change, and a real-browser end-to-end suite drives this exact federation flow. You inherit that verification by upgrading.
+- **Operations**: the SqlOS dashboard shows the relying party's client with its OIDC capability and discovery URL, and each user's **App grants** — revoke one and the next sign-in re-prompts for consent.
+
+## Run the example
+
+```bash
+cd examples/SqlOS.SignInWithX.AppY && npm install && cd -
+dotnet run --project examples/SqlOS.SignInWithX.AppHost
+```
+
+Open http://localhost:3020 and click **Sign in with X**. The [example README](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) walks through what to look at, including the discovery document and the dashboard.

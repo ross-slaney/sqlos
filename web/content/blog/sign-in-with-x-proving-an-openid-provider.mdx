@@ -1,0 +1,57 @@
+---
+title: "Sign in with X: Proving an OpenID Provider, Not Just Shipping One"
+description: "How SqlOS 3.27's OpenID Provider mode got three layers of proof — a real federation example, the OpenID Foundation conformance suite in CI, and a browser e2e test that immediately caught a bug nothing else could see."
+date: "2026-08-22"
+author: "Ross Slaney"
+tags: ["AuthServer", "OIDC", "OpenID Provider", "Testing", "Conformance", "SqlOS"]
+---
+
+SqlOS 3.27 makes every SqlOS host an OpenID Connect Provider by default: discovery, RS256 ID tokens, UserInfo, and a per-user consent screen on top of the existing OAuth code + PKCE flows. That's the feature. This post is about the part that took longer than the feature: proving it — and what the proof immediately found.
+
+## Claiming OIDC is easy; demonstrating it is a build step
+
+"We implement OpenID Connect" is a sentence anyone can type. We wanted the claim to be mechanical, so 3.27 landed with three layers of verification, each catching a class of bug the others can't:
+
+1. **A real federation example.** Two apps under one .NET Aspire host: App X is a SqlOS host whose entire identity-provider role is one `AddSqlOS` call, and App Y is a Next.js app with a **"Sign in with X"** button built on Auth.js. App Y has no SqlOS SDK and no private knowledge — only the standard discovery document. If the button works, interop with an ecosystem library works.
+
+2. **The OpenID Foundation conformance suite, in CI.** Not our tests of our code — the OIDF's own certification test harness, built from source and driven by their `run-test-plan.py`, running the Config OP and Basic OP certification plans against a live SqlOS deployment on every pull request and every push to main. Current state: 36 test modules, 1,741 individual condition checks, 0 failures. The handful of expected warnings and skips live in reviewed allowlist files with written justifications — and the harness fails the build if an allowlist entry stops being used, so the exceptions can't quietly rot.
+
+3. **A real browser, end to end.** Playwright-driven Chromium walks the actual user journeys against the actual running stack: first sign-up through the consent screen, federated sign-out followed by re-authentication with the grant remembered, and silent SSO. In CI, on every change.
+
+![The consent screen App Y's users see, with operator-defined scope display names](/docs/guides-sign-in-with-x-consent.png)
+
+## The bug only layer three could catch
+
+Within hours of the browser suite existing, it failed — on a screen that every scripted test in the repository said was fine.
+
+The hosted auth pages ship a strict Content Security Policy that includes `form-action 'self'`. What we hadn't internalized: Chromium and WebKit enforce that directive against the **redirect target of a form submission**, not just the form's action URL. Clicking **Allow access** on the consent screen POSTed to SqlOS (same origin — fine), and the server answered with a 302 straight to App Y on a different origin. The browser aborted the navigation without rendering anything. The user saw a spinner forever; the server, meanwhile, had recorded the consent and minted the code. A flow that was provably correct at the HTTP layer was unusable in a real browser.
+
+Every curl-based test passed, because curl doesn't enforce CSP. The unit suite passed — 977 tests. The integration suite passed. The conformance suite's HTTP checks passed. The only thing that failed was headless Chromium doing what a person does, and its failure screenshot was pixel-identical to the bug report.
+
+The fix keeps the CSP fully strict: hosted-form POSTs that end at a cross-origin relying party now respond with a same-origin interstitial that instantly meta-refreshes to the client — a fresh GET navigation that `form-action` doesn't govern, and the same pattern the large identity providers use. The browser suite went green, and that exact regression can never ship silently again.
+
+The lesson is the thesis of the whole release: **each verification layer sees what the others are blind to.** Protocol conformance can't see your CSP. Browser tests can't tell you your `at_hash` is computed correctly. You need both, and they both need to run on every change — verification that runs once is just documentation with a timestamp.
+
+## What this means if you use SqlOS
+
+Your app is already an OP — provider mode is a secure default, not an add-on. Making it a product feature is a client seed and three scope display names:
+
+```csharp
+auth.SeedClient(client =>
+{
+    client.ClientId = "app-y";
+    client.Name = "App Y";
+    client.RedirectUris = [$"{appYOrigin}/api/auth/callback/sqlos"];
+    client.AllowedScopes = ["openid", "profile", "email"];
+    client.ClientType = "public_pkce";
+    client.IsFirstParty = false;   // third party ⇒ users see the consent screen
+});
+
+auth.SeedScopeDisplayName("openid", "Sign you in", "Confirm your identity to the app with an ID token.");
+auth.SeedScopeDisplayName("profile", "See your name", "Share your display name and username.");
+auth.SeedScopeDisplayName("email", "See your email address", "Share your email address and whether it is verified.");
+```
+
+On the other side, any standard OIDC library — Auth.js, `AddOpenIdConnect`, a gateway — connects from the discovery URL alone. The full walkthrough, including the consent UX, remembered grants, federated sign-out, and the headless bring-your-own-UI path, is in the new [Sign in with X guide](/docs/guides/sign-in-with-x), and the runnable example lives in [`examples/SqlOS.SignInWithX.AppHost`](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) — one `dotnet run` starts the whole federation.
+
+And when you upgrade, you inherit the proof, not just the code: the conformance plans and the browser journeys gate every change to this repository.
