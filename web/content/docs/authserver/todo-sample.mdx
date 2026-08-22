@@ -32,7 +32,7 @@ Use the authenticated Aspire dashboard URL printed in the terminal (its configur
 
 | URL | Experience |
 | --- | --- |
-| `http://localhost:5090` | ASP.NET Core OAuth + PKCE, secure application cookie, `/api/me`, and revoking logout |
+| `http://localhost:5090` | ASP.NET Core OpenID Connect + PKCE, secure application cookie, `/api/me`, and revoking logout |
 | `http://localhost:5080` | Hosted-login Todo CRUD client and FGA-filtered data |
 | `http://localhost:5080/sqlos` | Auth, FGA, client, session, and audit administration |
 
@@ -52,7 +52,7 @@ The `example-aspnet` client is the shortest all-.NET proof:
 - audience: `http://localhost:5080/api/todos`;
 - scopes: `openid profile email offline_access todos.read todos.write`.
 
-ASP.NET Core's generic OAuth handler owns correlation state, the PKCE verifier, and the callback. SqlOS owns hosted credential collection, the code exchange, tokens, and persisted session. The application then stores its identity in an encrypted ASP.NET Core cookie and proves the access token with `GET /api/me`.
+ASP.NET Core's built-in OpenID Connect handler owns discovery, correlation state, the nonce, the PKCE verifier, ID token validation, and the callback. SqlOS owns hosted credential collection, the code exchange, tokens, UserInfo, and the persisted session. The application then stores its identity in an encrypted ASP.NET Core cookie and proves the access token with `GET /api/me`.
 
 See [Sign in an ASP.NET Core app](/docs/quickstarts/aspnet-core-login) for the annotated implementation and production tradeoffs.
 

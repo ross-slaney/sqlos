@@ -9,13 +9,23 @@ namespace SqlOS.IntegrationTests;
 [TestClass]
 public sealed class HostedAuthorizeTokenIntegrationTests
 {
-    private static readonly string[] ExpectedTokenResponseFields =
+    private static readonly string[] ExpectedOAuthTokenResponseFields =
     [
         "access_token",
         "refresh_token",
         "token_type",
         "expires_in",
         "scope"
+    ];
+
+    private static readonly string[] ExpectedOpenIdTokenResponseFields =
+    [
+        "access_token",
+        "refresh_token",
+        "token_type",
+        "expires_in",
+        "scope",
+        "id_token"
     ];
 
     [TestMethod]
@@ -52,6 +62,8 @@ public sealed class HostedAuthorizeTokenIntegrationTests
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid profile custom.read");
 
         tokens.RootElement.GetProperty("scope").GetString().Should().Be("");
+        tokens.RootElement.TryGetProperty("id_token", out _)
+            .Should().BeFalse("openid was requested but not granted, so no ID token is minted");
     }
 
     [TestMethod]
@@ -83,18 +95,18 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     }
 
     [TestMethod]
-    public async Task HostedAuthorizeToToken_CodeGrant_ContainsExactlyExpectedTopLevelFields()
+    public async Task HostedAuthorizeToToken_CodeGrant_OpenIdScope_ContainsExactlyExpectedTopLevelFields()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
         await fixture.SetClientAllowedScopesAsync("openid", "profile");
 
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid profile");
 
-        AssertExactTokenResponseFields(tokens);
+        AssertExactTokenResponseFields(tokens, expectIdToken: true);
     }
 
     [TestMethod]
-    public async Task HostedAuthorizeToToken_RefreshGrant_ContainsExactlyExpectedTopLevelFields()
+    public async Task HostedAuthorizeToToken_RefreshGrant_OpenIdSession_ContainsExactlyExpectedTopLevelFields()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
         await fixture.SetClientAllowedScopesAsync("openid", "profile");
@@ -102,8 +114,20 @@ public sealed class HostedAuthorizeTokenIntegrationTests
 
         using var refreshed = await fixture.RefreshAsync(issued.RootElement.GetProperty("refresh_token").GetString()!);
 
-        AssertExactTokenResponseFields(refreshed);
+        AssertExactTokenResponseFields(refreshed, expectIdToken: true);
         refreshed.RootElement.GetProperty("scope").GetString().Should().Be("openid profile");
+    }
+
+    [TestMethod]
+    public async Task HostedAuthorizeToToken_OAuthOnlyGrant_ContainsExactlyExpectedTopLevelFieldsWithoutIdToken()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
+        await fixture.SetClientAllowedScopesAsync("custom.read");
+
+        using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("custom.read");
+
+        AssertExactTokenResponseFields(tokens, expectIdToken: false);
+        tokens.RootElement.GetProperty("scope").GetString().Should().Be("custom.read");
     }
 
     [TestMethod]
@@ -143,11 +167,19 @@ public sealed class HostedAuthorizeTokenIntegrationTests
         tokens.RootElement.GetProperty("scope").GetString()!.Length.Should().Be(1000);
     }
 
-    private static void AssertExactTokenResponseFields(JsonDocument tokens)
+    private static void AssertExactTokenResponseFields(JsonDocument tokens, bool expectIdToken)
     {
         var names = tokens.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
-        names.Should().Equal(ExpectedTokenResponseFields);
-        names.Should().NotContain("id_token");
-        tokens.RootElement.TryGetProperty("id_token", out _).Should().BeFalse();
+        if (expectIdToken)
+        {
+            names.Should().Equal(ExpectedOpenIdTokenResponseFields);
+            tokens.RootElement.GetProperty("id_token").GetString().Should().NotBeNullOrWhiteSpace();
+        }
+        else
+        {
+            names.Should().Equal(ExpectedOAuthTokenResponseFields);
+            names.Should().NotContain("id_token");
+            tokens.RootElement.TryGetProperty("id_token", out _).Should().BeFalse();
+        }
     }
 }

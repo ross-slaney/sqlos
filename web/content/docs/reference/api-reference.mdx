@@ -51,11 +51,12 @@ The unified dashboard shell and the FGA component API/assets are middleware inst
 | Method | Route | Request | Response |
 | --- | --- | --- | --- |
 | `GET` | `/sqlos/auth/.well-known/oauth-authorization-server` | None | OAuth authorization-server metadata JSON |
+| `GET` | `/sqlos/auth/.well-known/openid-configuration` | None | OIDC discovery document; the same JSON as the RFC 8414 document. Served while [OpenID Provider mode](/docs/authserver/openid-provider) is enabled (the default) and `PublishDiscoveryDocument` is on; otherwise 404 |
 | `GET` | `/sqlos/auth/.well-known/jwks.json` | None | JWKS containing active and grace-window validation keys |
 
-Discovery is the authoritative source for endpoint URLs and advertised capabilities. Do not synthesize endpoint URLs in portable clients when discovery is available.
+Discovery is the authoritative source for endpoint URLs and advertised capabilities. Do not synthesize endpoint URLs in portable clients when discovery is available. Both documents always advertise `response_modes_supported` as `["query"]` — SqlOS returns every authorization response in the redirect query string, never the fragment. While OpenID Provider mode is enabled, both discovery documents also carry `userinfo_endpoint`, `subject_types_supported` (`["public"]`), `id_token_signing_alg_values_supported` (`["RS256"]`), and `claims_supported`.
 
-`scopes_supported` is the sorted union of scopes that at least one registered client can be granted. It omits reserved OpenID Connect names (`openid`, `profile`, `email`, `offline_access`) until SqlOS issues ID tokens, and it never includes internal `auth:*` credential-type strings. A client's allowlist may still contain those reserved names; requesting them is accepted by silent intersection. A deployment with no clients advertises an empty list. Operator-defined API scopes such as `x.read` appear when a client allowlist includes them.
+`scopes_supported` is the sorted union of the scopes that at least one registered client can be granted, merged — while [OpenID Provider mode](/docs/authserver/openid-provider) is enabled (the default) — with the reserved OpenID Connect names `openid`, `profile`, and `email`. With the provider enabled, those three names are therefore always advertised, even in a deployment with no clients; only with the provider disabled does a zero-client deployment advertise an empty list. `offline_access` remains unadvertised because SqlOS does not gate refresh-token issuance on it — refresh tokens are always issued for code-flow clients — though it stays allowlistable for gateway compatibility. The list never includes internal `auth:*` credential-type strings. Requested scopes outside a client's allowlist are accepted by silent intersection. Operator-defined API scopes such as `x.read` appear when a client allowlist includes them.
 
 ## Authorization code and refresh tokens
 
@@ -71,19 +72,19 @@ Discovery is the authoritative source for endpoint URLs and advertised capabilit
 | `response_type` | Yes | Must be `code`. |
 | `client_id` | Yes | A stored client ID or, when CIMD is enabled, an allowed HTTPS metadata-document URL. |
 | `redirect_uri` | Yes for a usable browser flow | Must match one of the resolved client's redirect URIs. |
-| `state` | Yes | Returned unchanged to the client; length must be 1–2048 characters. |
-| `scope` | No | Space-separated. SqlOS always intersects the request with the client's registered allow-list and keeps only the overlap (RFC 6749 §3.3). An empty allow-list grants nothing. Unknown requested scopes are dropped, not rejected. `openid` is never always-allowed and does not mint an `id_token` yet. Hosted and headless warn when an allowlisted `openid` is omitted from the grant; issue #118 will add ID token issuance. |
+| `state` | Recommended | Optional (OIDC Core alignment; PKCE binds the exchange). When present, length must be 1–2048 characters and it is returned unchanged to the client; when absent, redirects omit it. |
+| `scope` | No | Space-separated. SqlOS always intersects the request with the client's registered allow-list and keeps only the overlap (RFC 6749 §3.3). An empty allow-list grants nothing. Unknown requested scopes are dropped, not rejected. `openid` is never always-allowed; when the granted set includes it and [OpenID Provider mode](/docs/authserver/openid-provider) is enabled, the token response carries an `id_token`. Hosted and headless warn when an allowlisted `openid` is omitted from the grant. |
 | `code_challenge` | For clients that require PKCE | Verified during token exchange. |
 | `code_challenge_method` | With PKCE | Only `S256` is supported. |
 | `resource` | When using resource indicators | Bound to the authorization code and refresh-token family; it cannot be introduced or changed later. |
 | `login_hint` | No | Prefills or routes the hosted/headless login flow. |
 | `prompt` | No | `login` skips first-party silent reuse of the AuthPage cookie and shows the hosted/headless form. Send this on an explicit Sign in or Sign up. `select_account` behaves like `login` (SqlOS has no account chooser yet). `none` returns `login_required` when no reusable session exists or the session is older than `max_age`. |
-| `nonce` | No | Stored with the authorization request and copied onto the authorization code at issuance so token issuance can bind it once OpenID Provider mode ships. |
+| `nonce` | No | Stored with the authorization request and copied onto the authorization code at issuance; the `id_token` minted at code exchange echoes the same `nonce` claim. |
 | `max_age` | No | Non-negative integer seconds. When the AuthPage session's original authentication is older than this, SqlOS re-challenges instead of silently reusing the session; `max_age=0` always forces a fresh sign-in. Combined with `prompt=none`, a stale session returns `login_required`. |
 
 SqlOS-specific presentation parameters include `view` (`invite`, `login`, `signup`, `password`, `forgot-password`, `email-otp`, `phone-otp`, or `phone-otp-signup`), `ui_context` for a headless UI, and `invitation_token`/`invitationToken` for an invitation-bound flow. Portable OAuth clients should rely only on discovery and standard parameters.
 
-On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, `state`, and the granted `scope` when that grant is non-empty. The `scope` query parameter is an intentional SqlOS extension: RFC 6749 §4.1.2 permits extra parameters, and clients can read the actual grant before exchanging the code. Errors that occur after a valid authorization request can redirect to the client; malformed requests handled before that point render the hosted error page or redirect to the configured headless UI. Do not assume every `/authorize` failure has a JSON body.
+On success, SqlOS redirects to the exact registered `redirect_uri` with `code`, `state` when the request sent one, and the granted `scope` when that grant is non-empty. The `scope` query parameter is an intentional SqlOS extension: RFC 6749 §4.1.2 permits extra parameters, and clients can read the actual grant before exchanging the code. Errors that occur after a valid authorization request can redirect to the client; malformed requests handled before that point render the hosted error page or redirect to the configured headless UI. Do not assume every `/authorize` failure has a JSON body.
 
 ### Token request
 
@@ -125,6 +126,8 @@ curl -X POST https://app.example.com/sqlos/auth/token \
 ```
 
 Successful token responses use OAuth-style snake-case JSON fields such as `access_token`, `refresh_token`, `token_type`, `expires_in`, and `scope`. `scope` is the granted set after the same silent intersection used by `/authorize`, device authorization, and `client_credentials`. An empty grant is returned as an empty string rather than `invalid_scope`. Refresh-token responses echo the scope originally granted to the session; for sessions created before SqlOS recorded granted scope, the `scope` field is omitted rather than misreported as empty. OAuth errors use an `error` code and may include `error_description`.
+
+The response carries an `id_token` field only when [OpenID Provider mode](/docs/authserver/openid-provider) is enabled and the granted scope includes `openid`. That applies to the authorization-code, refresh (refresh-minted ID tokens carry no `nonce`), and device grants; `client_credentials` responses never include one. When no ID token is minted, the field is absent — never `null`.
 
 ## Device authorization
 
@@ -174,6 +177,38 @@ Honor `interval` while polling `/token`. Device errors use the OAuth-style `erro
 | `unauthorized_client` / `invalid_client` | The client is not eligible for public device authorization. |
 | `invalid_target` | The requested resource is not allowed for this client. Unknown scopes are dropped by silent intersection rather than rejected. |
 | `invalid_grant` | The device code is invalid, mismatched, or already consumed. |
+
+## UserInfo
+
+Mapped while [OpenID Provider mode](/docs/authserver/openid-provider) and its `EnableUserInfoEndpoint` option are enabled (both default to on).
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/sqlos/auth/userinfo` | Return OIDC claims for the presented access token |
+| `POST` | `/sqlos/auth/userinfo` | Same, accepting the token as a form field |
+
+Authenticate with a SqlOS access token: an `Authorization: Bearer` header on either method, or an `access_token` form field on `POST`. The session's granted scope must include `openid`.
+
+```bash
+curl https://app.example.com/sqlos/auth/userinfo \
+  -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiIs...'
+```
+
+A success response is a JSON claims document. `sub` is always present; the remaining claims follow the scope granted at authorization time:
+
+| Claim | Released when |
+| --- | --- |
+| `sub` | Always |
+| `name`, `preferred_username`, `updated_at` | Granted scope includes `profile` |
+| `email`, `email_verified` | Granted scope includes `email` |
+| `amr` | Always (authentication methods for the session) |
+| `org_id` | The session is organization-scoped |
+
+Validation is session-aware, not just JWT validation: session revocation, idle or absolute expiry, and user or organization deactivation stop claim release immediately. Failures use RFC 6750 Bearer challenges:
+
+- `401` with `WWW-Authenticate: Bearer error="invalid_token", error_description="The access token is invalid, expired, or its session is no longer active."` — bad, expired, or session-dead token;
+- `403` with `WWW-Authenticate: Bearer error="insufficient_scope", error_description="The access token was not granted the openid scope."` — a live token whose grant omits `openid`;
+- a bare `401` with `WWW-Authenticate: Bearer` when no token was presented at all.
 
 ## Hosted AuthPage
 

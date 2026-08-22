@@ -70,6 +70,7 @@ public static partial class EndpointRouteBuilderExtensions
         MapHeadlessAuthEndpoints(headless);
         MapBrowserSessionEndpoints(auth, authPrefix);
         MapTokenEndpoints(auth);
+        MapOpenIdProviderEndpoints(auth, authOptions);
         MapClientRegistrationEndpoints(auth, authOptions);
         MapPublicAccountEndpoints(auth, hostedForms, authPrefix);
         MapOidcEndpoints(auth);

@@ -1,8 +1,10 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.WebUtilities;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -81,6 +83,120 @@ public sealed class SqlOSControlPlaneParityTests
         enabled.EnsureSuccessStatusCode();
         new[] { await code.ProjectClientAsync("parity-client"), await service.ProjectClientAsync("parity-client"), await dashboard.ProjectClientAsync("parity-client") }
             .Should().OnlyContain(x => x.IsEnabled);
+    }
+
+    [TestMethod]
+    public async Task OidcCapableClient_CodeServiceAndDashboard_ProjectTheSameDiscoveryCapability()
+    {
+        await using var code = await ControlPlaneParityHarness.CreateAsync(options => options.SeedClient(seed =>
+        {
+            seed.ClientId = "parity-client";
+            seed.Name = "Parity Client";
+            seed.RedirectUris = [Callback];
+            seed.AllowedScopes = ["openid", "profile"];
+        }));
+        await using var service = await ControlPlaneParityHarness.CreateAsync();
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync();
+
+        await code.ReconcileStartupAsync();
+        await service.Admin.CreateClientAsync(ClientRequest());
+        await dashboard.PostDashboardAsync(DashboardAdminContracts.Clients, ClientPayload());
+
+        var codeProjection = await code.ProjectClientAsync("parity-client");
+        var serviceProjection = await service.ProjectClientAsync("parity-client");
+        var dashboardProjection = await dashboard.ProjectClientAsync("parity-client");
+        codeProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+        dashboardProjection.Configuration.Should().BeEquivalentTo(serviceProjection.Configuration);
+
+        var mintedIdTokens = new List<(string Plane, string Audience, string[] ClaimNames)>();
+        foreach (var (harness, plane) in new[] { (code, "code"), (service, "service"), (dashboard, "dashboard") })
+        {
+            var stored = await harness.Context.Set<SqlOSClientApplication>()
+                .AsNoTracking()
+                .SingleAsync(x => x.ClientId == "parity-client");
+            var detail = await harness.Client.GetFromJsonAsync<JsonElement>(
+                $"{DashboardAdminContracts.Clients}/{stored.Id}");
+            detail.GetProperty("oidcCapable").GetBoolean()
+                .Should().BeTrue("all three control planes share the same OIDC capability projection");
+            detail.GetProperty("oidcDiscoveryUrl").GetString()
+                .Should().Be("https://auth.parity.test/sqlos/auth/.well-known/openid-configuration");
+
+            using var authorize = await harness.Client.GetAsync(
+                "/sqlos/auth/authorize?client_id=parity-client&redirect_uri=https%3A%2F%2Fapp.parity.test%2Fcallback&response_type=code&scope=openid&state=parity&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256");
+            authorize.StatusCode.Should().NotBe(HttpStatusCode.BadRequest, "an OIDC-capable client must pass real authorization-request validation on every control plane");
+
+            mintedIdTokens.Add(await IssueCodeAndExchangeForIdTokenAsync(harness, plane));
+        }
+
+        // Redacted runtime comparison: audience and claim-name sets only — no
+        // generated identifiers, timestamps, or token values.
+        mintedIdTokens.Should().OnlyContain(
+            x => x.Audience == "parity-client",
+            "the ID token audience is the relying party's client_id on every control plane");
+        mintedIdTokens[1].ClaimNames.Should().Equal(
+            mintedIdTokens[0].ClaimNames,
+            "service-created and code-seeded clients must mint equivalent ID tokens");
+        mintedIdTokens[2].ClaimNames.Should().Equal(
+            mintedIdTokens[0].ClaimNames,
+            "dashboard-created and code-seeded clients must mint equivalent ID tokens");
+    }
+
+    /// <summary>
+    /// Drives the defining OIDC runtime boundary for one control plane: a real
+    /// authorization request, code issuance, and PKCE-bound exchange whose token
+    /// response must carry an ID token.
+    /// </summary>
+    private static async Task<(string Plane, string Audience, string[] ClaimNames)> IssueCodeAndExchangeForIdTokenAsync(
+        ControlPlaneParityHarness harness,
+        string plane)
+    {
+        await harness.Crypto.EnsureActiveSigningKeyAsync();
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+            "Parity User",
+            "parity-user@example.test",
+            "P@ssword123!"));
+        var codeVerifier = harness.Crypto.GenerateOpaqueToken();
+
+        var request = await harness.Authorization.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
+            "code",
+            "parity-client",
+            Callback,
+            "parity-runtime",
+            "openid profile email",
+            harness.Crypto.CreatePkceCodeChallenge(codeVerifier),
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null));
+
+        var redirect = await harness.Authorization.IssueAuthorizationRedirectAsync(
+            request,
+            user,
+            null,
+            "password",
+            new DefaultHttpContext());
+        var authorizationCode = QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString();
+        authorizationCode.Should().NotBeNullOrWhiteSpace(
+            $"the {plane} control plane must issue a real authorization code");
+
+        var exchanged = await harness.Authorization.ExchangeAuthorizationCodeAsync(
+            new SqlOSTokenRequest(
+                "authorization_code",
+                authorizationCode,
+                Callback,
+                "parity-client",
+                codeVerifier,
+                null,
+                null),
+            new DefaultHttpContext());
+
+        exchanged.Tokens.IdToken.Should().NotBeNullOrWhiteSpace(
+            $"the {plane} control plane's OIDC-capable client must mint an ID token at the runtime boundary");
+        var jwt = new JwtSecurityTokenHandler { MapInboundClaims = false }.ReadJwtToken(exchanged.Tokens.IdToken);
+        return (plane, jwt.Audiences.Single(), jwt.Payload.Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray());
     }
 
     [TestMethod]
@@ -505,7 +621,8 @@ public sealed class SqlOSControlPlaneParityTests
             "`${authApiBasePath}/clients/${encodeURIComponent(clientId)}/emergency-enable`",
             "clientId", "redirectUris", "allowedScopes", "confidential", "clientSecret",
             "emptyAllowlistWarning", "data-empty-allowlist-warning", "Empty allowlist grants nothing.",
-            "omittedOpenIdWarning", "data-omitted-openid-warning", "Allowlist omits openid.");
+            "omittedOpenIdWarning", "data-omitted-openid-warning", "Allowlist omits openid.",
+            "oidcCapable", "oidcDiscoveryUrl", "OIDC capable", "OIDC discovery");
         AssertDashboardContract(
             Section(javascript, "function buildOidcPayload(form)", "function renderStatsGroup"),
             "providerType", "clientSecret", "displayName");

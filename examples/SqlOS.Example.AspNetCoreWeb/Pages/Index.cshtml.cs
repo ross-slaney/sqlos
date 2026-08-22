@@ -188,7 +188,7 @@ public sealed class IndexModel(
     public async Task<IActionResult> OnPostLogoutAsync(CancellationToken cancellationToken)
     {
         var refreshToken = await HttpContext.GetTokenAsync("refresh_token");
-        var sessionId = User.FindFirst("session_id")?.Value;
+        var sessionId = User.FindFirst("sid")?.Value;
 
         try
         {

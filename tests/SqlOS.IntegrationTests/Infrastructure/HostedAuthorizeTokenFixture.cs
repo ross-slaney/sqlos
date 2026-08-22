@@ -101,10 +101,14 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         return await ExchangeAuthorizationCodeAsync(code, started.CodeVerifier);
     }
 
-    public async Task<HostedAuthorizeStart> StartAuthorizeAsync(string scope, string? state = null, string? nonce = null)
+    public async Task<HostedAuthorizeStart> StartAuthorizeAsync(
+        string scope,
+        string? state = null,
+        string? nonce = null,
+        bool omitState = false)
     {
         var codeVerifier = CreateCodeVerifier();
-        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt: null, maxAge: null, codeVerifier);
+        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt: null, maxAge: null, codeVerifier, omitState);
 
         using var authorize = await Client.GetAsync(authorizeUrl);
         var html = await authorize.Content.ReadAsStringAsync();
@@ -159,7 +163,10 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             throw new InvalidOperationException($"Authorization redirect omitted code: {location}");
         }
 
-        return new HostedLoginResult(code, ExtractCookie(response, "sqlos_auth_page="));
+        return new HostedLoginResult(
+            code,
+            ExtractCookie(response, "sqlos_auth_page="),
+            location.IsAbsoluteUri ? location.AbsoluteUri : location.OriginalString);
     }
 
     /// <summary>
@@ -188,19 +195,23 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         string? nonce,
         string? prompt,
         string? maxAge,
-        string codeVerifier)
+        string codeVerifier,
+        bool omitState = false)
     {
         var query = new Dictionary<string, string?>
         {
             ["response_type"] = "code",
             ["client_id"] = ClientId,
             ["redirect_uri"] = RedirectUri,
-            ["state"] = state ?? $"state-{Guid.NewGuid():N}",
             ["scope"] = scope,
             ["code_challenge"] = CreateCodeChallenge(codeVerifier),
             ["code_challenge_method"] = "S256",
             ["view"] = "password"
         };
+        if (!omitState)
+        {
+            query["state"] = state ?? $"state-{Guid.NewGuid():N}";
+        }
         if (!string.IsNullOrWhiteSpace(nonce))
         {
             query["nonce"] = nonce;
@@ -316,7 +327,8 @@ public sealed record HostedAuthorizeStart(
 
 public sealed record HostedLoginResult(
     string Code,
-    string AuthPageCookie);
+    string AuthPageCookie,
+    string Location);
 
 public sealed record HostedSessionAuthorize(
     HttpResponseMessage Response,

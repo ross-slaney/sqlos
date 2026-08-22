@@ -100,6 +100,50 @@ public sealed class SqlOSAuthorizationServerMetadataTests
     }
 
     [TestMethod]
+    public async Task GetMetadataAsync_OmitsOpenIdProviderFields_WhenProviderDisabled()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.ConfigureOpenIdProvider(provider => provider.Enabled = false);
+
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        var json = JsonSerializer.Serialize(metadata);
+
+        json.Should().NotContain("userinfo_endpoint");
+        json.Should().NotContain("subject_types_supported");
+        json.Should().NotContain("id_token_signing_alg_values_supported");
+        json.Should().NotContain("claims_supported");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_OmitsOnlyUserInfoEndpoint_WhenUserInfoDisabled()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.ConfigureOpenIdProvider(provider => provider.EnableUserInfoEndpoint = false);
+
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        var json = JsonSerializer.Serialize(metadata);
+
+        json.Should().NotContain("userinfo_endpoint");
+        json.Should().Contain("\"subject_types_supported\":[\"public\"]");
+        json.Should().Contain("\"id_token_signing_alg_values_supported\":[\"RS256\"]");
+        json.Should().Contain("claims_supported");
+    }
+
+    [TestMethod]
     public async Task GetMetadataAsync_AdvertisesClientCredentialsOnlyForConfiguredConfidentialClient()
     {
         using var context = CreateContext();
@@ -131,7 +175,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
     }
 
     [TestMethod]
-    public async Task GetMetadataAsync_ZeroClients_AdvertisesStableEmptyScopes()
+    public async Task GetMetadataAsync_ZeroClients_AdvertisesStableOpenIdProviderDocument()
     {
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions
@@ -144,16 +188,39 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Should().BeEmpty();
 
         var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        metadata.ScopesSupported.Should().Equal("email", "openid", "profile");
+        metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
+
+        var json = JsonSerializer.Serialize(metadata);
+        json.Should().Be(
+            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":["email","openid","profile"],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true,"userinfo_endpoint":"https://app.example.com/sqlos/auth/userinfo","subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],"claims_supported":["sub","name","preferred_username","email","email_verified","auth_time","amr","org_id"]}""");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_ZeroClients_OpenIdProviderDisabled_IsByteIdenticalToOAuthOnlyDocument()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.ConfigureOpenIdProvider(provider => provider.Enabled = false);
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Should().BeEmpty();
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
         metadata.ScopesSupported.Should().BeEmpty();
         metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
 
         var json = JsonSerializer.Serialize(metadata);
         json.Should().Be(
-            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":[],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true}""");
+            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":[],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true}""");
     }
 
     [TestMethod]
-    public async Task GetMetadataAsync_DefaultSingleApplication_MakesNoOidcClaimAndKeepsSeededAllowlist()
+    public async Task GetMetadataAsync_DefaultSingleApplication_AdvertisesOidcByDefault_AndKeepsSeededAllowlist()
     {
         using var context = CreateContext();
         var optionsValue = new SqlOSAuthServerOptions
@@ -162,6 +229,35 @@ public sealed class SqlOSAuthorizationServerMetadataTests
             Issuer = "https://app.example.com/sqlos/auth"
         };
         optionsValue.UseSingleApplication("Acme", app => app.Origin = "https://app.example.com");
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var client = await context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().SingleAsync();
+        JsonSerializer.Deserialize<List<string>>(client.AllowedScopesJson)
+            .Should().BeEquivalentTo("openid", "profile", "email", "offline_access");
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        metadata.ScopesSupported.Should().Equal("email", "openid", "profile");
+        metadata.ScopesSupported.Should().NotContain("offline_access", "refresh issuance is not gated on offline_access, so advertising it would be dishonest");
+        metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
+
+        var json = JsonSerializer.Serialize(metadata);
+        json.Should().Contain("\"openid\"");
+        json.Should().Contain("\"id_token_signing_alg_values_supported\":[\"RS256\"]");
+        json.Should().NotContain("offline_access");
+        json.Should().NotContain("\"auth:");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_DefaultSingleApplication_OpenIdProviderDisabled_MakesNoOidcClaim()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        optionsValue.UseSingleApplication("Acme", app => app.Origin = "https://app.example.com");
+        optionsValue.ConfigureOpenIdProvider(provider => provider.Enabled = false);
         var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
 
         var client = await context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().SingleAsync();
@@ -196,8 +292,13 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
 
         var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
-        metadata.ScopesSupported.Should().Equal("x.read", "y.write");
-        metadata.ScopesSupported.Should().NotIntersectWith(["openid", "profile", "email", "offline_access"]);
+        metadata.ScopesSupported.Should().Equal(
+            "email",
+            "openid",
+            "profile",
+            "x.read",
+            "y.write");
+        metadata.ScopesSupported.Should().NotContain("offline_access");
         metadata.ScopesSupported.Should().NotContain(scope => scope.StartsWith("auth:", StringComparison.Ordinal));
     }
 
@@ -212,7 +313,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         };
         var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
         var before = await service.GetMetadataAsync(new DefaultHttpContext());
-        before.ScopesSupported.Should().BeEmpty();
+        before.ScopesSupported.Should().Equal("email", "openid", "profile");
 
         context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Add(new()
         {
@@ -228,7 +329,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
         await context.SaveChangesAsync();
 
         var after = await service.GetMetadataAsync(new DefaultHttpContext());
-        after.ScopesSupported.Should().Equal("x.read");
+        after.ScopesSupported.Should().Equal("email", "openid", "profile", "x.read");
     }
 
     private static Task<SqlOSAuthorizationServerService> CreateAuthorizationServerServiceAsync(

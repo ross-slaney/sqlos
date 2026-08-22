@@ -6,8 +6,9 @@ public sealed record SqlOSOpenIdScopeWarning(string Code, string Message);
 
 /// <summary>
 /// Computed operator and request-time signals when <c>openid</c> is missing.
-/// SqlOS does not issue an <c>id_token</c> yet; these warnings prepare hosts for
-/// OpenID Provider mode and record that <c>openid</c> is never always-allowed.
+/// SqlOS issues an <c>id_token</c> only when OpenID Provider mode is enabled and
+/// <c>openid</c> is granted; these warnings explain why a client or sign-in will
+/// not receive one and record that <c>openid</c> is never always-allowed.
 /// Shared by admin, dashboard, hosted AuthPage, and headless so the rule is not
 /// reimplemented in JavaScript.
 /// </summary>
@@ -20,10 +21,10 @@ public static class SqlOSOpenIdScopeWarnings
     public const string OmittedGrantedOpenIdCode = "omitted_granted_openid";
 
     public const string MissingAllowlistedOpenIdMessage =
-        "This allowlist omits openid. SqlOS does not issue an id_token yet. When OpenID Provider mode ships, this client cannot receive one until openid is allowlisted. openid is never granted unless it is both requested and allowlisted.";
+        "This allowlist omits openid. This client cannot receive an ID token until openid is on its allowlist. openid is never granted unless it is both requested and allowlisted.";
 
     public const string OmittedGrantedOpenIdMessage =
-        "openid was not granted. When OpenID Provider mode ships, this sign-in will not receive an ID token. Send openid on /authorize and keep it on the client allowlist. Omitting scope remains valid OAuth.";
+        "openid was not granted, so this sign-in will not receive an ID token. It was not requested on /authorize or is not on the client allowlist. Send openid and keep it allowlisted. Omitting scope remains valid OAuth.";
 
     public static bool ContainsOpenId(IEnumerable<string> scopes)
         => scopes.Contains(OpenIdScope, StringComparer.Ordinal);
@@ -95,7 +96,12 @@ public static class SqlOSOpenIdScopeWarnings
         return $"{existingInfo} {warning.Message}";
     }
 
-    private static bool IsUserFacingClient(
+    /// <summary>
+    /// Whether the client can complete an interactive, user-facing flow. Shared by
+    /// the missing-allowlist warning and the admin <c>oidcCapable</c> projections so
+    /// machine-only (client-credentials) clients are never presented as OIDC-capable.
+    /// </summary>
+    public static bool IsUserFacingClient(
         bool isFirstParty,
         bool allowNativeHeadlessAuth,
         bool allowDeviceAuthorization,

@@ -1,8 +1,5 @@
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OAuth;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,101 +27,58 @@ builder.Services
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
     })
-    .AddOAuth("SqlOS", options =>
+    .AddOpenIdConnect("SqlOS", options =>
     {
+        // SqlOS is an OpenID Connect Provider. The handler reads
+        // {Authority}/.well-known/openid-configuration to discover the
+        // authorization, token, JWKS, and UserInfo endpoints.
+        options.Authority = $"{sqlosOrigin}/sqlos/auth";
         options.ClientId = clientId;
-        // ASP.NET Core's generic OAuth handler requires a non-empty value even
-        // for public clients. SqlOS authenticates this client with PKCE and
-        // intentionally ignores this placeholder; it is not a client secret.
-        options.ClientSecret = "public-pkce-client";
-        options.CallbackPath = "/signin-sqlos";
-        options.AuthorizationEndpoint = $"{sqlosOrigin}/sqlos/auth/authorize";
-        options.TokenEndpoint = $"{sqlosOrigin}/sqlos/auth/token";
+
+        // example-aspnet is a public PKCE client (token_endpoint_auth_method
+        // "none"): there is no client secret, and the code exchange is bound
+        // by the PKCE verifier instead.
+        options.ResponseType = "code";
         options.UsePkce = true;
+
+        // SqlOS returns the authorization code as a standard query redirect.
+        options.ResponseMode = "query";
+
+        // The seeded client registers this exact redirect URI.
+        options.CallbackPath = "/signin-sqlos";
+
         options.SaveTokens = true;
+
+        // The ID token carries sub/sid/amr/org_id plus profile and email
+        // claims; UserInfo supplements them (name, preferred_username,
+        // updated_at, email_verified).
+        options.GetClaimsFromUserInfoEndpoint = true;
+
+        // Keep the raw OIDC claim names (sub, email, name, sid) instead of
+        // letting the JWT handler rename them to legacy SOAP ClaimTypes URIs.
+        // Everything in this example reads the raw names.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters.NameClaimType = "name";
+
+        // Localhost runs over HTTP. Production deployments must use HTTPS
+        // and leave this at its secure default of true.
+        options.RequireHttpsMetadata = false;
 
         options.Scope.Clear();
         options.Scope.Add("openid");
         options.Scope.Add("profile");
         options.Scope.Add("email");
         options.Scope.Add("offline_access");
-        options.Scope.Add("todos.read");
-        options.Scope.Add("todos.write");
 
         // Localhost runs over HTTP. Production deployments should use HTTPS and
-        // CookieSecurePolicy.Always for both the correlation and session cookies.
+        // CookieSecurePolicy.Always for the correlation, nonce, and session cookies.
         options.CorrelationCookie.SameSite = SameSiteMode.Lax;
         options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.NonceCookie.SameSite = SameSiteMode.Lax;
+        options.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 
-        options.Events = new OAuthEvents
+        options.Events = new OpenIdConnectEvents
         {
-            OnCreatingTicket = async context =>
-            {
-                if (string.IsNullOrWhiteSpace(context.AccessToken))
-                {
-                    throw new InvalidOperationException("SqlOS did not return an access token.");
-                }
-
-                using var request = new HttpRequestMessage(
-                    HttpMethod.Get,
-                    $"{sqlosOrigin}/api/me");
-                request.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", context.AccessToken);
-
-                using var response = await context.Backchannel.SendAsync(
-                    request,
-                    context.HttpContext.RequestAborted);
-                response.EnsureSuccessStatusCode();
-
-                await using var responseStream =
-                    await response.Content.ReadAsStreamAsync(context.HttpContext.RequestAborted);
-                using var session = await JsonDocument.ParseAsync(
-                    responseStream,
-                    cancellationToken: context.HttpContext.RequestAborted);
-
-                var identity = context.Identity
-                    ?? throw new InvalidOperationException("The OAuth ticket has no identity.");
-                var root = session.RootElement;
-
-                AddClaim(identity, ClaimTypes.NameIdentifier, root, "subjectId");
-                AddClaim(identity, "org_id", root, "organizationId");
-                AddClaim(identity, "client_id", root, "clientId");
-
-                if (root.TryGetProperty("claims", out var claims)
-                    && claims.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var claim in claims.EnumerateArray())
-                    {
-                        if (!claim.TryGetProperty("type", out var typeProperty)
-                            || !claim.TryGetProperty("value", out var valueProperty))
-                        {
-                            continue;
-                        }
-
-                        var type = typeProperty.GetString();
-                        var value = valueProperty.GetString();
-                        if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(value))
-                        {
-                            continue;
-                        }
-
-                        if (!identity.HasClaim(type, value))
-                        {
-                            identity.AddClaim(new Claim(type, value));
-                        }
-
-                        if (type == "email")
-                        {
-                            AddMappedClaim(identity, ClaimTypes.Email, value);
-                            AddMappedClaim(identity, ClaimTypes.Name, value);
-                        }
-                        else if (type == "sid")
-                        {
-                            AddMappedClaim(identity, "session_id", value);
-                        }
-                    }
-                }
-            },
             OnRemoteFailure = context =>
             {
                 var logger = context.HttpContext.RequestServices
@@ -155,30 +109,3 @@ app.UseAuthorization();
 app.MapRazorPages();
 
 app.Run();
-
-static void AddClaim(
-    ClaimsIdentity identity,
-    string claimType,
-    JsonElement source,
-    string propertyName)
-{
-    if (!source.TryGetProperty(propertyName, out var property)
-        || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-    {
-        return;
-    }
-
-    var value = property.GetString();
-    if (!string.IsNullOrWhiteSpace(value) && !identity.HasClaim(claimType, value))
-    {
-        identity.AddClaim(new Claim(claimType, value));
-    }
-}
-
-static void AddMappedClaim(ClaimsIdentity identity, string claimType, string value)
-{
-    if (!identity.HasClaim(claimType, value))
-    {
-        identity.AddClaim(new Claim(claimType, value));
-    }
-}

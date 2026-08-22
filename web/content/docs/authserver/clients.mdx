@@ -50,11 +50,11 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`SeedOwnedWebApp` and `SeedBrowserClient` register redirect URIs only. They leave `AllowedScopes` empty. Set the allowlist explicitly with `SeedClient` (or the dashboard / Admin API) when the app will send a `scope` query on `/authorize`. Headless and hosted first-party apps should do both: put `openid profile email` on the client, and send the same `scope` on the authorize request. User access tokens do not carry a `scope` claim today; the pair still matters so a later OpenID Provider mode can mint an ID token instead of silently omitting it.
+`SeedOwnedWebApp` and `SeedBrowserClient` register redirect URIs only. They leave `AllowedScopes` empty. Set the allowlist explicitly with `SeedClient` (or the dashboard / Admin API) when the app will send a `scope` query on `/authorize`. Headless and hosted first-party apps should do both: put `openid profile email` on the client, and send the same `scope` on the authorize request. User access tokens do not carry a `scope` claim today; the pair still matters because [OpenID Provider mode](/docs/authserver/openid-provider) mints an ID token only when `openid` ends up in the granted set — allowlisted and requested — and silently omits it otherwise.
 
 The dashboard and Admin API surface a computed `emptyAllowlistWarning` when a user-facing client has an empty allowlist. Code-owned records show the same warning and must be fixed in the seed, not by overwriting ownership from the dashboard.
 
-`openid` is never always-allowed. SqlOS does not issue an `id_token` yet (that remains issue #118). The dashboard and Admin API surface a computed `omittedOpenIdWarning` when a user-facing client allowlist omits `openid`, including empty allowlists. Code-owned records show the same warning and must be fixed in the seed. Omitting `openid` on `/authorize` is valid OAuth and does not fail the request; hosted and headless pages set a non-blocking info signal when the allowlist includes `openid` but the grant does not.
+`openid` is never always-allowed. With [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), a client receives an `id_token` only when `openid` is both on its allowlist and requested on the grant. The dashboard and Admin API surface a computed `omittedOpenIdWarning` when a user-facing client allowlist omits `openid`, including empty allowlists. Code-owned records show the same warning and must be fixed in the seed. Omitting `openid` on `/authorize` is valid OAuth and does not fail the request; hosted and headless pages set a non-blocking info signal when the allowlist includes `openid` but the grant does not.
 
 ### Admin API
 

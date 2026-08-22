@@ -127,8 +127,8 @@ const requiredSourceContracts = [
   ],
   [
     "examples/SqlOS.Example.AspNetCoreWeb/Program.cs",
-    /\.AddOAuth\("SqlOS", options =>[\s\S]*options\.UsePkce = true;[\s\S]*options\.SaveTokens = true;/,
-    "ASP.NET Core OAuth + PKCE example",
+    /\.AddOpenIdConnect\("SqlOS", options =>[\s\S]*options\.UsePkce = true;[\s\S]*options\.SaveTokens = true;/,
+    "ASP.NET Core OpenID Connect + PKCE example",
   ],
   [
     "examples/SqlOS.Todo.Api/Program.cs",
@@ -147,7 +147,7 @@ const requiredSourceContracts = [
   ],
   [
     "src/SqlOS/AuthServer/Services/SqlOSAuthorizationServerService.cs",
-    /input\.State\.Length > 2048/,
+    /input\.State is \{ Length: > 2048 \}/,
     "OAuth state length validation",
   ],
   [

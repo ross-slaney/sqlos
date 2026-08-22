@@ -469,6 +469,7 @@ public static class ExampleAuthEndpoints
             },
             accessToken = tokens.AccessToken,
             refreshToken = tokens.RefreshToken,
+            idToken = tokens.IdToken,
             sessionId = tokens.SessionId,
             clientId = tokens.ClientId,
             organizationId = tokens.OrganizationId,

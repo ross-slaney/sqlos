@@ -1,0 +1,130 @@
+---
+title: "OpenID Provider"
+description: "SqlOS as an OpenID Connect Provider: ID tokens, discovery, and UserInfo for downstream relying parties."
+order: 21.5
+section: authserver
+---
+
+SqlOS is an OpenID Connect Provider (OP) for your applications: on top of OAuth code + PKCE it issues ID tokens, publishes OIDC discovery, and serves UserInfo, so any standard OIDC relying party can sign users in against SqlOS. Provider mode is on by default because protocol conformance is a secure default, not an optional feature.
+
+Keep the two OIDC roles distinct. This page covers SqlOS as the *provider* for downstream apps. When SqlOS signs users in through Google, Microsoft, Apple, or a custom connection, it is the *relying party* of that upstream provider — that role lives in [OIDC Social Login](/docs/authserver/oidc-auth), and "OIDC connection" in these docs always means the upstream role.
+
+## Configuration
+
+```csharp
+builder.AddSqlOS<AppDbContext>(options =>
+{
+    options.AuthServer.ConfigureOpenIdProvider(op =>
+    {
+        op.Enabled = true;                             // default
+        op.PublishDiscoveryDocument = true;            // default
+        op.EnableUserInfoEndpoint = true;              // default
+        op.IdTokenLifetime = TimeSpan.FromMinutes(5);  // default
+    });
+});
+```
+
+Disabling `Enabled` restores pure-OAuth behavior exactly: no ID tokens, no `/.well-known/openid-configuration`, no `/userinfo` route, and authorization-server metadata byte-identical to an OAuth-only deployment's. The ID token lifetime is deliberately short — an ID token proves the login ceremony to the relying party; it is not an API credential.
+
+## Discovery
+
+```
+GET /sqlos/auth/.well-known/openid-configuration
+```
+
+This serves the same JSON as the RFC 8414 `/.well-known/oauth-authorization-server` document. While provider mode is enabled, both documents add `userinfo_endpoint`, `subject_types_supported` (`["public"]`), `id_token_signing_alg_values_supported` (`["RS256"]`), and `claims_supported`, and `scopes_supported` includes the grantable reserved names `openid`, `profile`, and `email`.
+
+`offline_access` is deliberately not advertised: SqlOS does not gate refresh-token issuance on it — code-flow clients always receive refresh tokens — but it remains allowlistable so gateways that insist on requesting it keep working.
+
+## When an ID token is issued
+
+`openid` is never always-allowed. A client receives an `id_token` from `POST /token` only when `openid` is in the *granted* scope — meaning it was both on the client's allowlist and requested, because every grant is the silent intersection of the two (see [Clients](/docs/authserver/clients) and [Scopes and Permissions](/docs/authserver/scopes-and-permissions)). That holds for the authorization-code, refresh, and device grants; `client_credentials` tokens never get one. Refresh-minted ID tokens carry no `nonce`. When no ID token is minted the field is absent from the response, never `null`.
+
+The dashboard and Admin API warn when a user-facing client allowlist omits `openid`, and the hosted and headless pages set a non-blocking info signal when the allowlist includes `openid` but the grant does not — both exist so a missing ID token is a visible configuration gap rather than a silent one.
+
+ID tokens are RS256 JWTs signed by the same rotating keys as access tokens and verifiable against `/sqlos/auth/.well-known/jwks.json`. Their header `typ` is `JWT`, while SqlOS access-token validation requires `typ` `at+jwt`, so an ID token can never be replayed against a SqlOS-protected API.
+
+### ID token claims
+
+| Claim | When present |
+| --- | --- |
+| `iss`, `sub`, `aud`, `iat`, `exp` | Always; `aud` is the client's `client_id` |
+| `auth_time` | Always — when the session's original authentication happened |
+| `at_hash` | Always — binds the ID token to the access token issued with it |
+| `sid` | Always — the SqlOS session ID |
+| `amr` | Always — authentication methods for the session |
+| `nonce` | The authorize request sent one (never on refresh-minted tokens) |
+| `org_id` | The session is organization-scoped |
+| `name`, `preferred_username` | Granted scope includes `profile` |
+| `email`, `email_verified` | Granted scope includes `email` |
+
+## UserInfo
+
+```
+GET  /sqlos/auth/userinfo
+POST /sqlos/auth/userinfo
+```
+
+Authenticate with a SqlOS access token in the `Authorization: Bearer` header, or as an `access_token` form field on `POST`. The session's granted scope must include `openid`; otherwise the response is `403 insufficient_scope`.
+
+| Claim | Released when |
+| --- | --- |
+| `sub` | Always |
+| `name`, `preferred_username`, `updated_at` | Granted scope includes `profile` |
+| `email`, `email_verified` | Granted scope includes `email` |
+| `amr` | Always |
+| `org_id` | The session is organization-scoped |
+
+UserInfo validation is session-aware like the rest of SqlOS [token validation](/docs/authserver/token-validation): session revocation, idle or absolute expiry, and user or organization deactivation stop claim release immediately with `401 invalid_token`, before the JWT would have expired. Failures carry RFC 6750 Bearer challenges in `WWW-Authenticate`.
+
+## Connect a downstream relying party
+
+Any OIDC-capable framework or gateway needs five values, all standard:
+
+1. **Discovery / issuer** — `{PublicOrigin}{BasePath}`, for example `https://auth.example.com/sqlos/auth`. The RP appends `/.well-known/openid-configuration` itself.
+2. **`client_id`** — a registered SqlOS [client](/docs/authserver/clients) whose allowlist includes the scopes below.
+3. **Redirect URI** — registered exactly on that client.
+4. **Scopes** — `openid profile email`; add `offline_access` only for gateway compatibility.
+5. **Flow** — authorization code + PKCE with a `nonce`. SqlOS supports `token_endpoint_auth_method` `none` (public + PKCE) and `client_secret_basic` (confidential).
+
+For ASP.NET Core:
+
+```csharp
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+    })
+    .AddCookie()
+    .AddOpenIdConnect(oidc =>
+    {
+        oidc.Authority = "https://auth.example.com/sqlos/auth";
+        oidc.ClientId = "my-web-app";
+        oidc.ResponseType = "code";
+        oidc.UsePkce = true; // public client: no ClientSecret, PKCE binds the exchange
+        oidc.Scope.Clear();
+        oidc.Scope.Add("openid");
+        oidc.Scope.Add("profile");
+        oidc.Scope.Add("email");
+        oidc.GetClaimsFromUserInfoEndpoint = true;
+        oidc.SaveTokens = true;
+        oidc.TokenValidationParameters.NameClaimType = "name";
+    });
+```
+
+The handler reads discovery, sends `nonce` and PKCE, validates the ID token signature against the SqlOS JWKS, and merges UserInfo claims. The runnable version of this setup is the [ASP.NET Core example](/docs/quickstarts/aspnet-core-login).
+
+## Not here yet
+
+- RP-initiated logout: there is no `end_session_endpoint`; the discovery document reserves the field but does not emit it (issue #266). Use `GET /sqlos/auth/logout` for browser sign-out.
+- Consent screen (issue #265).
+- Per-application claim policies (issue #121).
+- Hybrid and implicit flows — not planned; SqlOS issues tokens through code + PKCE only.
+
+## See also
+
+- [Clients](/docs/authserver/clients) — allowlists, the intersection rule, and the `openid` warnings
+- [Scopes and Permissions](/docs/authserver/scopes-and-permissions) — scope gates claim release, never API authorization
+- [Token Validation](/docs/authserver/token-validation) — validating access tokens in your APIs
+- [HTTP API Reference](/docs/reference/api-reference) — exact routes, parameters, and error shapes

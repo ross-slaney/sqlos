@@ -31,7 +31,10 @@ public class SqlOSAuthEndpointRouteInventoryTests
         var expected = new[]
         {
             "GET /sqlos/auth/.well-known/oauth-authorization-server",
+            "GET /sqlos/auth/.well-known/openid-configuration",
             "GET /sqlos/auth/.well-known/jwks.json",
+            "GET /sqlos/auth/userinfo",
+            "POST /sqlos/auth/userinfo",
             "GET /sqlos/auth/authorize",
             "GET /sqlos/auth/continue",
             "POST /sqlos/auth/token",

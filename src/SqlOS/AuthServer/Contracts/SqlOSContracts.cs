@@ -47,7 +47,8 @@ public sealed record SqlOSTokenResponse(
     string ClientId,
     string? OrganizationId,
     DateTime AccessTokenExpiresAt,
-    DateTime RefreshTokenExpiresAt);
+    DateTime RefreshTokenExpiresAt,
+    string? IdToken = null);
 
 public sealed record SqlOSLoginResult(
     bool RequiresOrganizationSelection,
@@ -713,6 +714,10 @@ public sealed record SqlOSAuthorizationServerMetadataDto
     [JsonPropertyName("response_types_supported")]
     public required string[] ResponseTypesSupported { get; init; }
 
+    [JsonPropertyName("response_modes_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? ResponseModesSupported { get; init; }
+
     [JsonPropertyName("grant_types_supported")]
     public required string[] GrantTypesSupported { get; init; }
 
@@ -736,4 +741,24 @@ public sealed record SqlOSAuthorizationServerMetadataDto
     [JsonPropertyName("resource_parameter_supported")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ResourceParameterSupported { get; init; }
+
+    [JsonPropertyName("userinfo_endpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UserInfoEndpoint { get; init; }
+
+    [JsonPropertyName("subject_types_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? SubjectTypesSupported { get; init; }
+
+    [JsonPropertyName("id_token_signing_alg_values_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? IdTokenSigningAlgValuesSupported { get; init; }
+
+    [JsonPropertyName("claims_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? ClaimsSupported { get; init; }
+
+    [JsonPropertyName("end_session_endpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EndSessionEndpoint { get; init; }
 }

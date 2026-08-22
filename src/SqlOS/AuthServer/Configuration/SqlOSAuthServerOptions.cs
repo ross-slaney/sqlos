@@ -65,6 +65,7 @@ public class SqlOSAuthServerOptions
     public SqlOSDeviceAuthorizationOptions DeviceAuthorization { get; } = new();
     public SqlOSClientRegistrationOptions ClientRegistration { get; } = new();
     public SqlOSResourceIndicatorOptions ResourceIndicators { get; } = new();
+    public SqlOSOpenIdProviderOptions OpenIdProvider { get; } = new();
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSHeadlessAuthOptions Headless { get; } = new();
     public SqlOSAuthPageSeedOptions? AuthPageSeed { get; private set; }
@@ -388,6 +389,12 @@ public class SqlOSAuthServerOptions
     public SqlOSAuthServerOptions ConfigureDeviceAuthorization(Action<SqlOSDeviceAuthorizationOptions> configure)
     {
         configure(DeviceAuthorization);
+        return this;
+    }
+
+    public SqlOSAuthServerOptions ConfigureOpenIdProvider(Action<SqlOSOpenIdProviderOptions> configure)
+    {
+        configure(OpenIdProvider);
         return this;
     }
 

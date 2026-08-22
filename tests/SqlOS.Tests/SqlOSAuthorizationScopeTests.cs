@@ -79,6 +79,80 @@ public sealed class SqlOSAuthorizationScopeTests
     }
 
     [TestMethod]
+    public async Task CreateAuthorizationRequestAsync_WhitespaceStateOverLimit_IsRejectedAsProtocolError()
+    {
+        await using var harness = await Harness.CreateAsync(["openid"]);
+
+        var create = () => harness.Authorization.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
+            "code",
+            Harness.ClientId,
+            Harness.RedirectUri,
+            new string(' ', 3000),
+            "openid",
+            harness.CodeChallenge,
+            "S256",
+            null,
+            null,
+            null,
+            null,
+            "hosted",
+            null));
+
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                "State cannot exceed 2048 characters.",
+                "a whitespace-only state past the NVARCHAR(2048) column limit must fail protocol validation, not database truncation");
+    }
+
+    [TestMethod]
+    public async Task WhitespaceNonce_RoundTripsVerbatimIntoTheIdToken()
+    {
+        await using var harness = await Harness.CreateAsync(["openid"]);
+        var user = await harness.CreateUserAsync();
+
+        var request = await harness.Authorization.CreateAuthorizationRequestAsync(new SqlOSAuthorizeRequestInput(
+            "code",
+            Harness.ClientId,
+            Harness.RedirectUri,
+            "state-nonce",
+            "openid",
+            harness.CodeChallenge,
+            "S256",
+            null,
+            null,
+            null,
+            " ",
+            "hosted",
+            null));
+        request.Nonce.Should().Be(" ", "the authorization request must persist the nonce unmodified");
+
+        var redirect = await harness.Authorization.IssueAuthorizationRedirectAsync(
+            request,
+            user,
+            null,
+            "password",
+            harness.Http);
+        var code = QueryHelpers.ParseQuery(new Uri(redirect).Query)["code"].ToString();
+
+        var tokens = await harness.Authorization.ExchangeAuthorizationCodeAsync(
+            new SqlOSTokenRequest(
+                "authorization_code",
+                code,
+                Harness.RedirectUri,
+                Harness.ClientId,
+                harness.CodeVerifier,
+                null,
+                null),
+            harness.Http);
+
+        var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler { MapInboundClaims = false }
+            .ReadJwtToken(tokens.Tokens.IdToken);
+        jwt.Payload["nonce"].Should().Be(
+            " ",
+            "OIDC Core requires the request nonce back in the ID token unmodified, whitespace included");
+    }
+
+    [TestMethod]
     public async Task DcrRegisteredClient_CannotBeGrantedArbitraryRequestedScopes()
     {
         await using var harness = await Harness.CreateAsync(["openid", "profile"]);

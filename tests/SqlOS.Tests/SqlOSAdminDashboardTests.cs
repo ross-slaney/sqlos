@@ -222,6 +222,9 @@ public sealed class SqlOSAdminDashboardTests
         emptyWarning.ValueKind.Should().Be(JsonValueKind.Null);
         detail.TryGetProperty("omittedOpenIdWarning", out var openIdWarning).Should().BeTrue();
         openIdWarning.ValueKind.Should().Be(JsonValueKind.Null);
+        detail.GetProperty("oidcCapable").GetBoolean().Should().BeTrue();
+        detail.GetProperty("oidcDiscoveryUrl").GetString()
+            .Should().Be("https://localhost/sqlos/auth/.well-known/openid-configuration");
     }
 
     [TestMethod]
@@ -249,6 +252,8 @@ public sealed class SqlOSAdminDashboardTests
         var missing = SerializeForDashboard(await admin.GetClientDetailAsync("cli_openid_warn"));
         missing.GetProperty("omittedOpenIdWarning").GetProperty("code").GetString()
             .Should().Be(SqlOSOpenIdScopeWarnings.MissingAllowlistedOpenIdCode);
+        missing.GetProperty("oidcCapable").GetBoolean().Should().BeFalse();
+        missing.GetProperty("oidcDiscoveryUrl").ValueKind.Should().Be(JsonValueKind.Null);
 
         var stored = await context.Set<SqlOSClientApplication>().SingleAsync(x => x.Id == "cli_openid_warn");
         stored.AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]";
@@ -257,6 +262,124 @@ public sealed class SqlOSAdminDashboardTests
         var cleared = SerializeForDashboard(await admin.GetClientDetailAsync("cli_openid_warn"));
         cleared.TryGetProperty("omittedOpenIdWarning", out var warning).Should().BeTrue();
         warning.ValueKind.Should().Be(JsonValueKind.Null);
+        cleared.GetProperty("oidcCapable").GetBoolean().Should().BeTrue();
+        cleared.GetProperty("oidcDiscoveryUrl").GetString()
+            .Should().Be("https://localhost/sqlos/auth/.well-known/openid-configuration");
+    }
+
+    [TestMethod]
+    public async Task GetClientDetailAsync_OpenIdProviderDisabled_IsNeverOidcCapable()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.ConfigureOpenIdProvider(provider => provider.Enabled = false);
+        var options = Options.Create(optionsValue);
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_op_disabled",
+            ClientId = "op-disabled-client",
+            Name = "Provider Disabled Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+            AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]",
+            RegistrationSource = "manual",
+            IsFirstParty = true,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_op_disabled"));
+        detail.GetProperty("oidcCapable").GetBoolean().Should().BeFalse();
+        detail.GetProperty("oidcDiscoveryUrl").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [TestMethod]
+    public async Task GetClientDetailAsync_UnpublishedDiscovery_StaysOidcCapableWithoutAdvertisingUrl()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions();
+        optionsValue.ConfigureOpenIdProvider(provider => provider.PublishDiscoveryDocument = false);
+        var options = Options.Create(optionsValue);
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().Add(new SqlOSClientApplication
+        {
+            Id = "cli_unpublished_discovery",
+            ClientId = "unpublished-discovery-client",
+            Name = "Unpublished Discovery Client",
+            Audience = "sqlos",
+            RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+            AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]",
+            RegistrationSource = "manual",
+            IsFirstParty = true,
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_unpublished_discovery"));
+        detail.GetProperty("oidcCapable").GetBoolean().Should().BeTrue(
+            "capability reflects provider mode and the allowlist, not discovery publication");
+        detail.GetProperty("oidcDiscoveryUrl").ValueKind.Should().Be(
+            JsonValueKind.Null,
+            "the discovery route returns 404 while PublishDiscoveryDocument is false, so the URL must not be advertised");
+    }
+
+    [TestMethod]
+    public async Task ListClientsAsync_ProjectsOidcCapable_WithTheDetailRule()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().AddRange(
+            new SqlOSClientApplication
+            {
+                Id = "cli_list_oidc",
+                ClientId = "list-oidc-client",
+                Name = "List OIDC Client",
+                Audience = "sqlos",
+                RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+                AllowedScopesJson = "[\"openid\",\"profile\",\"email\"]",
+                RegistrationSource = "manual",
+                IsActive = true
+            },
+            new SqlOSClientApplication
+            {
+                Id = "cli_list_plain",
+                ClientId = "list-plain-client",
+                Name = "List Plain Client",
+                Audience = "sqlos",
+                RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+                AllowedScopesJson = "[\"profile\"]",
+                RegistrationSource = "manual",
+                IsActive = true
+            });
+        await context.SaveChangesAsync();
+
+        var result = SerializeForDashboard(await admin.ListClientsAsync(pageSize: 10));
+        var items = result.GetProperty("data").EnumerateArray()
+            .ToDictionary(item => item.GetProperty("clientId").GetString()!);
+        items["list-oidc-client"].GetProperty("oidcCapable").GetBoolean().Should().BeTrue(
+            "the list projection shares the detail rule: provider enabled and openid allowlisted");
+        items["list-plain-client"].GetProperty("oidcCapable").GetBoolean().Should().BeFalse();
+
+        var disabledOptionsValue = new SqlOSAuthServerOptions();
+        disabledOptionsValue.ConfigureOpenIdProvider(provider => provider.Enabled = false);
+        var disabledOptions = Options.Create(disabledOptionsValue);
+        var disabledAdmin = new SqlOSAdminService(
+            context,
+            disabledOptions,
+            TestCryptoService.Create(context, disabledOptions));
+
+        var disabledResult = SerializeForDashboard(await disabledAdmin.ListClientsAsync(pageSize: 10));
+        disabledResult.GetProperty("data").EnumerateArray()
+            .Should().OnlyContain(item => !item.GetProperty("oidcCapable").GetBoolean(),
+                "no client is OIDC capable while OpenID Provider mode is disabled");
     }
 
     [TestMethod]
@@ -285,6 +408,60 @@ public sealed class SqlOSAdminDashboardTests
         var detail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_machine_openid"));
         detail.TryGetProperty("omittedOpenIdWarning", out var warning).Should().BeTrue();
         warning.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [TestMethod]
+    public async Task OidcCapable_MachineOnlyClientWithOpenIdAllowlisted_IsNotCapable()
+    {
+        using var context = CreateContext();
+        var options = Options.Create(new SqlOSAuthServerOptions());
+        var crypto = TestCryptoService.Create(context, options);
+        var admin = new SqlOSAdminService(context, options, crypto);
+
+        context.Set<SqlOSClientApplication>().AddRange(
+            new SqlOSClientApplication
+            {
+                Id = "cli_machine_oidc",
+                ClientId = "machine-oidc-client",
+                Name = "Machine OIDC Client",
+                Audience = "sqlos",
+                RedirectUrisJson = "[]",
+                AllowedScopesJson = "[\"openid\",\"ledger.export\"]",
+                GrantTypesJson = "[\"client_credentials\"]",
+                RegistrationSource = "manual",
+                IsFirstParty = false,
+                IsActive = true
+            },
+            new SqlOSClientApplication
+            {
+                Id = "cli_redirect_oidc",
+                ClientId = "redirect-oidc-client",
+                Name = "Redirect OIDC Client",
+                Audience = "sqlos",
+                RedirectUrisJson = "[\"https://app.example.test/callback\"]",
+                AllowedScopesJson = "[\"openid\",\"profile\"]",
+                RegistrationSource = "manual",
+                IsActive = true
+            });
+        await context.SaveChangesAsync();
+
+        var list = SerializeForDashboard(await admin.ListClientsAsync(pageSize: 10));
+        var items = list.GetProperty("data").EnumerateArray()
+            .ToDictionary(item => item.GetProperty("clientId").GetString()!);
+        items["machine-oidc-client"].GetProperty("oidcCapable").GetBoolean().Should().BeFalse(
+            "a client-credentials-only client can never complete an interactive flow, even with openid allowlisted");
+        items["redirect-oidc-client"].GetProperty("oidcCapable").GetBoolean().Should().BeTrue(
+            "a redirect-capable client with openid allowlisted stays OIDC capable");
+
+        var machineDetail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_machine_oidc"));
+        machineDetail.GetProperty("oidcCapable").GetBoolean().Should().BeFalse(
+            "the detail projection shares the list rule");
+        machineDetail.GetProperty("oidcDiscoveryUrl").ValueKind.Should().Be(JsonValueKind.Null);
+
+        var redirectDetail = SerializeForDashboard(await admin.GetClientDetailAsync("cli_redirect_oidc"));
+        redirectDetail.GetProperty("oidcCapable").GetBoolean().Should().BeTrue();
+        redirectDetail.GetProperty("oidcDiscoveryUrl").GetString()
+            .Should().Be("https://localhost/sqlos/auth/.well-known/openid-configuration");
     }
 
     [TestMethod]

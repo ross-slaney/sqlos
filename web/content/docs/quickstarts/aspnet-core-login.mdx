@@ -1,6 +1,6 @@
 ---
 title: "Sign in an ASP.NET Core app"
-description: "Complete hosted SqlOS login with ASP.NET Core OAuth, PKCE, a secure cookie, and token revocation."
+description: "Complete hosted SqlOS login with ASP.NET Core OpenID Connect, PKCE, a secure cookie, and token revocation."
 order: 2
 section: quickstarts
 ---
@@ -18,13 +18,14 @@ section: quickstarts
 
 Run a Razor Pages application that:
 
-1. challenges ASP.NET Core's built-in OAuth handler;
+1. challenges ASP.NET Core's built-in OpenID Connect handler, which reads SqlOS [OIDC discovery](/docs/authserver/openid-provider);
 2. redirects to the SqlOS hosted AuthPage;
-3. exchanges an authorization code with PKCE at `/signin-sqlos`;
-4. creates an encrypted, HTTP-only ASP.NET Core session cookie;
-5. calls a SqlOS-protected API with the access token;
-6. rotates the refresh token and renews the application ticket before expiry; and
-7. revokes the refresh token and server session during sign-out.
+3. exchanges an authorization code with PKCE at `/signin-sqlos` and validates the returned ID token and nonce;
+4. builds identity claims from the ID token and the SqlOS UserInfo endpoint;
+5. creates an encrypted, HTTP-only ASP.NET Core session cookie;
+6. calls a SqlOS-protected API with the access token;
+7. rotates the refresh token and renews the application ticket before expiry; and
+8. revokes the refresh token and server session during sign-out.
 
 This is an all-.NET client. It does not require a JavaScript authentication SDK or an external identity provider.
 
@@ -59,9 +60,9 @@ After SqlOS redirects back, the page shows the authenticated identity, token exp
 
 | Concern | Owner |
 | --- | --- |
-| PKCE verifier, protected `state`, and correlation cookie | ASP.NET Core OAuth handler |
+| Discovery, PKCE verifier, protected `state`, `nonce`, correlation cookie, and ID token validation | ASP.NET Core OpenID Connect handler |
 | Password, organization selection, SSO, and MFA | SqlOS hosted AuthPage |
-| Authorization code and access/refresh tokens | SqlOS AuthServer |
+| Authorization code, access/refresh tokens, ID token, and UserInfo | SqlOS AuthServer |
 | Application login session | ASP.NET Core cookie handler |
 | API signature, audience, and session validation | SqlOS token validation on the Todo API |
 
@@ -96,24 +97,26 @@ builder.Services
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
     })
-    .AddOAuth("SqlOS", options =>
+    .AddOpenIdConnect("SqlOS", options =>
     {
+        options.Authority = $"{sqlosOrigin}/sqlos/auth";
         options.ClientId = clientId;
-        options.ClientSecret = "public-pkce-client";
-        options.CallbackPath = "/signin-sqlos";
-        options.AuthorizationEndpoint =
-            $"{sqlosOrigin}/sqlos/auth/authorize";
-        options.TokenEndpoint = $"{sqlosOrigin}/sqlos/auth/token";
+        options.ResponseType = "code";
         options.UsePkce = true;
+        options.CallbackPath = "/signin-sqlos";
         options.SaveTokens = true;
+        options.GetClaimsFromUserInfoEndpoint = true;
+        options.MapInboundClaims = false; // keep raw OIDC claim names (sub, sid, name)
+        options.TokenValidationParameters.NameClaimType = "name";
+        options.RequireHttpsMetadata = false; // localhost only
     });
 ```
 
-<Callout type="warning" title="The placeholder is not a client secret">
-  ASP.NET Core's generic OAuth handler requires a non-empty `ClientSecret` property even for a public client. `example-aspnet` is registered in SqlOS as `public_pkce`; SqlOS authenticates the exchange with PKCE and intentionally ignores `"public-pkce-client"`. Do not rotate, vault, or treat that placeholder as a credential.
+<Callout type="info" title="No client secret at all">
+  `example-aspnet` is registered in SqlOS as `public_pkce` with `token_endpoint_auth_method` `none`. The OpenID Connect handler, unlike ASP.NET Core's generic OAuth handler, does not demand a placeholder secret: the code exchange is bound by the PKCE verifier. Do not add a `ClientSecret` to browser-facing or distributed applications.
 </Callout>
 
-The sample requests `openid`, `profile`, `email`, `offline_access`, `todos.read`, and `todos.write`. The seeded client fixes the audience to `http://localhost:5080/api/todos` and allows the exact callback `http://localhost:5090/signin-sqlos`.
+The handler resolves the authorization, token, JWKS, and UserInfo endpoints from `{Authority}/.well-known/openid-configuration`. The sample requests `openid`, `profile`, `email`, and `offline_access`. The seeded client fixes the audience to `http://localhost:5080/api/todos` and allows the exact callback `http://localhost:5090/signin-sqlos`.
 
 ## Start the challenge
 
@@ -129,26 +132,13 @@ public IActionResult OnGetLogin()
         "SqlOS");
 ```
 
-The framework creates the correlation cookie, PKCE verifier and challenge, and protected `state`. SqlOS persists and returns that state unchanged. Current SqlOS schemas allow the longer protected state emitted by standard ASP.NET Core handlers.
+The framework creates the correlation cookie, PKCE verifier and challenge, `nonce`, and protected `state`. SqlOS persists and returns the state unchanged and echoes the `nonce` inside the ID token, where the handler verifies it. Current SqlOS schemas allow the longer protected state emitted by standard ASP.NET Core handlers.
 
 ## Build the application identity
 
-During `OnCreatingTicket`, the sample calls the protected Todo endpoint with the new access token:
+The callback exchanges the code, validates the ID token's RS256 signature against the SqlOS JWKS, and — because `GetClaimsFromUserInfoEndpoint` is enabled — calls `/sqlos/auth/userinfo` with the new access token. The resulting identity carries `sub`, `sid`, `amr`, `org_id` when the session is organization-scoped, and the `name`, `preferred_username`, `email`, and `email_verified` claims released by the granted `profile` and `email` scopes (see [OpenID Provider](/docs/authserver/openid-provider) for the exact claim tables). ASP.NET Core then encrypts that identity and the saved tokens into its authentication ticket.
 
-```csharp
-using var request = new HttpRequestMessage(
-    HttpMethod.Get,
-    $"{sqlosOrigin}/api/me");
-request.Headers.Authorization =
-    new AuthenticationHeaderValue("Bearer", context.AccessToken);
-
-using var response = await context.Backchannel.SendAsync(
-    request,
-    context.HttpContext.RequestAborted);
-response.EnsureSuccessStatusCode();
-```
-
-It maps the returned subject, organization, client, email, and session ID into the `ClaimsIdentity`. ASP.NET Core then encrypts that identity and the saved tokens into its authentication ticket.
+No claim in that cookie came from browser input: the ID token is signed by SqlOS, and UserInfo only answers a bearer-authenticated request whose session is still live.
 
 <Callout type="info" title="SaveTokens keeps the sample inspectable">
   `SaveTokens = true` puts access and refresh tokens in the encrypted authentication ticket. That is convenient for a small demo, but it can create a large browser cookie. For a production app, use an `ITicketStore` or another server-side token/session store and keep only an opaque session identifier in the browser.
@@ -206,7 +196,7 @@ Keep logout as a `POST`. Razor Pages antiforgery protection prevents another sit
 
 | File | What to copy or study |
 | --- | --- |
-| [`Program.cs`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Program.cs) | Cookie and OAuth registration, PKCE, scopes, and claim mapping |
+| [`Program.cs`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Program.cs) | Cookie and OpenID Connect registration, discovery, PKCE, scopes, and claim mapping |
 | [`Index.cshtml.cs`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Pages/Index.cshtml.cs) | Challenge, protected API call, and revoking logout |
 | [`Index.cshtml`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Example.AspNetCoreWeb/Pages/Index.cshtml) | Login/logout UI and authenticated proof |
 | [`Todo AppHost`](https://github.com/ross-slaney/sqlos/blob/main/examples/SqlOS.Todo.AppHost/Program.cs) | One-command SQL Server, API, and Razor app orchestration |
@@ -217,12 +207,12 @@ Keep logout as a `POST`. Razor Pages antiforgery protection prevents another sit
 Use the sample as a working reference, then change these values together:
 
 1. Give the ASP.NET Core client a stable HTTPS origin, such as `https://app.acme.com`.
-2. Register it in SqlOS as a public PKCE client with the exact redirect URI `https://app.acme.com/signin-sqlos`.
+2. Register it in SqlOS as a public PKCE client with the exact redirect URI `https://app.acme.com/signin-sqlos` and an `AllowedScopes` list containing `openid profile email` (see [Clients](/docs/authserver/clients)).
 3. Give the client the exact audience of the API it will call, such as `https://api.acme.com`.
-4. Set `SqlOS:Origin` to the externally reachable SqlOS origin and `SqlOS:ClientId` to the registered client ID.
-5. Replace the Todo-specific scopes and `/api/me` call with your application's scopes and session/bootstrap endpoint.
+4. Set `SqlOS:Origin` to the externally reachable SqlOS origin and `SqlOS:ClientId` to the registered client ID, and remove `RequireHttpsMetadata = false`.
+5. Replace the `/api/me` call with your application's session/bootstrap endpoint.
 
-If the same ASP.NET Core process hosts SqlOS and the application UI, [Add SqlOS to one app](/docs/quickstarts/add-to-app) supplies the server registration. Set its `RedirectPath` to `/signin-sqlos` so `UseSingleApplication` seeds the URI expected by the OAuth handler.
+If the same ASP.NET Core process hosts SqlOS and the application UI, [Add SqlOS to one app](/docs/quickstarts/add-to-app) supplies the server registration. Set its `RedirectPath` to `/signin-sqlos` so `UseSingleApplication` seeds the URI expected by the OpenID Connect handler.
 
 ## Common failures
 
@@ -240,7 +230,7 @@ Confirm the access token was issued for `http://localhost:5080/api/todos`, the `
 
 ### The cookie is missing in production
 
-Use HTTPS, set the session and correlation cookies to `CookieSecurePolicy.Always`, configure forwarded headers before authentication when a proxy terminates TLS, and persist ASP.NET Core Data Protection keys across replicas.
+Use HTTPS, set the session, correlation, and nonce cookies to `CookieSecurePolicy.Always`, configure forwarded headers before authentication when a proxy terminates TLS, and persist ASP.NET Core Data Protection keys across replicas.
 
 ## Next steps
 

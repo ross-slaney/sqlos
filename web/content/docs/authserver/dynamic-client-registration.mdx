@@ -83,7 +83,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-`openid` is stored and granted as an ordinary allow-listed string. It is never always-allowed and does not mint an `id_token` yet. Issue #118 will add ID token issuance; the warning when an OIDC-capable client omits `openid` is already on the admin, dashboard, hosted, and headless surfaces.
+`openid` is stored and granted as an ordinary allow-listed string. It is never always-allowed, and because a registration without `scope` stores an empty allow-list, a dynamically registered client must be granted `openid` deliberately — in the registration request or by an operator afterward. With [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), a granted `openid` mints an `id_token` at the token endpoint; the warning when an OIDC-capable client omits `openid` is on the admin, dashboard, hosted, and headless surfaces.
 
 ## Operational controls
 

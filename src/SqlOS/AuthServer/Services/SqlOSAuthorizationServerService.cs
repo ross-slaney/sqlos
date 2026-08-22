@@ -61,9 +61,11 @@ public sealed class SqlOSAuthorizationServerService
             .Select(x => x.AllowedScopesJson)
             .ToListAsync(cancellationToken);
 
+        var openIdProviderEnabled = _options.OpenIdProvider.Enabled;
         var scopes = configuredScopes
             .SelectMany(ParseJsonArray)
             .Where(IsAdvertisedGrantableScope)
+            .Concat(openIdProviderEnabled ? AdvertisedOpenIdScopes : [])
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
@@ -109,6 +111,10 @@ public sealed class SqlOSAuthorizationServerService
                 : null,
             JwksUri = $"{origin}{basePath}/.well-known/jwks.json",
             ResponseTypesSupported = ["code"],
+            // Always advertised: SqlOS constructs every authorization response in
+            // the redirect query string, so the OIDC Discovery default of
+            // query + fragment would be dishonest for OAuth and OIDC alike.
+            ResponseModesSupported = ["query"],
             GrantTypesSupported = grantTypes.ToArray(),
             CodeChallengeMethodsSupported = ["S256"],
             ScopesSupported = scopes,
@@ -123,9 +129,35 @@ public sealed class SqlOSAuthorizationServerService
                 : null,
             ResourceParameterSupported = _options.ResourceIndicators.Enabled
                 ? true
-                : null
+                : null,
+            UserInfoEndpoint = openIdProviderEnabled && _options.OpenIdProvider.EnableUserInfoEndpoint
+                ? $"{origin}{basePath}/userinfo"
+                : null,
+            SubjectTypesSupported = openIdProviderEnabled ? ["public"] : null,
+            IdTokenSigningAlgValuesSupported = openIdProviderEnabled ? ["RS256"] : null,
+            ClaimsSupported = openIdProviderEnabled ? AdvertisedOpenIdClaims : null
         };
     }
+
+    /// <summary>
+    /// Scopes the OpenID Provider role itself understands. <c>offline_access</c> is
+    /// deliberately absent: SqlOS does not gate refresh-token issuance on it, so
+    /// advertising it would be dishonest. It remains storable on client allowlists
+    /// for gateway compatibility.
+    /// </summary>
+    private static readonly string[] AdvertisedOpenIdScopes = ["openid", "profile", "email"];
+
+    private static readonly string[] AdvertisedOpenIdClaims =
+    [
+        "sub",
+        "name",
+        "preferred_username",
+        "email",
+        "email_verified",
+        "auth_time",
+        "amr",
+        "org_id"
+    ];
 
     public async Task<SqlOSAuthorizationRequest> CreateAuthorizationRequestAsync(
         SqlOSAuthorizeRequestInput input,
@@ -136,12 +168,13 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Only authorization code requests are supported.");
         }
 
-        if (string.IsNullOrWhiteSpace(input.State))
-        {
-            throw new InvalidOperationException("A state value is required.");
-        }
-
-        if (input.State.Length > 2048)
+        // OIDC Core makes state optional (RECOMMENDED). PKCE binds the code exchange
+        // for the flows SqlOS supports, so an absent state is accepted and simply not
+        // echoed. SAML/SSO-broker flows keep their own state requirement. The length
+        // limit applies to any present value — whitespace included — because the
+        // NVARCHAR(2048) column would otherwise fail with a truncation error instead
+        // of the protocol validation error.
+        if (input.State is { Length: > 2048 })
         {
             throw new InvalidOperationException("State cannot exceed 2048 characters.");
         }
@@ -254,9 +287,12 @@ public sealed class SqlOSAuthorizationServerService
 
         var query = new Dictionary<string, string?>
         {
-            ["error"] = error,
-            ["state"] = authorizationRequest.State
+            ["error"] = error
         };
+        if (!string.IsNullOrEmpty(authorizationRequest.State))
+        {
+            query["state"] = authorizationRequest.State;
+        }
 
         if (!string.IsNullOrWhiteSpace(errorDescription))
         {
@@ -1218,9 +1254,13 @@ public sealed class SqlOSAuthorizationServerService
 
         var query = new Dictionary<string, string?>
         {
-            ["code"] = rawCode,
-            ["state"] = authorizationRequest.State
+            ["code"] = rawCode
         };
+        if (!string.IsNullOrEmpty(authorizationRequest.State))
+        {
+            query["state"] = authorizationRequest.State;
+        }
+
         if (!string.IsNullOrWhiteSpace(authorizationRequest.Scope))
         {
             query["scope"] = authorizationRequest.Scope;
@@ -1532,10 +1572,13 @@ public sealed class SqlOSAuthorizationServerService
         => JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
 
     /// <summary>
-    /// Reserved OpenID Connect scope names. Until OIDC Provider mode ships, these stay
-    /// off <c>scopes_supported</c> because SqlOS does not issue an id_token and does not
-    /// gate refresh tokens on <c>offline_access</c>. Client allowlists may still include
-    /// them; requested-but-unadvertised scopes are silently intersected.
+    /// Reserved OpenID Connect scope names. These never surface through the
+    /// client-allowlist-derived scope list; when OpenID Provider mode is enabled,
+    /// <c>openid</c>/<c>profile</c>/<c>email</c> are advertised through
+    /// <see cref="AdvertisedOpenIdScopes"/> instead. <c>offline_access</c> stays
+    /// unadvertised because SqlOS does not gate refresh-token issuance on it.
+    /// Client allowlists may still include them; requested-but-unadvertised scopes
+    /// are silently intersected.
     /// </summary>
     private static readonly HashSet<string> ReservedOidcScopeNames = new(StringComparer.Ordinal)
     {

@@ -65,9 +65,9 @@ This applies with full force to MCP resource servers: a dynamically registered M
 
 ## Where scope does gate behavior
 
-Scope is not decorative. Today it constrains what a client may request (the allowed-scopes intersection on every [client](/docs/authserver/clients)) and what a service token records. When SqlOS ships OpenID Provider mode (issue #118), scope will also gate **identity-claim release**: `openid` will mint an ID token, and `profile` / `email` will decide which claims appear in ID tokens and UserInfo responses.
+Scope is not decorative. It constrains what a client may request (the allowed-scopes intersection on every [client](/docs/authserver/clients)) and what a service token records, and through [OpenID Provider mode](/docs/authserver/openid-provider) it gates **identity-claim release**: a granted `openid` mints an ID token, and `profile` / `email` decide which claims appear in ID tokens and UserInfo responses.
 
-That boundary is precise: scope will gate what identity claims SqlOS releases *about* the user, and it still will not gate what the user may *do* against your API. FGA remains the authorization authority after OIDC Provider mode ships.
+That boundary is precise: scope gates what identity claims SqlOS releases *about* the user, and it still does not gate what the user may *do* against your API. FGA remains the authorization authority.
 
 ## If scope enforcement is ever wanted
 
@@ -85,6 +85,7 @@ Service tokens are the exception, exactly because they carry a `scope` claim on 
 ## See also
 
 - [Token Validation](/docs/authserver/token-validation) — the exact claims on user access tokens
+- [OpenID Provider](/docs/authserver/openid-provider) — ID tokens and UserInfo, where scope gates claim release
 - [Clients](/docs/authserver/clients) — allowed scopes and the intersection rule
 - [Machine Clients](/docs/authserver/machine-clients) — service tokens, where `scope` is a claim
 - [MCP OAuth](/docs/guides/mcp-oauth) — audience binding and per-operation authorization for MCP servers

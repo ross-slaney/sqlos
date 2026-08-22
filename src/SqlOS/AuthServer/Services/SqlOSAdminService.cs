@@ -1428,6 +1428,9 @@ public sealed partial class SqlOSAdminService
             .ToListAsync(cancellationToken);
 
         var item = FormatClientListItem(client, managedClientIds.Contains(client.ClientId), duplicateCount);
+        var oidcDiscoveryUrl = item.OidcCapable && _options.OpenIdProvider.PublishDiscoveryDocument
+            ? $"{SqlOSPublicOriginResolver.Resolve(_options)}{_options.BasePath.TrimEnd('/')}/.well-known/openid-configuration"
+            : null;
         return new
         {
             item.Id,
@@ -1468,6 +1471,8 @@ public sealed partial class SqlOSAdminService
             item.Ownership,
             item.EmptyAllowlistWarning,
             item.OmittedOpenIdWarning,
+            item.OidcCapable,
+            OidcDiscoveryUrl = oidcDiscoveryUrl,
             client.MetadataJson,
             RecentAuditEvents = recentAuditEvents
         };
@@ -3299,7 +3304,7 @@ public sealed partial class SqlOSAdminService
             seed.ClientType,
             seed.IsActive);
 
-    private static ClientAdminView FormatClientListItem(SqlOSClientApplication client, bool managedByStartupSeed, int duplicateCount)
+    private ClientAdminView FormatClientListItem(SqlOSClientApplication client, bool managedByStartupSeed, int duplicateCount)
     {
         var redirectUris = DeserializeJsonList(client.RedirectUrisJson);
         var grantTypes = DeserializeJsonList(client.GrantTypesJson);
@@ -3358,7 +3363,19 @@ public sealed partial class SqlOSAdminService
                 client.AllowNativeHeadlessAuth,
                 client.AllowDeviceAuthorization,
                 redirectUris,
-                grantTypes));
+                grantTypes),
+            // A client-credentials-only (machine) client can never complete an
+            // interactive flow, so oidcCapable additionally requires the same
+            // user-facing predicate the missing-allowlist warning uses. The detail
+            // projection reuses this value, so both projections share one rule.
+            _options.OpenIdProvider.Enabled
+                && SqlOSOpenIdScopeWarnings.ContainsOpenId(allowedScopes)
+                && SqlOSOpenIdScopeWarnings.IsUserFacingClient(
+                    client.IsFirstParty,
+                    client.AllowNativeHeadlessAuth,
+                    client.AllowDeviceAuthorization,
+                    redirectUris,
+                    grantTypes));
     }
 
     private static bool MatchesSourceFilter(string registrationSource, string? filter)
@@ -3721,7 +3738,8 @@ public sealed partial class SqlOSAdminService
         int DuplicateCount,
         string LifecycleState,
         SqlOSClientAllowlistWarning? EmptyAllowlistWarning,
-        SqlOSOpenIdScopeWarning? OmittedOpenIdWarning);
+        SqlOSOpenIdScopeWarning? OmittedOpenIdWarning,
+        bool OidcCapable);
 
     private sealed record SqlOSFederationMetadata(
         string IdentityProviderEntityId,

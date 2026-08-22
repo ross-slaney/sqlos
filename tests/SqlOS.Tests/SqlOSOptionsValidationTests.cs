@@ -344,6 +344,36 @@ public sealed class SqlOSOptionsValidationTests
     }
 
     [TestMethod]
+    public void AddSqlOS_Throws_WhenOpenIdProviderIdTokenLifetimeIsNotPositive()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.ConfigureOpenIdProvider(provider => provider.IdTokenLifetime = TimeSpan.Zero);
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*OpenIdProvider.IdTokenLifetime must be positive*");
+    }
+
+    [TestMethod]
+    public void AddSqlOS_Throws_WhenOpenIdProviderIdTokenLifetimeExceedsSigningKeyGraceWindow()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddSqlOS<TestSqlOSInMemoryDbContext>(options =>
+        {
+            options.AuthServer.DefaultSigningKeyGraceWindowDays = 7;
+            options.AuthServer.ConfigureOpenIdProvider(provider =>
+                provider.IdTokenLifetime = TimeSpan.FromDays(8));
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*OpenIdProvider.IdTokenLifetime must not exceed the DefaultSigningKeyGraceWindowDays JWKS grace window*");
+    }
+
+    [TestMethod]
     public void AddSqlOS_Throws_WhenCalendarConnectSessionLifetimeIsNotPositive()
     {
         var services = new ServiceCollection();

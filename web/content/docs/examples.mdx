@@ -37,9 +37,9 @@ This starts a persistent SQL Server container, the Todo API and embedded SqlOS h
 The browser journey is deliberately ordinary ASP.NET Core:
 
 1. the application issues an authentication challenge;
-2. the generic OAuth handler creates protected state, a correlation cookie, and PKCE material;
+2. the OpenID Connect handler reads SqlOS discovery, then creates protected state, a correlation cookie, a nonce, and PKCE material;
 3. SqlOS hosts user and organization sign-in;
-4. middleware owns the `/signin-sqlos` callback and code exchange;
+4. middleware owns the `/signin-sqlos` callback, code exchange, ID token validation, and UserInfo claims;
 5. the application calls protected `/api/me` and creates its encrypted cookie;
 6. logout revokes the remote refresh token and session, then removes the local cookie.
 

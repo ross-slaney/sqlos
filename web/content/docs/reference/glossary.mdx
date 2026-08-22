@@ -207,7 +207,11 @@ The authorization protocol clients use to obtain access tokens for APIs. In SqlO
 
 ### OIDC (OpenID Connect)
 
-An identity layer used by external login providers. In SqlOS docs, “OIDC connection” usually means SqlOS is the relying party/client of Google, Microsoft, Apple, or a custom provider: it validates the provider's ID token/user information and links an external identity. Your application-facing SqlOS session then uses SqlOS access and refresh tokens. See [OIDC Social Login](/docs/authserver/oidc-auth).
+An identity layer on top of OAuth 2.0. SqlOS plays both OIDC roles. For downstream applications it is the OpenID Provider: it issues ID tokens, publishes OIDC discovery, and serves UserInfo (see [OpenID Provider](/docs/authserver/openid-provider)). Toward Google, Microsoft, Apple, or a custom provider it is the relying party/client: it validates the provider's ID token/user information and links an external identity. In SqlOS docs, “OIDC connection” still refers to that upstream relying-party role. Your application-facing SqlOS session then uses SqlOS access and refresh tokens. See [OIDC Social Login](/docs/authserver/oidc-auth).
+
+### OpenID Provider (OP)
+
+The OIDC role that authenticates users and issues ID tokens. SqlOS is an OpenID Provider for your applications by default: granted `openid` mints an ID token at the token endpoint, `/.well-known/openid-configuration` serves discovery, and `/userinfo` releases claims gated by the granted `profile`/`email` scopes. Disabling `AuthServer.OpenIdProvider` restores pure-OAuth behavior. Distinct from the relying-party role SqlOS plays toward upstream social login providers. See [OpenID Provider](/docs/authserver/openid-provider).
 
 ### Organization
 
@@ -289,7 +293,7 @@ Authentication through a shared enterprise identity provider rather than a separ
 
 ### State
 
-A client-generated value that correlates the authorization response with the browser request and protects against login CSRF/request substitution. ASP.NET Core OAuth handlers protect structured state automatically. The client must verify it on callback; it is not a session ID or PKCE verifier.
+A client-generated value that correlates the authorization response with the browser request and protects against login CSRF/request substitution. ASP.NET Core OAuth and OpenID Connect handlers protect structured state automatically. The client must verify it on callback; it is not a session ID or PKCE verifier. On SqlOS `/authorize`, `state` is optional — PKCE binds the exchange — but sending one remains recommended.
 
 ### Subject
 

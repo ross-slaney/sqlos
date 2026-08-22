@@ -142,7 +142,7 @@ Open `http://localhost:5050/sqlos`, enter the configured dashboard password, the
 
 This host now owns the auth server surfaces. Your browser application still needs a standard authorization-code-with-PKCE callback. Continue with the ASP.NET Core login quickstart for a complete framework-owned callback and application session.
 
-That runnable client uses `/signin-sqlos`, the conventional ASP.NET Core middleware callback. When adapting it to this host, either change `app.RedirectPath` above to `/signin-sqlos` or set the OAuth handler's `CallbackPath` to `/auth/callback`. The seeded redirect URI and middleware callback must match exactly.
+That runnable client uses `/signin-sqlos`, the conventional ASP.NET Core middleware callback. When adapting it to this host, either change `app.RedirectPath` above to `/signin-sqlos` or set the OpenID Connect handler's `CallbackPath` to `/auth/callback`. The seeded redirect URI and middleware callback must match exactly.
 
 ## Common failures
 
