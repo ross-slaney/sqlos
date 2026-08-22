@@ -27,6 +27,15 @@ export type HeadlessViewModel = {
   mfaMethods?: string[] | null;
   totpEnrollment?: HeadlessTotpEnrollment | null;
   scope?: string | null;
+  clientName?: string | null;
+  consentToken?: string | null;
+  consentScopes?: HeadlessConsentScope[] | null;
+};
+
+export type HeadlessConsentScope = {
+  scope: string;
+  displayName: string;
+  description?: string | null;
 };
 
 export type HeadlessTotpEnrollment = {
@@ -220,6 +229,14 @@ export async function headlessVerifyPhoneOtpSignup(
 
 export async function headlessSelectOrganization(pendingToken: string, organizationId: string): Promise<HeadlessActionResult> {
   return headlessPost("/organization/select", { pendingToken, organizationId });
+}
+
+export async function headlessApproveConsent(requestId: string, consentToken: string): Promise<HeadlessActionResult> {
+  return headlessPost("/consent/approve", { requestId, consentToken });
+}
+
+export async function headlessDenyConsent(requestId: string, consentToken: string): Promise<HeadlessActionResult> {
+  return headlessPost("/consent/deny", { requestId, consentToken });
 }
 
 export async function headlessStartProvider(requestId: string, connectionId: string, email?: string): Promise<HeadlessActionResult> {

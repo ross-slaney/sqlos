@@ -1344,6 +1344,25 @@ input::placeholder { color: var(--color-text-tertiary); }
   gap: 10px;
 }
 
+.ha-consent-scopes {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ha-border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--ha-surface-muted, #f8fafc);
+}
+
+.ha-consent-scope {
+  display: grid;
+  gap: 2px;
+}
+
+.ha-consent-scope span {
+  font-size: 13px;
+  color: var(--ha-text-muted, #64748b);
+}
+
 .ha-org-btn {
   display: flex;
   align-items: center;

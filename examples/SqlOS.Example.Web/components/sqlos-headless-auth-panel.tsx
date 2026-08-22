@@ -17,6 +17,8 @@ import {
   headlessResetPassword,
   headlessSelectOrganization,
   headlessSignup,
+  headlessApproveConsent,
+  headlessDenyConsent,
   headlessStartProvider,
   headlessStartMfaTotpEnrollment,
   headlessVerifyEmailOtp,
@@ -429,6 +431,22 @@ export function SqlOSHeadlessAuthPanel() {
     finally { setLoading(false); }
   };
 
+  const onDecideConsent = async (approve: boolean) => {
+    // The consent view state carries a one-time consent token; approve issues
+    // the code redirect, deny redirects back to the client with access_denied.
+    if (!requestId || !viewModel?.consentToken) return;
+    setLoading(true); setError(null);
+    try {
+      await handleResult(approve
+        ? await headlessApproveConsent(requestId, viewModel.consentToken)
+        : await headlessDenyConsent(requestId, viewModel.consentToken));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The consent decision could not be recorded.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onVerifyMfa = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!requestId || !viewModel?.mfaToken) return;
@@ -475,6 +493,8 @@ export function SqlOSHeadlessAuthPanel() {
 
   const headline = isSignup
     ? "Start your free trial"
+    : view === "consent"
+      ? "Authorize access"
     : view === "organization"
       ? "Choose workspace"
       : view === "mfa"
@@ -490,6 +510,8 @@ export function SqlOSHeadlessAuthPanel() {
                 : "Welcome back";
   const subtitle = isSignup
     ? "Create your account and start managing retail operations in minutes."
+    : view === "consent"
+      ? `${viewModel?.clientName ?? "The application"} is asking to access your account.`
     : view === "organization"
       ? "Select the organization you'd like to sign in to."
       : view === "mfa"
@@ -890,6 +912,26 @@ export function SqlOSHeadlessAuthPanel() {
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {view === "consent" && (
+                <div className="ha-form">
+                  <div className="ha-consent-scopes">
+                    <p className="ha-helper-text">This application will be able to:</p>
+                    {(viewModel?.consentScopes ?? []).map((scope) => (
+                      <div key={scope.scope} className="ha-consent-scope">
+                        <strong>{scope.displayName}</strong>
+                        {scope.description && <span>{scope.description}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="ha-submit" disabled={loading} onClick={() => void onDecideConsent(true)}>
+                    {loading ? "Working…" : "Allow access"}
+                  </button>
+                  <button type="button" className="ha-link-btn" disabled={loading} onClick={() => void onDecideConsent(false)}>
+                    Deny request
+                  </button>
                 </div>
               )}
 
