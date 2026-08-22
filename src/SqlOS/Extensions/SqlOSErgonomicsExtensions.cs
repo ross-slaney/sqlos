@@ -1015,32 +1015,42 @@ internal static class SqlOSAccessTokenEndpointFilter
             return Unauthorized(options, "The bearer access token is invalid, expired, revoked, or was not minted for this resource.");
         }
 
+        if (SqlOSScopeRequirementPolicy.DescribeUnsatisfied(options.RequiredScopes, validated.Scope) is { } scopeFailure)
+        {
+            return new SqlOSTokenChallengeResult(options, "insufficient_scope", scopeFailure);
+        }
+
         httpContext.User = validated.Principal;
         httpContext.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = validated;
         return await next(context);
     }
 
     private static IResult Unauthorized(SqlOSAccessTokenValidationOptions options, string description)
-        => new SqlOSUnauthorizedTokenResult(options, description);
+        => new SqlOSTokenChallengeResult(options, "invalid_token", description);
 
-    private sealed class SqlOSUnauthorizedTokenResult : IResult
+    private sealed class SqlOSTokenChallengeResult : IResult
     {
         private readonly SqlOSAccessTokenValidationOptions _options;
+        private readonly string _error;
         private readonly string _description;
 
-        public SqlOSUnauthorizedTokenResult(SqlOSAccessTokenValidationOptions options, string description)
+        public SqlOSTokenChallengeResult(SqlOSAccessTokenValidationOptions options, string error, string description)
         {
             _options = options;
+            _error = error;
             _description = description;
         }
 
         public async Task ExecuteAsync(HttpContext httpContext)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            // RFC 6750 §3.1: invalid_token answers 401; insufficient_scope answers 403.
+            httpContext.Response.StatusCode = string.Equals(_error, "insufficient_scope", StringComparison.Ordinal)
+                ? StatusCodes.Status403Forbidden
+                : StatusCodes.Status401Unauthorized;
             httpContext.Response.Headers.WWWAuthenticate = BuildChallenge();
             await httpContext.Response.WriteAsJsonAsync(new
             {
-                error = "invalid_token",
+                error = _error,
                 error_description = _description
             });
         }
@@ -1050,9 +1060,14 @@ internal static class SqlOSAccessTokenEndpointFilter
             var parts = new List<string>
             {
                 $"Bearer realm=\"{EscapeHeaderValue(_options.Realm)}\"",
-                "error=\"invalid_token\"",
+                $"error=\"{_error}\"",
                 $"error_description=\"{EscapeHeaderValue(_description)}\""
             };
+
+            if (string.Equals(_error, "insufficient_scope", StringComparison.Ordinal) && _options.RequiredScopes.Count > 0)
+            {
+                parts.Add($"scope=\"{EscapeHeaderValue(string.Join(' ', _options.RequiredScopes))}\"");
+            }
 
             if (!string.IsNullOrWhiteSpace(_options.ResourceMetadataUrl))
             {

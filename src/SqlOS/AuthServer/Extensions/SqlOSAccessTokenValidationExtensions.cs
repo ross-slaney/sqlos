@@ -72,6 +72,47 @@ public static class SqlOSAccessTokenValidationExtensions
     }
 }
 
+/// <summary>
+/// Shared scope-requirement evaluation for the validation middleware and the route-group
+/// filter: the token's granted scope (the client application's delegation ceiling) must
+/// include every required scope. Per-user, per-resource authorization remains with FGA.
+/// </summary>
+internal static class SqlOSScopeRequirementPolicy
+{
+    internal static IReadOnlyCollection<string> Normalize(IReadOnlyCollection<string>? requiredScopes)
+        => requiredScopes is null || requiredScopes.Count == 0
+            ? []
+            : requiredScopes
+                .Select(scope => scope?.Trim() ?? string.Empty)
+                .Where(scope => scope.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+    /// <summary>
+    /// Returns a failure description when the granted scope does not satisfy the
+    /// requirement, or null when it does. A token without a scope claim fails closed:
+    /// its grant is unknown, and enforcement must not assume the widest one.
+    /// </summary>
+    internal static string? DescribeUnsatisfied(IReadOnlyCollection<string> requiredScopes, string? grantedScope)
+    {
+        if (requiredScopes.Count == 0)
+        {
+            return null;
+        }
+
+        if (grantedScope is null)
+        {
+            return "The access token carries no granted scope, and this resource requires one.";
+        }
+
+        var granted = grantedScope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var missing = requiredScopes.Where(scope => !granted.Contains(scope, StringComparer.Ordinal)).ToArray();
+        return missing.Length == 0
+            ? null
+            : $"The access token's granted scope does not include: {string.Join(' ', missing)}.";
+    }
+}
+
 public sealed class SqlOSAccessTokenValidationMiddleware
 {
     private readonly RequestDelegate _next;
@@ -120,6 +161,12 @@ public sealed class SqlOSAccessTokenValidationMiddleware
             return;
         }
 
+        if (SqlOSScopeRequirementPolicy.DescribeUnsatisfied(_options.RequiredScopes, validated.Scope) is { } scopeFailure)
+        {
+            await WriteInsufficientScopeAsync(context, scopeFailure);
+            return;
+        }
+
         context.User = validated.Principal;
         context.Items[SqlOSAccessTokenValidationExtensions.ValidatedTokenItemKey] = validated;
 
@@ -136,6 +183,7 @@ public sealed class SqlOSAccessTokenValidationMiddleware
         }
 
         options.ExpectedAudience = options.ExpectedAudience.Trim();
+        options.RequiredScopes = SqlOSScopeRequirementPolicy.Normalize(options.RequiredScopes);
         options.Realm = string.IsNullOrWhiteSpace(options.Realm) ? "SqlOS API" : options.Realm.Trim();
         options.ResourceMetadataUrl = string.IsNullOrWhiteSpace(options.ResourceMetadataUrl)
             ? null
@@ -147,7 +195,7 @@ public sealed class SqlOSAccessTokenValidationMiddleware
     private async Task WriteUnauthorizedAsync(HttpContext context, string description)
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        context.Response.Headers.WWWAuthenticate = BuildChallenge(description);
+        context.Response.Headers.WWWAuthenticate = BuildChallenge("invalid_token", description);
         await context.Response.WriteAsJsonAsync(new
         {
             error = "invalid_token",
@@ -155,14 +203,32 @@ public sealed class SqlOSAccessTokenValidationMiddleware
         });
     }
 
-    private string BuildChallenge(string description)
+    // RFC 6750 §3.1: a token that is valid but lacks the required scope answers 403
+    // with an insufficient_scope challenge naming the scope the resource requires.
+    private async Task WriteInsufficientScopeAsync(HttpContext context, string description)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.Headers.WWWAuthenticate = BuildChallenge("insufficient_scope", description);
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "insufficient_scope",
+            error_description = description
+        });
+    }
+
+    private string BuildChallenge(string error, string description)
     {
         var parts = new List<string>
         {
             $"Bearer realm=\"{EscapeHeaderValue(_options.Realm)}\"",
-            "error=\"invalid_token\"",
+            $"error=\"{error}\"",
             $"error_description=\"{EscapeHeaderValue(description)}\""
         };
+
+        if (string.Equals(error, "insufficient_scope", StringComparison.Ordinal) && _options.RequiredScopes.Count > 0)
+        {
+            parts.Add($"scope=\"{EscapeHeaderValue(string.Join(' ', _options.RequiredScopes))}\"");
+        }
 
         if (!string.IsNullOrWhiteSpace(_options.ResourceMetadataUrl))
         {

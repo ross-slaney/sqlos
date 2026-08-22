@@ -131,16 +131,19 @@ public sealed class HostedAuthorizeTokenIntegrationTests
     }
 
     [TestMethod]
-    public async Task HostedAuthorizeToToken_UserAccessToken_DoesNotIncludeScopeClaim()
+    public async Task HostedAuthorizeToToken_UserAccessToken_CarriesGrantedScopeClaim()
     {
         await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync();
         await fixture.SetClientAllowedScopesAsync("openid", "profile", "email");
         using var tokens = await fixture.AuthorizeLoginAndExchangeAsync("openid profile email");
 
+        // The granted scope rides in the access token (RFC 9068 shape) so resource
+        // servers can enforce the client's delegation ceiling via RequiredScopes.
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
             tokens.RootElement.GetProperty("access_token").GetString());
-        jwt.Claims.Should().NotContain(claim => claim.Type == "scope");
-        jwt.Payload.ContainsKey("scope").Should().BeFalse();
+        jwt.Payload["scope"].Should().Be("openid profile email");
+        jwt.Payload["scope"].Should().Be(tokens.RootElement.GetProperty("scope").GetString(),
+            "the claim must record exactly the granted scope the token response echoes");
     }
 
     [TestMethod]

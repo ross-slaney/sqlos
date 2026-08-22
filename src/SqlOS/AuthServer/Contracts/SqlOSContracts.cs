@@ -102,7 +102,8 @@ public sealed record SqlOSValidatedToken(
     string? UserId,
     string? OrganizationId,
     string? ClientId,
-    string? Audience);
+    string? Audience,
+    string? Scope = null);
 
 public sealed record SqlOSSignupRequest(
     string DisplayName,

@@ -526,6 +526,17 @@ public sealed class SqlOSCryptoService
             payload["org_id"] = organizationId;
         }
 
+        // The granted scope is the ceiling of what the client application may do with
+        // this delegation (RFC 9068 §2.2.3 shape); resource servers may enforce it via
+        // RequiredScopes. A null session scope (pre-scope-tracking sessions, direct
+        // logins) omits the claim — mirroring the token response, which omits the
+        // scope field rather than fabricating a grant. An empty grant is a real
+        // deny-all string and is still emitted.
+        if (session.Scope is not null)
+        {
+            payload["scope"] = session.Scope;
+        }
+
         var header = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
@@ -831,7 +842,8 @@ public sealed class SqlOSCryptoService
                     null,
                     principal.FindFirstValue("org_id"),
                     serviceClientId,
-                    principal.FindFirstValue("aud"));
+                    principal.FindFirstValue("aud"),
+                    principal.FindFirstValue("scope"));
             }
 
             var now = DateTime.UtcNow;
@@ -940,7 +952,8 @@ public sealed class SqlOSCryptoService
                 userId,
                 organizationId,
                 principal.FindFirstValue("client_id"),
-                principal.FindFirstValue("aud"));
+                principal.FindFirstValue("aud"),
+                principal.FindFirstValue("scope"));
         }
         catch
         {
