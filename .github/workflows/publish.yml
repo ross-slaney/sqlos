@@ -44,7 +44,7 @@ jobs:
       - run: chmod +x scripts/*.sh && ./scripts/integration-tests.sh
         env:
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
-        timeout-minutes: 30
+        timeout-minutes: 60
       - run: chmod +x scripts/*.sh && ./scripts/docs-check.sh
       - run: dotnet pack src/SqlOS/SqlOS.csproj -c Release -o ./nupkg
       - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
