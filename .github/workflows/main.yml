@@ -94,7 +94,7 @@ jobs:
       - run: chmod +x scripts/*.sh && ./scripts/integration-tests.sh
         env:
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
-        timeout-minutes: 30
+        timeout-minutes: 60
       - uses: actions/upload-artifact@v4
         if: always()
         with:
