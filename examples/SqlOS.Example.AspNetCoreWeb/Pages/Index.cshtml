@@ -27,8 +27,9 @@
                 <p class="eyebrow">One .NET login, end to end</p>
                 <h1>Hosted SqlOS auth.<br />Native ASP.NET Core session.</h1>
                 <p class="lede">
-                    The built-in OAuth handler owns PKCE and state. SqlOS owns sign-in.
-                    A secure ASP.NET cookie owns the application session.
+                    The built-in OpenID Connect handler owns discovery, PKCE, and ID token
+                    validation. SqlOS owns sign-in. A secure ASP.NET cookie owns the
+                    application session.
                 </p>
             </div>
 
@@ -59,8 +60,8 @@
                     <p class="card-label">Application session</p>
                     <h2>@(User.Identity?.Name ?? "Signed-in user")</h2>
                     <dl>
-                        <div><dt>Email</dt><dd>@(User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "—")</dd></div>
-                        <div><dt>User ID</dt><dd>@(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "—")</dd></div>
+                        <div><dt>Email</dt><dd>@(User.FindFirst("email")?.Value ?? "—")</dd></div>
+                        <div><dt>User ID</dt><dd>@(User.FindFirst("sub")?.Value ?? "—")</dd></div>
                         <div><dt>Organization</dt><dd>@(User.FindFirst("org_id")?.Value ?? "No organization selected")</dd></div>
                         <div><dt>Client</dt><dd>@(User.FindFirst("client_id")?.Value ?? "example-aspnet")</dd></div>
                         <div><dt>Token expires</dt><dd>@(Model.TokenExpiresAt ?? "—")</dd></div>
@@ -85,7 +86,7 @@
                 <article>
                     <span>1</span>
                     <h2>Challenge</h2>
-                    <p>ASP.NET Core creates state, a correlation cookie, and a PKCE verifier.</p>
+                    <p>ASP.NET Core reads OIDC discovery, then creates state, a nonce, a correlation cookie, and a PKCE verifier.</p>
                 </article>
                 <article>
                     <span>2</span>
@@ -95,14 +96,14 @@
                 <article>
                     <span>3</span>
                     <h2>Secure session</h2>
-                    <p>The callback exchanges the code, loads <code>/api/me</code>, and signs in the cookie.</p>
+                    <p>The callback exchanges the code, validates the ID token, loads UserInfo claims, and signs in the cookie.</p>
                 </article>
             </section>
         }
 
         <footer>
             <span>No JavaScript auth SDK. No hosted identity vendor.</span>
-            <span>Razor Pages · OAuth 2.0 + PKCE · SQL Server</span>
+            <span>Razor Pages · OpenID Connect code + PKCE · SQL Server</span>
         </footer>
     </main>
 </body>

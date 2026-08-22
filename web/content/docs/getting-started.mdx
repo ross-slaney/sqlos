@@ -60,7 +60,7 @@ builder.AddSqlOS<AppDbContext>(
     });
 ```
 
-`UseSingleApplication` creates one first-party PKCE client, a callback at `{Origin}/auth/callback`, a default client allowlist (`openid`, `profile`, `email`, `offline_access`), and matching AuthPage branding. Those reserved names stay on the client for gateway compatibility; authorization-server metadata does not advertise them because SqlOS does not yet issue OpenID tokens. Advanced public-client registration and resource indicators remain off until you opt in.
+`UseSingleApplication` creates one first-party PKCE client, a callback at `{Origin}/auth/callback`, a default client allowlist (`openid`, `profile`, `email`, `offline_access`), and matching AuthPage branding. With [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), authorization-server metadata advertises `openid`, `profile`, and `email`; `offline_access` stays on the client only for gateway compatibility and is not advertised, because SqlOS issues refresh tokens to code-flow clients without gating them on that scope. Advanced public-client registration and resource indicators remain off until you opt in.
 
 <Callout type="warning" title="Configuration is explicit">
   `AddSqlOS` does not automatically bind an `SqlOS` configuration section. Read values from `builder.Configuration`, your secret store, or environment variables and assign them in the options callback as shown above.

@@ -809,6 +809,17 @@ public sealed class SqlOSAuthService
         // balancer, with no in-process coordination required.
         var accessToken = await _cryptoService.CreateAccessTokenAsync(session.User!, session, session.ClientApplication!, organizationId, cancellationToken);
         var accessTokenExpiresAt = DateTime.UtcNow.Add(_options.AccessTokenLifetime);
+        // OIDC refresh responses MAY include a fresh ID token; the nonce is only
+        // ever bound to the original authorization request, never a refresh.
+        var refreshIdToken = await MintIdTokenIfGrantedAsync(
+            session.User!,
+            session,
+            session.ClientApplication!,
+            organizationId,
+            session.Scope,
+            accessToken,
+            nonce: null,
+            cancellationToken);
 
         var newRawRefreshToken = _cryptoService.GenerateOpaqueToken();
         var nextRefreshToken = new SqlOSRefreshToken
@@ -825,7 +836,7 @@ public sealed class SqlOSAuthService
         if (securitySettings.RefreshTokenGraceWindow > TimeSpan.Zero)
         {
             var replacementResponse = JsonSerializer.Serialize(
-                new RefreshTokenReplacementPayload(accessToken, newRawRefreshToken));
+                new RefreshTokenReplacementPayload(accessToken, newRawRefreshToken, refreshIdToken));
             protectedReplacementResponse = _cryptoService.ProtectRefreshTokenResponse(
                 replacementResponse,
                 securitySettings.RefreshTokenGraceWindow);
@@ -906,7 +917,8 @@ public sealed class SqlOSAuthService
             session.ClientApplication!.ClientId,
             organizationId,
             accessTokenExpiresAt,
-            nextRefreshToken.ExpiresAt), session.Scope);
+            nextRefreshToken.ExpiresAt,
+            refreshIdToken), session.Scope);
     }
 
     /// <summary>
@@ -1029,7 +1041,8 @@ public sealed class SqlOSAuthService
                     session.ClientApplication!.ClientId,
                     cachedOrganizationId,
                     refreshToken.ReplacementAccessTokenExpiresAt!.Value,
-                    replacement.ExpiresAt);
+                    replacement.ExpiresAt,
+                    cachedResponse.IdToken);
             }
         }
 
@@ -2332,10 +2345,6 @@ public sealed class SqlOSAuthService
         SqlOSResolvedSecuritySettings securitySettings,
         CancellationToken cancellationToken)
     {
-        // The nonce is intentionally unused until OpenID Provider mode mints ID
-        // tokens; accepting it here keeps every grant's call chain stable when
-        // that lands.
-        _ = nonce;
         organizationId = string.IsNullOrWhiteSpace(organizationId) ? null : organizationId.Trim();
         var issuanceDecision = await _mfaPolicyService.EvaluateForIssuanceAsync(
             user.Id,
@@ -2396,6 +2405,15 @@ public sealed class SqlOSAuthService
         await _context.SaveChangesAsync(cancellationToken);
 
         var accessToken = await _cryptoService.CreateAccessTokenAsync(user, session, client, organizationId, cancellationToken);
+        var idToken = await MintIdTokenIfGrantedAsync(
+            user,
+            session,
+            client,
+            organizationId,
+            scope,
+            accessToken,
+            nonce,
+            cancellationToken);
         return new SqlOSTokenResponse(
             accessToken,
             rawRefreshToken,
@@ -2403,7 +2421,45 @@ public sealed class SqlOSAuthService
             client.ClientId,
             organizationId,
             DateTime.UtcNow.Add(_options.AccessTokenLifetime),
-            refreshToken.ExpiresAt);
+            refreshToken.ExpiresAt,
+            idToken);
+    }
+
+    /// <summary>
+    /// Mints an ID token when OpenID Provider mode is enabled and the granted scope
+    /// includes <c>openid</c>. Returns null otherwise — client-credentials and
+    /// OAuth-only grants never receive one.
+    /// </summary>
+    private async Task<string?> MintIdTokenIfGrantedAsync(
+        SqlOSUser user,
+        SqlOSSession session,
+        SqlOSClientApplication client,
+        string? organizationId,
+        string? scope,
+        string accessToken,
+        string? nonce,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.OpenIdProvider.Enabled)
+        {
+            return null;
+        }
+
+        var grantedScopes = SqlOSScopePolicy.Split(scope);
+        if (!grantedScopes.Contains(SqlOSOpenIdScopeWarnings.OpenIdScope, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        return await _cryptoService.CreateIdTokenAsync(
+            user,
+            session,
+            client,
+            organizationId,
+            grantedScopes,
+            accessToken,
+            nonce,
+            cancellationToken);
     }
 
     private async Task RequireActiveLifecycleAsync(
@@ -3154,7 +3210,8 @@ public sealed class SqlOSAuthService
 
     private sealed record PendingAuthPayload(string ClientId, string AuthenticationMethod);
     private sealed record AuthCodePayload(string ClientId, string RedirectUri, string AuthenticationMethod);
-    private sealed record RefreshTokenReplacementPayload(string AccessToken, string RefreshToken);
+    // IdToken defaults so replacement payloads cached before OP mode deserialize cleanly.
+    private sealed record RefreshTokenReplacementPayload(string AccessToken, string RefreshToken, string? IdToken = null);
     private sealed record PasswordResetPayload(string EmailId, string NormalizedEmail);
     private sealed record PasswordResetRequestPayload(
         string NormalizedEmail,

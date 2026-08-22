@@ -68,6 +68,8 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         Machines = scope.ServiceProvider.GetRequiredService<SqlOSMachineClientAdminService>();
         ClientCredentials = scope.ServiceProvider.GetRequiredService<SqlOSClientCredentialsService>();
         Crypto = scope.ServiceProvider.GetRequiredService<SqlOSCryptoService>();
+        Authorization = scope.ServiceProvider.GetRequiredService<SqlOSAuthorizationServerService>();
+        Auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
     }
 
     public HttpClient Client { get; }
@@ -81,6 +83,8 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public SqlOSMachineClientAdminService Machines { get; }
     public SqlOSClientCredentialsService ClientCredentials { get; }
     public SqlOSCryptoService Crypto { get; }
+    public SqlOSAuthorizationServerService Authorization { get; }
+    public SqlOSAuthService Auth { get; }
 
     public static async Task<ControlPlaneParityHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
     {

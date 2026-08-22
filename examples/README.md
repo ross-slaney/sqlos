@@ -69,7 +69,7 @@ It does **not** start the Expo app or Todo CLI. Those are separate clients that 
 | --- | --- | --- | --- |
 | [`SqlOS.Example.AppHost`](SqlOS.Example.AppHost/README.md) | You | Aspire dashboard on HTTPS port `18888` | Full local orchestration, SQL resources, configuration forwarding |
 | [`SqlOS.Example.Api`](SqlOS.Example.Api/README.md) | Full AppHost | `http://localhost:5062` | Embedding SqlOS in ASP.NET Core, AuthServer, dashboard, MFA, SSO helpers, FGA, protected APIs |
-| [`SqlOS.Example.AspNetCoreWeb`](SqlOS.Example.AspNetCoreWeb/README.md) | Both AppHosts | `http://localhost:5090` | Built-in ASP.NET Core OAuth handler, PKCE, cookie session, and a Todo-resource API call |
+| [`SqlOS.Example.AspNetCoreWeb`](SqlOS.Example.AspNetCoreWeb/README.md) | Both AppHosts | `http://localhost:5090` | Built-in ASP.NET Core OpenID Connect handler, PKCE, ID token + UserInfo claims, cookie session, and a Todo-resource API call |
 | [`SqlOS.Example.Web`](SqlOS.Example.Web/README.md) | Full AppHost | `http://localhost:3010` under Aspire; `3000` standalone | Next.js, hosted and headless auth, NextAuth, MFA, SSO portal, retail FGA UI |
 | [`SqlOS.Example.AngularWeb`](SqlOS.Example.AngularWeb/README.md) | Full AppHost | `http://localhost:4200` | Angular, hosted and headless auth, browser PKCE, retail FGA UI |
 | [`SqlOS.Example.ExpoApp`](SqlOS.Example.ExpoApp/README.md) | You, separately | Simulator/device | Expo Router, native OAuth callback, SecureStore, protected retail UI |

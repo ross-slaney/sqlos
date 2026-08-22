@@ -779,6 +779,10 @@
             badges.push(renderClientBadge("Empty allowlist", "warning"));
         }
 
+        if (client.oidcCapable) {
+            badges.push(renderClientBadge("OIDC capable", "success"));
+        }
+
         if (client.omittedOpenIdWarning) {
             badges.push(renderClientBadge("No openid", "warning"));
         }
@@ -3310,7 +3314,7 @@
                             <button type="submit">Create manual client</button>
                         </form>
                         ${!String(draft.allowedScopes || "").trim() ? `<div class="callout" data-empty-allowlist-warning="empty_allowlist"><strong>Empty allowlist grants nothing.</strong> First-party and headless apps that send scope on /authorize need those values on the client. An empty list is not a wildcard.</div>` : ""}
-                        ${draftOmitsOpenId(draft) ? `<div class="callout" data-omitted-openid-warning="missing_allowlisted_openid"><strong>Allowlist omits openid.</strong> SqlOS does not issue an id_token yet. When OpenID Provider mode ships, this client cannot receive one until openid is allowlisted.</div>` : ""}
+                        ${draftOmitsOpenId(draft) ? `<div class="callout" data-omitted-openid-warning="missing_allowlisted_openid"><strong>Allowlist omits openid.</strong> This client cannot receive an ID token until openid is on its allowlist.</div>` : ""}
                         <div class="callout">
                             <strong>This form creates manual client records.</strong>
                             <div>Use owned templates for first-party apps you control. Use portable or compatibility templates for manual local testing of third-party-style clients.</div>
@@ -3386,6 +3390,17 @@
                                     {
                                         label: "Allowed scopes",
                                         value: clientDetail.allowedScopes.length ? clientDetail.allowedScopes.join(", ") : "none (deny-all)"
+                                    },
+                                    {
+                                        label: "OIDC capable",
+                                        value: clientDetail.oidcCapable ? "Yes" : "No"
+                                    },
+                                    {
+                                        label: "OIDC discovery",
+                                        value: clientDetail.oidcDiscoveryUrl || "",
+                                        html: clientDetail.oidcDiscoveryUrl
+                                            ? `<span class="inline-code">${esc(clientDetail.oidcDiscoveryUrl)}</span>`
+                                            : null
                                     }
                                 ])}
                                 <div>

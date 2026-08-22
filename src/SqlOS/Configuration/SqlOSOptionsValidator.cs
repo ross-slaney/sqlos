@@ -119,6 +119,7 @@ internal static class SqlOSOptionsValidator
         ValidateAccessTokenValidationOptions(options.AuthServer, errors);
         ValidateClientRegistrationOptions(options.AuthServer, errors);
         ValidateSigningKeyOptions(options.AuthServer, errors);
+        ValidateOpenIdProviderOptions(options.AuthServer, errors);
 
         if (errors.Count > 0)
         {
@@ -216,6 +217,18 @@ internal static class SqlOSOptionsValidator
         if (options.Totp.FailedAttemptWindow <= TimeSpan.Zero)
         {
             errors.Add("AuthServer.Mfa.Totp.FailedAttemptWindow must be greater than zero.");
+        }
+    }
+
+    private static void ValidateOpenIdProviderOptions(SqlOSAuthServerOptions options, List<string> errors)
+    {
+        if (options.OpenIdProvider.IdTokenLifetime <= TimeSpan.Zero)
+        {
+            errors.Add("AuthServer.OpenIdProvider.IdTokenLifetime must be positive.");
+        }
+        else if (options.OpenIdProvider.IdTokenLifetime > TimeSpan.FromDays(options.DefaultSigningKeyGraceWindowDays))
+        {
+            errors.Add("AuthServer.OpenIdProvider.IdTokenLifetime must not exceed the DefaultSigningKeyGraceWindowDays JWKS grace window, or unexpired ID tokens would outlive their published validation key after rotation.");
         }
     }
 

@@ -103,9 +103,9 @@ public sealed class AspNetCoreWebSessionTests
         var principal = new ClaimsPrincipal(
             new ClaimsIdentity(
                 [
-                    new Claim(ClaimTypes.NameIdentifier, "usr_test"),
+                    new Claim("sub", "usr_test"),
                     new Claim("client_id", "custom-client"),
-                    new Claim("session_id", "ses_test")
+                    new Claim("sid", "ses_test")
                 ],
                 CookieAuthenticationDefaults.AuthenticationScheme));
         var properties = new AuthenticationProperties();

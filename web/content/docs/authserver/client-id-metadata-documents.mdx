@@ -71,7 +71,7 @@ SqlOS also:
 - uses a fallback TTL when needed
 - records fetch and validation failures in audit events
 
-`openid` in a CIMD document is an ordinary allow-listed string. It does not mint an `id_token`.
+`openid` in a CIMD document is an ordinary allow-listed string, and the document's `scope` behaves like any other allowlist: with [OpenID Provider mode](/docs/authserver/openid-provider) enabled (the default), declaring `openid` there makes the client OIDC-capable, and a grant that includes `openid` receives an `id_token`.
 
 ## Trust policy
 

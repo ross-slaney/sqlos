@@ -13,6 +13,7 @@ This reference covers the advanced multi-application topology. Use [Single-Appli
 | --- | --- | --- |
 | Auth host | ASP.NET app that runs `AddSqlOS` and `MapSqlOS` | [Getting Started](/docs/getting-started) |
 | Client application | OAuth client representing one app surface | [Clients](/docs/authserver/clients) |
+| OpenID Provider | OIDC discovery, ID tokens, and UserInfo served to downstream apps | [OpenID Provider](/docs/authserver/openid-provider) |
 | Audience | Resource/API identifier placed in access tokens | [Token Validation](/docs/authserver/token-validation) |
 | Application access | Policy for who may use a client application | [Application Access](/docs/authserver/application-access) |
 | Headless auth | App-owned UI with SqlOS-owned protocol state | [Headless Auth](/docs/authserver/headless-auth) |
@@ -75,6 +76,8 @@ auth.SeedCliClient(
     "email",
     "offline_access");
 ```
+
+A standalone host is also the deployment where [OpenID Provider mode](/docs/authserver/openid-provider) earns its keep: every downstream app can consume `/.well-known/openid-configuration`, receive an ID token when its grant includes `openid`, and read claims from `/userinfo` — including third-party relying parties that only speak standard OIDC. The CLI seed above already allowlists `openid profile email offline_access`, so device-flow grants that request `openid` receive ID tokens too. Give the browser client seeds an explicit `AllowedScopes` the same way when their apps should be OIDC clients.
 
 ## Application access modes
 

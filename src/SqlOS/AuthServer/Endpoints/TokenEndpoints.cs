@@ -84,14 +84,20 @@ public static partial class EndpointRouteBuilderExtensions
                         context,
                         cancellationToken);
 
-                    return Results.Ok(new
+                    var deviceResponse = new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
-                        access_token = deviceResult.Tokens.AccessToken,
-                        refresh_token = deviceResult.Tokens.RefreshToken,
-                        token_type = "Bearer",
-                        expires_in = Math.Max(1, (int)(deviceResult.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
-                        scope = deviceResult.Scope ?? string.Empty
-                    });
+                        ["access_token"] = deviceResult.Tokens.AccessToken,
+                        ["refresh_token"] = deviceResult.Tokens.RefreshToken,
+                        ["token_type"] = "Bearer",
+                        ["expires_in"] = Math.Max(1, (int)(deviceResult.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
+                        ["scope"] = deviceResult.Scope ?? string.Empty
+                    };
+                    if (!string.IsNullOrEmpty(deviceResult.Tokens.IdToken))
+                    {
+                        deviceResponse["id_token"] = deviceResult.Tokens.IdToken;
+                    }
+
+                    return Results.Ok(deviceResponse);
                 }
 
                 if (!string.Equals(grantType, SqlOSOAuthGrantTypes.AuthorizationCode, StringComparison.Ordinal)
@@ -124,25 +130,26 @@ public static partial class EndpointRouteBuilderExtensions
                 // RFC 6749 §5.1: a null scope means "unknown" (legacy sessions on the
                 // refresh grant), so the field is omitted instead of claiming an empty
                 // grant. An empty string is a real deny-all grant and is still echoed.
-                if (result.Scope is null)
+                // id_token appears only when OpenID Provider mode minted one for a
+                // granted openid scope — strict RP libraries reject "id_token": null.
+                var response = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    return Results.Ok(new
-                    {
-                        access_token = result.Tokens.AccessToken,
-                        refresh_token = result.Tokens.RefreshToken,
-                        token_type = "Bearer",
-                        expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds)
-                    });
+                    ["access_token"] = result.Tokens.AccessToken,
+                    ["refresh_token"] = result.Tokens.RefreshToken,
+                    ["token_type"] = "Bearer",
+                    ["expires_in"] = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds)
+                };
+                if (result.Scope != null)
+                {
+                    response["scope"] = result.Scope;
                 }
 
-                return Results.Ok(new
+                if (!string.IsNullOrEmpty(result.Tokens.IdToken))
                 {
-                    access_token = result.Tokens.AccessToken,
-                    refresh_token = result.Tokens.RefreshToken,
-                    token_type = "Bearer",
-                    expires_in = Math.Max(1, (int)(result.Tokens.AccessTokenExpiresAt - DateTime.UtcNow).TotalSeconds),
-                    scope = result.Scope
-                });
+                    response["id_token"] = result.Tokens.IdToken;
+                }
+
+                return Results.Ok(response);
             }
             catch (SqlOSDeviceAuthorizationException ex)
             {

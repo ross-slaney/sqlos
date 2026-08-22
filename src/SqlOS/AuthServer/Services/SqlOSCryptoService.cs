@@ -21,6 +21,11 @@ public sealed class SqlOSCryptoService
 {
     internal const string AccessTokenJwtType = "at+jwt";
 
+    // ID tokens are plain JWTs for the relying party's login ceremony. Access-token
+    // validation requires typ "at+jwt", so an ID token can never be replayed against
+    // a SqlOS-protected API.
+    internal const string IdTokenJwtType = "JWT";
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAuthServerOptions _options;
     private readonly SqlOSValidationSigningKeyCache _validationSigningKeyCache;
@@ -538,6 +543,125 @@ public sealed class SqlOSCryptoService
         return $"{signingInput}.{Base64UrlEncoder.Encode(signature)}";
     }
 
+    /// <summary>
+    /// Mints an OpenID Connect ID token for a session whose granted scope includes
+    /// <c>openid</c>. The audience is the client's <c>client_id</c> — deliberately not
+    /// the access-token audience logic, which targets resource servers. Claim release
+    /// follows the granted scope: <c>profile</c> gates <c>name</c>/<c>preferred_username</c>,
+    /// <c>email</c> gates <c>email</c>/<c>email_verified</c>.
+    /// </summary>
+    public async Task<string> CreateIdTokenAsync(
+        SqlOSUser user,
+        SqlOSSession session,
+        SqlOSClientApplication client,
+        string? organizationId,
+        IReadOnlyCollection<string> grantedScopes,
+        string accessToken,
+        string? nonce,
+        CancellationToken cancellationToken = default)
+    {
+        var key = await EnsureActiveSigningKeyCoreAsync(validateExistingCustody: false, cancellationToken);
+        var now = DateTime.UtcNow;
+        var authTime = session.AuthenticatedAt ?? session.CreatedAt;
+        var authenticationMethods = SqlOSMfaPolicyService
+            .SplitAuthenticationMethods(session.AuthenticationMethod ?? "password")
+            .ToArray();
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [JwtRegisteredClaimNames.Iss] = _options.Issuer,
+            [JwtRegisteredClaimNames.Sub] = user.Id,
+            [JwtRegisteredClaimNames.Aud] = client.ClientId,
+            [JwtRegisteredClaimNames.Iat] = EpochTime.GetIntDate(now),
+            [JwtRegisteredClaimNames.Exp] = EpochTime.GetIntDate(now.Add(_options.OpenIdProvider.IdTokenLifetime)),
+            ["auth_time"] = ToUtcEpochSeconds(authTime),
+            ["at_hash"] = ComputeAtHash(accessToken),
+            ["sid"] = session.Id,
+            ["amr"] = authenticationMethods
+        };
+
+        // OIDC Core §2: a nonce sent on the authorization request must be returned
+        // in the ID token unmodified — whitespace-only values included — so only
+        // null/empty counts as absent.
+        if (!string.IsNullOrEmpty(nonce))
+        {
+            payload[JwtRegisteredClaimNames.Nonce] = nonce;
+        }
+
+        if (grantedScopes.Contains("profile"))
+        {
+            if (!string.IsNullOrWhiteSpace(user.DisplayName))
+            {
+                payload["name"] = user.DisplayName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.DefaultEmail))
+            {
+                payload["preferred_username"] = user.DefaultEmail;
+            }
+        }
+
+        if (grantedScopes.Contains("email") && !string.IsNullOrWhiteSpace(user.DefaultEmail))
+        {
+            payload[JwtRegisteredClaimNames.Email] = user.DefaultEmail;
+            payload["email_verified"] = await IsDefaultEmailVerifiedAsync(user, cancellationToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(organizationId))
+        {
+            payload["org_id"] = organizationId;
+        }
+
+        var header = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [JwtHeaderParameterNames.Alg] = SecurityAlgorithms.RsaSha256,
+            [JwtHeaderParameterNames.Typ] = IdTokenJwtType,
+            [JwtHeaderParameterNames.Kid] = key.Kid
+        };
+        var encodedHeader = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(header));
+        var encodedPayload = Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(payload));
+        var signingInput = $"{encodedHeader}.{encodedPayload}";
+        var signature = await _signingKeyCustody.SignAsync(
+            ToDescriptor(key),
+            Encoding.ASCII.GetBytes(signingInput),
+            cancellationToken);
+        VerifySignature(key, Encoding.ASCII.GetBytes(signingInput), signature);
+        return $"{signingInput}.{Base64UrlEncoder.Encode(signature)}";
+    }
+
+    /// <summary>
+    /// SqlOS stores timestamps as UTC, but values reloaded from SQL come back with
+    /// <see cref="DateTimeKind.Unspecified"/>, which <see cref="EpochTime.GetIntDate"/>
+    /// would convert as local time and shift by the host offset. Stamp the UTC kind
+    /// before converting to epoch seconds.
+    /// </summary>
+    internal static long ToUtcEpochSeconds(DateTime value)
+        => EpochTime.GetIntDate(
+            value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+    /// <summary>
+    /// OIDC Core §3.1.3.6: base64url of the left half of the SHA-256 hash of the
+    /// ASCII access token (RS256 uses SHA-256).
+    /// </summary>
+    private static string ComputeAtHash(string accessToken)
+    {
+        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(accessToken));
+        return Base64UrlEncoder.Encode(hash[..(hash.Length / 2)]);
+    }
+
+    internal async Task<bool> IsDefaultEmailVerifiedAsync(SqlOSUser user, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(user.DefaultEmail))
+        {
+            return false;
+        }
+
+        return await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .Where(x => x.UserId == user.Id && x.Email == user.DefaultEmail)
+            .Select(x => x.IsVerified)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<string> CreateServiceAccessTokenAsync(
         string subjectId,
         SqlOSClientApplication client,
@@ -597,6 +721,19 @@ public sealed class SqlOSCryptoService
     }
 
     internal async Task<SqlOSValidatedToken?> ValidateAccessTokenWithoutAudienceForIntrospectionOnlyAsync(
+        string rawToken,
+        CancellationToken cancellationToken = default)
+        => await ValidateAccessTokenCoreAsync(rawToken, expectedAudience: null, validateAudience: false, cancellationToken);
+
+    /// <summary>
+    /// Validates a bearer token presented to the OpenID Provider's UserInfo endpoint.
+    /// UserInfo releases identity claims about the session's user, not resource-API
+    /// data, so the token's resource audience is deliberately not enforced; issuer,
+    /// signature, lifetime, session revocation/expiry, and user/org lifecycle all
+    /// are (via the shared validation core). Do not use this for protecting APIs —
+    /// audience binding is mandatory there.
+    /// </summary>
+    internal async Task<SqlOSValidatedToken?> ValidateAccessTokenForUserInfoAsync(
         string rawToken,
         CancellationToken cancellationToken = default)
         => await ValidateAccessTokenCoreAsync(rawToken, expectedAudience: null, validateAudience: false, cancellationToken);
