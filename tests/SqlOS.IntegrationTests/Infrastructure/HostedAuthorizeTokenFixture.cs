@@ -108,17 +108,21 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         bool omitState = false,
         string? clientId = null,
         string? redirectUri = null,
-        string? prompt = null)
+        string? prompt = null,
+        bool usePost = false)
     {
         var codeVerifier = CreateCodeVerifier();
-        var authorizeUrl = BuildAuthorizeUrl(scope, state, nonce, prompt, maxAge: null, codeVerifier, omitState, clientId, redirectUri);
+        var parameters = BuildAuthorizeParameters(scope, state, nonce, prompt, maxAge: null, codeVerifier, omitState, clientId, redirectUri);
 
-        using var authorize = await Client.GetAsync(authorizeUrl);
+        using var authorize = usePost
+            ? await Client.PostAsync("/sqlos/auth/authorize", new FormUrlEncodedContent(
+                parameters.Where(x => x.Value != null).Select(x => new KeyValuePair<string, string>(x.Key, x.Value!))))
+            : await Client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", parameters));
         var html = await authorize.Content.ReadAsStringAsync();
         if (authorize.StatusCode != HttpStatusCode.OK)
         {
             throw new InvalidOperationException(
-                $"GET /authorize returned {(int)authorize.StatusCode}: {html}");
+                $"{(usePost ? "POST" : "GET")} /authorize returned {(int)authorize.StatusCode}: {html}");
         }
 
         return new HostedAuthorizeStart(
@@ -126,6 +130,34 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             codeVerifier,
             ExtractInputValue(html, "__RequestVerificationToken"),
             ExtractCookie(authorize, "sqlos_auth_page_csrf_"));
+    }
+
+    /// <summary>
+    /// Sends an authorize request via GET (query) or POST (form) with arbitrary
+    /// extra parameters (e.g. <c>request</c>, <c>request_uri</c>, <c>prompt</c>)
+    /// and returns the raw response for status/redirect assertions.
+    /// </summary>
+    public async Task<HostedSessionAuthorize> AuthorizeRawAsync(
+        HttpMethod method,
+        string scope,
+        string? state = null,
+        IDictionary<string, string>? extraParameters = null)
+    {
+        var codeVerifier = CreateCodeVerifier();
+        var parameters = BuildAuthorizeParameters(scope, state, nonce: null, prompt: null, maxAge: null, codeVerifier, omitState: false, clientId: null, redirectUri: null);
+        if (extraParameters != null)
+        {
+            foreach (var (key, value) in extraParameters)
+            {
+                parameters[key] = value;
+            }
+        }
+
+        var response = method == HttpMethod.Post
+            ? await Client.PostAsync("/sqlos/auth/authorize", new FormUrlEncodedContent(
+                parameters.Where(x => x.Value != null).Select(x => new KeyValuePair<string, string>(x.Key, x.Value!))))
+            : await Client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", parameters));
+        return new HostedSessionAuthorize(response, codeVerifier);
     }
 
     public async Task<string> SubmitPasswordLoginAsync(HostedAuthorizeStart started)
@@ -152,13 +184,10 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         login.Headers.TryAddWithoutValidation("Origin", TrustedOrigin);
         using var response = await Client.SendAsync(login);
         var body = await response.Content.ReadAsStringAsync();
-        if (response.StatusCode != HttpStatusCode.Redirect || response.Headers.Location is null)
-        {
-            throw new InvalidOperationException(
+        var location = TryReadClientRedirect(response, body)
+            ?? throw new InvalidOperationException(
                 $"Password login did not redirect with an authorization code. Status {(int)response.StatusCode}: {body}");
-        }
 
-        var location = response.Headers.Location;
         var query = QueryHelpers.ParseQuery(location.IsAbsoluteUri ? location.Query : location.OriginalString);
         var code = query["code"].ToString();
         if (string.IsNullOrWhiteSpace(code))
@@ -204,6 +233,20 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         bool omitState = false,
         string? clientId = null,
         string? redirectUri = null)
+        => QueryHelpers.AddQueryString(
+            "/sqlos/auth/authorize",
+            BuildAuthorizeParameters(scope, state, nonce, prompt, maxAge, codeVerifier, omitState, clientId, redirectUri));
+
+    private static Dictionary<string, string?> BuildAuthorizeParameters(
+        string scope,
+        string? state,
+        string? nonce,
+        string? prompt,
+        string? maxAge,
+        string codeVerifier,
+        bool omitState = false,
+        string? clientId = null,
+        string? redirectUri = null)
     {
         var query = new Dictionary<string, string?>
         {
@@ -234,7 +277,7 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
             query["max_age"] = maxAge;
         }
 
-        return QueryHelpers.AddQueryString("/sqlos/auth/authorize", query);
+        return query;
     }
 
     /// <summary>
@@ -273,8 +316,50 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
     }
 
     /// <summary>
+    /// Resolves the client redirect a browser would follow from a hosted-form response.
+    /// Hosted POST completions do not 302 straight to the relying party — browsers
+    /// enforce the page CSP's <c>form-action 'self'</c> against a form submission's
+    /// redirect target, so the server answers 200 with a same-origin meta-refresh
+    /// interstitial. This reads that target, while still accepting a plain 302 for
+    /// GET-navigation completions. Returns null when the response carries neither.
+    /// </summary>
+    public static Uri? TryReadClientRedirect(HttpResponseMessage response, string body)
+    {
+        if (response.StatusCode == HttpStatusCode.Redirect && response.Headers.Location is not null)
+        {
+            return response.Headers.Location;
+        }
+
+        if (response.StatusCode == HttpStatusCode.OK)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                body,
+                "http-equiv=\"refresh\" content=\"0;url=([^\"]+)\"");
+            if (match.Success)
+            {
+                return new Uri(WebUtility.HtmlDecode(match.Groups[1].Value), UriKind.RelativeOrAbsolute);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Throwing form of <see cref="TryReadClientRedirect"/> for callers that require the
+    /// redirect to exist.
+    /// </summary>
+    public static async Task<Uri> ReadClientRedirectAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        return TryReadClientRedirect(response, body)
+            ?? throw new InvalidOperationException(
+                $"Response did not carry a client redirect. Status {(int)response.StatusCode}: {body}");
+    }
+
+    /// <summary>
     /// Posts the hosted consent approve or deny form and returns the raw response so callers
-    /// can assert the code redirect (approve) or the access_denied error redirect (deny).
+    /// can assert the code redirect (approve) or the access_denied error redirect (deny),
+    /// resolving either via <see cref="TryReadClientRedirect"/>.
     /// </summary>
     public async Task<HttpResponseMessage> SubmitConsentDecisionAsync(HostedConsentPage page, bool approve)
     {
@@ -315,6 +400,38 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         {
             throw new InvalidOperationException(
                 $"POST /token code grant returned {(int)response.StatusCode}: {body}");
+        }
+
+        return JsonDocument.Parse(body);
+    }
+
+    /// <summary>
+    /// Exchanges a code authenticating with client_secret_post: client_id and
+    /// client_secret ride in the POST body, no Authorization header.
+    /// </summary>
+    public async Task<JsonDocument> ExchangeAuthorizationCodeWithBodySecretAsync(
+        string code,
+        string codeVerifier,
+        string clientId,
+        string clientSecret,
+        string? redirectUri = null)
+    {
+        using var response = await Client.PostAsync(
+            "/sqlos/auth/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = clientId,
+                ["client_secret"] = clientSecret,
+                ["redirect_uri"] = redirectUri ?? RedirectUri,
+                ["code_verifier"] = codeVerifier
+            }));
+        var body = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            throw new InvalidOperationException(
+                $"POST /token code grant with body secret returned {(int)response.StatusCode}: {body}");
         }
 
         return JsonDocument.Parse(body);

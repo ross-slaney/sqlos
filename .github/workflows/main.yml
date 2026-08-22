@@ -126,3 +126,79 @@ jobs:
         with:
           name: coverage-reports
           path: TestResults/**
+
+  conformance:
+    name: OIDC Conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      # The OIDF suite has no official image; the harness builds it from source
+      # at a pinned tag. Cache the clone (with its maven target) and ~/.m2 keyed
+      # by the harness script, which pins SUITE_TAG — bumping the tag invalidates.
+      - name: Cache conformance suite build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/oidf-conformance-suite
+            ~/.m2
+          key: ${{ runner.os }}-oidf-suite-${{ hashFiles('tests/SqlOS.Conformance/run-conformance.sh') }}
+      - name: Run OIDCC certification plans
+        env:
+          SUITE_DIR: ${{ runner.temp }}/oidf-conformance-suite
+        run: chmod +x tests/SqlOS.Conformance/run-conformance.sh && ./tests/SqlOS.Conformance/run-conformance.sh
+      - name: Upload conformance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-results
+          path: |
+            tests/SqlOS.Conformance/export
+            tests/SqlOS.Conformance/logs
+
+  e2e:
+    name: Sign in with X E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: examples/SqlOS.SignInWithX.AppY/package-lock.json
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      - run: npm ci --prefix examples/SqlOS.SignInWithX.AppY
+      - run: docker pull mcr.microsoft.com/mssql/server:2022-latest
+        continue-on-error: true
+      - run: dotnet build examples/SqlOS.SignInWithX.E2eTests --configuration Release
+      - name: Install Playwright Chromium
+        run: pwsh examples/SqlOS.SignInWithX.E2eTests/bin/Release/net9.0/playwright.ps1 install --with-deps chromium
+      - run: dotnet test examples/SqlOS.SignInWithX.E2eTests --configuration Release --no-build --logger "console;verbosity=normal"
+        env:
+          ASPIRE_ALLOW_UNSECURED_TRANSPORT: "true"
+      - name: Upload e2e failure screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-screenshots
+          path: examples/SqlOS.SignInWithX.E2eTests/bin/Release/net9.0/TestResults/**

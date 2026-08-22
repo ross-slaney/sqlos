@@ -745,6 +745,14 @@ public sealed record SqlOSAuthorizationServerMetadataDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? ResponseModesSupported { get; init; }
 
+    [JsonPropertyName("request_parameter_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequestParameterSupported { get; init; }
+
+    [JsonPropertyName("request_uri_parameter_supported")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? RequestUriParameterSupported { get; init; }
+
     [JsonPropertyName("grant_types_supported")]
     public required string[] GrantTypesSupported { get; init; }
 

@@ -324,7 +324,7 @@ public static partial class EndpointRouteBuilderExtensions
                             cancellationToken);
                     }
 
-                    return Results.Redirect(completion.RedirectUrl!);
+                    return ClientRedirect(completion.RedirectUrl!);
                 }
 
                 return Html(await BuildAuthPageViewModelAsync(
@@ -757,7 +757,7 @@ public static partial class EndpointRouteBuilderExtensions
                         invitationService: invitationService);
                 }
 
-                return Results.Redirect(completion.RedirectUrl!);
+                return ClientRedirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {

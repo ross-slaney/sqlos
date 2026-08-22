@@ -1,0 +1,23 @@
+[
+  {
+    "test-name": "oidcc-scope-address",
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json"
+  },
+  {
+    "test-name": "oidcc-scope-phone",
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json"
+  },
+  {
+    "test-name": "oidcc-scope-all",
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json"
+  },
+  {
+    "test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json",
+    "comment": "SqlOS does not support request objects and advertises request_parameter_supported=false / request_uri_parameter_supported=false; the module verifies the advertisement and skips, which is the spec-correct outcome for an OP without JAR support."
+  }
+]

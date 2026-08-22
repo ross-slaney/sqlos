@@ -87,7 +87,8 @@ public sealed class OpenIdProviderIntegrationTests
         jwt.Payload["at_hash"].Should().Be(ComputeAtHash(accessToken));
         jwt.Payload.ContainsKey("auth_time").Should().BeTrue();
         jwt.Payload.ContainsKey("amr").Should().BeTrue();
-        jwt.Payload["email"].Should().Be(fixture.Email);
+        // Profile/email claims live in UserInfo, not the ID token (OIDC Core §5.4).
+        jwt.Payload.ContainsKey("email").Should().BeFalse();
         jwt.Subject.Should().Be(fixture.UserId);
     }
 

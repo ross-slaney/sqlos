@@ -109,8 +109,16 @@ public sealed class SqlOSClientAuthenticationService
                 .OrderBy(x => x.CreatedAt)
                 .Take(MaximumActiveCredentials + 1)
                 .ToListAsync(cancellationToken);
-        var candidateSecret = presented.BasicSecret is { Length: >= 43 and <= 256 }
-            ? presented.BasicSecret
+        // RFC 6749 §2.3.1: the registered token-endpoint auth method decides which
+        // transport carries the secret. Both transports feed the same credential
+        // hash comparison below — there is exactly one verification path.
+        var usesBodySecretAuth = string.Equals(
+            client?.TokenEndpointAuthMethod,
+            "client_secret_post",
+            StringComparison.Ordinal);
+        var presentedSecret = usesBodySecretAuth ? presented.BodySecret : presented.BasicSecret;
+        var candidateSecret = presentedSecret is { Length: >= 43 and <= 256 }
+            ? presentedSecret
             : string.Empty;
         SqlOSClientCredential? matchedCredential = null;
         if (credentials.Count == 0)
@@ -132,15 +140,24 @@ public sealed class SqlOSClientAuthenticationService
             && client.IsActive
             && client.DisabledAt == null
             && string.Equals(client.ClientType, "confidential", StringComparison.Ordinal)
-            && string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
             && presented.IsUnambiguous
-            && presented.HasBasicCredentials
-            && presented.BasicSecret is { Length: >= 43 and <= 256 }
-            && !presented.HasBodySecret
-            && (string.IsNullOrWhiteSpace(presented.BodyClientId)
-                || string.Equals(presented.BodyClientId, presented.BasicClientId, StringComparison.Ordinal))
             && credentials.Count <= MaximumActiveCredentials
-            && matchedCredential != null;
+            && matchedCredential != null
+            && (usesBodySecretAuth
+                // client_secret_post: client_id + client_secret in the body only.
+                // A Basic header (even a matching one) is a method violation.
+                ? presented.HasBodySecret
+                    && presented.BodySecret is { Length: >= 43 and <= 256 }
+                    && !presented.HasAuthorizationHeader
+                    && !string.IsNullOrWhiteSpace(presented.BodyClientId)
+                // client_secret_basic keeps today's exact behavior, including
+                // rejecting any body secret.
+                : string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
+                    && presented.HasBasicCredentials
+                    && presented.BasicSecret is { Length: >= 43 and <= 256 }
+                    && !presented.HasBodySecret
+                    && (string.IsNullOrWhiteSpace(presented.BodyClientId)
+                        || string.Equals(presented.BodyClientId, presented.BasicClientId, StringComparison.Ordinal)));
         if (!valid)
         {
             await AuditAsync("oauth.client_authentication.failed", candidateClientId, httpContext, cancellationToken);
@@ -247,10 +264,10 @@ public sealed class SqlOSClientAuthenticationService
         var client = await RequireClientAsync(clientApplicationId, cancellationToken);
         await AcquireCredentialCreationLockAsync(client.Id, cancellationToken);
         SqlOSConfigurationOwnershipPolicy.EnsureDashboardEditable(client.ConfigurationOwner, $"OAuth client '{client.ClientId}'");
-        if (!string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal)
+        if (client.TokenEndpointAuthMethod is not ("client_secret_basic" or "client_secret_post")
             || !string.Equals(client.ClientType, "confidential", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Client credentials can only be issued to confidential clients using client_secret_basic.");
+            throw new InvalidOperationException("Client credentials can only be issued to confidential clients using client_secret_basic or client_secret_post.");
         }
 
         var existing = await _context.Set<SqlOSClientCredential>()
@@ -436,7 +453,8 @@ public sealed class SqlOSClientAuthenticationService
 
         return new PresentedCredentials(
             bodyClientIds.Count == 1 ? bodyClientIds.ToString() : null,
-            bodySecrets.Count == 1,
+            bodySecrets.Count > 0,
+            bodySecrets.Count == 1 ? bodySecrets.ToString() : null,
             basicClientId,
             basicSecret,
             hasAuthorizationHeader,
@@ -468,6 +486,7 @@ public sealed class SqlOSClientAuthenticationService
     private sealed record PresentedCredentials(
         string? BodyClientId,
         bool HasBodySecret,
+        string? BodySecret,
         string? BasicClientId,
         string? BasicSecret,
         bool HasAuthorizationHeader,

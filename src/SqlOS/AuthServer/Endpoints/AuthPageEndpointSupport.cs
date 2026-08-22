@@ -249,8 +249,35 @@ public static partial class EndpointRouteBuilderExtensions
                 organizationSelection: completion.Organizations));
         }
 
-        return Results.Redirect(completion.RedirectUrl
+        return ClientRedirect(completion.RedirectUrl
             ?? throw new InvalidOperationException("Authorization completion did not produce a redirect."));
+    }
+
+    /// <summary>
+    /// Delivers the final redirect to the client's redirect URI from a hosted-form POST.
+    /// A plain 302 cannot be used here: Chromium and WebKit enforce the page CSP's
+    /// <c>form-action 'self'</c> against the redirect target of a form submission, so a
+    /// POST response that 302s to a cross-origin relying party is silently aborted by the
+    /// browser (the flow completes server-side while the page sits on its loading state).
+    /// A same-origin interstitial with an instant meta refresh starts a fresh GET
+    /// navigation, which <c>form-action</c> does not govern, without loosening the CSP.
+    /// </summary>
+    private static IResult ClientRedirect(string redirectUrl)
+    {
+        var encoded = WebUtility.HtmlEncode(redirectUrl);
+        return HostedHtml($"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta http-equiv="refresh" content="0;url={encoded}" />
+              <title>Continuing…</title>
+            </head>
+            <body>
+              <p>Returning to the application… <a href="{encoded}">Continue</a></p>
+            </body>
+            </html>
+            """);
     }
 
     private static async Task<SqlOSAuthPageViewModel> BuildAuthPageViewModelAsync(

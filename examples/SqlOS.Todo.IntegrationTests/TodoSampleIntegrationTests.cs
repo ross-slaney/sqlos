@@ -111,9 +111,7 @@ public sealed class TodoSampleIntegrationTests
                 ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
             }));
 
-        signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        signupResponse.Headers.Location.Should().NotBeNull();
-        var callback = signupResponse.Headers.Location!;
+        var callback = await ReadClientRedirectAsync(signupResponse);
         var callbackQuery = QueryHelpers.ParseQuery(callback.Query);
         callbackQuery["state"].ToString().Should().Be(protectedState);
         var code = callbackQuery["code"].ToString();
@@ -225,8 +223,7 @@ public sealed class TodoSampleIntegrationTests
             ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
-        verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var location = verifyResponse.Headers.Location!.ToString();
+        var location = (await ReadClientRedirectAsync(verifyResponse)).ToString();
         var authCode = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
         authCode.Should().NotBeNullOrWhiteSpace();
 
@@ -293,8 +290,7 @@ public sealed class TodoSampleIntegrationTests
             ["__RequestVerificationToken"] = authorize.AntiforgeryToken!
         }));
 
-        verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var location = verifyResponse.Headers.Location!.ToString();
+        var location = (await ReadClientRedirectAsync(verifyResponse)).ToString();
         var authCode = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
         authCode.Should().NotBeNullOrWhiteSpace();
 
@@ -776,12 +772,31 @@ public sealed class TodoSampleIntegrationTests
         // Non-first-party clients render the consent view before the first code.
         signupResponse = await ApproveHostedConsentIfPromptedAsync(client, signupResponse);
 
-        signupResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var location = signupResponse.Headers.Location!.ToString();
+        var location = (await ReadClientRedirectAsync(signupResponse)).ToString();
         var code = QueryHelpers.ParseQuery(new Uri(location).Query)["code"].ToString();
         code.Should().NotBeNullOrWhiteSpace();
 
         return new HostedSignupResult(code, authorize.CodeVerifier);
+    }
+
+    /// <summary>
+    /// Resolves the client redirect a browser would follow from a hosted-form POST.
+    /// Hosted POST completions answer 200 with a same-origin meta-refresh interstitial
+    /// rather than a direct 302 (browsers enforce the page CSP's form-action 'self'
+    /// against a form submission's redirect target); GET navigations still 302.
+    /// </summary>
+    private static async Task<Uri> ReadClientRedirectAsync(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.Redirect && response.Headers.Location is not null)
+        {
+            return response.Headers.Location;
+        }
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var html = await response.Content.ReadAsStringAsync();
+        var match = Regex.Match(html, "http-equiv=\"refresh\" content=\"0;url=([^\"]+)\"");
+        match.Success.Should().BeTrue("hosted POST completions deliver the client redirect via the meta-refresh interstitial");
+        return new Uri(WebUtility.HtmlDecode(match.Groups[1].Value), UriKind.RelativeOrAbsolute);
     }
 
     private static async Task<HttpResponseMessage> ApproveHostedConsentIfPromptedAsync(

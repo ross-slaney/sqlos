@@ -41,8 +41,7 @@ public sealed class HostedConsentIntegrationTests
         consentPage.ConsentToken.Should().NotBeNullOrWhiteSpace();
 
         using var approved = await fixture.SubmitConsentDecisionAsync(consentPage, approve: true);
-        approved.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var location = approved.Headers.Location!;
+        var location = await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(approved);
         location.AbsoluteUri.Should().StartWith(ThirdPartyRedirect);
         var query = QueryHelpers.ParseQuery(location.Query);
         var code = query["code"].ToString();
@@ -113,8 +112,7 @@ public sealed class HostedConsentIntegrationTests
 
         using var denied = await fixture.SubmitConsentDecisionAsync(consentPage, approve: false);
 
-        denied.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var location = denied.Headers.Location!;
+        var location = await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(denied);
         location.AbsoluteUri.Should().StartWith(ThirdPartyRedirect);
         var query = QueryHelpers.ParseQuery(location.Query);
         query["error"].ToString().Should().Be("access_denied");
@@ -223,8 +221,7 @@ public sealed class HostedConsentIntegrationTests
             redirectUri: ThirdPartyRedirect);
         var consentPage = await fixture.SubmitPasswordLoginExpectingConsentAsync(thirdPartyStart);
         using var approved = await fixture.SubmitConsentDecisionAsync(consentPage, approve: true);
-        approved.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var thirdPartyCode = QueryHelpers.ParseQuery(approved.Headers.Location!.Query)["code"].ToString();
+        var thirdPartyCode = QueryHelpers.ParseQuery((await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(approved)).Query)["code"].ToString();
         using var thirdPartyTokens = await fixture.ExchangeAuthorizationCodeAsync(
             thirdPartyCode,
             thirdPartyStart.CodeVerifier,
@@ -325,8 +322,7 @@ public sealed class HostedConsentIntegrationTests
             redirectUri: ThirdPartyRedirect);
         var consentPage = await fixture.SubmitPasswordLoginExpectingConsentAsync(started);
         using var approved = await fixture.SubmitConsentDecisionAsync(consentPage, approve: true);
-        approved.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        QueryHelpers.ParseQuery(approved.Headers.Location!.Query)["code"].ToString()
+        QueryHelpers.ParseQuery((await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(approved)).Query)["code"].ToString()
             .Should().NotBeNullOrWhiteSpace();
         return HostedAuthorizeTokenFixture.TryExtractCookie(approved, "sqlos_auth_page=")
             ?? throw new InvalidOperationException("Consent approval did not establish an auth-page session.");

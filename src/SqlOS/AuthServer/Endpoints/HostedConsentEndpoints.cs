@@ -76,7 +76,9 @@ public static partial class EndpointRouteBuilderExtensions
                     authorizationRequest.Id,
                     context,
                     cancellationToken);
-                return Results.Redirect(errorRedirect);
+                // Same CSP constraint as ClientRedirect: a POSTed deny cannot 302
+                // cross-origin to the relying party's error redirect.
+                return ClientRedirect(errorRedirect);
             }
             catch (InvalidOperationException ex)
             {

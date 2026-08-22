@@ -1,0 +1,102 @@
+{
+  "alias": "sqlos",
+  "description": "SqlOS example OP (App X) - OIDCC basic certification",
+  "server": {
+    "discoveryUrl": "https://sqlos-op/sqlos/auth/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "conformance-client-one",
+    "client_secret": "conformance-local-secret-0123456789abcdef0123456789abcdef"
+  },
+  "client2": {
+    "client_id": "conformance-client-two",
+    "client_secret": "conformance-local-secret-0123456789abcdef0123456789abcdef"
+  },
+  "client_secret_post": {
+    "client_id": "conformance-client-post",
+    "client_secret": "conformance-local-secret-0123456789abcdef0123456789abcdef"
+  },
+  "browser": [
+    {
+      "match": "https://sqlos-op/sqlos/auth/authorize*",
+      "tasks": [
+        {
+          "task": "Login - identify",
+          "optional": true,
+          "match": "https://sqlos-op/sqlos/auth/authorize*",
+          "commands": [
+            [
+              "wait",
+              "xpath",
+              "//form[.//input[@name='requestId']] | //div[contains(@class,'callout') and contains(@class,'error')]",
+              10,
+              ".*",
+              "update-image-placeholder-optional"
+            ],
+            [
+              "text",
+              "xpath",
+              "//form[.//input[@name='requestId']]//input[@name='email']",
+              "conformance-user@x.test",
+              "optional"
+            ],
+            [
+              "click",
+              "xpath",
+              "//form[.//input[@name='requestId']]//button[@type='submit']",
+              "optional"
+            ]
+          ]
+        },
+        {
+          "task": "Login - password",
+          "optional": true,
+          "match": "https://sqlos-op/sqlos/auth/login/identify*",
+          "commands": [
+            [
+              "text",
+              "xpath",
+              "//form[.//input[@name='requestId']]//input[@name='password']",
+              "Conformance123!",
+              "optional"
+            ],
+            [
+              "click",
+              "xpath",
+              "//form[.//input[@name='requestId']]//button[@type='submit']",
+              "optional"
+            ]
+          ]
+        },
+        {
+          "task": "Error page screenshot",
+          "optional": true,
+          "match": "https://sqlos-op/sqlos/auth/authorize*",
+          "commands": [
+            [
+              "wait",
+              "xpath",
+              "//div[contains(@class,'callout') and contains(@class,'error')]",
+              2,
+              ".+",
+              "update-image-placeholder-optional"
+            ]
+          ]
+        },
+        {
+          "task": "Verify Complete",
+          "optional": true,
+          "match": "https://localhost.emobix.co.uk:8443/test/a/sqlos/callback*",
+          "commands": [
+            [
+              "wait",
+              "id",
+              "submission_complete",
+              10
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -19,7 +19,15 @@ export const authOptions: AuthOptions = {
       // token_endpoint_auth_method "none", so there is no client secret.
       client: { token_endpoint_auth_method: "none" },
       authorization: { params: { scope: "openid profile email" } },
+      // idToken: true keeps openid-client's full OIDC callback (ID-token
+      // signature/iss/aud validation); the custom userinfo request sources
+      // profile claims from UserInfo, where OIDC Core §5.4 releases them.
       idToken: true,
+      userinfo: {
+        async request({ client, tokens }) {
+          return await client.userinfo(tokens);
+        }
+      },
       checks: ["pkce", "state"],
       profile(profile) {
         return {

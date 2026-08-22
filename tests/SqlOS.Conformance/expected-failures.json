@@ -1,0 +1,47 @@
+[
+  {
+    "test-name": "oidcc-discovery-endpoint-verification",
+    "variant": "*",
+    "configuration-filename": "*sqlos-config.json",
+    "current-block": "",
+    "condition": "CheckForUnexpectedParametersInServerMetadata",
+    "expected-result": "warning",
+    "comment": "SqlOS advertises the non-registered metadata field 'resource_parameter_supported' (RFC 8707 resource indicators support has no registered discovery field by that name). Suppressed as a known warning until the field is renamed/removed or reported to OIDF as an extension."
+  },
+  {
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json",
+    "current-block": "*",
+    "expected-result": "warning",
+    "test-name": "oidcc-ensure-request-with-acr-values-succeeds",
+    "condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
+    "comment": "SHOULD-level: SqlOS has no ACR concept, so requested acr_values yield no acr claim. Documented; candidate follow-up alongside per-application claim policies (issue #121)."
+  },
+  {
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json",
+    "current-block": "*",
+    "expected-result": "warning",
+    "test-name": "oidcc-codereuse-30seconds",
+    "condition": "EnsureHttpStatusCodeIs4xx",
+    "comment": "SHOULD-level (RFC 6749 4.1.2): tokens issued from a code replayed after 30s are not proactively revoked. Authlete's certified deployment carries the same expected warning. Roadmap: revoke the session minted from a replayed code."
+  },
+  {
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json",
+    "current-block": "*",
+    "expected-result": "warning",
+    "test-name": "oidcc-claims-essential",
+    "condition": "EnsureUserInfoContainsName",
+    "comment": "The OIDC 'claims' request parameter is not supported (tracked as issue #121); an essential 'name' claim requested without the profile scope is therefore not released."
+  },
+  {
+    "variant": "*",
+    "configuration-filename": "*sqlos-basic.json",
+    "current-block": "*",
+    "expected-result": "warning",
+    "test-name": "oidcc-scope-profile",
+    "condition": "VerifyScopesReturnedInUserInfoClaims",
+    "comment": "SqlOS's user model stores name/preferred_username/updated_at but not the remaining optional profile claims (given_name, family_name, picture, ...); issue #121 adds richer claim storage/release."
+  }
+]

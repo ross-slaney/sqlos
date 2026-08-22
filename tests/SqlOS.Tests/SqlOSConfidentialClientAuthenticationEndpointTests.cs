@@ -25,9 +25,11 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
 {
     private const string ConfidentialA = "confidential-a";
     private const string ConfidentialB = "confidential-b";
+    private const string ConfidentialPost = "confidential-post";
     private const string PublicClient = "public-client";
     private const string SecretA = "confidential-a-secret-with-at-least-256-bits-of-entropy-123";
     private const string SecretB = "confidential-b-secret-with-at-least-256-bits-of-entropy-456";
+    private const string SecretPost = "confidential-post-secret-with-at-least-256-bits-entropy-789";
     private const string RotatedSecretA = "confidential-a-rotated-secret-with-at-least-256-bits-789";
     private const string RedirectUri = "https://client.example.test/callback";
     private const string Verifier = "pkce-verifier-with-at-least-forty-three-characters-123456";
@@ -235,6 +237,71 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
         (await harness.IsAuthorizationCodeConsumedAsync(disabledCode)).Should().BeFalse();
     }
 
+    [TestMethod]
+    public async Task ClientSecretPost_AuthenticatesWithBodySecret()
+    {
+        await using var harness = await Harness.StartAsync();
+        var code = await harness.CreateAuthorizationCodeAsync(ConfidentialPost);
+        var form = AuthorizationCodeForm(code, ConfidentialPost).ToList();
+        form.Add(new KeyValuePair<string, string>("client_secret", SecretPost));
+
+        var accepted = await harness.PostTokenAsync(form);
+
+        accepted.StatusCode.Should().Be(HttpStatusCode.OK, await accepted.Content.ReadAsStringAsync());
+        (await harness.IsAuthorizationCodeConsumedAsync(code)).Should().BeTrue();
+        var auditJson = await harness.GetClientAuthenticationAuditJsonAsync();
+        auditJson.Should().NotContain(SecretPost);
+    }
+
+    [TestMethod]
+    public async Task ClientSecretPost_RejectsBasicAuthentication()
+    {
+        await using var harness = await Harness.StartAsync();
+        var code = await harness.CreateAuthorizationCodeAsync(ConfidentialPost);
+
+        // Correct secret over the wrong transport: the registered method is
+        // client_secret_post, so HTTP Basic must be rejected.
+        var rejected = await harness.PostTokenAsync(
+            AuthorizationCodeForm(code, ConfidentialPost),
+            ConfidentialPost,
+            SecretPost);
+
+        await AssertGenericInvalidClientAsync(rejected);
+        (await harness.IsAuthorizationCodeConsumedAsync(code)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ClientSecretPost_WrongBodySecret_IsRejected()
+    {
+        await using var harness = await Harness.StartAsync();
+        var code = await harness.CreateAuthorizationCodeAsync(ConfidentialPost);
+        var form = AuthorizationCodeForm(code, ConfidentialPost).ToList();
+        form.Add(new KeyValuePair<string, string>(
+            "client_secret",
+            "wrong-secret-with-at-least-forty-three-characters-123456"));
+
+        var rejected = await harness.PostTokenAsync(form);
+
+        await AssertGenericInvalidClientAsync(rejected);
+        (await harness.IsAuthorizationCodeConsumedAsync(code)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ClientSecretBasicClient_StillRejectsBodySecret()
+    {
+        await using var harness = await Harness.StartAsync();
+        var code = await harness.CreateAuthorizationCodeAsync(ConfidentialA);
+        var form = AuthorizationCodeForm(code, ConfidentialA).ToList();
+        form.Add(new KeyValuePair<string, string>("client_secret", SecretA));
+
+        // A basic-registered client presenting its (correct) secret in the body
+        // keeps today's rejection: the transport must match the registration.
+        var rejected = await harness.PostTokenAsync(form);
+
+        await AssertGenericInvalidClientAsync(rejected);
+        (await harness.IsAuthorizationCodeConsumedAsync(code)).Should().BeFalse();
+    }
+
     private static IEnumerable<KeyValuePair<string, string>> AuthorizationCodeForm(string code, string clientId)
         =>
         [
@@ -265,8 +332,10 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
         json.RootElement.GetProperty("error_description").GetString().Should().Be("Client authentication failed.");
         body.Should().NotContain(ConfidentialA);
         body.Should().NotContain(ConfidentialB);
+        body.Should().NotContain(ConfidentialPost);
         body.Should().NotContain(SecretA);
         body.Should().NotContain(SecretB);
+        body.Should().NotContain(SecretPost);
     }
 
     private static async Task AssertGenericInvalidGrantAsync(HttpResponseMessage response)
@@ -314,6 +383,7 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
                             sqlos.AuthServer.BasePath = "/sqlos/auth";
                             AddClientSeed(sqlos.AuthServer.ClientSeeds, ConfidentialA, "Confidential A", SecretA, "confidential");
                             AddClientSeed(sqlos.AuthServer.ClientSeeds, ConfidentialB, "Confidential B", SecretB, "confidential");
+                            AddClientSeed(sqlos.AuthServer.ClientSeeds, ConfidentialPost, "Confidential Post", SecretPost, "confidential", "client_secret_post");
                             AddClientSeed(sqlos.AuthServer.ClientSeeds, PublicClient, "Public client", null, "public_pkce");
                         });
                         foreach (var hostedService in services
@@ -497,7 +567,8 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
             string clientId,
             string name,
             string? secret,
-            string clientType)
+            string clientType,
+            string? tokenEndpointAuthMethod = null)
         {
             seeds.Add(new()
             {
@@ -505,6 +576,7 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
                 Name = name,
                 Audience = "sqlos",
                 ClientType = clientType,
+                TokenEndpointAuthMethod = tokenEndpointAuthMethod,
                 RequirePkce = true,
                 RedirectUris = [RedirectUri],
                 AllowedScopes = ["openid", "offline_access"],
