@@ -52,6 +52,7 @@ pnpm-debug.log*
 
 ## Next.js
 .next/
+.next-*/
 out/
 .vercel
 

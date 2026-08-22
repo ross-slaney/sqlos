@@ -1,0 +1,66 @@
+# Compose file for running the OpenID Foundation conformance suite against the
+# SqlOS example OP (examples/SqlOS.SignInWithX.AppX). Mirrors the suite's own
+# docker-compose.yml (pinned tag; see README.md) with two additions:
+#
+#   * extra_hosts on the server so that
+#       - localhost.emobix.co.uk resolves to 127.0.0.1 WITHOUT public DNS.
+#         The suite's own `redir` process (started by
+#         --fintechlabs.startredir=true) forwards 127.0.0.1:8443 inside the
+#         server container to the nginx service, so the in-JVM automation
+#         browser can reach its own callback URL.
+#       - host.docker.internal resolves to the host gateway even on Linux
+#         (Docker Desktop on macOS resolves it natively). The SqlOS OP runs
+#         on the host at http://host.docker.internal:5102.
+#
+# The suite clone location is provided via SUITE_DIR (run-conformance.sh sets
+# it). The clone itself stays pristine at the pinned tag.
+services:
+  # https front for the SqlOS OP on the host: the OIDCC config plan requires
+  # all advertised endpoints to be https, so the OP's public origin is
+  # https://sqlos-op (this service, resolvable inside the compose network)
+  # proxying to App X on the host. Port 443 is also published to the host as
+  # ${OP_PROXY_HOST_PORT:-5443} for debugging.
+  sqlos-op:
+    build:
+      context: ./op-proxy
+    environment:
+      - APPX_UPSTREAM=host.docker.internal:${APPX_PORT:-5102}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${OP_PROXY_HOST_PORT:-5443}:443"
+  mongodb:
+    image: mongo:6.0.13
+    volumes:
+      - ${SUITE_DIR:?set SUITE_DIR to the conformance-suite clone}/mongo/data:/data/db
+  nginx:
+    build:
+      context: ${SUITE_DIR}/nginx
+    ports:
+      - "8443:8443"
+    depends_on:
+      - server
+  server:
+    build:
+      context: ${SUITE_DIR}/server-dev
+    volumes:
+      - ${SUITE_DIR}/target/:/server/
+    command: >
+      java
+      -jar /server/fapi-test-suite.jar
+      -Djdk.tls.maxHandshakeMessageSize=65536
+      --fintechlabs.base_url=https://localhost.emobix.co.uk:8443
+      --fintechlabs.devmode=true
+      --fintechlabs.startredir=true
+    extra_hosts:
+      - "localhost.emobix.co.uk:127.0.0.1"
+      - "host.docker.internal:host-gateway"
+    links:
+      - mongodb:mongodb
+    depends_on:
+      - mongodb
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500k"
+        max-file: "5"

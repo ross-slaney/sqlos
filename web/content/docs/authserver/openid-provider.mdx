@@ -55,8 +55,8 @@ ID tokens are RS256 JWTs signed by the same rotating keys as access tokens and v
 | `amr` | Always — authentication methods for the session |
 | `nonce` | The authorize request sent one (never on refresh-minted tokens) |
 | `org_id` | The session is organization-scoped |
-| `name`, `preferred_username` | Granted scope includes `profile` |
-| `email`, `email_verified` | Granted scope includes `email` |
+
+Scope-gated identity claims (`name`, `preferred_username`, `email`, `email_verified`) are deliberately **not** embedded in the ID token: in the authorization-code flow, OIDC Core §5.4 releases scope claims from the UserInfo endpoint, and the OpenID Foundation conformance suite warns when they appear in the ID token unrequested. Relying parties read them from UserInfo — most OIDC libraries (including the `AddOpenIdConnect` handler and Auth.js) do this automatically.
 
 ## UserInfo
 

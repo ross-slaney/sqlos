@@ -175,6 +175,55 @@ public sealed class SqlOSAuthorizationServerMetadataTests
     }
 
     [TestMethod]
+    public async Task GetMetadataAsync_AlwaysAdvertisesRequestObjectParametersAsUnsupported()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+
+        var metadata = await service.GetMetadataAsync(new DefaultHttpContext());
+        var json = JsonSerializer.Serialize(metadata);
+
+        // OIDC Discovery defaults request_uri_parameter_supported to TRUE when the
+        // field is absent, so both flags must be emitted explicitly as false.
+        json.Should().Contain("\"request_parameter_supported\":false");
+        json.Should().Contain("\"request_uri_parameter_supported\":false");
+    }
+
+    [TestMethod]
+    public async Task GetMetadataAsync_AdvertisesClientSecretPostOnlyWhenSuchAClientExists()
+    {
+        using var context = CreateContext();
+        var optionsValue = new SqlOSAuthServerOptions
+        {
+            PublicOrigin = "https://app.example.com",
+            Issuer = "https://app.example.com/sqlos/auth"
+        };
+        var service = await CreateAuthorizationServerServiceAsync(context, optionsValue);
+        var before = await service.GetMetadataAsync(new DefaultHttpContext());
+        before.TokenEndpointAuthMethodsSupported.Should().NotContain("client_secret_post");
+
+        context.Set<SqlOS.AuthServer.Models.SqlOSClientApplication>().Add(new()
+        {
+            Id = "post-app",
+            ClientId = "post-client",
+            Name = "Post Client",
+            ClientType = "confidential",
+            TokenEndpointAuthMethod = "client_secret_post",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        var after = await service.GetMetadataAsync(new DefaultHttpContext());
+        after.TokenEndpointAuthMethodsSupported.Should().Equal("none", "client_secret_post");
+    }
+
+    [TestMethod]
     public async Task GetMetadataAsync_ZeroClients_AdvertisesStableOpenIdProviderDocument()
     {
         using var context = CreateContext();
@@ -193,7 +242,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
 
         var json = JsonSerializer.Serialize(metadata);
         json.Should().Be(
-            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":["email","openid","profile"],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true,"userinfo_endpoint":"https://app.example.com/sqlos/auth/userinfo","subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],"claims_supported":["sub","name","preferred_username","email","email_verified","auth_time","amr","org_id"]}""");
+            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"request_parameter_supported":false,"request_uri_parameter_supported":false,"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":["email","openid","profile"],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true,"userinfo_endpoint":"https://app.example.com/sqlos/auth/userinfo","subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],"claims_supported":["sub","name","preferred_username","email","email_verified","auth_time","amr","org_id"]}""");
     }
 
     [TestMethod]
@@ -216,7 +265,7 @@ public sealed class SqlOSAuthorizationServerMetadataTests
 
         var json = JsonSerializer.Serialize(metadata);
         json.Should().Be(
-            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":[],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true}""");
+            """{"issuer":"https://app.example.com/sqlos/auth","authorization_endpoint":"https://app.example.com/sqlos/auth/authorize","token_endpoint":"https://app.example.com/sqlos/auth/token","device_authorization_endpoint":"https://app.example.com/sqlos/auth/device_authorization","jwks_uri":"https://app.example.com/sqlos/auth/.well-known/jwks.json","response_types_supported":["code"],"response_modes_supported":["query"],"request_parameter_supported":false,"request_uri_parameter_supported":false,"grant_types_supported":["authorization_code","refresh_token","urn:ietf:params:oauth:grant-type:device_code"],"code_challenge_methods_supported":["S256"],"scopes_supported":[],"token_endpoint_auth_methods_supported":["none"],"resource_parameter_supported":true}""");
     }
 
     [TestMethod]

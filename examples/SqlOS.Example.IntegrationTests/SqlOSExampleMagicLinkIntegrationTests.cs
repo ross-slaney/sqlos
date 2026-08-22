@@ -117,9 +117,17 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
             ["token"] = token,
             ["__RequestVerificationToken"] = antiforgeryToken
         }));
-        complete.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        // Hosted-form POST completions answer 200 with a same-origin meta-refresh
+        // interstitial rather than a direct 302 (browsers enforce the page CSP's
+        // form-action 'self' against a form submission's redirect target), so read
+        // the client redirect the way a browser would.
+        complete.StatusCode.Should().Be(HttpStatusCode.OK);
+        var interstitial = await complete.Content.ReadAsStringAsync();
+        var clientRedirect = WebUtility.HtmlDecode(
+            Regex.Match(interstitial, "http-equiv=\"refresh\" content=\"0;url=([^\"]+)\"").Groups[1].Value);
+        clientRedirect.Should().NotBeNullOrWhiteSpace();
 
-        using var tokenJson = await ExchangeAuthCodeAsync(client, complete.Headers.Location!.ToString(), verifier);
+        using var tokenJson = await ExchangeAuthCodeAsync(client, clientRedirect, verifier);
         await AssertMagicLinkSessionAsync(client, tokenJson, organizationId);
     }
 

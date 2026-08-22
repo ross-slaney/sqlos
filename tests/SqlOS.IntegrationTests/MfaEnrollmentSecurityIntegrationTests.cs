@@ -511,7 +511,7 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
                 ["code"] = code
             },
             antiforgery);
-        accepted.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        (await HostedAuthorizeTokenFixture.ReadClientRedirectAsync(accepted)).Should().NotBeNull();
         await AssertAuthorizationCodeOnlyForAsync(server, requestA, requestB);
     }
 

@@ -1,0 +1,16 @@
+# APPX_UPSTREAM is substituted by the stock nginx image's envsubst template
+# mechanism (set in docker-compose.conformance.yml).
+server {
+    listen 443 ssl;
+    server_name sqlos-op;
+
+    ssl_certificate /etc/ssl/certs/op-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/op-selfsigned.key;
+
+    location / {
+        proxy_pass http://${APPX_UPSTREAM};
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}

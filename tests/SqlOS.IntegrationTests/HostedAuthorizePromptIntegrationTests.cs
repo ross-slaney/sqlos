@@ -249,6 +249,123 @@ public sealed class HostedAuthorizePromptIntegrationTests
         await replay.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [TestMethod]
+    public async Task PostAuthorize_WithFormParameters_RendersLoginPageAndCompletesFlow()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("AuthorizePost");
+        await fixture.SetClientAllowedScopesAsync("openid");
+
+        // OIDC Core 3.1.2.1: POST /authorize with the same form fields the GET
+        // flow sends via query must start the same hosted flow.
+        var started = await fixture.StartAuthorizeAsync("openid", usePost: true);
+        started.RequestId.Should().NotBeNullOrWhiteSpace();
+
+        var code = await fixture.SubmitPasswordLoginAsync(started);
+        using var tokens = await fixture.ExchangeAuthorizationCodeAsync(code, started.CodeVerifier);
+        tokens.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task PostAuthorize_PromptNoneWithoutSession_RedirectsLoginRequired()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("AuthorizePost");
+        await fixture.SetClientAllowedScopesAsync("openid");
+
+        using var denied = await fixture.AuthorizeRawAsync(
+            HttpMethod.Post,
+            "openid",
+            state: "post-none-state",
+            extraParameters: new Dictionary<string, string> { ["prompt"] = "none" });
+
+        denied.Response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var location = denied.Response.Headers.Location!;
+        location.AbsoluteUri.Should().StartWith(HostedAuthorizeTokenFixture.RedirectUri);
+        var query = QueryHelpers.ParseQuery(location.Query);
+        query["error"].ToString().Should().Be("login_required");
+        query["state"].ToString().Should().Be("post-none-state");
+    }
+
+    [TestMethod]
+    public async Task Authorize_WithRequestObject_RedirectsRequestNotSupportedEchoingOuterState()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("AuthorizePost");
+        await fixture.SetClientAllowedScopesAsync("openid");
+
+        // OIDC Core 6.1: an OP without request-object support must return
+        // request_not_supported. The outer state must be echoed even when the RP
+        // put its real state only inside the request object.
+        using var rejected = await fixture.AuthorizeRawAsync(
+            HttpMethod.Get,
+            "openid",
+            state: "outer-state",
+            extraParameters: new Dictionary<string, string>
+            {
+                ["request"] = "eyJhbGciOiJub25lIn0.eyJzdGF0ZSI6ImlubmVyLXN0YXRlIn0."
+            });
+
+        rejected.Response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var location = rejected.Response.Headers.Location!;
+        location.AbsoluteUri.Should().StartWith(HostedAuthorizeTokenFixture.RedirectUri);
+        var query = QueryHelpers.ParseQuery(location.Query);
+        query["error"].ToString().Should().Be("request_not_supported");
+        query["state"].ToString().Should().Be("outer-state");
+        query.ContainsKey("code").Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task Authorize_WithRequestUri_RedirectsRequestUriNotSupported()
+    {
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync("AuthorizePost");
+        await fixture.SetClientAllowedScopesAsync("openid");
+
+        using var rejected = await fixture.AuthorizeRawAsync(
+            HttpMethod.Post,
+            "openid",
+            state: "outer-state",
+            extraParameters: new Dictionary<string, string>
+            {
+                ["request_uri"] = "https://client.example.test/request.jwt"
+            });
+
+        rejected.Response.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var query = QueryHelpers.ParseQuery(rejected.Response.Headers.Location!.Query);
+        query["error"].ToString().Should().Be("request_uri_not_supported");
+        query["state"].ToString().Should().Be("outer-state");
+    }
+
+    [TestMethod]
+    public async Task ClientSecretPost_FullAuthorizeLoginExchange_SucceedsWithBodySecret()
+    {
+        const string postClientId = "hosted-post-client";
+        const string postSecret = "hosted-post-client-secret-with-256-bits-of-entropy-1234567";
+        await using var fixture = await HostedAuthorizeTokenFixture.CreateAsync(
+            "AuthorizePost",
+            options => options.AuthServer.SeedClient(client =>
+            {
+                client.ClientId = postClientId;
+                client.Name = "Hosted client_secret_post client";
+                client.RedirectUris = [HostedAuthorizeTokenFixture.RedirectUri];
+                client.AllowedScopes = ["openid"];
+                client.ClientType = "confidential";
+                client.TokenEndpointAuthMethod = "client_secret_post";
+                client.RequirePkce = false;
+                client.IsFirstParty = true;
+                client.ClientSecretResolver = () => postSecret;
+            }));
+
+        var started = await fixture.StartAuthorizeAsync("openid", clientId: postClientId);
+        var code = await fixture.SubmitPasswordLoginAsync(started);
+
+        using var tokens = await fixture.ExchangeAuthorizationCodeWithBodySecretAsync(
+            code,
+            started.CodeVerifier,
+            postClientId,
+            postSecret);
+
+        tokens.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+        tokens.RootElement.GetProperty("token_type").GetString().Should().Be("Bearer");
+    }
+
     private static async Task<SqlOSAuthorizationCode> LoadCodeRowAsync(HostedAuthorizeTokenFixture fixture, string rawCode)
     {
         await using var scope = fixture.App.Services.CreateAsyncScope();

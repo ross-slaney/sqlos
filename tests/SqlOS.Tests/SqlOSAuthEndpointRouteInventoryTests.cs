@@ -36,6 +36,7 @@ public class SqlOSAuthEndpointRouteInventoryTests
             "GET /sqlos/auth/userinfo",
             "POST /sqlos/auth/userinfo",
             "GET /sqlos/auth/authorize",
+            "POST /sqlos/auth/authorize",
             "GET /sqlos/auth/continue",
             "POST /sqlos/auth/token",
             "POST /sqlos/auth/register",

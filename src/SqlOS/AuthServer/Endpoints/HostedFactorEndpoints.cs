@@ -281,7 +281,7 @@ public static partial class EndpointRouteBuilderExtensions
                         cancellationToken);
                 }
 
-                return Results.Redirect(completion.RedirectUrl!);
+                return ClientRedirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {
@@ -486,7 +486,7 @@ public static partial class EndpointRouteBuilderExtensions
                         phoneNumber: phoneNumber);
                 }
 
-                return Results.Redirect(completion.RedirectUrl!);
+                return ClientRedirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {
@@ -536,7 +536,7 @@ public static partial class EndpointRouteBuilderExtensions
                         cancellationToken);
                 }
 
-                return Results.Redirect(completion.RedirectUrl!);
+                return ClientRedirect(completion.RedirectUrl!);
             }
             catch (InvalidOperationException ex)
             {
@@ -589,7 +589,7 @@ public static partial class EndpointRouteBuilderExtensions
                     code,
                     context,
                     cancellationToken);
-                return Results.Redirect(redirectUrl);
+                return ClientRedirect(redirectUrl);
             }
             catch (InvalidOperationException ex)
             {
@@ -629,7 +629,7 @@ public static partial class EndpointRouteBuilderExtensions
                     requestId,
                     context,
                     cancellationToken);
-                return Results.Redirect(redirectUrl);
+                return ClientRedirect(redirectUrl);
             }
             catch (InvalidOperationException ex)
             {

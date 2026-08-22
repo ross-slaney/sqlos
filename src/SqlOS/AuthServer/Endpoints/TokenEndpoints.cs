@@ -34,6 +34,11 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSClientCredentialsService clientCredentialsService,
             CancellationToken cancellationToken) =>
         {
+            // RFC 6749 §5.1: token responses carry credentials and must never be
+            // cached; set unconditionally so error responses are covered too.
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+
             var form = await context.Request.ReadFormAsync(cancellationToken);
             var grantType = form["grant_type"].ToString();
 

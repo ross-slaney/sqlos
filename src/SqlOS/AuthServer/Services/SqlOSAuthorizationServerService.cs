@@ -103,6 +103,20 @@ public sealed class SqlOSAuthorizationServerService
             .AnyAsync(x => x.IsActive
                 && x.DisabledAt == null
                 && x.TokenEndpointAuthMethod == "client_secret_basic", cancellationToken);
+        var supportsClientSecretPost = await _context.Set<SqlOSClientApplication>()
+            .AsNoTracking()
+            .AnyAsync(x => x.IsActive
+                && x.DisabledAt == null
+                && x.TokenEndpointAuthMethod == "client_secret_post", cancellationToken);
+        var tokenEndpointAuthMethods = new List<string> { "none" };
+        if (supportsClientSecretBasic)
+        {
+            tokenEndpointAuthMethods.Add("client_secret_basic");
+        }
+        if (supportsClientSecretPost)
+        {
+            tokenEndpointAuthMethods.Add("client_secret_post");
+        }
 
         return new SqlOSAuthorizationServerMetadataDto
         {
@@ -118,12 +132,15 @@ public sealed class SqlOSAuthorizationServerService
             // the redirect query string, so the OIDC Discovery default of
             // query + fragment would be dishonest for OAuth and OIDC alike.
             ResponseModesSupported = ["query"],
+            // Always emitted, always false: SqlOS does not support request objects.
+            // OIDC Discovery defaults request_uri_parameter_supported to TRUE when
+            // absent, so omitting the fields would advertise a lie.
+            RequestParameterSupported = false,
+            RequestUriParameterSupported = false,
             GrantTypesSupported = grantTypes.ToArray(),
             CodeChallengeMethodsSupported = ["S256"],
             ScopesSupported = scopes,
-            TokenEndpointAuthMethodsSupported = supportsClientSecretBasic
-                ? ["none", "client_secret_basic"]
-                : ["none"],
+            TokenEndpointAuthMethodsSupported = tokenEndpointAuthMethods.ToArray(),
             RegistrationEndpoint = _options.ClientRegistration.Dcr.Enabled
                 ? $"{origin}{basePath}/register"
                 : null,
@@ -2034,7 +2051,18 @@ public sealed class SqlOSAuthorizationServerService
             throw new InvalidOperationException("Resource cannot be introduced during token exchange.");
         }
 
-        if (!_cryptoService.VerifyPkceCodeVerifier(request.CodeVerifier ?? string.Empty, authorizationCode.CodeChallenge, authorizationCode.CodeChallengeMethod))
+        // PKCE binds only codes that were issued with a challenge. Public clients
+        // always have one (enforced at /authorize); a confidential client that
+        // authorized without PKCE exchanges without a verifier, and presenting a
+        // verifier for a non-PKCE code fails closed (RFC 7636 §4.4.1).
+        if (!string.IsNullOrEmpty(authorizationCode.CodeChallenge))
+        {
+            if (!_cryptoService.VerifyPkceCodeVerifier(request.CodeVerifier ?? string.Empty, authorizationCode.CodeChallenge, authorizationCode.CodeChallengeMethod))
+            {
+                throw new InvalidOperationException("PKCE verification failed.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(request.CodeVerifier))
         {
             throw new InvalidOperationException("PKCE verification failed.");
         }
@@ -2193,7 +2221,9 @@ public sealed record SqlOSAuthorizeRequestInput(
     string? Nonce,
     string? PresentationMode,
     string? UiContextJson,
-    string? MaxAge = null);
+    string? MaxAge = null,
+    string? RequestObject = null,
+    string? RequestUri = null);
 
 public sealed record SqlOSPasswordAuthenticationResult(
     SqlOSUser User,

@@ -51,10 +51,12 @@ public sealed class SqlOSIdTokenIssuanceTests
         jwt.Payload["at_hash"].Should().Be(ComputeExpectedAtHash(AccessToken));
         Convert.ToInt64(jwt.Payload["auth_time"]).Should().Be(EpochTime.GetIntDate(authenticatedAt));
         jwt.Payload["sid"].Should().Be(session.Id);
-        jwt.Payload["name"].Should().Be(user.DisplayName);
-        jwt.Payload["preferred_username"].Should().Be(user.DefaultEmail);
-        jwt.Payload["email"].Should().Be(user.DefaultEmail);
-        jwt.Payload["email_verified"].Should().Be(true);
+        // OIDC Core §5.4: scope-gated profile/email claims are released from
+        // UserInfo in the code flow, never embedded in the ID token.
+        jwt.Payload.ContainsKey("name").Should().BeFalse();
+        jwt.Payload.ContainsKey("preferred_username").Should().BeFalse();
+        jwt.Payload.ContainsKey("email").Should().BeFalse();
+        jwt.Payload.ContainsKey("email_verified").Should().BeFalse();
         jwt.Payload["org_id"].Should().Be("org_idt");
         jwt.Claims.Where(claim => claim.Type == "amr").Select(claim => claim.Value).Should().Contain("password");
     }
@@ -170,8 +172,8 @@ public sealed class SqlOSIdTokenIssuanceTests
             nonce: null);
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(idToken);
-        jwt.Payload["name"].Should().Be(user.DisplayName);
-        jwt.Payload["preferred_username"].Should().Be(user.DefaultEmail);
+        jwt.Payload.ContainsKey("name").Should().BeFalse();
+        jwt.Payload.ContainsKey("preferred_username").Should().BeFalse();
         jwt.Payload.ContainsKey("email").Should().BeFalse();
         jwt.Payload.ContainsKey("email_verified").Should().BeFalse();
     }

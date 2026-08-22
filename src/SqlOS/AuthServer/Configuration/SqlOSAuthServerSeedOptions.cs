@@ -99,6 +99,13 @@ public sealed class SqlOSClientSeedOptions
     public string? Description { get; set; }
     public string? Audience { get; set; }
     public string ClientType { get; set; } = "public_pkce";
+    /// <summary>
+    /// Optional token-endpoint authentication method override. When null the method is
+    /// derived from <see cref="ClientType"/> (confidential → <c>client_secret_basic</c>,
+    /// public → <c>none</c>). Confidential clients may set <c>client_secret_post</c> to
+    /// authenticate with <c>client_id</c> + <c>client_secret</c> in the token request body.
+    /// </summary>
+    public string? TokenEndpointAuthMethod { get; set; }
     public bool RequirePkce { get; set; } = true;
     public List<string> AllowedScopes { get; set; } = [];
     public List<string> RedirectUris { get; set; } = [];

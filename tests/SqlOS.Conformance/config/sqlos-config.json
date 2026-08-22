@@ -1,0 +1,15 @@
+{
+  "alias": "sqlos",
+  "description": "SqlOS example OP (App X) - OIDCC config certification",
+  "server": {
+    "discoveryUrl": "https://sqlos-op/sqlos/auth/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "conformance-client-one",
+    "client_secret": "conformance-local-secret-0123456789abcdef0123456789abcdef"
+  },
+  "client2": {
+    "client_id": "conformance-client-two",
+    "client_secret": "conformance-local-secret-0123456789abcdef0123456789abcdef"
+  }
+}

@@ -194,7 +194,8 @@ public sealed partial class SqlOSAdminService
             var assignmentFingerprint = seed.Assignments
                 .OrderBy(x => x.Key, StringComparer.Ordinal)
                 .Select(x => new { x.Key, x.PrincipalType, x.PrincipalId, x.OrganizationIdOrSlug, x.RoleKey, x.Access, x.Description });
-            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { normalized.ClientId, normalized.Name, normalized.Description, normalized.Audience, normalized.ClientType, normalized.RequirePkce, normalized.AllowedScopes, normalized.IsFirstParty, normalized.AllowNativeHeadlessAuth, normalized.AllowDeviceAuthorization, normalized.EnableClientCredentials, normalized.RedirectUris, normalized.IsActive, AccessMode = accessMode, Assignments = assignmentFingerprint });
+            var tokenEndpointAuthMethod = ResolveSeededTokenEndpointAuthMethod(seed.TokenEndpointAuthMethod, normalized.ClientType, normalized.ClientId);
+            var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { normalized.ClientId, normalized.Name, normalized.Description, normalized.Audience, normalized.ClientType, TokenEndpointAuthMethod = tokenEndpointAuthMethod, normalized.RequirePkce, normalized.AllowedScopes, normalized.IsFirstParty, normalized.AllowNativeHeadlessAuth, normalized.AllowDeviceAuthorization, normalized.EnableClientCredentials, normalized.RedirectUris, normalized.IsActive, AccessMode = accessMode, Assignments = assignmentFingerprint });
             var outcome = existing == null ? "created" : existing.ConfigurationFingerprint == fingerprint && existing.ConfigurationOrphanedAt == null ? null : "updated";
 
             if (existing != null && string.Equals(existing.RegistrationSource, "seeded", StringComparison.OrdinalIgnoreCase) && existing.ConfigurationSourceKey == null)
@@ -222,7 +223,7 @@ public sealed partial class SqlOSAdminService
                     ConfigurationSourceKey = sourceKey,
                     ConfigurationFingerprint = fingerprint,
                     LastReconciledAt = now,
-                    TokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(normalized.ClientType),
+                    TokenEndpointAuthMethod = tokenEndpointAuthMethod,
                     GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes),
                     ResponseTypesJson = JsonSerializer.Serialize(new[] { "code" }),
                     RequirePkce = normalized.RequirePkce,
@@ -250,7 +251,7 @@ public sealed partial class SqlOSAdminService
             existing.LastReconciledAt = now;
             existing.ConfigurationOrphanedAt = null;
             if (outcome != null) auditOutcomes.Add((existing.Id, sourceKey, outcome, fingerprint));
-            existing.TokenEndpointAuthMethod = ResolveTokenEndpointAuthMethod(normalized.ClientType);
+            existing.TokenEndpointAuthMethod = tokenEndpointAuthMethod;
             existing.GrantTypesJson = JsonSerializer.Serialize(normalized.GrantTypes);
             existing.ResponseTypesJson = string.IsNullOrWhiteSpace(existing.ResponseTypesJson)
                 ? JsonSerializer.Serialize(new[] { "code" })
@@ -302,7 +303,7 @@ public sealed partial class SqlOSAdminService
                     && x.ConfigurationOwner == SqlOSConfigurationOwners.Code
                     && x.ConfigurationSourceKey == "primary", cancellationToken);
 
-            if (!string.Equals(client.TokenEndpointAuthMethod, "client_secret_basic", StringComparison.Ordinal))
+            if (client.TokenEndpointAuthMethod is not ("client_secret_basic" or "client_secret_post"))
             {
                 if (configuredResolverCount != 0)
                 {
@@ -3683,6 +3684,42 @@ public sealed partial class SqlOSAdminService
         => string.Equals(clientType, "confidential", StringComparison.Ordinal)
             ? "client_secret_basic"
             : "none";
+
+    /// <summary>
+    /// Resolves a seed's token-endpoint auth method: null derives from the client
+    /// type exactly as before; an explicit value must be a supported method that is
+    /// coherent with the client type (secret methods are confidential-only, and a
+    /// confidential client must use a secret method).
+    /// </summary>
+    private static string ResolveSeededTokenEndpointAuthMethod(string? requested, string clientType, string clientId)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return ResolveTokenEndpointAuthMethod(clientType);
+        }
+
+        var normalized = requested.Trim();
+        if (normalized is not ("none" or "client_secret_basic" or "client_secret_post"))
+        {
+            throw new InvalidOperationException(
+                $"Client '{clientId}' has unsupported token endpoint auth method '{normalized}'. Supported: none, client_secret_basic, client_secret_post.");
+        }
+
+        var isConfidential = string.Equals(clientType, "confidential", StringComparison.Ordinal);
+        if (isConfidential && normalized == "none")
+        {
+            throw new InvalidOperationException(
+                $"Confidential client '{clientId}' cannot use token endpoint auth method 'none'.");
+        }
+
+        if (!isConfidential && normalized != "none")
+        {
+            throw new InvalidOperationException(
+                $"Client '{clientId}' must be confidential to use token endpoint auth method '{normalized}'.");
+        }
+
+        return normalized;
+    }
 
     private static string RequireText(string? value, string name)
     {

@@ -587,24 +587,13 @@ public sealed class SqlOSCryptoService
             payload[JwtRegisteredClaimNames.Nonce] = nonce;
         }
 
-        if (grantedScopes.Contains("profile"))
-        {
-            if (!string.IsNullOrWhiteSpace(user.DisplayName))
-            {
-                payload["name"] = user.DisplayName;
-            }
-
-            if (!string.IsNullOrWhiteSpace(user.DefaultEmail))
-            {
-                payload["preferred_username"] = user.DefaultEmail;
-            }
-        }
-
-        if (grantedScopes.Contains("email") && !string.IsNullOrWhiteSpace(user.DefaultEmail))
-        {
-            payload[JwtRegisteredClaimNames.Email] = user.DefaultEmail;
-            payload["email_verified"] = await IsDefaultEmailVerifiedAsync(user, cancellationToken);
-        }
+        // Scope-gated identity claims (profile/email) are deliberately NOT put in
+        // the ID token: in the authorization-code flow, OIDC Core §5.4 releases
+        // scope claims from the UserInfo endpoint, and the conformance suite
+        // warns when they appear in the ID token unrequested. The grantedScopes
+        // parameter is retained so a future `claims`-parameter implementation
+        // (issue #121) can request them here explicitly.
+        _ = grantedScopes;
 
         if (!string.IsNullOrWhiteSpace(organizationId))
         {
