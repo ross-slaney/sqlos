@@ -1,38 +1,38 @@
 ---
-title: "SqlOS 3.28: An OpenID Provider You Can Prove"
-description: "Every SqlOS host is now an OpenID Connect Provider with consent, granted-scope tokens, and the OpenID Foundation suite in CI."
+title: "SqlOS 3.28: Your App Is an OpenID Provider"
+description: "Discovery, ID tokens, UserInfo, and a consent screen — on by default. Other apps can now federate against your SqlOS host with any standard OIDC library."
 date: "2026-08-22"
 author: "Ross Slaney"
 tags: ["AuthServer", "OIDC", "OAuth", "OpenID Provider", "Security", "SqlOS"]
 ---
 
-SqlOS 3.28 turns every host into an OpenID Connect Provider. Downstream apps can federate with discovery, RS256 ID tokens, and UserInfo. Third-party clients get an explicit consent screen. User access tokens carry the granted scope, and APIs can enforce it. The OpenID Foundation Basic OP and Config OP plans run in CI on every change.
+SqlOS 3.28 makes every SqlOS host a full OpenID Connect Provider. Other applications — yours, a partner's, an off-the-shelf tool — can now offer "Sign in with your app" using nothing but a standard OIDC library and your discovery document. Third-party sign-ins get a consent screen. Access tokens carry the scope the user actually granted, and your APIs can require it.
 
-## OpenID Connect is on by default
+## Downstream apps can federate against you
 
-`/.well-known/openid-configuration` and `/userinfo` ship with the host. ID tokens are minted only when the granted scope includes `openid`. They are RS256, `aud` is the client, and they never pass access-token validation (`typ: JWT` vs `at+jwt`). Disable provider mode only when you need the previous OAuth-only posture.
+`/.well-known/openid-configuration` and `/userinfo` are live on every host, and ID tokens are issued whenever the granted scope includes `openid`. Any OIDC client — Auth.js, ASP.NET Core's `AddOpenIdConnect`, an API gateway — connects from the discovery URL alone; no SqlOS SDK on the relying-party side.
 
-See [OpenID Provider](/docs/authserver/openid-provider) and [Sign in with X](/docs/guides/sign-in-with-x).
+ID tokens are RS256-signed with your existing rotating keys, addressed to the client, and cannot be mistaken for access tokens at a resource server. Profile claims like `name` and `email` are released from UserInfo per OIDC Core, which is where standard client libraries expect them.
 
-## Third-party clients ask the user
+Provider mode is on by default and can be switched off if you need the previous OAuth-only behavior. See [OpenID Provider](/docs/authserver/openid-provider), and the new [Sign in with X guide](/docs/guides/sign-in-with-x) for an end-to-end walkthrough with a runnable two-app example.
 
-Non-first-party clients (DCR, CIMD, or a registered third party) now require an Allow/Deny step before the first code. Grants are remembered per user and client, re-prompted on scope escalation or `prompt=consent`, and revoked when CIMD metadata becomes security-sensitive. First-party clients are unchanged.
+## Users approve third-party apps before they get access
 
-Operators can give scopes human names through code seeds, the Admin API, or the dashboard. Custom login UIs get a `consent` view with approve and deny.
+When a client you didn't mark first-party requests authorization, the user now sees a consent screen: which app is asking, what it will be able to do, Allow or Deny. Approvals are remembered per user and app, so later sign-ins are silent; asking for more scopes re-prompts, and `prompt=consent` always prompts. Denying cancels the request cleanly. Your own first-party apps are untouched — no new step, no behavior change.
 
-See [Consent](/docs/authserver/consent) and [Build your own login and signup UI](/docs/guides/custom-login-ui).
+You control the wording: a scope display-name catalog turns raw scope strings into product language ("See your email address" instead of `email`), manageable in code, the Admin API, or the dashboard. Users' remembered grants are visible and revocable in the dashboard, and custom login UIs get the consent step as a [headless view](/docs/guides/custom-login-ui) like every other step.
 
-## Granted scope is on the token
+See [Consent](/docs/authserver/consent).
 
-User access tokens carry the granted scope as an RFC 9068 `scope` claim — the same string the token response echoes. Sessions from before scope tracking omit the claim. Opt in to API-edge checks with `RequiredScopes` on access-token validation; an unsatisfied token returns `403` and `insufficient_scope`. Scope is the client's delegation ceiling. FGA remains the per-resource authority.
+## APIs can enforce the granted scope
 
-See [Scopes and permissions](/docs/authserver/scopes-and-permissions) and [Token validation](/docs/authserver/token-validation).
+User access tokens now carry the granted scope as a standard RFC 9068 `scope` claim — exactly the grant the token response reported. If you want an endpoint to require a scope, opt in with `RequiredScopes` on access-token validation; tokens without the scope get a `403` with a proper `insufficient_scope` challenge. Tokens issued before scope tracking have no claim and fail closed rather than being treated as all-powerful.
 
-## Proof, not a claim
+Scope remains the *client's* ceiling — what the user let the app do. Per-user, per-resource authorization stays with FGA, and effective permission is the intersection of the two. See [Scopes and permissions](/docs/authserver/scopes-and-permissions) and [Token validation](/docs/authserver/token-validation).
 
-The [OpenID Foundation conformance suite](https://gitlab.com/openid/conformance-suite) runs the Config OP and Basic OP plans against the Sign in with X example on every pull request and every push to `main`. That harness found protocol gaps internal tests missed: POST `/authorize`, honest `request`/`request_uri` errors, `client_secret_post`, and PKCE verified only when a challenge was issued.
+## Verified against the OpenID Foundation suite
 
-A real-browser e2e suite walks signup, consent, remembered grants, and federated sign-out. The verification story is in [Sign in with X: proving an OpenID Provider](/blog/sign-in-with-x-proving-an-openid-provider).
+This release doesn't just claim OIDC compliance. The OpenID Foundation's own [conformance suite](https://gitlab.com/openid/conformance-suite) — the harness behind official OP certification — now runs its Basic OP and Config OP plans against a live SqlOS deployment in CI on every change, alongside a real-browser end-to-end suite that exercises federation sign-up, consent, remembered grants, and sign-out. Companion post: [Add "Sign in with X" to your product](/blog/sign-in-with-x-proving-an-openid-provider).
 
 ## Upgrade notes
 
@@ -42,10 +42,14 @@ Upgrade the package normally:
 dotnet add package SqlOS --version 3.28.0
 ```
 
-Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test a first-party authorize plus one third-party client if you have one.
+Then run one new revision against a restored production database, wait for `SqlOS initialization complete.`, and smoke-test a first-party sign-in — plus one third-party client if you have any.
 
-Two schema revisions land: authorization codes and sessions now persist nonce, `auth_time`, and granted scope; consent grants and scope display names are new tables. `SqlOSTokenResponse` adds an optional trailing `IdToken` member — source-compatible, binary-breaking for compiled callers.
+What to expect after upgrading:
 
-If you already set `AllowedScopes` and send `scope` on `/authorize`, first-party flows keep working. Third-party clients will pause on consent until the user approves. Downstream OIDC apps can point at the discovery document. To require a scope at an API, set `RequiredScopes`.
+- **Schema** — SqlOS applies its own migrations at startup, as always. This release adds columns for nonce, authentication time, and granted scope on authorization codes and sessions, plus new tables for consent grants and scope display names.
+- **First-party apps** — no behavior change if `AllowedScopes` is set and your app sends `scope` on `/authorize`.
+- **Third-party clients** — their next authorization pauses on the consent screen until the user approves. Seed scope display names so that screen reads well.
+- **Compiled compatibility** — `SqlOSTokenResponse` gains an optional trailing `IdToken` member: source-compatible, but recompile anything that binds against the package binary.
+- **New capabilities are opt-in** — nothing requires you to adopt `RequiredScopes` or register downstream relying parties; existing deployments keep working as before.
 
-This release is backed by hosted authorize-to-token pins, OpenID Provider wire tests, consent parity across the three control planes, OIDF Basic OP and Config OP in CI, Sign in with X browser e2e, and the repository's complete build, documentation, unit, integration, example-application, and coverage gates.
+This release passed the repository's complete gate: build, documentation, unit, integration, and example-application tests, coverage thresholds, the OpenID Foundation Basic OP and Config OP plans, and the real-browser federation suite.
