@@ -1,57 +1,86 @@
 ---
-title: "Sign in with X: Proving an OpenID Provider, Not Just Shipping One"
-description: "How SqlOS 3.27's OpenID Provider mode got three layers of proof — a real federation example, the OpenID Foundation conformance suite in CI, and a browser e2e test that immediately caught a bug nothing else could see."
+title: "Add \"Sign in with X\" to Your Product"
+description: "Your SqlOS app is an OpenID Provider. Give any other app — Next.js, ASP.NET Core, a partner's — a sign-in button backed by your users, with one client seed and a standard OIDC library."
 date: "2026-08-22"
 author: "Ross Slaney"
-tags: ["AuthServer", "OIDC", "OpenID Provider", "Testing", "Conformance", "SqlOS"]
+tags: ["AuthServer", "OIDC", "OpenID Provider", "SqlOS"]
 ---
 
-SqlOS 3.27 makes every SqlOS host an OpenID Connect Provider by default: discovery, RS256 ID tokens, UserInfo, and a per-user consent screen on top of the existing OAuth code + PKCE flows. That's the feature. This post is about the part that took longer than the feature: proving it — and what the proof immediately found.
+If you run a SqlOS-hosted application, you already run an OpenID Connect Provider. As of SqlOS 3.28, discovery, RS256 ID tokens, a UserInfo endpoint, and a consent screen ship on by default. That means the accounts in your app can sign users into *other* apps — a companion product, a partner integration, an internal tool — the same way "Sign in with Google" works, except X is your product.
 
-## Claiming OIDC is easy; demonstrating it is a build step
+This post shows what that looks like in practice.
 
-"We implement OpenID Connect" is a sentence anyone can type. We wanted the claim to be mechanical, so 3.27 landed with three layers of verification, each catching a class of bug the others can't:
+## What the relying party needs: nothing SqlOS-specific
 
-1. **A real federation example.** Two apps under one .NET Aspire host: App X is a SqlOS host whose entire identity-provider role is one `AddSqlOS` call, and App Y is a Next.js app with a **"Sign in with X"** button built on Auth.js. App Y has no SqlOS SDK and no private knowledge — only the standard discovery document. If the button works, interop with an ecosystem library works.
+The app adding the button does not install a SqlOS SDK. It uses any standard OIDC library and your discovery document:
 
-2. **The OpenID Foundation conformance suite, in CI.** Not our tests of our code — the OIDF's own certification test harness, built from source and driven by their `run-test-plan.py`, running the Config OP and Basic OP certification plans against a live SqlOS deployment on every pull request and every push to main. Current state: 36 test modules, 1,741 individual condition checks, 0 failures. The handful of expected warnings and skips live in reviewed allowlist files with written justifications — and the harness fails the build if an allowlist entry stops being used, so the exceptions can't quietly rot.
+```text
+https://x.example.com/sqlos/auth/.well-known/openid-configuration
+```
 
-3. **A real browser, end to end.** Playwright-driven Chromium walks the actual user journeys against the actual running stack: first sign-up through the consent screen, federated sign-out followed by re-authentication with the grant remembered, and silent SSO. In CI, on every change.
+With [Auth.js](https://authjs.dev) in a Next.js app, the whole integration is one provider block pointed at that URL, using authorization code + PKCE with no client secret. The ASP.NET Core equivalent is `AddOpenIdConnect` with `GetClaimsFromUserInfoEndpoint = true`. Both are spelled out in the [Sign in with X guide](/docs/guides/sign-in-with-x).
 
-![The consent screen App Y's users see, with operator-defined scope display names](/docs/guides-sign-in-with-x-consent.png)
+One detail to know when wiring up a client library: SqlOS follows OIDC Core and releases profile claims like `name` and `email` from the **UserInfo endpoint**, not the ID token. Configure your library to validate the ID token and fetch the profile from UserInfo — the guide shows the exact settings.
 
-## The bug only layer three could catch
+## What the provider needs: one client seed
 
-Within hours of the browser suite existing, it failed — on a screen that every scripted test in the repository said was fine.
-
-The hosted auth pages ship a strict Content Security Policy that includes `form-action 'self'`. What we hadn't internalized: Chromium and WebKit enforce that directive against the **redirect target of a form submission**, not just the form's action URL. Clicking **Allow access** on the consent screen POSTed to SqlOS (same origin — fine), and the server answered with a 302 straight to App Y on a different origin. The browser aborted the navigation without rendering anything. The user saw a spinner forever; the server, meanwhile, had recorded the consent and minted the code. A flow that was provably correct at the HTTP layer was unusable in a real browser.
-
-Every curl-based test passed, because curl doesn't enforce CSP. The unit suite passed — 977 tests. The integration suite passed. The conformance suite's HTTP checks passed. The only thing that failed was headless Chromium doing what a person does, and its failure screenshot was pixel-identical to the bug report.
-
-The fix keeps the CSP fully strict: hosted-form POSTs that end at a cross-origin relying party now respond with a same-origin interstitial that instantly meta-refreshes to the client — a fresh GET navigation that `form-action` doesn't govern, and the same pattern the large identity providers use. The browser suite went green, and that exact regression can never ship silently again.
-
-The lesson is the thesis of the whole release: **each verification layer sees what the others are blind to.** Protocol conformance can't see your CSP. Browser tests can't tell you your `at_hash` is computed correctly. You need both, and they both need to run on every change — verification that runs once is just documentation with a timestamp.
-
-## What this means if you use SqlOS
-
-Your app is already an OP — provider mode is a secure default, not an add-on. Making it a product feature is a client seed and three scope display names:
+On the SqlOS side, register the relying party as a client:
 
 ```csharp
 auth.SeedClient(client =>
 {
     client.ClientId = "app-y";
     client.Name = "App Y";
-    client.RedirectUris = [$"{appYOrigin}/api/auth/callback/sqlos"];
+    client.RedirectUris = ["https://app-y.example.com/api/auth/callback/sqlos"];
     client.AllowedScopes = ["openid", "profile", "email"];
     client.ClientType = "public_pkce";
-    client.IsFirstParty = false;   // third party ⇒ users see the consent screen
+    client.IsFirstParty = false;   // users see a consent screen
 });
-
-auth.SeedScopeDisplayName("openid", "Sign you in", "Confirm your identity to the app with an ID token.");
-auth.SeedScopeDisplayName("profile", "See your name", "Share your display name and username.");
-auth.SeedScopeDisplayName("email", "See your email address", "Share your email address and whether it is verified.");
 ```
 
-On the other side, any standard OIDC library — Auth.js, `AddOpenIdConnect`, a gateway — connects from the discovery URL alone. The full walkthrough, including the consent UX, remembered grants, federated sign-out, and the headless bring-your-own-UI path, is in the new [Sign in with X guide](/docs/guides/sign-in-with-x), and the runnable example lives in [`examples/SqlOS.SignInWithX.AppHost`](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) — one `dotnet run` starts the whole federation.
+Two settings carry the weight:
 
-And when you upgrade, you inherit the proof, not just the code: the conformance plans and the browser journeys gate every change to this repository.
+- **`AllowedScopes` must include `openid`.** The grant is the intersection of the client's allowlist and the request. Without `openid` granted, no ID token is minted and the flow degrades to plain OAuth.
+- **`IsFirstParty = false`** means users see a consent screen before the first sign-in — appropriate whenever the relying party is something the user would think of as a different application. First-party clients skip consent entirely.
+
+## Make the consent screen speak your product's language
+
+The consent screen renders each requested scope by a display name you define. Raw scope strings are a poor user experience, so name them:
+
+```csharp
+auth.SeedScopeDisplayName("openid", "Sign you in",
+    "Confirm your identity to the app with an ID token.");
+auth.SeedScopeDisplayName("profile", "See your name",
+    "Share your display name and username.");
+auth.SeedScopeDisplayName("email", "See your email address",
+    "Share your email address and whether it is verified.");
+```
+
+![The SqlOS consent screen showing requested scopes by display name](/docs/guides-sign-in-with-x-consent.png)
+
+The same catalog is editable from the dashboard and the Admin API, and it also feeds the [headless view model](/docs/guides/custom-login-ui) if you build your own login UI.
+
+## What your users experience
+
+1. **First sign-in** — your hosted login page, then the consent screen. Approving issues the authorization code; the relying party exchanges it and validates the ID token against your JWKS.
+2. **Later sign-ins** — silent. The remembered grant plus a live session on X means no password and no consent prompt; users land straight back in the app. Consent re-appears only if the app asks for more scopes than the user already approved.
+3. **Sign-out** — ending the relying party's session alone leaves the session on X alive, so the next sign-in stays silent. For a sign-out that truly re-authenticates, end both sessions; the [guide](/docs/guides/sign-in-with-x#4-what-the-user-experiences) shows the two-line pattern.
+
+Operators can see every relying party in the dashboard — including its discovery URL — and every user's app grants. Revoking a grant makes the next sign-in re-prompt for consent.
+
+## Try it in one command
+
+The repository ships a runnable federation: App X is a SqlOS host, App Y is a Next.js app with a **Sign in with X** button built on Auth.js, both under one .NET Aspire host.
+
+```bash
+cd examples/SqlOS.SignInWithX.AppY && npm install && cd -
+dotnet run --project examples/SqlOS.SignInWithX.AppHost
+```
+
+Open http://localhost:3020 and click the button. The [example README](https://github.com/ross-slaney/sqlos/tree/main/examples/SqlOS.SignInWithX.AppHost) points out what to look at along the way.
+
+## Why you can trust the protocol surface
+
+Interop claims are cheap, so this repository's CI enforces them: the [OpenID Foundation conformance suite](https://gitlab.com/openid/conformance-suite) runs its Basic OP and Config OP certification plans against a live SqlOS deployment on every change, and a real-browser end-to-end suite drives this exact federation flow — sign-up, consent, remembered grants, and federated sign-out. When you upgrade the package, you inherit that verification.
+
+Start with the [Sign in with X guide](/docs/guides/sign-in-with-x), or read the [OpenID Provider reference](/docs/authserver/openid-provider) for the full option surface.
