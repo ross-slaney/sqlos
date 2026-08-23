@@ -137,11 +137,6 @@ And you have:
 
 SqlOS creates and upgrades its own tables at startup — your EF migrations keep owning only your application's tables. Signing-key protection is configured automatically.
 
-A couple of notes worth knowing up front:
-
-- `AddSqlOS` doesn't auto-bind the `SqlOS` configuration section — read secrets from `builder.Configuration` and assign them in the options callback, as shown above.
-- If NuGet doesn't list 3.28.0 yet, run the repository examples from source rather than pairing these docs with an older package.
-
 [Full add-to-app quickstart](https://sqlos.dev/docs/quickstarts/add-to-app)
 
 ## Guides
