@@ -4,7 +4,9 @@ using System.Text;
 namespace SqlOS.Fga.Specifications;
 
 /// <summary>
-/// Base class for specifications that define filtering, sorting, and cursor-based pagination criteria.
+/// Advanced extension point for authorized, cursor-paged queries. Prefer
+/// <see cref="PagedSpec.For{T}"/> to define list queries; subclass this type only when the
+/// builder cannot express a custom sort/cursor triad.
 ///
 /// <para><b>Cursor Pagination Contract:</b></para>
 /// <para>

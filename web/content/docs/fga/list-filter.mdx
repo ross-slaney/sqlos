@@ -34,7 +34,8 @@ Use `PagedSpec` for built-in pagination, sorting, search, and authorization:
 ```csharp
 var spec = PagedSpec.For<Chain>(c => c.Id)
     .RequirePermission("CHAIN_VIEW")
-    .SortByString("name", c => c.Name, isDefault: true)
+    .SortBy("name", c => c.Name, isDefault: true)
+    .SortBy("createdAt", c => c.CreatedAt)
     .Search(searchQuery, c => c.Name, c => c.Description)
     .Build(pageSize: 20, cursor, sortBy, sortDir);
 
@@ -80,7 +81,8 @@ api.MapGet("/chains", async (
 
     var spec = PagedSpec.For<Chain>(c => c.Id)
         .RequirePermission(RetailPermissionKeys.ChainView)
-        .SortByString("name", c => c.Name, isDefault: true)
+        .SortBy("name", c => c.Name, isDefault: true)
+        .SortBy("createdAt", c => c.CreatedAt)
         .Search(search, c => c.Name, c => c.Description)
         .Build(pageSize ?? 20, cursor, sortBy, sortDir);
 

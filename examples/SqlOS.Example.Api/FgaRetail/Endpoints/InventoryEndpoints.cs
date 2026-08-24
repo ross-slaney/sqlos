@@ -5,9 +5,9 @@ using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
-using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Specifications;
 
 namespace SqlOS.Example.Api.FgaRetail.Endpoints;
 
@@ -29,8 +29,16 @@ public static class InventoryEndpoints
             string? sortDir = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
-            var spec = new GetInventoryItemsSpecification(pageSize, search, locationId, sortBy, descending) { Cursor = cursor };
+            var spec = PagedSpec.For<InventoryItem>(i => i.Id)
+                .RequirePermission(RetailPermissionKeys.InventoryView)
+                .SortBy("name", i => i.Name, isDefault: true)
+                .SortBy("sku", i => i.Sku)
+                .SortBy("price", i => i.Price)
+                .SortBy("createdAt", i => i.CreatedAt)
+                .Where(i => i.LocationId == locationId)
+                .Search(search, i => i.Name, i => i.Sku)
+                .Configure(q => q.Include(i => i.Location))
+                .Build(pageSize, cursor, sortBy, sortDir);
             var result = await executor.ExecuteAsync(
                 context.InventoryItems, spec, subjectId,
                 i => new InventoryItemDto

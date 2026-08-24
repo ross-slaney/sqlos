@@ -5,9 +5,9 @@ using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
-using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
+using SqlOS.Fga.Specifications;
 
 namespace SqlOS.Example.Api.FgaRetail.Endpoints;
 
@@ -26,7 +26,12 @@ public static class LocationEndpoints
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var spec = new GetLocationsSpecification(pageSize, search) { Cursor = cursor };
+            var spec = PagedSpec.For<Location>(l => l.Id)
+                .RequirePermission(RetailPermissionKeys.LocationView)
+                .SortBy("storeNumber", l => l.StoreNumber ?? "", isDefault: true)
+                .Search(search, l => l.Name, l => l.StoreNumber)
+                .Configure(q => q.Include(l => l.Chain))
+                .Build(pageSize, cursor, descending: false);
             var result = await executor.ExecuteAsync(
                 context.Locations, spec, subjectId,
                 l => new LocationDto
@@ -54,7 +59,13 @@ public static class LocationEndpoints
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var spec = new GetLocationsSpecification(pageSize, search, chainId) { Cursor = cursor };
+            var spec = PagedSpec.For<Location>(l => l.Id)
+                .RequirePermission(RetailPermissionKeys.LocationView)
+                .SortBy("storeNumber", l => l.StoreNumber ?? "", isDefault: true)
+                .Where(l => l.ChainId == chainId)
+                .Search(search, l => l.Name, l => l.StoreNumber)
+                .Configure(q => q.Include(l => l.Chain))
+                .Build(pageSize, cursor, descending: false);
             var result = await executor.ExecuteAsync(
                 context.Locations, spec, subjectId,
                 l => new LocationDto

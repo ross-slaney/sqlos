@@ -88,8 +88,8 @@ Group: `grp_walmart_regional` / subject `subj_walmart_regional_group` — Alice 
 | `GET /api/chains/{id}` | `AuthorizedDetailAsync` | CHAIN_VIEW |
 | `POST /api/chains` | `CheckAccessAsync(..., CHAIN_EDIT, "retail_root")` | CHAIN_EDIT on parent |
 | `PUT/DELETE /api/chains/{id}` | `CheckAccessAsync(..., CHAIN_EDIT, chain.ResourceId)` | CHAIN_EDIT |
-| `GET /api/chains/{chainId}/locations` | `GetLocationsSpecification` | LOCATION_VIEW |
-| `GET /api/locations`, inventory routes | Similar spec/detail/check patterns | LOCATION_* / INVENTORY_* |
+| `GET /api/chains/{chainId}/locations` | `PagedSpec` + `RequirePermission(LOCATION_VIEW)` | LOCATION_VIEW |
+| `GET /api/locations`, inventory routes | `PagedSpec` / `AuthorizedDetailAsync` / `CheckAccessAsync` | LOCATION_* / INVENTORY_* |
 
 Create-chain uses manual `context.CreateResource("retail_root", ...)` — comment in code notes Todo-style `ISqlOSResourceEntity` as the recommended path for new apps.
 

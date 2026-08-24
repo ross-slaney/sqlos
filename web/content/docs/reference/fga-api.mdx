@@ -247,8 +247,8 @@ Start building a paged specification. The `idSelector` identifies the unique tie
 ```csharp
 var spec = PagedSpec.For<Chain>(c => c.Id)
     .RequirePermission("CHAIN_VIEW")
-    .SortByString("name", c => c.Name, isDefault: true)
-    .SortByString("description", c => c.Description ?? "")
+    .SortBy("name", c => c.Name, isDefault: true)
+    .SortBy("createdAt", c => c.CreatedAt)
     .Search(search, c => c.Name, c => c.Description)
     .Configure(q => q.Include(c => c.Locations))
     .Build(pageSize, cursor, sortBy, sortDir);
@@ -260,7 +260,9 @@ var spec = PagedSpec.For<Chain>(c => c.Id)
 |--------|------------|-------------|
 | `For<T>(idSelector)` | `Expression<Func<T, string>>` | Start builder with the ID/tiebreaker column. |
 | `.RequirePermission(key)` | `string` | Set the FGA permission key for authorization filtering. |
-| `.SortByString(name, selector, isDefault?)` | `string`, `Expression<Func<T, string>>`, `bool` | Register a named string sort column. |
+| `.SortBy(name, selector, isDefault?)` | `string`, `Expression<Func<T, TKey>>`, `bool` | Register a named sort column. Built-in serializers cover `string`, `int`, `long`, `decimal`, `double`, `DateTime`, `DateTimeOffset`, `DateOnly`, `Guid`, and `bool`. No `CultureInfo` in caller code. |
+| `.SortByString(name, selector, isDefault?)` | `string`, `Expression<Func<T, string>>`, `bool` | Alias for `.SortBy` on a string column. |
+| `.SortBy(name, selector, serialize, deserialize, isDefault?)` | `string`, `Expression<Func<T, TKey>>`, `Func<TKey, string>`, `Func<string, TKey>`, `bool` | Escape hatch for comparable types without a built-in serializer. |
 | `.Search(search, ...fields)` | `string?`, `params Expression<Func<T, string?>>[]` | Add text search across the given fields. |
 | `.Where(predicate)` | `Expression<Func<T, bool>>` | Add a static filter. |
 | `.Configure(configurator)` | `Func<IQueryable<T>, IQueryable<T>>` | Return a configured query (for example `query => query.Include(...)`). |

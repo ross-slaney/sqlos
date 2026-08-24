@@ -3,13 +3,15 @@ using System.Linq.Expressions;
 namespace SqlOS.Fga.Specifications;
 
 /// <summary>
-/// Entry point for the fluent specification builder.
+/// Entry point for the fluent specification builder. This is the supported way to define
+/// authorized, cursor-paged lists.
 /// <example>
 /// <code>
 /// var spec = PagedSpec.For&lt;Chain&gt;(c => c.Id)
 ///     .RequirePermission("CHAIN_VIEW")
-///     .SortByString("name", c => c.Name, isDefault: true)
-///     .Where(c => c.Name.Contains(search))
+///     .SortBy("name", c => c.Name, isDefault: true)
+///     .SortBy("createdAt", c => c.CreatedAt)
+///     .Search(search, c => c.Name, c => c.Description)
 ///     .Configure(q => q.Include(c => c.Locations))
 ///     .Build(pageSize, cursor);
 /// </code>
@@ -26,7 +28,8 @@ public static class PagedSpec
 }
 
 /// <summary>
-/// Fluent builder for creating <see cref="PagedSpecification{T}"/> instances without a dedicated class.
+/// Fluent builder for creating <see cref="PagedSpecification{T}"/> instances.
+/// Prefer this over subclassing <see cref="PagedSpecification{T}"/>.
 /// </summary>
 public class PagedSpecificationBuilder<T> where T : class
 {
@@ -52,19 +55,87 @@ public class PagedSpecificationBuilder<T> where T : class
     }
 
     /// <summary>
-    /// Registers a string sort field.
+    /// Registers a string sort field. Equivalent to <see cref="SortBy(string, Expression{Func{T, string}}, bool)"/>.
     /// </summary>
     public PagedSpecificationBuilder<T> SortByString(
         string name, Expression<Func<T, string>> keySelector, bool isDefault = false)
-    {
-        _sorts[name] = new StringSortField<T>(keySelector);
-        if (isDefault || _defaultSort == null)
-            _defaultSort = name;
-        return this;
-    }
+        => SortBy(name, keySelector, isDefault);
+
+    /// <summary>
+    /// Registers a string sort field. Cursor values are the raw strings.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, string>> keySelector, bool isDefault = false)
+        => Register(name, new StringSortField<T>(keySelector), isDefault);
+
+    /// <summary>
+    /// Registers an <see cref="int"/> sort field with a culture-invariant cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, int>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeInt, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="long"/> sort field with a culture-invariant cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, long>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeLong, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="decimal"/> sort field with a culture-invariant round-trip cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, decimal>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeDecimal, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="double"/> sort field with a culture-invariant round-trip cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, double>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeDouble, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="DateTime"/> sort field. Uses the round-trip ("O") format and
+    /// <see cref="System.Globalization.DateTimeStyles.RoundtripKind"/> so <see cref="DateTime.Kind"/> is preserved.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, DateTime>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeDateTime, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="DateTimeOffset"/> sort field with a round-trip ("O") cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, DateTimeOffset>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeDateTimeOffset, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="DateOnly"/> sort field with an invariant ISO date cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, DateOnly>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeDateOnly, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="Guid"/> sort field with a standard "D" cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, Guid>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeGuid, isDefault);
+
+    /// <summary>
+    /// Registers a <see cref="bool"/> sort field with an invariant True/False cursor serializer.
+    /// </summary>
+    public PagedSpecificationBuilder<T> SortBy(
+        string name, Expression<Func<T, bool>> keySelector, bool isDefault = false)
+        => RegisterComparable(name, keySelector, CursorSerializers.Serialize, CursorSerializers.DeserializeBool, isDefault);
 
     /// <summary>
     /// Registers a sort field for any comparable type with custom serialization.
+    /// Use the typed <c>SortBy</c> overloads for common CLR keys; this is the escape hatch
+    /// for types without a built-in serializer.
     /// </summary>
     public PagedSpecificationBuilder<T> SortBy<TKey>(
         string name,
@@ -72,12 +143,7 @@ public class PagedSpecificationBuilder<T> where T : class
         Func<TKey, string> serialize,
         Func<string, TKey> deserialize,
         bool isDefault = false) where TKey : IComparable<TKey>
-    {
-        _sorts[name] = new ComparableSortField<T, TKey>(keySelector, serialize, deserialize);
-        if (isDefault || _defaultSort == null)
-            _defaultSort = name;
-        return this;
-    }
+        => RegisterComparable(name, keySelector, serialize, deserialize, isDefault);
 
     /// <summary>
     /// Adds a filter expression. Multiple Where calls are combined with AND.
@@ -137,6 +203,22 @@ public class PagedSpecificationBuilder<T> where T : class
             new List<Expression<Func<T, bool>>>(_filters),
             _queryConfigurator,
             pageSize, cursor);
+    }
+
+    private PagedSpecificationBuilder<T> RegisterComparable<TKey>(
+        string name,
+        Expression<Func<T, TKey>> keySelector,
+        Func<TKey, string> serialize,
+        Func<string, TKey> deserialize,
+        bool isDefault) where TKey : IComparable<TKey>
+        => Register(name, new ComparableSortField<T, TKey>(keySelector, serialize, deserialize), isDefault);
+
+    private PagedSpecificationBuilder<T> Register(string name, ISortField<T> field, bool isDefault)
+    {
+        _sorts[name] = field;
+        if (isDefault || _defaultSort == null)
+            _defaultSort = name;
+        return this;
     }
 }
 

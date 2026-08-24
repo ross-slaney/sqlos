@@ -67,4 +67,4 @@ GET /sqlos/admin/auth/api/users?pageSize=25&cursor={nextCursor}
 
 Keep the same `search` and other filters on every window. A cursor from a different filter set is rejected.
 
-Application-level authorized lists still use FGA `PagedSpecification`. Admin lists use the shared `SqlOS.Pagination` keyset helper and do not go through `SpecificationExecutor`.
+Application-level authorized lists still use `PagedSpec.For<T>()` with `ISpecificationExecutor`. Admin lists use the shared `SqlOS.Pagination` keyset helper and do not go through `SpecificationExecutor`.
