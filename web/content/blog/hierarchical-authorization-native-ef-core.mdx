@@ -128,7 +128,7 @@ Create the host and install the same package version used to compile this articl
 ```bash
 dotnet new web --framework net9.0 --name HierarchicalEf
 cd HierarchicalEf
-dotnet add package SqlOS --version 3.28.0
+dotnet add package SqlOS --version 4.0.0
 ```
 
 Replace `Program.cs` with the program below. It assumes SQL Server is running and that callers obtain an audience-bound access token through the [Protect an API quickstart](/docs/quickstarts/protect-api). That keeps the sample focused on upgrading the EF model rather than rebuilding the OAuth client flow in the same file.

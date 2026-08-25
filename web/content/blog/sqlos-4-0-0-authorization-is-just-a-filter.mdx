@@ -1,0 +1,56 @@
+---
+title: "SqlOS 4.0: Authorization Is Just a Filter"
+description: "Authorized lists now start from one method — BuildFilterAsync — and compose with ordinary EF Core for pagination, sorting, search, and projection."
+date: "2026-08-25"
+author: "Ross Slaney"
+tags: ["FGA", "Authorization", "EF Core", "SqlOS"]
+---
+
+SqlOS 4.0 removes the parallel query framework that had grown around authorized lists. The query-side FGA surface is now one method: `BuildFilterAsync`. You compose that filter with the EF Core you already use — `Where`, `Select`, `OrderBy`, `Skip`/`Take`, or an external keyset library — and the authorization TVF still runs in SQL.
+
+This is a breaking release. Call sites that used `GetAuthorizationFilterAsync`, `PagedSpec`, `ISpecificationExecutor`, or `PaginatedResult` need a rename and, where they used the specification types, a short rewrite onto plain EF.
+
+## One method, then your query
+
+`BuildFilterAsync` returns an `Expression<Func<T, bool>>` for the signed-in subject and a permission. Put it in `Where(...)` and the rest of the query is yours:
+
+```csharp
+var canView = await authService.BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+
+var chains = await db.Chains
+    .Where(canView)
+    .Where(c => search == null || c.Name.Contains(search))
+    .OrderBy(c => c.Name).ThenBy(c => c.Id)
+    .Skip(page * pageSize).Take(pageSize)
+    .Select(c => new ChainDto { Id = c.Id, Name = c.Name })
+    .ToListAsync();
+```
+
+The subject's principal set is resolved when you await the filter. Build it once per request. Do not cache it in statics — grant and membership changes are not reflected in an already-built filter.
+
+See [List filtering](/docs/fga/list-filter) and [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
+
+## What this removes
+
+SqlOS no longer ships a pagination, sorting, or search framework on the query side. `PagedSpecification`, `PagedSpec`, `SortablePagedSpecification`, `PaginatedResult`, and `ISpecificationExecutor` are gone. Those types duplicated work EF Core and libraries such as [MR.EntityFrameworkCore.KeysetPagination](https://github.com/mrahhal/MR.EntityFrameworkCore.KeysetPagination) already do well.
+
+Admin keyset pagination under `SqlOS.Pagination` is unchanged. `CheckAccessAsync`, `AuthorizedDetailAsync`, traces, and the authorization TVF are unchanged — the generated auth-filter SQL is the same as 3.28, under a clearer name.
+
+## Upgrade notes
+
+Upgrade the package:
+
+```bash
+dotnet add package SqlOS --version 4.0.0
+```
+
+Then fix compile errors. There is no schema migration for this change.
+
+- **Rename** `GetAuthorizationFilterAsync` to `BuildFilterAsync`. The arguments and return type are the same.
+- **Replace specification lists** with a filter plus ordinary EF. If you used `PagedSpec` or `ISpecificationExecutor`, move pagination, sort, search, and projection onto the `IQueryable` after `.Where(filter)`.
+- **Keep `PaginatedResult` out of the package.** If your API still returns `data`, `pageSize`, `nextCursor`, and `hasNextPage`, build that shape in the endpoint. The retail example does this.
+- **End every `OrderBy` with a unique tiebreaker** (usually the primary key) before you page. Auth is evaluated at query time, so a grant change between keyset pages can add or remove rows.
+
+First-party login, tokens, consent, and OpenID Provider mode from 3.28 are unchanged.
+
+This release passed the repository's complete gate: build, documentation, unit, integration, and example-application tests, coverage thresholds, the OpenID Foundation Basic OP and Config OP plans, and the real-browser federation suite.
