@@ -5,7 +5,6 @@ using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
 using SqlOS.Example.Api.FgaRetail.Services;
-using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
@@ -19,57 +18,27 @@ public static class LocationEndpoints
 
         group.MapGet("/locations", async (
             ExampleAppDbContext context,
-            ISpecificationExecutor executor,
+            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var spec = new GetLocationsSpecification(pageSize, search) { Cursor = cursor };
-            var result = await executor.ExecuteAsync(
-                context.Locations, spec, subjectId,
-                l => new LocationDto
-                {
-                    Id = l.Id,
-                    ResourceId = l.ResourceId,
-                    ChainId = l.ChainId,
-                    ChainName = l.Chain?.Name,
-                    Name = l.Name,
-                    StoreNumber = l.StoreNumber,
-                    City = l.City,
-                    State = l.State,
-                    CreatedAt = l.CreatedAt
-                });
-            return Results.Ok(result);
+            return await ListLocationsAsync(context, fga, subjectId, chainId: null, pageSize, search, cursor);
         }).WithName("GetAllLocations");
 
         group.MapGet("/chains/{chainId}/locations", async (
             string chainId,
             ExampleAppDbContext context,
-            ISpecificationExecutor executor,
+            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
             string? cursor = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
-            var spec = new GetLocationsSpecification(pageSize, search, chainId) { Cursor = cursor };
-            var result = await executor.ExecuteAsync(
-                context.Locations, spec, subjectId,
-                l => new LocationDto
-                {
-                    Id = l.Id,
-                    ResourceId = l.ResourceId,
-                    ChainId = l.ChainId,
-                    ChainName = l.Chain?.Name,
-                    Name = l.Name,
-                    StoreNumber = l.StoreNumber,
-                    City = l.City,
-                    State = l.State,
-                    CreatedAt = l.CreatedAt
-                });
-            return Results.Ok(result);
+            return await ListLocationsAsync(context, fga, subjectId, chainId, pageSize, search, cursor);
         }).WithName("GetLocations");
 
         group.MapGet("/locations/{id}", async (
@@ -273,5 +242,72 @@ public static class LocationEndpoints
 
             return Results.NoContent();
         }).WithName("DeleteLocation");
+    }
+
+    private static async Task<IResult> ListLocationsAsync(
+        ExampleAppDbContext context,
+        ISqlOSFgaAuthService fga,
+        string subjectId,
+        string? chainId,
+        int pageSize,
+        string? search,
+        string? cursor)
+    {
+        var canView = await fga.BuildFilterAsync<Location>(subjectId, RetailPermissionKeys.LocationView);
+        var size = Math.Clamp(pageSize, 1, 100);
+
+        var query = context.Locations.Where(canView);
+
+        if (chainId != null)
+        {
+            query = query.Where(l => l.ChainId == chainId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.ToLower();
+            query = query.Where(l =>
+                l.Name.ToLower().Contains(term) ||
+                (l.StoreNumber != null && l.StoreNumber.ToLower().Contains(term)));
+        }
+
+        // Keyset cursor: skip everything at or before the last row of the previous page.
+        if (cursor != null)
+        {
+            var (after, afterId) = RetailCursor.Decode(cursor);
+            query = query.Where(l =>
+                (l.StoreNumber ?? "").CompareTo(after) > 0 ||
+                ((l.StoreNumber ?? "") == after && l.Id.CompareTo(afterId) > 0));
+        }
+
+        var rows = await query
+            .OrderBy(l => l.StoreNumber ?? "")
+            .ThenBy(l => l.Id) // unique tiebreaker keeps pages deterministic
+            .Select(l => new LocationDto
+            {
+                Id = l.Id,
+                ResourceId = l.ResourceId,
+                ChainId = l.ChainId,
+                ChainName = l.Chain!.Name,
+                Name = l.Name,
+                StoreNumber = l.StoreNumber,
+                City = l.City,
+                State = l.State,
+                CreatedAt = l.CreatedAt
+            })
+            .Take(size + 1)
+            .ToListAsync();
+
+        var hasNextPage = rows.Count > size;
+        if (hasNextPage) rows.RemoveAt(size);
+
+        string? nextCursor = null;
+        if (hasNextPage)
+        {
+            var last = rows[^1];
+            nextCursor = RetailCursor.Encode(last.StoreNumber ?? "", last.Id);
+        }
+
+        return Results.Ok(new { data = rows, pageSize = size, nextCursor, hasNextPage });
     }
 }

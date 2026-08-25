@@ -84,7 +84,7 @@ Group: `grp_walmart_regional` / subject `subj_walmart_regional_group` — Alice 
 
 | Route | List/detail pattern | Permission |
 | --- | --- | --- |
-| `GET /api/chains` | `PagedSpec` + `RequirePermission(CHAIN_VIEW)` | CHAIN_VIEW |
+| `GET /api/chains` | `BuildFilterAsync<Chain>` + `.Where(filter)` in the EF query | CHAIN_VIEW |
 | `GET /api/chains/{id}` | `AuthorizedDetailAsync` | CHAIN_VIEW |
 | `POST /api/chains` | `CheckAccessAsync(..., CHAIN_EDIT, "retail_root")` | CHAIN_EDIT on parent |
 | `PUT/DELETE /api/chains/{id}` | `CheckAccessAsync(..., CHAIN_EDIT, chain.ResourceId)` | CHAIN_EDIT |

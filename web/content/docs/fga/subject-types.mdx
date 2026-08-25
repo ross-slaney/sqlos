@@ -82,7 +82,7 @@ A service account is an FGA subject. It can receive grants without being an Auth
 
 Authentication is application code or AuthServer. A bearer token, API key, or agent token can map to a user, service account, or agent subject, but FGA receives only the resolved `subjectId`.
 
-All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `GetAuthorizationFilterAsync` calls work regardless of whether the subject is a user, agent, service account, or group.
+All subject types use the same FGA authorization -- the same `CheckAccessAsync` and `BuildFilterAsync` calls work regardless of whether the subject is a user, agent, service account, or group.
 
 ## Dashboard
 

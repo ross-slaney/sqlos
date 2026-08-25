@@ -1,0 +1,97 @@
+---
+title: "Paginating authorized lists"
+description: "Compose BuildFilterAsync with offset or keyset pagination in plain EF Core."
+order: 6
+section: guides
+---
+
+<Banner
+  eyebrow="Guide"
+  title="Authorization filter + plain EF pagination"
+  href="/docs/fga/list-filter"
+  actionLabel="List filtering"
+>
+  SqlOS provides the authorization filter. Pagination, sorting, search, and projection are ordinary EF Core (or an external pagination library) composed on the same query.
+</Banner>
+
+`BuildFilterAsync` returns an `Expression<Func<T, bool>>` that translates to the SqlOS authorization TVF at query time. Anything you compose after `.Where(filter)` — projections, ordering, `Skip`/`Take`, keyset predicates — ends up in the same SQL statement.
+
+## Offset pagination
+
+Plain `Skip`/`Take` after the authorization filter:
+
+```csharp
+var canView = await fga.BuildFilterAsync<InventoryItem>(
+    subjectId, RetailPermissionKeys.InventoryView);
+
+var items = await db.InventoryItems
+    .Where(canView)
+    .Where(i => i.LocationId == locationId)
+    .Select(i => new InventoryItemDto
+    {
+        Id = i.Id,
+        Name = i.Name,
+        LocationName = i.Location!.Name
+    })
+    .OrderBy(d => d.Name).ThenBy(d => d.Id)
+    .Skip(page * pageSize).Take(pageSize)
+    .ToListAsync();
+```
+
+Offset pagination is fine for small admin-style lists and simple UIs. For large tables or infinite scrolling, prefer keyset pagination, which does not degrade as the offset grows.
+
+## Keyset pagination with an external package
+
+Keyset (cursor/seek) pagination works with any library that composes on `IQueryable`. This example uses [MR.EntityFrameworkCore.KeysetPagination](https://github.com/mrahhal/MR.EntityFrameworkCore.KeysetPagination):
+
+```csharp
+using MR.EntityFrameworkCore.KeysetPagination;
+
+var canView = await fga.BuildFilterAsync<InventoryItem>(
+    subjectId, RetailPermissionKeys.InventoryView);
+
+var dtos = db.InventoryItems
+    .Where(canView)
+    .Where(i => i.LocationId == locationId)
+    .Select(i => new InventoryItemDto
+    {
+        Id = i.Id,
+        Name = i.Name,
+        Price = i.Price,
+        LocationName = i.Location!.Name
+    });
+
+// reference carries the sort value + Id of the last row on the previous page
+// (decoded from an opaque cursor your endpoint issued).
+var keysetContext = dtos.KeysetPaginate(
+    b => b.Ascending(d => d.Name).Ascending(d => d.Id),
+    KeysetPaginationDirection.Forward,
+    reference);
+
+var rows = await keysetContext.Query.Take(pageSize + 1).ToListAsync();
+
+var hasNextPage = rows.Count > pageSize;
+if (hasNextPage) rows.RemoveAt(pageSize);
+```
+
+Fetching `pageSize + 1` rows and trimming the extra is a simple way to compute `hasNextPage` without a `COUNT(*)`. Encode the last row's sort value and `Id` into an opaque cursor string for the client to send back; the retail example app's inventory endpoint (`examples/SqlOS.Example.Api/FgaRetail/Endpoints/InventoryEndpoints.cs`) shows this end to end, including per-`sortBy` keysets.
+
+## Authorization is evaluated at query time
+
+The filter's TVF runs inside each page's SQL query. If grants change between keyset pages, newly authorized rows appear and newly revoked rows disappear from subsequent pages — the keyset predicate skips by position in the sort order, not by a snapshot of the first page. This is normally exactly what you want: a revoked subject stops seeing rows on the very next page fetch.
+
+Note that the *principal set* (the subject plus its group memberships) is captured when `BuildFilterAsync` is awaited. Build the filter once per request; do not cache it in statics or reuse it across requests.
+
+## Always end with a unique tiebreaker
+
+Whatever pagination style you use, always end the `OrderBy` chain with a unique column (typically `Id`):
+
+```csharp
+.OrderBy(d => d.Name).ThenBy(d => d.Id)
+```
+
+Without a unique tiebreaker, rows that share the same sort value have no deterministic order, so rows can be skipped or duplicated across pages.
+
+## Admin surfaces
+
+SqlOS's own dashboard and admin APIs use an internal keyset helper with opaque versioned cursors — see [Admin cursor pagination](/docs/guides/admin-cursor-pagination). That contract is for SqlOS admin endpoints; application lists compose `BuildFilterAsync` with the patterns above.

@@ -32,7 +32,7 @@ List endpoints return only rows the current subject may read — in one SQL roun
 2. **Build a filter** for the entity type:
 
 ```csharp
-var filter = await fgaAuth.GetAuthorizationFilterAsync<Project>(
+var filter = await fgaAuth.BuildFilterAsync<Project>(
     subjectId: userId,
     permissionKey: "project.read");
 
@@ -56,6 +56,7 @@ var projects = await db.Projects
 
 ## Next steps
 
-- [List filtering](/docs/fga/list-filter) — pagination and `PagedSpec`
+- [List filtering](/docs/fga/list-filter) — composing the filter into list endpoints
+- [Paginating authorized lists](/docs/guides/paginating-authorized-lists) — offset and keyset pagination
 - [Syncing auth to FGA](/docs/fga/syncing-auth-to-fga)
 - [SDK reference](/docs/reference/sdk-reference)

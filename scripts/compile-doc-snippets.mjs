@@ -87,7 +87,7 @@ const snippetSpecs = [
     name: "FGA group list authorization",
     relativePath: "web/content/docs/guides/fga-groups.mdx",
     heading: "## 6. Prove inherited list access",
-    marker: "var filter = await fga.GetAuthorizationFilterAsync<Workspace>",
+    marker: "var filter = await fga.BuildFilterAsync<Workspace>",
     wrap: asFgaGroupListProgram,
   },
   {

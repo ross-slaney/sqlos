@@ -54,10 +54,19 @@ public interface ISqlOSFgaAuthService
     /// The expression always evaluates to <see langword="false"/> when the subject or permission cannot be resolved.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// Keep the expression in the <see cref="IQueryable{T}"/> pipeline so EF Core can translate
     /// it to the configured SqlOS authorization table-valued function.
+    /// </para>
+    /// <para>
+    /// Filter lifetime: the subject's principal set (the subject plus its active group
+    /// memberships) is resolved when this task is awaited. Build the filter once per request
+    /// and compose it into that request's queries; do not cache it in statics or reuse it
+    /// across requests, because grant and membership changes are not reflected in an
+    /// already-built filter's principal set.
+    /// </para>
     /// </remarks>
-    Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
+    Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
         string subjectId,
         string permissionKey) where T : IHasResourceId;
 }

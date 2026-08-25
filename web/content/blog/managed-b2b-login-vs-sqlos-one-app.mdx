@@ -96,7 +96,7 @@ That mounts the SqlOS auth routes and dashboard inside your app. Users, organiza
 | Organizations and invites | Yes | Yes |
 | SSO later | Yes, usually paid or plan-gated | Yes, configured in your deployment |
 | Resource-level authorization | Vendor product or custom app logic | SqlOS FGA in the same package |
-| List filtering in EF | Usually custom | Built around `GetAuthorizationFilterAsync` |
+| List filtering in EF | Usually custom | Built around `BuildFilterAsync` |
 | Operations | Vendor operates auth service | You operate the ASP.NET host and SQL Server |
 | Pricing shape | MAU, org, SSO, add-ons, or contracts | MIT plus infrastructure |
 
@@ -122,7 +122,7 @@ Who should see which projects? What if a user is a workspace admin in one worksp
 With SqlOS, that becomes:
 
 ```csharp
-var filter = await fgaAuthService.GetAuthorizationFilterAsync<Project>(
+var filter = await fgaAuthService.BuildFilterAsync<Project>(
     subjectId,
     "PROJECT_VIEW");
 

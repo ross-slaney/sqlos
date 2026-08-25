@@ -97,7 +97,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 Then you build an authorization filter as an `Expression<Func<T, bool>>` that calls the TVF:
 
 ```csharp
-var filter = await fga.GetAuthorizationFilterAsync<Document>(
+var filter = await fga.BuildFilterAsync<Document>(
     subjectId: currentUserId,
     permissionKey: "documents.read");
 
@@ -243,4 +243,4 @@ app.MapSqlOS(); // Maps routes; schema + TVF run on host startup
 
 The [getting started guide](/docs/getting-started) walks through the full setup. The [SHRBAC paper](https://github.com/ross-slaney/sqlos/blob/main/paper/shrbac-compsac-2026.pdf) covers the formal model and benchmark methodology.
 
-Authorized row filtering is a property of how the authorization model composes with a data query. With SqlOS, the filter becomes part of the SQL query instead of running after materialization. Apply it directly or use `ISpecificationExecutor` on every protected list path; it does not turn unfiltered EF or raw SQL into an automatically protected query.
+Authorized row filtering is a property of how the authorization model composes with a data query. With SqlOS, the filter becomes part of the SQL query instead of running after materialization. Apply it directly on every protected list path; it does not turn unfiltered EF or raw SQL into an automatically protected query.

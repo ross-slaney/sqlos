@@ -139,7 +139,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSScimService>();
         services.AddScoped<ISqlOSFgaAuthService, SqlOSFgaAuthService>();
         services.AddScoped<ISqlOSFgaSubjectService, SqlOSFgaSubjectService>();
-        services.AddScoped<ISpecificationExecutor, SpecificationExecutor>();
         services.AddScoped<SqlOSFgaSeedService>();
         services.AddScoped<SqlOSFgaFunctionInitializer>();
         services.AddScoped<SqlOSFgaSchemaInitializer>();

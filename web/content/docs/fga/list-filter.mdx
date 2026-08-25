@@ -5,7 +5,7 @@ order: 9
 section: fga
 ---
 
-`GetAuthorizationFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
+`BuildFilterAsync` returns a filter for `Where(...)`. Lists only rows the subject may see. Use this on list endpoints.
 
 This is a read-side helper. Lifecycle-managed domain rows normally implement `ISqlOSResourceEntity`; the filter only needs the inherited `ResourceId` contract to join application rows to accessible FGA resources.
 
@@ -17,7 +17,7 @@ This is a read-side helper. Lifecycle-managed domain rows normally implement `IS
 
 ```csharp
 var filter = await authService
-    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+    .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 
 var chains = await dbContext.Chains
     .Where(filter)
@@ -27,31 +27,35 @@ var chains = await dbContext.Chains
 
 The subject only sees chains they have access to. The filter translates to a SQL query -- no in-memory filtering.
 
-## With pagination and search
+## Filter lifetime
 
-Use `PagedSpec` for built-in pagination, sorting, search, and authorization:
+The subject's principal set (the subject plus its active group memberships) is resolved when the returned task is awaited. Build the filter once per request and compose it into that request's queries. Do not cache the filter in statics or reuse it across requests -- grant and membership changes are not reflected in an already-built filter.
+
+## Composing with plain EF
+
+SqlOS does authorization filters only. Pagination, sorting, search, and projection are ordinary EF Core on the same query:
 
 ```csharp
-var spec = PagedSpec.For<Chain>(c => c.Id)
-    .RequirePermission("CHAIN_VIEW")
-    .SortByString("name", c => c.Name, isDefault: true)
-    .Search(searchQuery, c => c.Name, c => c.Description)
-    .Build(pageSize: 20, cursor, sortBy, sortDir);
+var canView = await authService
+    .BuildFilterAsync<InventoryItem>(subjectId, "INVENTORY_VIEW");
 
-var result = await executor.ExecuteAsync(
-    dbContext.Chains, spec, subjectId,
-    chain => new ChainDto
+var items = await db.InventoryItems
+    .Where(canView)
+    .Where(i => i.LocationId == locationId)
+    .Select(i => new InventoryItemDto
     {
-        Id = chain.Id,
-        Name = chain.Name,
-        Description = chain.Description,
-        CreatedAt = chain.CreatedAt
-    });
-
-// result.Data       → authorized, searched, sorted, paged
-// result.NextCursor → cursor for next page
-// result.HasNextPage → whether more results exist
+        Id = i.Id,
+        Name = i.Name,
+        LocationName = i.Location!.Name
+    })
+    .OrderBy(d => d.Name).ThenBy(d => d.Id)
+    .Skip(page * pageSize).Take(pageSize)
+    .ToListAsync();
 ```
+
+Everything composes into one SQL statement: the authorization TVF join, your business predicates, the projection, the ordering, and the paging.
+
+For cursor/keyset pagination over authorized lists, see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).
 
 ## Full endpoint example
 
@@ -69,25 +73,33 @@ var api = app.MapGroup("/api")
 api.MapGet("/chains", async (
     ExampleAppDbContext context,
     ISqlOSFgaAuthService authService,
-    ISpecificationExecutor executor,
     HttpContext http,
-    string? search, int? pageSize, string? cursor,
-    string? sortBy, string? sortDir) =>
+    string? search, int? page, int? pageSize) =>
 {
     var subjectId = http.GetSqlOSValidatedToken()?.UserId;
     if (string.IsNullOrWhiteSpace(subjectId))
         return Results.Unauthorized();
 
-    var spec = PagedSpec.For<Chain>(c => c.Id)
-        .RequirePermission(RetailPermissionKeys.ChainView)
-        .SortByString("name", c => c.Name, isDefault: true)
-        .Search(search, c => c.Name, c => c.Description)
-        .Build(pageSize ?? 20, cursor, sortBy, sortDir);
+    var canView = await authService
+        .BuildFilterAsync<Chain>(subjectId, RetailPermissionKeys.ChainView);
 
-    return await executor.ExecuteAsync(
-        context.Chains.Include(c => c.Locations),
-        spec, subjectId,
-        chain => new ChainListDto { /* ... */ });
+    var query = context.Chains.Where(canView);
+
+    if (!string.IsNullOrWhiteSpace(search))
+        query = query.Where(c => c.Name.Contains(search));
+
+    var chains = await query
+        .Select(c => new ChainListDto
+        {
+            Id = c.Id,
+            Name = c.Name,
+            LocationCount = c.Locations.Count
+        })
+        .OrderBy(d => d.Name).ThenBy(d => d.Id)
+        .Skip((page ?? 0) * (pageSize ?? 20)).Take(pageSize ?? 20)
+        .ToListAsync();
+
+    return Results.Ok(chains);
 });
 ```
 

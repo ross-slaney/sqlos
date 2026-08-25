@@ -49,7 +49,7 @@ api.MapGet("/projects", async (
         return Results.Unauthorized();
     }
 
-    var filter = await authorization.GetAuthorizationFilterAsync<Project>(
+    var filter = await authorization.BuildFilterAsync<Project>(
         subjectId,
         "project.read");
 

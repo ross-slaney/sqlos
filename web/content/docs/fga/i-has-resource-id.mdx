@@ -32,11 +32,11 @@ public sealed class Workspace : ISqlOSResourceEntity
 }
 ```
 
-When you call `GetAuthorizationFilterAsync<T>`, the filter uses `ResourceId` to restrict the query to resources the subject can access:
+When you call `BuildFilterAsync<T>`, the filter uses `ResourceId` to restrict the query to resources the subject can access:
 
 ```csharp
 var filter = await authService
-    .GetAuthorizationFilterAsync<Workspace>(subjectId, "WORKSPACE_VIEW");
+    .BuildFilterAsync<Workspace>(subjectId, "WORKSPACE_VIEW");
 
 var workspaces = await db.Workspaces
     .Where(filter)

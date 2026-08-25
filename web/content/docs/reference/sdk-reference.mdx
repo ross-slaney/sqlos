@@ -26,7 +26,6 @@ All services below are registered by `AddSqlOS<TContext>`. Prefer interfaces whe
 | Trusted identity/client administration | `SqlOSAdminService` | [AuthServer API](/docs/reference/authserver-api#sqlosadminservice) |
 | Point and query authorization | `ISqlOSFgaAuthService` | [FGA API](/docs/reference/fga-api) |
 | Provision users, agents, service accounts, and groups | `ISqlOSFgaSubjectService` or `ISqlOSFgaDbContext` helpers | [Subject types](/docs/fga/subject-types) |
-| Execute authorized cursor-paged specifications | `ISpecificationExecutor` | [FGA API](/docs/reference/fga-api#ispecificationexecutor) |
 | Record and query audit events | `ISqlOSAuditLogService` | [Audit Logs](/docs/reference/audit-logs) |
 | Render and send application email | `ISqlOSTransactionalEmailService` | [Transactional email](#transactional-email) |
 | Connect and use Google/Microsoft calendars | `SqlOSCalendarService` | [Calendar](#calendar) |
@@ -399,7 +398,7 @@ if (!decision.Allowed)
 For collection queries, keep the generated expression inside the EF Core `IQueryable` so SQL Server applies the authorization TVF:
 
 ```csharp
-var filter = await fga.GetAuthorizationFilterAsync<Workspace>(
+var filter = await fga.BuildFilterAsync<Workspace>(
     subjectId,
     permissionKey: "WORKSPACE_VIEW");
 
@@ -626,7 +625,6 @@ See [Calendar Integration](/docs/authserver/calendar-integration) for provider s
 | `SqlOSTokenResponse` | `SqlOS.AuthServer.Contracts` | access/refresh token, session, client, organization, expirations |
 | `SqlOSValidatedToken` | `SqlOS.AuthServer.Contracts` | `Principal`, `UserId`, `OrganizationId`, `ClientId`, `Audience` |
 | `SqlOSFgaAccessCheckResult` | `SqlOS.Fga.Models` | `Allowed`, optional trace/error |
-| `PaginatedResult<T>` | `SqlOS.Fga.Specifications` | `Data`, `PageSize`, `NextCursor`, `HasNextPage` |
 | `SqlOSAuditLogListResult` | `SqlOS.AuditLogs` | `Data`, page values, total count/pages |
 | `SqlOSSendEmailResult` | `SqlOS.Email.Contracts` | delivery ID/status, template version, provider/error details |
 | `SqlOSCalendarConnectionSummary` | `SqlOS.Calendar.Contracts` | owner, provider, mode, status, scopes, sync health |

@@ -416,7 +416,7 @@ app.MapGet("/api/todos", async (
     }
 
     var todoContext = authResult.Context!;
-    var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+    var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
         todoContext.SubjectId,
         TodoFgaService.TodoReadPermission);
 
