@@ -67,4 +67,4 @@ GET /sqlos/admin/auth/api/users?pageSize=25&cursor={nextCursor}
 
 Keep the same `search` and other filters on every window. A cursor from a different filter set is rejected.
 
-Application-level authorized lists still use FGA `PagedSpecification`. Admin lists use the shared `SqlOS.Pagination` keyset helper and do not go through `SpecificationExecutor`.
+This cursor contract applies to SqlOS admin endpoints only. Application-level authorized lists compose `BuildFilterAsync` with plain EF pagination — see [Paginating authorized lists](/docs/guides/paginating-authorized-lists).

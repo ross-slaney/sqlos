@@ -133,7 +133,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
             ResourceId = FgaTestDataSeeder.TestProjectResourceId
         });
         await Context.SaveChangesAsync();
-        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(
             FgaTestDataSeeder.SystemAdminSubjectId,
             permission.Key);
 
@@ -276,7 +276,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var group = await subjectService.CreateGroupAsync("Racing Lifecycle Group");
         await subjectService.AddToGroupAsync(user.SubjectId, group.Id);
         var resourceId = await CreateProtectedResourceWithGrantAsync(group.SubjectId);
-        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(user.SubjectId, "TEST_VIEW");
 
         user.IsActive = false;
         await Context.SaveChangesAsync();
@@ -342,7 +342,7 @@ public class SqlOSFgaAuthServiceIntegrationTests : FgaIntegrationTestBase
         var pointCheck = await _authService.CheckAccessAsync(subjectId, "TEST_VIEW", resourceId);
         Assert.AreEqual(expected, pointCheck.Allowed, "Point authorization result did not match lifecycle policy.");
 
-        var filter = await _authService.GetAuthorizationFilterAsync<LifecycleProtectedEntity>(subjectId, "TEST_VIEW");
+        var filter = await _authService.BuildFilterAsync<LifecycleProtectedEntity>(subjectId, "TEST_VIEW");
         var listed = await Context.Set<LifecycleProtectedEntity>()
             .Where(item => item.ResourceId == resourceId)
             .Where(filter)

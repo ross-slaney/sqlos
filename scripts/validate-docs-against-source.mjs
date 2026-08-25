@@ -106,9 +106,9 @@ const requiredSourceContracts = [
     "HttpContext.GetSqlOSValidatedToken",
   ],
   [
-    "src/SqlOS/Fga/Specifications/PaginatedResult.cs",
-    /public class PaginatedResult<T>/,
-    "PaginatedResult<T>",
+    "src/SqlOS/Fga/Interfaces/ISqlOSFgaAuthService.cs",
+    /Task<Expression<Func<T, bool>>> BuildFilterAsync<T>/,
+    "ISqlOSFgaAuthService.BuildFilterAsync<T>",
   ],
   [
     "src/SqlOS/AuthServer/Configuration/SqlOSAuthServerOptions.cs",
@@ -198,7 +198,7 @@ const stalePatterns = [
   [/\bPagedResult<T>\b/, "stale PagedResult<T> type name"],
   [/\bresult\.Items\b/, "stale pagination Items property"],
   [/\bresult\.HasMore\b/, "stale pagination HasMore property"],
-  [/\bBuildFilterAsync\b/, "stale FGA BuildFilterAsync method"],
+  [/\bGetAuthorizationFilterAsync\b/, "stale FGA GetAuthorizationFilterAsync method"],
   [/\bSqlOSSsoConnectionDraft\b/, "nonexistent SqlOSSsoConnectionDraft return type"],
   [/\bSqlOSOidcProviderInfo\b/, "nonexistent SqlOSOidcProviderInfo return type"],
   [/\bSqlOSHomeRealmDiscoveryResponse\b/, "nonexistent SqlOSHomeRealmDiscoveryResponse type"],

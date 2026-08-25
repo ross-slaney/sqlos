@@ -4,8 +4,9 @@ using SqlOS.Example.Api.Data;
 using SqlOS.Example.Api.FgaRetail.Dtos;
 using SqlOS.Example.Api.FgaRetail.Models;
 using SqlOS.Example.Api.FgaRetail.Seeding;
+using System.Globalization;
+using MR.EntityFrameworkCore.KeysetPagination;
 using SqlOS.Example.Api.FgaRetail.Services;
-using SqlOS.Example.Api.FgaRetail.Specifications;
 using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
@@ -17,10 +18,13 @@ public static class InventoryEndpoints
     {
         var group = app.MapGroup("/api").WithTags("Inventory");
 
+        // This endpoint demonstrates keyset pagination with the external
+        // MR.EntityFrameworkCore.KeysetPagination package composed after the
+        // SqlOS authorization filter.
         group.MapGet("/locations/{locationId}/inventory", async (
             string locationId,
             ExampleAppDbContext context,
-            ISpecificationExecutor executor,
+            ISqlOSFgaAuthService fga,
             HttpContext http,
             int pageSize = 10,
             string? search = null,
@@ -29,23 +33,95 @@ public static class InventoryEndpoints
             string? sortDir = null) =>
         {
             var subjectId = RetailSubjectResolver.ResolveSubjectId(http);
+            var canView = await fga.BuildFilterAsync<InventoryItem>(subjectId, RetailPermissionKeys.InventoryView);
+            var size = Math.Clamp(pageSize, 1, 100);
             var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
-            var spec = new GetInventoryItemsSpecification(pageSize, search, locationId, sortBy, descending) { Cursor = cursor };
-            var result = await executor.ExecuteAsync(
-                context.InventoryItems, spec, subjectId,
-                i => new InventoryItemDto
-                {
-                    Id = i.Id,
-                    ResourceId = i.ResourceId,
-                    LocationId = i.LocationId,
-                    LocationName = i.Location?.Name,
-                    Sku = i.Sku,
-                    Name = i.Name,
-                    Price = i.Price,
-                    QuantityOnHand = i.QuantityOnHand,
-                    CreatedAt = i.CreatedAt
-                });
-            return Results.Ok(result);
+            var sortKey = sortBy?.ToLowerInvariant() switch
+            {
+                "sku" => "sku",
+                "price" => "price",
+                _ => "name"
+            };
+
+            var query = context.InventoryItems
+                .Where(canView)
+                .Where(i => i.LocationId == locationId);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.ToLower();
+                query = query.Where(i =>
+                    i.Name.ToLower().Contains(term) ||
+                    i.Sku.ToLower().Contains(term));
+            }
+
+            var dtos = query.Select(i => new InventoryItemDto
+            {
+                Id = i.Id,
+                ResourceId = i.ResourceId,
+                LocationId = i.LocationId,
+                LocationName = i.Location!.Name,
+                Sku = i.Sku,
+                Name = i.Name,
+                Price = i.Price,
+                QuantityOnHand = i.QuantityOnHand,
+                CreatedAt = i.CreatedAt
+            });
+
+            var (after, afterId) = cursor != null ? RetailCursor.Decode(cursor) : ("", "");
+
+            // KeysetPaginate applies both the ordering (with the unique Id tiebreaker)
+            // and, when a reference is provided, the seek predicate for the next page.
+            var keysetContext = sortKey switch
+            {
+                "sku" => dtos.KeysetPaginate(
+                    b =>
+                    {
+                        if (descending) b.Descending(d => d.Sku).Descending(d => d.Id);
+                        else b.Ascending(d => d.Sku).Ascending(d => d.Id);
+                    },
+                    KeysetPaginationDirection.Forward,
+                    cursor != null ? new { Sku = after, Id = afterId } : null),
+                "price" => dtos.KeysetPaginate(
+                    b =>
+                    {
+                        if (descending) b.Descending(d => d.Price).Descending(d => d.Id);
+                        else b.Ascending(d => d.Price).Ascending(d => d.Id);
+                    },
+                    KeysetPaginationDirection.Forward,
+                    cursor != null
+                        ? new { Price = decimal.Parse(after, CultureInfo.InvariantCulture), Id = afterId }
+                        : null),
+                _ => dtos.KeysetPaginate(
+                    b =>
+                    {
+                        if (descending) b.Descending(d => d.Name).Descending(d => d.Id);
+                        else b.Ascending(d => d.Name).Ascending(d => d.Id);
+                    },
+                    KeysetPaginationDirection.Forward,
+                    cursor != null ? new { Name = after, Id = afterId } : null),
+            };
+
+            var rows = await keysetContext.Query.Take(size + 1).ToListAsync();
+
+            var hasNextPage = rows.Count > size;
+            if (hasNextPage) rows.RemoveAt(size);
+
+            string? nextCursor = null;
+            if (hasNextPage)
+            {
+                var last = rows[^1];
+                nextCursor = RetailCursor.Encode(
+                    sortKey switch
+                    {
+                        "sku" => last.Sku,
+                        "price" => last.Price.ToString(CultureInfo.InvariantCulture),
+                        _ => last.Name
+                    },
+                    last.Id);
+            }
+
+            return Results.Ok(new { data = rows, pageSize = size, nextCursor, hasNextPage });
         }).WithName("GetInventoryItems");
 
         group.MapGet("/inventory/{id}", async (

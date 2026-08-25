@@ -41,7 +41,7 @@ Login, signup, OTP entry, MFA, organization selection, and consent ship as hoste
 SqlOS's hierarchical role-based access control models your resources as a tree (org → workspace → project), defines permissions and roles, and grants them to users, groups, service accounts, or agents. Point checks answer "can this user do X to this resource?", and — the part that changes how you write code — list queries get an authorization filter that runs **in SQL**, so users only ever receive rows they're allowed to see:
 
 ```csharp
-var filter = await authorization.GetAuthorizationFilterAsync<Project>(userId, "project.read");
+var filter = await authorization.BuildFilterAsync<Project>(userId, "project.read");
 var projects = await db.Projects.Where(filter).ToListAsync();
 ```
 

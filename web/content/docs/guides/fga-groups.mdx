@@ -195,7 +195,7 @@ In the FGA dashboard's Access Tester, the trace identifies the group and group-o
 The same expansion happens before SqlOS constructs an EF authorization filter:
 
 ```csharp
-var filter = await fga.GetAuthorizationFilterAsync<Workspace>(
+var filter = await fga.BuildFilterAsync<Workspace>(
     userSubjectId,
     "workspace.view");
 
@@ -208,7 +208,7 @@ var visibleWorkspaces = await db.Workspaces
 
 The first predicate binds the query to the trusted token organization. The FGA expression then limits rows to resources available through the user's direct and group grants. Do not treat a group grant as a replacement for the application's tenant boundary.
 
-Build the filter for each authorization request. `GetAuthorizationFilterAsync` resolves the user's current group subject ids and captures them in the returned expression; caching that expression across membership changes can retain a removed group's id.
+Build the filter for each authorization request. `BuildFilterAsync` resolves the user's current group subject ids and captures them in the returned expression; caching that expression across membership changes can retain a removed group's id.
 
 ## 7. Remove a member and verify revocation
 

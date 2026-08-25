@@ -23,7 +23,7 @@ if (!canCreateChains)
 | "Can this user edit *this* chain?" | `CheckAccessAsync` with a resource ID |
 | "Does this user have our global create-chain capability?" | `HasCapabilityAsync`, with a role granted on root |
 | "Can this user edit at least one chain somewhere?" | Query/filter the relevant chain resources; `HasCapabilityAsync` does not answer this |
-| "Show me all chains this user can see" | `GetAuthorizationFilterAsync` |
+| "Show me all chains this user can see" | `BuildFilterAsync` |
 
 `HasCapabilityAsync` is useful for:
 

@@ -23,7 +23,7 @@ SqlOS SHRBAC keeps a hierarchical resource tree, roles, permissions, and grants 
 | Where do resources live? | Relationship tuples in an FGA store | Resource rows in your SQL Server database |
 | Model style | ReBAC relations in an authorization model DSL | Tree + flat roles + scoped grants |
 | Point check | Check API | DB-backed FGA service |
-| List page of authorized rows | ListObjects or Batch Check plus app query logic | LINQ filter with `GetAuthorizationFilterAsync` |
+| List page of authorized rows | ListObjects or Batch Check plus app query logic | LINQ filter with `BuildFilterAsync` |
 | App data writes | App DB write plus FGA tuple write | App row plus resource/grant rows in the same DB |
 | Operations | Managed service, credentials, stores, billing | SQL Server you already run |
 | Pairs with | Auth0 login or another identity system | SqlOS AuthServer in the same package |
@@ -84,7 +84,7 @@ That can be correct, but it is an application orchestration problem. It is not t
 SqlOS optimizes for that EF query:
 
 ```csharp
-var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
     subjectId,
     "TODO_READ");
 

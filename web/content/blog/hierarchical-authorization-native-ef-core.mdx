@@ -115,7 +115,7 @@ The upgrade is smaller than the complete sample makes it look. Authentication an
 | `AppDbContext : DbContext` | Derive from `SqlOSDbContext<AppDbContext>` and keep application mappings in `OnApplicationModelCreating`. |
 | `Organization`, `Workspace`, and `Project` entities | Implement `ISqlOSResourceEntity`, persist a stable `ResourceId`, and return the parent resource ID from existing foreign keys. |
 | Workspace membership or role assignment | Provision the authenticated subject and place one explicit role grant on the appropriate workspace or project. |
-| `db.Projects.Where(...)` | Compose the expression from `GetAuthorizationFilterAsync<Project>` before ordering, projection, and pagination. |
+| `db.Projects.Where(...)` | Compose the expression from `BuildFilterAsync<Project>` before ordering, projection, and pagination. |
 
 Keys, relationships, migrations, change tracking, and business predicates remain ordinary EF Core. SqlOS adds a synchronized resource representation and an authorization predicate; it does not replace the application's data model.
 
@@ -289,7 +289,7 @@ api.MapPost("/workspaces/{workspaceId:guid}/projects", async (
     }
 
     var workspaceFilter =
-        await authorization.GetAuthorizationFilterAsync<Workspace>(
+        await authorization.BuildFilterAsync<Workspace>(
             subjectId,
             createProject);
 
@@ -339,7 +339,7 @@ api.MapGet("/projects", async (
     }
 
     var projectFilter =
-        await authorization.GetAuthorizationFilterAsync<Project>(
+        await authorization.BuildFilterAsync<Project>(
             subjectId,
             readProject);
 
@@ -550,7 +550,7 @@ You do not need to remodel the whole application at once. Start with one aggrega
 3. Move the context to `SqlOSDbContext<TContext>`.
 4. Seed one resource type, permission, and role.
 5. Grant that role at the narrowest useful parent.
-6. Apply `GetAuthorizationFilterAsync` to the protected list query.
+6. Apply `BuildFilterAsync` to the protected list query.
 7. Add integration tests for allowed and denied subjects.
 
 That is enough to turn a flat EF query into hierarchical authorization. Additional entities can join the same tree when the product needs them.

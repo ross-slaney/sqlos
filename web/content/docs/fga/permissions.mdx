@@ -48,7 +48,7 @@ Permission keys are strings passed to authorization checks:
 ```csharp
 // List filtering
 var filter = await authService
-    .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+    .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 
 // Point check
 var access = await authService

@@ -394,7 +394,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
         return trace;
     }
 
-    public async Task<Expression<Func<T, bool>>> GetAuthorizationFilterAsync<T>(
+    public async Task<Expression<Func<T, bool>>> BuildFilterAsync<T>(
         string subjectId,
         string permissionKey) where T : IHasResourceId
     {

@@ -308,7 +308,7 @@ var token = http.GetSqlOSValidatedToken()!;
 var organizationId = token.OrganizationId!;
 var subjectId = token.UserId!;
 
-var filter = await fgaAuth.GetAuthorizationFilterAsync<Workspace>(
+var filter = await fgaAuth.BuildFilterAsync<Workspace>(
     subjectId,
     "WORKSPACE_VIEW");
 

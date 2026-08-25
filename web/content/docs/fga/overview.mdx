@@ -54,7 +54,7 @@ Define resources (projects, chains, stores), roles (admin, viewer), and permissi
 
     ```csharp
     var filter = await authService
-        .GetAuthorizationFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
+        .BuildFilterAsync<Chain>(subjectId, "CHAIN_VIEW");
 
     var chains = await dbContext.Chains
         .Where(filter)

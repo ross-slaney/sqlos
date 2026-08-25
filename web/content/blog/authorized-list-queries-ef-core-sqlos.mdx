@@ -1,6 +1,6 @@
 ---
 title: "List Endpoints That Only Return Authorized Rows"
-description: "How SqlOS FGA turns EF Core list queries into authorized SQL Server queries, using the Todo sample resource tree and GetAuthorizationFilterAsync."
+description: "How SqlOS FGA turns EF Core list queries into authorized SQL Server queries, using the Todo sample resource tree and BuildFilterAsync."
 date: "2026-06-04"
 author: "Ross Slaney"
 tags: ["FGA", "EF Core", "Authorization", "SQL Server", "SqlOS"]
@@ -142,7 +142,7 @@ var items = await dbContext.TodoItems
 That is okay only while each todo has one owner and no sharing. The SqlOS version asks FGA for a query predicate:
 
 ```csharp
-var filter = await fgaAuthService.GetAuthorizationFilterAsync<TodoItem>(
+var filter = await fgaAuthService.BuildFilterAsync<TodoItem>(
     subjectId,
     TodoFgaService.TodoReadPermission);
 

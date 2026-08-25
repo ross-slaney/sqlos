@@ -158,7 +158,7 @@ public static class ExampleEndpoints
 
             await fgaService.EnsureUserAccessAsync(subjectId, organizationId, cancellationToken);
 
-            var filter = await authService.GetAuthorizationFilterAsync<Workspace>(
+            var filter = await authService.BuildFilterAsync<Workspace>(
                 subjectId,
                 ExampleFgaService.WorkspaceViewPermission);
 

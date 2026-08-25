@@ -20,7 +20,7 @@ SqlOS agrees with that mental model. The difference is the data boundary.
 | --- | --- | --- |
 | Resource instances | Registered through WorkOS API | Created by your app or FGA admin in SQL Server |
 | Resource hierarchy | WorkOS-managed hierarchy | SqlOS resource table in your database |
-| List filtering | Authorization checks and discovery plus app query logic | EF predicate with `GetAuthorizationFilterAsync` |
+| List filtering | Authorization checks and discovery plus app query logic | EF predicate with `BuildFilterAsync` |
 | Mental model | RBAC + hierarchy | RBAC + hierarchy |
 | Auth coupling | AuthKit, SSO, Directory Sync, organization-scoped IdP role assignment | SqlOS AuthServer in the same host |
 | High-volume rows | Usually stay in your DB with parent references | Can be modeled as resources when list filtering needs it |
@@ -123,7 +123,7 @@ SqlOS focuses heavily on EF list filtering:
 
 ```csharp
 var filter = await authService
-    .GetAuthorizationFilterAsync<Project>(subjectId, "PROJECT_VIEW");
+    .BuildFilterAsync<Project>(subjectId, "PROJECT_VIEW");
 
 var page = await dbContext.Projects
     .Where(x => x.WorkspaceId == workspaceId)

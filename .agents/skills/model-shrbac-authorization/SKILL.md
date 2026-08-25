@@ -161,7 +161,7 @@ Before coding endpoints, fill this table for **your routes**:
 
 Enforcement patterns in SqlOS:
 
-- **Lists**: `PagedSpec.For<T>().RequirePermission(key)` + `ISpecificationExecutor.ExecuteAsync(..., subjectId, ...)`
+- **Lists**: `fga.BuildFilterAsync<T>(subjectId, permission)` composed into the EF query with `.Where(filter)`; pagination, sorting, search, and projection are plain EF in the endpoint
 - **Detail**: `authService.AuthorizedDetailAsync(query, predicate, subjectId, permission, mapper)`
 - **Mutations**: `authService.CheckAccessAsync(subjectId, permission, resourceId)` before `SaveChanges`
 

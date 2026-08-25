@@ -81,7 +81,7 @@ public class SqlOSFgaSubjectServiceTests
     }
 
     [TestMethod]
-    public async Task GetAuthorizationFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
+    public async Task BuildFilterAsync_UsesCapturedParametersInsteadOfLiteralConstants()
     {
         _context.Set<SqlOSFgaPermission>().Add(new SqlOSFgaPermission
         {
@@ -95,7 +95,7 @@ public class SqlOSFgaSubjectServiceTests
             Options.Create(new SqlOSFgaOptions()),
             NullLogger<SqlOSFgaAuthService>.Instance);
 
-        var filter = await authService.GetAuthorizationFilterAsync<TestProtectedEntity>("subj_user", "READ");
+        var filter = await authService.BuildFilterAsync<TestProtectedEntity>("subj_user", "READ");
         var constants = ConstantCollector.Collect(filter);
 
         Assert.IsFalse(constants.Contains("subj_user"));
