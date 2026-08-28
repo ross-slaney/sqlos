@@ -28,11 +28,23 @@ A full OAuth 2.0 authorization server and OpenID Connect Provider mounted inside
 
 Sign-in methods are configuration, not projects: passwords, email OTP, magic links, SMS, social login (Google, Microsoft, GitHub, Apple, any OIDC provider), SAML enterprise SSO, SCIM directory sync, and TOTP MFA. B2B primitives — organizations, memberships, invitations, per-application access rules — are built in. Other apps can even use yours as their identity provider ([Sign in with X](https://sqlos.dev/docs/guides/sign-in-with-x)).
 
+<p align="center">
+  <img src="https://sqlos.dev/docs/dashboard-home.png" alt="SqlOS admin dashboard home showing Auth Server and Fine-Grained Auth counts" width="900" />
+</p>
+
+<p align="center">
+  <img src="https://sqlos.dev/docs/guides-sign-in-with-x-consent.png" alt="SqlOS consent screen for Sign in with X, listing scopes by display name" width="560" />
+</p>
+
 → [Auth server overview](https://sqlos.dev/docs/authserver/overview) · [OpenID Provider](https://sqlos.dev/docs/authserver/openid-provider) · [Organizations](https://sqlos.dev/docs/authserver/organizations)
 
 ### 2. AuthPage — hosted login UI
 
 Login, signup, OTP entry, MFA, organization selection, and consent ship as hosted pages, ready on day one. Brand them with your name, logo, and colors — from code seeds, the Admin API, or the dashboard — and the same identity carries into the built-in OTP, invitation, and password-reset emails.
+
+<p align="center">
+  <img src="https://sqlos.dev/docs/guides-social-sign-in.png" alt="Hosted AuthPage with email continue plus GitHub and Microsoft social providers" width="560" />
+</p>
 
 → [Brand hosted auth and email](https://sqlos.dev/docs/guides/auth-branding) · [Hosted vs. headless](https://sqlos.dev/docs/authserver/hosted-vs-headless)
 
@@ -45,13 +57,30 @@ var filter = await authorization.BuildFilterAsync<Project>(userId, "project.read
 var projects = await db.Projects.Where(filter).ToListAsync();
 ```
 
-No sidecar, no policy service round-trips, no post-filtering in memory.
+No sidecar, no policy service round-trips, no post-filtering in memory. The same grants shape product UI — a company admin and a store clerk hit the same endpoints and see different rows:
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <p><strong>Company Admin</strong> — five chains visible</p>
+      <img src="https://sqlos.dev/docs/retail-app-admin-dashboard.png" alt="Retail app as Company Admin with five chains and multi-store inventory" />
+    </td>
+    <td width="50%" valign="top">
+      <p><strong>Store Clerk</strong> — one store, filtered in SQL</p>
+      <img src="https://sqlos.dev/docs/retail-app-clerk-dashboard.png" alt="Retail app as Store Clerk with zero chains and one store visible" />
+    </td>
+  </tr>
+</table>
 
 → [Authorize EF Core queries](https://sqlos.dev/docs/quickstarts/ef-authorization) · [Model your FGA](https://sqlos.dev/docs/guides/model-fga) · [EF query filters](https://sqlos.dev/docs/guides/ef-query-filters)
 
 ### 4. Headless auth — bring your own UI
 
 If the hosted pages don't fit your product, keep SqlOS as the protocol engine and draw every screen yourself. Your frontend talks to a typed state machine — login, signup, OTP, MFA, consent — while SqlOS still owns OAuth, PKCE, sessions, and tokens. Extra signup fields, A/B tests, and native-feeling popups all become your UI's decisions.
+
+<p align="center">
+  <img src="https://sqlos.dev/docs/guides-custom-login-ui.svg" alt="Product-owned login UI connected to the SqlOS headless authentication state machine" width="900" />
+</p>
 
 → [Build your own login and signup UI](https://sqlos.dev/docs/guides/custom-login-ui) · [Headless auth reference](https://sqlos.dev/docs/authserver/headless-auth)
 
@@ -64,6 +93,10 @@ dotnet run --project examples/SqlOS.Todo.AppHost/SqlOS.Todo.AppHost.csproj
 ```
 
 Then open `http://localhost:5090/`. The Aspire AppHost starts SQL Server, the Todo API with SqlOS at `http://localhost:5080`, and a Razor Pages client at `http://localhost:5090`.
+
+<p align="center">
+  <img src="https://sqlos.dev/docs/guides-password-login.png" alt="Hosted AuthPage password step from the SqlOS Todo sample" width="560" />
+</p>
 
 [Todo sample walkthrough](https://sqlos.dev/docs/quickstarts/run-todo) · [All documentation](https://sqlos.dev/docs)
 
