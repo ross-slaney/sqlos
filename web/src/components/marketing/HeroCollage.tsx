@@ -32,7 +32,19 @@ export default function HeroCollage() {
           <span className="h-1.5 w-1.5 rounded-full bg-primary" />
           Auth + FGA for .NET
           <span className="text-border">|</span>
-          <span className="font-mono text-[11px]">v3.15</span>
+          <a
+            href="https://www.nuget.org/packages/SqlOS"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- live NuGet badge must not be optimized/cached */}
+            <img
+              src="https://img.shields.io/nuget/v/SqlOS"
+              alt="SqlOS NuGet version"
+              className="h-4 w-auto"
+            />
+          </a>
         </div>
 
         <h1 className="mt-8 text-balance text-[clamp(2.6rem,5vw,4.25rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-foreground">
